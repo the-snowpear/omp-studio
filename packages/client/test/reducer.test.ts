@@ -1393,6 +1393,48 @@ test("late bootstrap completion cannot overwrite a recovered connection or clear
   await client.close();
 });
 
+test("concurrent first commands initialize once before dispatch and retain immediate receipts", async () => {
+  let finish!: (value: ClientBootstrap) => void;
+  let bootstraps = 0, dispatches = 0, cursor = 10;
+  const transport = new MemoryClientTransport({
+    bootstrap: () => { bootstraps++; return new Promise<ClientBootstrap>(resolve => { finish = resolve; }); },
+    command: async request => {
+      dispatches++;
+      transport.emit({
+        kind: "command.receipt", authorityEpoch: 7 as AuthorityEpoch, cursor: String(++cursor) as EventCursor, occurredAt: TS,
+        receipt: { requestId: request.requestId, commandName: request.commandName, status: "completed", observedAt: TS, result: { applied: true, runtimeEffect: "new-session" } },
+      } as ClientEvent);
+      return { requestId: request.requestId, commandName: request.commandName, status: "accepted", acceptedAt: TS };
+    },
+  });
+  const client = new StudioClientImpl(transport);
+  try {
+    const role = client.command("models.roles.set", { roleId: "default", selector: "test/model" });
+    const agent = client.command("agents.definition.configure", { name: "test", disabled: true });
+    assert.equal(bootstraps, 1);
+    assert.equal(dispatches, 0);
+    finish(bootstrap());
+    for (const handle of await Promise.all([role, agent])) assert.equal(client.getState().commands[handle.requestId]?.status, "completed");
+    await client.command("models.catalog.refresh", {});
+    assert.equal(bootstraps, 1);
+    assert.equal(dispatches, 3);
+  } finally { await client.close(); }
+});
+
+test("failed first-command initialization sends nothing and allows an explicit retry", async () => {
+  let attempts = 0, dispatches = 0;
+  const client = new StudioClientImpl(new MemoryClientTransport({
+    bootstrap: () => { if (++attempts === 1) throw new Error("Test initialization failed"); return bootstrap(); },
+    command: async request => { dispatches++; return { requestId: request.requestId, commandName: request.commandName, status: "accepted", acceptedAt: TS }; },
+  }));
+  try {
+    await assert.rejects(client.command("models.catalog.refresh", {}), { message: "Test initialization failed" });
+    assert.equal(dispatches, 0);
+    await client.command("models.catalog.refresh", {});
+    assert.equal(dispatches, 1);
+  } finally { await client.close(); }
+});
+
 test("terminal command receipts are capped so a long session cannot retain unbounded command state", () => {
   let state = bootedState();
   let cursor = 10;

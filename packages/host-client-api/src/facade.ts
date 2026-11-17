@@ -1292,8 +1292,9 @@ export class StudioHostClientFacade implements ClientTransport {
       }
       case "workspace.open":
       case "workspace.openPath":
+      case "workspace.forgetUnavailable":
       case "workspace.pick": {
-        return this.#commandWorkspace(request as ClientCommandRequest<"workspace.open" | "workspace.pick" | "workspace.openPath">);
+        return this.#commandWorkspace(request as ClientCommandRequest<"workspace.open" | "workspace.pick" | "workspace.openPath" | "workspace.forgetUnavailable">);
       }
       case "workspace.file.writeText":
       case "fs.file.writeText":
@@ -2714,6 +2715,26 @@ export class StudioHostClientFacade implements ClientTransport {
     return service.get();
   }
 
+  async #ensureModelRuntime(): Promise<void> {
+    if (this.#runtimeSession() && this.#currentSnapshotRef()) return;
+    const runtime = this.#options.runtime;
+    if (!runtime?.ensure || !this.#options.workspaceCwd?.()) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        runtime.ensure(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(unavailableError(hostText(
+            "连接模型目录 Runtime 超时，请重试", "Timed out connecting the model catalog Runtime; retry",
+          ))), 30_000);
+        }),
+      ]);
+      this.#readLifetime.signal.throwIfAborted();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async #queryModels(attempt = 0): Promise<ModelConfigReadModel> {
     const service = this.#options.models;
     if (service === undefined) {
@@ -2746,6 +2767,12 @@ export class StudioHostClientFacade implements ClientTransport {
           advanced: { searxng: { endpoint: "", tokenSet: false, basicUsername: "", passwordSet: false }, exa: { enabled: true, searchDelayMs: 1000 } },
         },
       };
+    }
+    try {
+      await this.#ensureModelRuntime();
+    } catch (error) {
+      this.#readLifetime.signal.throwIfAborted();
+      return withRuntimeModels(await service.get(), undefined, toClientError(error).message);
     }
     const session = this.#runtimeSession();
     const snapshot = this.#currentSnapshotRef();
@@ -3172,6 +3199,7 @@ export class StudioHostClientFacade implements ClientTransport {
           result = await service.refreshCatalog();
           break;
         case "models.discovery.refresh": {
+          await this.#ensureModelRuntime();
           const runtime = this.#runtimeSession();
           const snapshot = this.#currentSnapshotRef();
           if (runtime || snapshot) {
@@ -3431,7 +3459,7 @@ export class StudioHostClientFacade implements ClientTransport {
    * never as a fabricated success.
    */
   async #commandWorkspace(
-    request: ClientCommandRequest<"workspace.open" | "workspace.pick" | "workspace.openPath">,
+    request: ClientCommandRequest<"workspace.open" | "workspace.pick" | "workspace.openPath" | "workspace.forgetUnavailable">,
   ): Promise<ClientCommandAccepted> {
     validateEnvelope(request);
     const service = this.#options.workspaces;
@@ -3521,12 +3549,15 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   async #runWorkspaceCommand(
-    request: ClientCommandRequest<"workspace.open" | "workspace.pick" | "workspace.openPath">,
+    request: ClientCommandRequest<"workspace.open" | "workspace.pick" | "workspace.openPath" | "workspace.forgetUnavailable">,
     service: HostWorkspaceService,
   ): Promise<void> {
     try {
       if (request.commandName === "workspace.openPath" && !service.openPath) throw clientError("CAPABILITY_UNAVAILABLE", hostText("此 Host 不支持从路径打开项目，请更新 Host", "This Host does not support opening projects by path; please update the Host"));
-      const result = request.commandName === "workspace.openPath"
+      if (request.commandName === "workspace.forgetUnavailable" && !service.forgetUnavailable) throw clientError("CAPABILITY_UNAVAILABLE", hostText("此 Host 不支持清理失效项目记录，请更新 Host", "This Host does not support forgetting unavailable projects; please update the Host"));
+      const result = request.commandName === "workspace.forgetUnavailable"
+        ? await service.forgetUnavailable!()
+        : request.commandName === "workspace.openPath"
         ? await service.openPath!(request.input as { readonly path: string })
         : request.commandName === "workspace.open"
           ? await service.open(request.input as { readonly workspaceId: WorkspaceId })

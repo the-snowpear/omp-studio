@@ -6,7 +6,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
@@ -15,6 +15,9 @@ import { WorkspaceRegistry, canonicalWorkspacePath } from "@omp-studio/studio-ho
 
 import { createOmpWorkspaceService, WorkspacePickCancelledError } from "@omp-studio/host-client-api/workspaces";
 import type { StoredWorkspace } from "@omp-studio/studio-host";
+import { createDesktopRuntimeSessionPort } from "../src/runtime-session.js";
+import type { DesktopRuntimeSession, DesktopRuntimeSessionPort } from "../src/host-composition.js";
+import { InMemorySessionLeaseStore } from "@omp-studio/studio-host";
 
 function fakePicker(dirs: string[]): () => Promise<string | undefined> {
   let index = 0;
@@ -128,4 +131,43 @@ test("onActivated fires with the stored workspace; the runtime port rebind recei
     await rm(profile, { recursive: true, force: true });
     await rm(picked, { recursive: true, force: true });
   }
+});
+
+test("a stale workspace and failed saved session restore do not block a fresh Runtime in the available project", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "omp-workspace-recovery-"));
+  let port: DesktopRuntimeSessionPort | undefined;
+  try {
+    const valid = join(profile, "project"), old = join(profile, "old-install", "runtime");
+    await mkdir(valid); await mkdir(old, { recursive: true });
+    const registry = new WorkspaceRegistry(join(profile, "workspaces.json"));
+    const project = await registry.upsertByPath(valid);
+    const stale = await registry.upsertByPath(old);
+    await rm(join(profile, "old-install"), { recursive: true });
+    await writeFile(join(profile, "update-session-restore.json"), JSON.stringify({ activeSessionId: "missing", residents: [
+      { sessionId: "old", workspace: { workspaceId: stale.workspaceId, cwd: stale.canonicalPath } },
+      { sessionId: "missing", workspace: { workspaceId: project.workspaceId, cwd: project.canonicalPath } },
+    ] }));
+    const reloaded = new WorkspaceRegistry(registry.path);
+    await reloaded.load();
+    const selected = reloaded.get(reloaded.activeWorkspaceId!)!;
+    const launched: string[] = [];
+    port = createDesktopRuntimeSessionPort({ ownerId: "recovery-test", sessionLeaseStore: new InMemorySessionLeaseStore(),
+      workerPortFactory: ({ resumeSessionId, nextRuntimeEpoch }) => ({
+        async start(context) {
+          if (context.workspace?.cwd !== project.canonicalPath) return undefined;
+          if (resumeSessionId) throw new Error("Saved session is unavailable");
+          launched.push(context.workspace.cwd);
+          const snapshot = { sessionId: "fresh", runtimeId: "runtime", runtimeEpoch: nextRuntimeEpoch(), stateVersion: 1, activeMode: "normal", approvalMode: "yolo", isStreaming: false, isCompacting: false, jobs: [], agents: [] };
+          return { controller: { publication: () => ({ snapshot }) }, hello: () => ({ runtimeId: "runtime", runtimeEpoch: snapshot.runtimeEpoch }), onPublication: () => () => {} } as unknown as DesktopRuntimeSession;
+        },
+        stop: async () => {},
+      }),
+    });
+    const session = await port.start({ profileDirectory: profile, resolution: { classification: "managed" } as never, endpoint: {} as never, runtimeInstallDirectory: join(profile, "runtimes"), workspace: { workspaceId: selected.workspaceId, cwd: selected.canonicalPath } });
+    assert.equal(session?.controller.publication()?.snapshot.sessionId, "fresh");
+    assert.deepEqual(launched, [project.canonicalPath]);
+    assert.equal(port.lastUnavailable?.(), undefined);
+    await assert.rejects(readFile(join(profile, "update-session-restore.json")), /ENOENT/);
+    assert.equal(reloaded.get(stale.workspaceId)?.unavailable, true);
+  } finally { await port?.stop(); await rm(profile, { recursive: true, force: true }); }
 });

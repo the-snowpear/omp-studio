@@ -1,4 +1,5 @@
 import { SessionCompressionPane } from "./diagnostics/SessionCompressionPane";
+import { WorkspaceRecoveryPane } from "./diagnostics/WorkspaceRecoveryPane";
 import { NativeMaintenancePane } from "./diagnostics/NativeMaintenancePane";
 import { WorkspaceTabs, WorkspacePanel } from "./workspaces/Workspace";
 import type { NativePreferencesContext } from "./settings/NativePreferencesPane";
@@ -11,6 +12,7 @@ import type {
   RuntimeChannel,
   RuntimeInstallState,
   StudioClient,
+  WorkspaceRecord,
 } from "@omp-studio/client-contract";
 import type { SessionBuildIdentity, SessionBuildProvenance } from "@omp-studio/studio-protocol";
 import { Icon, type IconName } from "./icons";
@@ -271,6 +273,9 @@ export function DiagnosticsPage({
   runtime,
   environment,
   buildProvenance,
+  recoveryClient,
+  onOpenRecoveryWorkspace,
+  onChooseRemoteWorkspace,
 }: {
   nativeContext?: NativePreferencesContext;
   client: StudioClient;
@@ -280,6 +285,9 @@ export function DiagnosticsPage({
   environment?: EnvironmentReadModel;
   /** omp builds that wrote the active session (`snapshot.runtimeIdentity`). */
   buildProvenance?: SessionBuildProvenance;
+  recoveryClient?: StudioClient;
+  onOpenRecoveryWorkspace?: (workspace: WorkspaceRecord) => void;
+  onChooseRemoteWorkspace?: () => void;
 }) {
   const { preview, marks } = usePreviewMode();
  const [workspaceTab,setWorkspaceTab]=useState<"runtime"|"maintenance">("runtime");
@@ -816,6 +824,7 @@ export function DiagnosticsPage({
       </section>
 
       <ProcessMemoryPanel enabled={!preview} />
+      <WorkspaceRecoveryPane client={recoveryClient ?? client} {...(onOpenRecoveryWorkspace ? { onOpenWorkspace: onOpenRecoveryWorkspace } : {})} {...(onChooseRemoteWorkspace ? { onChooseRemoteWorkspace } : {})} />
       {busy !== null ? (
         <ActionProgressBar label={busy.label} step={busy.step} steps={busy.steps} />
       ) : null}

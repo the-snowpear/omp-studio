@@ -15,6 +15,7 @@ export const CORE_NODE_SUITES = [
   // Opening, recovering, browsing and deleting conversations.
   "packages/studio-host/dist/test/backend-lifecycle.test.js",
   "packages/studio-host/dist/test/host-foundation.test.js",
+  "packages/studio-host/dist/test/workspace-registry.test.js",
   "packages/studio-host/dist/test/evaluation-coordinator.test.js",
   "packages/studio-host/dist/test/conversation-open.test.js",
   "packages/studio-host/dist/test/conversation-open-slice.test.js",
@@ -24,10 +25,12 @@ export const CORE_NODE_SUITES = [
   "packages/host-client-api/dist/test/conversation-open.test.js",
   "packages/host-client-api/dist/test/facade-history.test.js",
   "packages/host-client-api/dist/test/snapshot-clone.test.js",
+  "packages/host-client-api/dist/test/runtime-model-snapshot.test.js",
   "packages/host-client-api/dist/test/session-delete-command.test.js",
   "apps/desktop/dist/test/runtime-session.test.js",
   "apps/desktop/dist/test/runtime-multi-session.test.js",
   "apps/desktop/dist/test/session-commands.test.js",
+  "apps/desktop/dist/test/interaction-host.test.js",
   "apps/desktop/dist/test/time-travel-service.test.js",
   "apps/desktop/dist/test/time-travel-port.test.js",
   // Local file writes, Electron boundaries, installation and update recovery.

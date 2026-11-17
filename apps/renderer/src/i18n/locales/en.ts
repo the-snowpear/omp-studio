@@ -1,6 +1,21 @@
 import type { LocaleDictionary } from "./zh";
 
 export const en: LocaleDictionary = {
+  workspaceRecovery: {
+    title: "Workspace recovery",
+    description: "If an old directory or session cannot be restored, start a new conversation in an available project. History and drafts are preserved. Use the History page to relocate an old session.",
+    choose: "Choose project and start conversation",
+    newChat: "Start conversation in {name}",
+    unavailable: "Directory unavailable",
+    staleCount: "{count} unavailable workspace records",
+    forget: "Forget unavailable records",
+    confirmForget: "Forget the currently unavailable workspace records? Project files and session history are preserved. A copy of the records will be saved in the app data directory.",
+    forgotten: "Unavailable records forgotten",
+    chosen: "Available project selected",
+    empty: "No available project selected. Choose a directory to continue.",
+    loadFailed: "Unable to read workspace records. You can still choose a project.",
+    actionFailed: "Workspace recovery failed",
+  },
   fileBrowser: { open: "Open file browser", showInBrowser: "Show in file browser", outsideProject: "Outside project" },
   agentDeck: {
     label: "Agent deck",
@@ -2319,6 +2334,7 @@ export const en: LocaleDictionary = {
     "noInstallableArtifact": "No installable artifact",
     "installStateFailed": "Installation state abnormal",
     "latestArtifact": "Already on latest version",
+    "localArtifactChecked": "Checked local Runtime artifacts; online updates were not checked",
     "updateCheckTimeout": "Update check timed out",
     "updateCheckFailed": "Failed to check update",
     "maintenance": "Maintenance",

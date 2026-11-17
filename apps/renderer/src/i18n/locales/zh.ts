@@ -1,6 +1,21 @@
 type DeepString<T> = { readonly [K in keyof T]: T[K] extends string ? string : DeepString<T[K]> };
 
 const zhRaw = {
+  workspaceRecovery: {
+    title: "工作区恢复",
+    description: "旧目录或会话无法恢复时，可在有效项目中新建对话。历史会话和草稿会保留；迁移旧会话可使用历史页的恢复入口。",
+    choose: "选择项目并新建对话",
+    newChat: "在 {name} 中新建对话",
+    unavailable: "目录不可用",
+    staleCount: "{count} 条失效工作区记录",
+    forget: "清除失效记录",
+    confirmForget: "清除当前失效的工作区记录？项目文件和历史会话会保留，记录副本会保存在应用数据目录。",
+    forgotten: "失效记录已清除",
+    chosen: "已选择有效项目",
+    empty: "尚未选择有效项目，请重新选择目录。",
+    loadFailed: "无法读取工作区记录，仍可重新选择项目。",
+    actionFailed: "工作区恢复失败",
+  },
   fileBrowser: { open: "打开文件浏览器", showInBrowser: "在文件浏览器中显示", outsideProject: "项目外" },
   agentDeck: {
     label: "Agent 指挥台",
@@ -2319,6 +2334,7 @@ const zhRaw = {
     "noInstallableArtifact": "暂无可安装制品",
     "installStateFailed": "安装状态异常",
     "latestArtifact": "已是最新版本",
+    "localArtifactChecked": "已检查本地 Runtime 工件，未检查在线更新",
     "updateCheckTimeout": "检查更新超时",
     "updateCheckFailed": "检查更新失败",
     "maintenance": "维护操作",

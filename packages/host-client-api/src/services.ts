@@ -568,6 +568,7 @@ export interface HostWorkspaceService {
   open(input: { readonly workspaceId: WorkspaceId }): Promise<WorkspaceListReadModel>;
   openPath?(input: { readonly path: string }): Promise<WorkspaceListReadModel>;
   pick(input?: { readonly name?: string }): Promise<WorkspaceListReadModel>;
+  forgetUnavailable?(): Promise<WorkspaceListReadModel>;
 }
 
 /** Host-owned workspace-relative file tree and mutation adapter. */

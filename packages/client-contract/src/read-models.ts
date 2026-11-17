@@ -283,6 +283,8 @@ export interface WorkspaceRecord {
   readonly root?: string;
   readonly lastOpenedAt: string;
   readonly active: boolean;
+  /** The registered directory is currently missing, inaccessible or unusable. */
+  readonly unavailable?: true;
 }
 
 /** Workspace inventory read model; the active workspace is optional. */

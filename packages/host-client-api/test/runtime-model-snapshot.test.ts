@@ -126,6 +126,7 @@ function facade(models: HostModelsService, runtime?: {
   hello: () => { runtimeId: string; runtimeEpoch: number; classification: "managed" } | undefined;
   snapshot: () => OperatorStateSnapshot | undefined;
   currentSession: () => StudioRuntimeSessionController | undefined;
+  ensure?: () => Promise<void>;
 }, invoke?: HostSemanticCommandService["invoke"]) {
   return new StudioHostClientFacade({
     authority: { authorityId: "authority" as PublicAuthorityIdentity["authorityId"], authorityEpoch: 1 as PublicAuthorityIdentity["authorityEpoch"] },
@@ -279,3 +280,90 @@ test("a Runtime restart during models.get retries on the new owner and releases 
     assert.equal(old.leases.size, 0); assert.equal(next.leases.size, 0);
   } finally { await api.close(); }
 });
+
+function detachedModels() {
+  const live = liveModels(new ModelRuntime());
+  let connected = false, ensures = 0;
+  return {
+    hello: () => connected ? live.hello() : undefined,
+    snapshot: () => connected ? live.snapshot() : undefined,
+    currentSession: () => connected ? live.currentSession() : undefined,
+    ensure: async () => { ensures++; connected = true; },
+    ensureCount: () => ensures,
+  };
+}
+
+test("a detached workspace connects before reading verified models and reuses that Runtime", async () => {
+  const runtime = detachedModels();
+  const api = facade({ get: () => config() } as HostModelsService, runtime);
+  try {
+    for (let i = 0; i < 2; i++) {
+      const result = await api.query({ queryName: "models.get", input: {} });
+      assert.ok(result.ok);
+      assert.equal(result.result.availability?.status, "verified");
+      assert.deepEqual(result.result.availableModels.map(model => model.id), ["a", "b"]);
+    }
+    assert.equal(runtime.ensureCount(), 1);
+  } finally { await api.close(); }
+});
+
+test("a detached workspace refresh connects and refreshes the same Runtime instead of the CLI", async () => {
+  const runtime = detachedModels();
+  let nativeRefreshes = 0, cliRefreshes = 0;
+  const api = facade({ get: () => config(), refreshDiscovery: async () => { cliRefreshes++; } } as unknown as HostModelsService,
+    runtime, operation => {
+      assert.deepEqual(operation, { kind: "models.available.refresh", sessionId: "session" });
+      nativeRefreshes++;
+      return { sessionId: "session", refreshed: true };
+    });
+  try {
+    const pending = submit(api, discoveryRequest());
+    await pending.accepted;
+    assert.equal((await pending.receipt).status, "completed");
+    assert.equal(runtime.ensureCount(), 1);
+    assert.equal(nativeRefreshes, 1);
+    assert.equal(cliRefreshes, 0);
+  } finally { await api.close(); }
+});
+
+test("failed workspace connection keeps config editable without authorizing cached models", async () => {
+  const runtime = { ...detachedModels(), ensure: async () => { throw new Error("Test Runtime unavailable"); } };
+  let cliRefreshes = 0;
+  const api = facade({ get: () => ({ ...config(), availableModels: [row("cached")] }), refreshDiscovery: async () => { cliRefreshes++; } } as unknown as HostModelsService, runtime);
+  try {
+    const result = await api.query({ queryName: "models.get", input: {} });
+    assert.ok(result.ok);
+    assert.equal(result.result.generatedConfigYml, "configuration");
+    assert.equal(result.result.availability?.status, "unverified");
+    assert.deepEqual(result.result.availableModels, []);
+    assert.match(result.result.availability?.reason ?? "", /Test Runtime unavailable/);
+    const pending = submit(api, discoveryRequest());
+    await pending.accepted;
+    assert.equal((await pending.receipt).status, "failed");
+    assert.equal(cliRefreshes, 0);
+  } finally { await api.close(); }
+});
+
+for (const refresh of [false, true]) {
+  test(`stalled model Runtime connection settles ${refresh ? "refresh" : "query"} after its deadline`, async context => {
+    context.mock.timers.enable({ apis: ["setTimeout"] });
+    const runtime = { ...detachedModels(), ensure: () => new Promise<void>(() => {}) };
+    const api = facade({ get: () => config() } as HostModelsService, runtime);
+    try {
+      if (refresh) {
+        const pending = submit(api, discoveryRequest());
+        await pending.accepted;
+        context.mock.timers.tick(30_000);
+        assert.equal((await pending.receipt).status, "failed");
+      } else {
+        const pending = api.query({ queryName: "models.get", input: {} });
+        await tick();
+        context.mock.timers.tick(30_000);
+        const result = await pending;
+        assert.ok(result.ok);
+        assert.equal(result.result.availability?.status, "unverified");
+        assert.deepEqual(result.result.availableModels, []);
+      }
+    } finally { await api.close(); }
+  });
+}

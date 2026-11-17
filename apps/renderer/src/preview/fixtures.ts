@@ -10,7 +10,7 @@ import type { TreeGitStatus } from "../git/treeStatus";
 import type { IconName } from "../icons";
 import type { ShellEventLogEntry } from "../shellMemory";
 import type { LedgerCommandRow } from "../panels/types";
-import type { CommandName, EventCursor } from "@omp-studio/client-contract";
+import type { CommandName, EventCursor, WorkspaceListReadModel, WorkspaceId } from "@omp-studio/client-contract";
 
 export const PREVIEW_SSH_TARGETS = [
   { id: "demo-linux", name: "dev-linux", platform: "linux" as const },
@@ -19,6 +19,17 @@ export const PREVIEW_SSH_TARGETS = [
 ];
 
 export const PREVIEW_DESKTOP_RECOVERY = { version: "0.1.4" } as const;
+
+export function getPreviewWorkspaceRecovery(zh: boolean): WorkspaceListReadModel {
+  const project = getPreviewProjects(zh)[0]!;
+  return {
+    activeWorkspaceId: project.id as WorkspaceId,
+    workspaces: [
+      { workspaceId: project.id as WorkspaceId, name: project.name, root: project.path, lastOpenedAt: "2026-11-17T08:00:00Z", active: true },
+      { workspaceId: "previous-project" as WorkspaceId, name: project.name, root: demoPath("previous", project.name), lastOpenedAt: "2026-11-16T08:00:00Z", active: false, unavailable: true },
+    ],
+  };
+}
 
 export type PreviewThreadWait = "approval" | "plan" | "ask";
 
