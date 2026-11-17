@@ -1,6 +1,7 @@
 import { memo, type CSSProperties } from "react";
 import type { DeckTone } from "./deckModel";
 import { SIGIL_GRID, sigilHash, sigilSpec, type SigilCell } from "./sigil";
+import "./sigil.css";
 
 /** Hue angles for the ten sigil colours, spaced so neighbours never read as the same agent. */
 export const SIGIL_HUE_DEG = [22, 52, 84, 146, 176, 204, 232, 262, 296, 334] as const;

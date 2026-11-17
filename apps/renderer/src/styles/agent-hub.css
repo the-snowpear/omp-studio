@@ -50,7 +50,6 @@
 .hub-deck-col > .ad { flex: 1; height: auto; }
 /* 行高由视口决定，详情面自己滚动。 */
 .hub-cols.is-deck .hub-detail { min-height: 0; }
-.hub-cols.is-deck .hub-face[data-hub-face="detail"] { overflow-y: auto; scrollbar-width: thin; }
 .hub-view-seg button { display: inline-flex; align-items: center; gap: var(--sp-4); }
 .hub-page > .workspace-tabbar { flex-shrink: 0; margin-bottom: 0; }
 
@@ -220,8 +219,28 @@
   display: flex;
   align-items: center;
   gap: var(--sp-8);
-  padding: var(--sp-8) var(--sp-12) 0;
+  min-height: 44px;
+  padding: var(--sp-6) var(--sp-12);
+  border-bottom: 1px solid var(--border);
   flex: none;
+}
+/* 翻到对话面后仍能看出在和谁说话：Sigil + 名字 + 状态。 */
+.hub-chat-who {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  min-width: 0;
+  padding-left: var(--sp-8);
+  border-left: 1px solid var(--border);
+  animation: var(--motion-swap);
+}
+.hub-chat-who > b {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hub-list { display: flex; flex-direction: column; gap: var(--sp-8); min-width: 0; }
@@ -496,8 +515,19 @@
   .hub-tg-head .tg-task { display: none; }
 }
 
-/* ---------- 详情列 ---------- */
+/* ============================================================
+   详情列：Agent 档案（dossier）
+   头部（身份 · 状态 · 模型 · 操作）与标签栏不动，下面的标签体自己滚动。
+   列表视图里整列 sticky，长列表滚动时档案一直留在视口；指挥台视图由
+   分栏行高撑满；≤900px 是抽屉（见文件末尾的媒体查询）。
+   视觉语言与指挥台检视器（deck.css .ad-ins-*）一致：Sigil、细线小标题、数据格。
+   ============================================================ */
 .hub-detail {
+  /* --hub-bar-h / --hub-scroll-h 由 AgentHub.tsx 量出：吸顶的工作区标签栏高度、页面滚动区高度。 */
+  position: sticky;
+  top: calc(var(--hub-bar-h, 0px) + var(--sp-12));
+  max-height: calc(var(--hub-scroll-h, 100dvh) - var(--hub-bar-h, 0px) - var(--sp-12) - max(var(--hub-tail-h, 0px), var(--sp-16)));
+  min-height: min(420px, calc(var(--hub-scroll-h, 100dvh) - var(--hub-bar-h, 0px) - var(--sp-32)));
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-10);
@@ -505,28 +535,360 @@
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
+  container: hub-detail / inline-size;
 }
-.hub-detail-head { padding: var(--sp-12) var(--sp-14) 0; }
-.hub-detail-head .hd-title { display: flex; align-items: center; gap: var(--sp-8); flex-wrap: wrap; }
-.hub-detail-head .hd-title b { font-size: var(--fs-14); }
-.hub-detail-head .hd-sub {
-  margin-top: 3px;
-  font-size: var(--fs-11);
-  color: var(--text-3);
+.hub-cols.is-deck .hub-detail,
+.hub-page.is-chat-preview .hub-detail,
+.hub-page.is-chat-closing .hub-detail { position: relative; top: auto; max-height: none; min-height: 0; }
+
+/* ---------- 档案头 ---------- */
+.hub-dossier-head {
+  flex: none;
   display: flex;
-  gap: var(--sp-8);
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: var(--sp-12);
+  padding: var(--sp-12) var(--sp-16) var(--sp-14);
+}
+.hub-dossier-top { display: flex; align-items: center; gap: var(--sp-6); min-height: 22px; }
+.hub-dossier-crumb {
+  display: inline-flex;
   align-items: center;
+  gap: var(--sp-4);
+  min-width: 0;
+  max-width: 72%;
+  margin-left: calc(var(--sp-6) * -1);
+  padding: 2px var(--sp-8) 2px var(--sp-6);
+  border: 0;
+  border-radius: var(--r-6);
+  background: none;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
 }
-.hub-detail-actions {
-  display: flex;
+.hub-dossier-crumb > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hub-dossier-crumb:hover { background: var(--accent-softer); color: var(--accent); }
+.hub-dossier-kind {
+  margin-left: auto;
+  padding: 0 var(--sp-6);
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: calc(10.5px * var(--text-font-scale));
+  font-weight: var(--fw-medium);
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.hub-dossier-id {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-12);
+  animation: var(--motion-swap);
+}
+.hub-dossier-name { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.hub-dossier-name h3 {
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--fs-16);
+  font-weight: var(--fw-semibold);
+  line-height: 1.3;
+  letter-spacing: -0.005em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hub-dossier-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4) var(--sp-8); min-width: 0; }
+.hub-dossier-meta {
+  display: inline-flex;
   align-items: center;
   gap: var(--sp-6);
-  padding: var(--sp-10) var(--sp-14);
-  flex-wrap: wrap;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-.hub-detail-tabs { border-bottom: 1px solid var(--border); padding: 0 var(--sp-8); }
-.hub-detail-body { padding: var(--sp-12) var(--sp-14); min-height: 260px; }
+.hub-dossier-meta > span { display: inline-flex; align-items: center; gap: 3px; }
+.hub-dossier-meta > span + span::before {
+  content: "";
+  width: 3px;
+  height: 3px;
+  margin-right: 3px;
+  border-radius: var(--r-full);
+  background: var(--glyph-faint);
+}
+.hub-dossier-meta .icon { color: var(--glyph-faint); }
+.hub-dossier-model { display: flex; align-items: center; gap: var(--sp-6); min-width: 0; }
+.hub-dossier-model-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hub-dossier-fallback { display: inline-flex; flex: none; color: var(--amber); }
+.hub-dossier-fallback + .hub-dossier-model-name { color: var(--amber); }
+
+.hub-dossier-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-6); }
+.hub-dossier-actions .btn.small { gap: var(--sp-4); }
+.hub-dossier-stop { margin-left: auto; }
+
+/* ---------- 标签栏：下划线式，激活条从中间展开 ---------- */
+.hub-detail-tabs {
+  flex: none;
+  position: relative;
+  z-index: 2;
+  padding: 0 var(--sp-10);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  transition: box-shadow var(--dur-fast) var(--ease);
+}
+.hub-dossier-head[data-scrolled] + .hub-detail-tabs {
+  box-shadow: 0 8px 12px -12px color-mix(in srgb, var(--text) 45%, transparent);
+}
+.hub-detail-tabs .tabs[role="tablist"] { gap: 0; }
+.hub-detail-tabs .tabs[role="tablist"] > [role="tab"] {
+  position: relative;
+  gap: var(--sp-6);
+  height: 38px;
+  padding: 0 var(--sp-10);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--fs-12);
+}
+.hub-detail-tabs .tabs[role="tablist"] > [role="tab"]::after {
+  content: "";
+  position: absolute;
+  right: var(--sp-8);
+  bottom: -1px;
+  left: var(--sp-8);
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+  scale: 0 1;
+  transition: scale var(--dur-fast) var(--ease);
+}
+.hub-detail-tabs .tabs[role="tablist"] > [role="tab"]:hover { background: transparent; color: var(--text); }
+.hub-detail-tabs .tabs[role="tablist"] > [role="tab"]:is(.active, [aria-selected="true"]) {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+}
+.hub-detail-tabs .tabs[role="tablist"] > [role="tab"]:is(.active, [aria-selected="true"])::after { scale: 1 1; }
+.hub-detail-tabs [role="tab"] > .icon { color: var(--glyph-faint); transition: color var(--dur-fast) var(--ease); }
+.hub-detail-tabs [role="tab"]:is(.active, [aria-selected="true"]) > .icon { color: var(--accent); }
+.hub-tab-badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: var(--r-full);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: calc(10px * var(--text-font-scale));
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  text-align: center;
+}
+/* 窄档：未激活的标签只留图标（文字在 data-tip 里），激活的仍显示文字。 */
+@container hub-detail (max-width: 440px) {
+  .hub-detail-tabs [role="tab"]:not(.active) > .page-tab-label { display: none; }
+  .hub-dossier-head { padding-inline: var(--sp-14); }
+}
+
+/* ---------- 标签体：各标签面叠在同一格里交叉过渡，各自滚动 ---------- */
+.hub-detail-body {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.hub-pane {
+  grid-area: 1 / 1;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-16) var(--sp-16) var(--sp-20);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.hub-pane-inner { min-width: 0; animation: var(--motion-swap); }
+.hub-pane[data-pane="transcript"] > .hub-pane-inner { display: flex; flex-direction: column; min-height: 100%; }
+.hub-pane[data-pane="transcript"] .hub-transcript { flex: 1 1 auto; height: auto; min-height: 280px; }
+/* BTW 铺满：话题栏、对话、输入框自己管边距。 */
+.hub-pane[data-pane="btw"] { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.hub-pane[data-pane="btw"] > .hub-pane-inner { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.hub-pane[data-pane="btw"] .btw-child-pane { min-height: 360px; }
+.hub-pane[data-pane="btw"] .btw-child-context { padding: var(--sp-8) var(--sp-16); }
+.hub-pane[data-pane="btw"] .btw-empty.empty { min-height: 0; padding: var(--sp-16) var(--sp-4) var(--sp-8); }
+.hub-pane[data-pane="btw"] .btw-empty-icon { width: 32px; height: 32px; margin-bottom: var(--sp-12); }
+.hub-pane[data-pane="btw"] .btw-empty.empty h3 { font-size: var(--fs-14); }
+.hub-pane[data-pane="btw"] .btw-empty.empty p { line-height: 1.7; }
+
+/* ---------- 概览各节 ---------- */
+.hub-dossier-overview { display: flex; flex-direction: column; gap: var(--sp-20); }
+.hub-dossier-sec { display: flex; flex-direction: column; gap: var(--sp-8); min-width: 0; }
+.hub-dossier-sec > h4 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.02em;
+}
+.hub-dossier-sec > h4 > span { color: var(--text-faint); font-weight: var(--fw-regular); font-variant-numeric: tabular-nums; }
+.hub-dossier-sec > h4::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+.hub-dossier-now { display: flex; align-items: flex-start; gap: var(--sp-8); color: var(--text); font-size: var(--fs-12); line-height: 1.6; }
+.hub-dossier-now > .icon { flex: none; margin-top: 3px; color: var(--text-3); }
+.hub-dossier-now[data-tone="running"] > .icon { color: var(--green); animation: omp-pulse var(--loop-pulse) var(--ease-loop) infinite; }
+.hub-dossier-now[data-tone="waiting"] > .icon { color: var(--amber); }
+.hub-dossier-now[data-tone="failed"] > .icon { color: var(--red); }
+.hub-dossier-now > span { min-width: 0; overflow-wrap: anywhere; }
+.hub-dossier-args { margin-left: var(--sp-6); color: var(--text-2); font-family: var(--font-mono); font-size: var(--fs-11); }
+.hub-dossier-retry { display: flex; align-items: center; gap: var(--sp-6); color: var(--amber); font-size: var(--fs-11); }
+.hub-dossier-progress { display: flex; align-items: center; gap: var(--sp-8); min-width: 0; }
+.hub-dossier-bar { flex: 1; min-width: 48px; height: 6px; overflow: hidden; border-radius: 3px; background: var(--surface-3); }
+.hub-dossier-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--green)));
+  transition: inline-size var(--dur-slow) var(--ease-out);
+}
+.hub-dossier-stage { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--text-2); font-size: var(--fs-11); text-overflow: ellipsis; white-space: nowrap; }
+.hub-dossier-pct { flex: none; color: var(--text-2); font-size: var(--fs-11); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.hub-dossier-chips { display: flex; flex-wrap: wrap; gap: var(--sp-6); min-width: 0; }
+.hub-dossier-job,
+.hub-dossier-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  max-width: 100%;
+  height: 24px;
+  padding: 0 var(--sp-8) 0 var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: var(--fs-11);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
+}
+.hub-dossier-job { padding-left: var(--sp-8); font-family: var(--font-mono); }
+.hub-dossier-job > span,
+.hub-dossier-agent > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hub-dossier-agent > .icon { margin-left: var(--sp-2); color: var(--text-3); }
+.hub-dossier-agent > .sg { border-radius: var(--r-full); }
+.hub-dossier-job:hover,
+.hub-dossier-agent:hover { border-color: var(--accent-border); background: var(--accent-softer); color: var(--accent); }
+.hub-dossier-dot { flex: none; width: 6px; height: 6px; border-radius: var(--r-full); background: var(--glyph-faint); }
+.hub-dossier-dot[data-tone="running"] { background: var(--green); }
+.hub-dossier-dot[data-tone="idle"] { background: var(--blue); }
+.hub-dossier-dot[data-tone="waiting"] { background: var(--amber); }
+.hub-dossier-dot[data-tone="failed"] { background: var(--red); }
+
+.hub-dossier-task { margin: 0; color: var(--text); font-size: var(--fs-12); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.hub-dossier-task[data-clamped] { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 5; -webkit-box-orient: vertical; }
+.hub-dossier-link {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: var(--fs-11);
+  cursor: pointer;
+}
+.hub-dossier-link:hover { text-decoration: underline; }
+
+.hub-dossier-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-6); margin: 0; }
+.hub-dossier-tiles > div { min-width: 0; padding: var(--sp-8) var(--sp-10); border-radius: var(--r-8); background: var(--surface-2); }
+.hub-dossier-tiles dt { color: var(--text-3); font-size: calc(10.5px * var(--text-font-scale)); }
+.hub-dossier-tiles dd {
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hub-dossier-context { display: flex; align-items: center; gap: var(--sp-8); color: var(--text-3); font-size: var(--fs-11); }
+.hub-dossier-context[data-high] .hub-dossier-bar > i { background: var(--red); }
+@container hub-detail (max-width: 340px) {
+  .hub-dossier-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.hub-dossier-lineage { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--sp-8) var(--sp-12); }
+.hub-dossier-label { color: var(--text-3); font-size: var(--fs-11); }
+.hub-dossier-none { color: var(--text-faint); font-size: var(--fs-11); }
+
+.hub-dossier-mode { display: flex; align-items: flex-start; gap: var(--sp-6); color: var(--text-2); font-size: var(--fs-12); line-height: 1.5; }
+.hub-dossier-mode > .icon { flex: none; margin-top: 2px; color: var(--text-3); }
+.hub-dossier-facts { display: grid; gap: var(--sp-6); margin: 0; }
+.hub-dossier-facts > div { display: grid; grid-template-columns: minmax(72px, 1fr) minmax(0, 3fr); align-items: center; gap: var(--sp-10); min-height: 24px; }
+.hub-dossier-facts dt { color: var(--text-3); font-size: var(--fs-11); }
+.hub-dossier-facts dd { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; margin: 0; color: var(--text-2); font-size: var(--fs-12); }
+.hub-dossier-facts code {
+  min-width: 0;
+  overflow: hidden;
+  padding: 1px var(--sp-6);
+  border-radius: var(--r-4);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 折叠节（模型与思考、技术信息） ---------- */
+.hub-dossier-folds { display: flex; flex-direction: column; border-top: 1px solid var(--border); }
+.hub-dossier-fold { border-bottom: 1px solid var(--border); font-size: var(--fs-12); }
+.hub-dossier-fold > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  min-height: 38px;
+  padding: 0 var(--sp-4);
+  color: var(--text-2);
+  font-weight: var(--fw-medium);
+  list-style: none;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease);
+}
+.hub-dossier-fold > summary::-webkit-details-marker { display: none; }
+.hub-dossier-fold > summary:hover { color: var(--text); }
+.hub-dossier-fold > summary > .icon:first-child { color: var(--text-3); }
+.hub-dossier-fold > summary > span { flex: 1; min-width: 0; }
+.hub-dossier-fold > summary > .icon:last-child { color: var(--glyph-faint); transition: rotate var(--dur) var(--ease-out); }
+.hub-dossier-fold[open] > summary > .icon:last-child { rotate: 90deg; }
+.hub-dossier-fold > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--r-6); }
+.hub-dossier-fold-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-10);
+  padding: var(--sp-2) var(--sp-4) var(--sp-14) calc(var(--sp-4) + 14px + var(--sp-8));
+  animation: var(--motion-unfold);
+}
+.hub-dossier-copy .icon-btn { flex: none; }
 
 /* 详情内联提示（revive/kill 拒绝、错误） */
 .hub-notice {
@@ -543,49 +905,6 @@
 .hub-notice.ok { background: var(--green-soft); color: var(--green); }
 .hub-notice.warn { background: var(--amber-soft); color: var(--amber); }
 .hub-notice.err { background: var(--red-soft); color: var(--red); }
-
-/* kv */
-.hub-kv { display: flex; flex-direction: column; }
-.hub-kv .kv {
-  display: flex;
-  gap: var(--sp-12);
-  padding: 7px 0;
-  border-bottom: 1px solid var(--border);
-  font-size: var(--fs-12);
-}
-.hub-kv .kv:last-child { border-bottom: none; }
-.hub-kv .kv .k { width: 108px; flex: none; color: var(--text-3); font-size: var(--fs-11); padding-top: 1px; }
-.hub-kv .kv .v { flex: 1; min-width: 0; color: var(--text); word-break: break-word; }
-.hub-kv .kv .v.mono { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-2); }
-
-.hub-sec-title {
-  font-size: var(--fs-12);
-  font-weight: var(--fw-semibold);
-  color: var(--text-2);
-  margin: var(--sp-14) 0 var(--sp-6);
-  display: flex;
-  align-items: center;
-  gap: var(--sp-6);
-}
-.hub-sec-title:first-child { margin-top: 0; }
-
-.hub-lineage-row { display: flex; align-items: center; gap: var(--sp-6); flex-wrap: wrap; font-size: var(--fs-12); }
-.hub-child-link {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-4);
-  padding: 2px var(--sp-8);
-  border-radius: var(--r-full);
-  border: 1px solid var(--border);
-  font-size: var(--fs-11);
-  color: var(--text-2);
-}
-.hub-child-link:hover { border-color: var(--accent-border); color: var(--accent); text-decoration: none; }
-
-/* context meter */
-.hub-ctx { display: flex; align-items: center; gap: var(--sp-8); }
-.hub-ctx .meter { flex: 1; }
-.hub-ctx .mono { font-size: var(--fs-11); color: var(--text-3); flex: none; }
 
 /* ---------- Transcript ---------- */
 .hub-transcript {
@@ -658,25 +977,11 @@
 .hub-job .jb-label { flex: 1; min-width: 0; }
 .hub-job .jb-label .mono { font-size: var(--fs-11); color: var(--text-3); display: block; margin-top: 1px; }
 
-/* ---------- IRC Messages ---------- */
-.hub-irc-out { display: flex; gap: var(--sp-8); margin-bottom: var(--sp-12); align-items: flex-end; }
-.hub-irc-out .field { flex: 1; }
-.hub-irc-list { display: flex; flex-direction: column; gap: var(--sp-6); }
-.hub-irc-msg {
-  display: flex;
-  gap: var(--sp-8);
-  padding: var(--sp-8) var(--sp-10);
-  border: 1px solid var(--border);
-  border-radius: var(--r-8);
-  font-size: var(--fs-12);
-  background: var(--surface);
-}
-.hub-irc-msg .im-dir { flex: none; font-weight: var(--fw-semibold); }
-.hub-irc-msg .im-dir.in { color: var(--blue); }
-.hub-irc-msg .im-dir.out { color: var(--accent); }
-.hub-irc-msg .im-main { flex: 1; min-width: 0; }
-.hub-irc-msg .im-meta { font-size: var(--fs-11); color: var(--text-3); display: flex; gap: var(--sp-6); flex-wrap: wrap; }
-.hub-irc-msg .im-body { margin-top: 2px; color: var(--text-2); white-space: pre-wrap; word-break: break-word; }
+/* ---------- Messages: the selected agent's thread, drawn by the deck's Comms board ---------- */
+.hub-pane[data-pane="messages"] { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.hub-pane[data-pane="messages"] > .hub-pane-inner { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.hub-comms { --ad-line: var(--border); display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.hub-comms > .ad-empty.is-inline { flex: 1; }
 
 /* outcome chip */
 .hub-outcome {
@@ -737,12 +1042,15 @@
     bottom: 0;
     left: 0;
     z-index: var(--z-panel);
+    max-height: none;
     border-radius: 0;
     border-left: 1px solid var(--border);
     transform: translateX(100%);
     transition: transform var(--dur) var(--ease-out);
-    overflow-y: auto;
+    overflow: hidden;
   }
+  /* 指挥台、对话预览下也一样是抽屉，盖过上面宽屏的 relative。 */
+  .hub-page .hub-cols .hub-detail { position: fixed; top: var(--topbar-h); max-height: none; min-height: 0; }
   .hub-detail.open { transform: translateX(0); }
   .hub-drawer-back { display: inline-flex; }
   .hub-search { width: 100%; }
@@ -754,15 +1062,6 @@
 /* ============================================================
    增量（2026-08-11 全新实现补充）
    ============================================================ */
-/* 详情头部状态行：OMP inspector 的「status · duration · active age」模式 */
-.hub-status-line {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-6);
-  font-size: var(--fs-11);
-  color: var(--text-3);
-}
-.hub-status-line .dot { width: 6px; height: 6px; }
 /* base.css 的 .dot 无 gray 态；parked 用实心灰点（glyph 色） */
 .dot.gray { background: var(--glyph-faint); }
 
@@ -782,13 +1081,6 @@
   text-align: center;
   padding: var(--sp-6) 0 var(--sp-2);
   font-family: var(--font-mono);
-}
-
-/* Detail tab spacing; shared selection lives in tabs.css. */
-.hub-detail-tabs .tabs { display: flex; gap: var(--sp-2); }
-.hub-detail-tabs .tabs [role="tab"] {
-  padding: 7px var(--sp-12);
-  font-size: var(--fs-12);
 }
 
 /* 骨架屏复用 components .card 即可，无需新增 */

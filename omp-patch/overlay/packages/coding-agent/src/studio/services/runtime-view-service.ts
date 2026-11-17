@@ -30,6 +30,7 @@ import { SessionControlError } from "./session-control-service";
 import { studioLinkTarget } from "./extension-links-service";
 import { managedBrowserFor } from "./managed-browser-service";
 import { readStudioTaskOptions } from "./task-options-service";
+import { readStudioAgentMessages } from "./agent-messages-service";
 
 type ShellRead = Extract<RuntimeViewOperation, { kind: "shell.view.read" }>;
 function shellKey(operation: Pick<ShellRead, "sessionId" | "sourceSessionId" | "agentId" | "toolCallId">): string {
@@ -106,6 +107,8 @@ export class StudioRuntimeViews {
 				return this.formReader(operation.interactionId, operation.leaseGeneration);
 			case "agent.spawn.options.read":
 				return readStudioTaskOptions(this.session, operation.definition);
+			case "agent.messages.list":
+				return readStudioAgentMessages(this.session);
 			case "session.lease.read":
 				return probeSessionLeases(operation.targetSessionIds);
 			case "extensions.links.list":

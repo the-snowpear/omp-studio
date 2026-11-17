@@ -146,6 +146,7 @@ export class DockStore {
   documentId?: string;
   eventWindow?: Window;
   windowManager?: WorkbenchWindows;
+  onRailReveal?: (() => void) | undefined;
   private conversationTitle = "";
   private reconcilingWindows = false;
   private unmigratedWindows = new Set<string>();
@@ -239,6 +240,7 @@ export class DockStore {
     this.listeners.clear();
     delete this.windowManager;
     delete this.eventWindow;
+    this.onRailReveal = undefined;
     this.unmigratedWindows.clear();
   }
 
@@ -544,6 +546,11 @@ export class DockStore {
     }
     const activePins = pinsForScope(this.state.pins, this.scope);
     const effective = dockReducer(this.snapshot.layout, action, this.state.preferences.locked);
+    if ((action.type === "region" && action.region === "rail" && action.visible)
+      || (action.type === "railMode" && action.mode !== "hidden")
+      || ((action.type === "open" || action.type === "reveal") && locatePanel(effective, action.panel)?.region === "rail")) {
+      this.onRailReveal?.();
+    }
     if (this.modalPanel) {
       const focused = effective.floats.find(group => group.panels.includes(this.modalPanel!));
       if (action.type === "apply" || !focused || focused.minimized || focused.pin || focused.panels.length !== 1) this.modalPanel = null;

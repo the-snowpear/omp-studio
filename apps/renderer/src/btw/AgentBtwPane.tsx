@@ -12,8 +12,10 @@ import type { BtwSessionApi } from "./useBtwSession";
 import { invokeUpgrade } from "../runtimeUpgrade";
 import type { SubagentBtwViewState } from "../conversation/subagentViewState";
 
-export function AgentBtwPane({ client, sessionId, agentId, available, viewState }: {
+export function AgentBtwPane({ client, sessionId, agentId, available, viewState, showTarget = true }: {
   client: StudioClient | undefined; sessionId: string | undefined; agentId: string; available: boolean; viewState?: SubagentBtwViewState;
+  /** The `agentId · target session` line; the Agent Hub shows the id in its own technical details instead. */
+  showTarget?: boolean;
 }) {
   const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
@@ -154,7 +156,7 @@ export function AgentBtwPane({ client, sessionId, agentId, available, viewState 
     ...(client && sessionId ? { dictation: { client, sessionId, available } } : {}),
   };
   return <section className="btw-child-pane" aria-label={zh ? "子代理 BTW" : "Child agent BTW"}>
-    <p className="btw-child-context">{agentId} · {preview && marks ? (zh ? "演示" : "Demo") : state?.targetSessionId ?? "—"}</p>
+    {showTarget ? <p className="btw-child-context">{agentId} · {preview && marks ? (zh ? "演示" : "Demo") : state?.targetSessionId ?? "—"}</p> : null}
     {!preview && !available ? <p role="status" className="btw-child-context">{zh ? "当前 Runtime 或目标不支持子代理 BTW" : "This Runtime or target does not support child BTW"}</p> : null}
     <BtwPanel session={session} demo={preview} />
   </section>;

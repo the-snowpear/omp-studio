@@ -301,10 +301,10 @@ describe("Agents deck", () => {
     expect(document.querySelector('.ad-card[data-selected] .ad-card-name strong')?.textContent).toBe(agents.find(agent => agent.agentId === "agent-019fcb20")!.displayName);
   });
 
-  it("shows agent messaging as not connected in real mode, with no invented messages", () => {
+  it("shows agent messaging as unavailable in real mode without a Runtime to read it, with no invented messages", () => {
     render(deck(getPreviewDockAgents(true), { links: links() }));
     fireEvent.click(screen.getByRole("tab", { name: "通讯" }));
-    expect(screen.getByText("Agent 间通讯尚未接入")).toBeTruthy();
+    expect(screen.getByText("读不到 Agent 间通讯")).toBeTruthy();
     expect(document.querySelector(".ad-post")).toBeNull();
   });
 });

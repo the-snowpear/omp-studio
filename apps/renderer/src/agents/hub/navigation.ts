@@ -72,7 +72,6 @@ export function loadPersisted(): Persisted {
       selected?: unknown;
       selectedBySession?: unknown;
       tab?: unknown;
-      view?: unknown;
     };
     const selectedBySession = parseSelectedMap(saved.selectedBySession);
     if (
@@ -85,10 +84,9 @@ export function loadPersisted(): Persisted {
     return {
       selectedBySession,
       tab: parseHubTab(saved.tab) ?? "overview",
-      view: saved.view === "tree" || saved.view === "deck" ? saved.view : "flat",
     };
   } catch {
-    return { selectedBySession: {}, tab: "overview", view: "flat" };
+    return { selectedBySession: {}, tab: "overview" };
   }
 }
 

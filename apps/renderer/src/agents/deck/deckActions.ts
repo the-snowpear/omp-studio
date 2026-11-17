@@ -21,6 +21,8 @@ export type DeckCommandContext = {
   /** The roster is the live session (not history, not the last state before a disconnect). */
   readonly viewingLive: boolean;
   readonly online: boolean;
+  /** The live Runtime session the roster belongs to; its agent messages are read under it. */
+  readonly sessionId?: string | undefined;
 };
 
 function subject(row: DeckAgent): CapsSubject {

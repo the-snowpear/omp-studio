@@ -8,7 +8,7 @@ import { useAppSettings, type AgentRosterDensity } from "../../settings/appSetti
 import type { AgentRosterSource } from "../AgentRosterMeter";
 import { AgentInspector, SwarmSummary, type InspectorActions } from "./AgentInspector";
 import { CommsView } from "./CommsView";
-import { useSwarmComms } from "./comms";
+import { rosterKeyOf, useSwarmComms, type SwarmComms } from "./comms";
 import { useDeckCommands, type DeckCommandContext } from "./deckActions";
 import { buildDeck, deckTotals, filterDeck, type DeckAgent, type DeckGroup } from "./deckModel";
 import { useDeckUi, type DeckStageView, type DeckView } from "./deckState";
@@ -39,7 +39,7 @@ export type DeckEmbedding = {
   onSelect: (id: string) => void;
 };
 
-export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, width, height, region, openedIds, links, commandContext, embedded }: {
+export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, width, height, region, openedIds, links, commandContext, embedded, comms: hostComms }: {
   /** Panel instance + scope: what the user set up in this deck is remembered under it. */
   instanceKey: string;
   /** Recorder scope: target, workspace, parent session, preview. */
@@ -56,6 +56,8 @@ export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, 
   commandContext: DeckCommandContext;
   /** Set by a host page: selection is controlled and the deck renders no inspector of its own. */
   embedded?: DeckEmbedding;
+  /** Agent messages a host page already reads (the Hub shares them with its Messages tab). */
+  comms?: SwarmComms;
 }) {
   const { preview, marks } = usePreviewMode();
   const { t, resolvedLanguage } = useI18n();
@@ -93,7 +95,10 @@ export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, 
   const groups = useMemo(() => new Set(ui.groups), [ui.groups]);
   const filter = useMemo(() => filterDeck(rows, { query: ui.query, groups }), [rows, ui.query, groups]);
   const collapsed = useMemo(() => new Set(ui.collapsed), [ui.collapsed]);
-  const comms = useSwarmComms(preview, zh, live);
+  const rosterKey = useMemo(() => rosterKeyOf(agents), [agents]);
+  const ownComms = useSwarmComms({ preview, zh, live, client: commandContext.client,
+    sessionId: commandContext.viewingLive ? commandContext.sessionId : undefined, rosterKey, enabled: hostComms === undefined });
+  const comms = hostComms ?? ownComms;
   // Preview is read here too: a demo deck must never reach the Host, whatever its caller passed.
   const commands = useDeckCommands({ ...commandContext, preview: commandContext.preview || preview,
     viewingLive: commandContext.viewingLive && replay === null }, zh);

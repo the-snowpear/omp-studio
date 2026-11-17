@@ -18,6 +18,8 @@ export type FetchedModelCandidate = {
   readonly parameters?: ModelParameterValues;
   readonly parameterSources?: ModelParameterSources;
   readonly adaptation?: ModelAdaptationResult;
+  readonly catalogChoices?: ReadonlyArray<ModelAdaptationCandidate>;
+  readonly selectedCatalogKey?: string;
   readonly kind?: import("@omp-studio/client-contract").ModelKind;
   readonly webSearch?: string;
   readonly api?: string;
@@ -83,6 +85,7 @@ export function toCandidates(
       id, parameters, parameterSources,
       ...(model.api ? { api: model.api } : {}),
       ...(adaptation ? { adaptation } : {}),
+      ...(adaptation?.status === "ambiguous" && adaptation.candidates.length > 0 ? { catalogChoices: adaptation.candidates } : {}),
       name: model.name.trim() || id,
       existing,
       picked: !existing,
@@ -174,11 +177,27 @@ export function mergeImportedModels(
   })];
 }
 
-export function chooseFetchedModelCandidate(candidate: FetchedModelCandidate, selected: ModelAdaptationCandidate): FetchedModelCandidate {
+export function chooseFetchedModelCandidate(candidate: FetchedModelCandidate, selected: ModelAdaptationCandidate | undefined): FetchedModelCandidate {
   const adaptation = candidate.adaptation!;
-  const endpoint = Object.fromEntries(MODEL_PARAMETER_FIELDS.filter(field => candidate.parameterSources?.[field]?.source === "endpoint").map(field => [field, candidate.parameters?.[field]]));
+  const choices = candidate.catalogChoices ?? adaptation.candidates;
+  const endpoint = Object.fromEntries(MODEL_PARAMETER_FIELDS.filter(field => candidate.parameterSources?.[field]?.source === "endpoint").map(field => [field, candidate.parameters?.[field]])) as ModelParameterValues;
+  const { contextWindow: _ctx, maxTokens: _max, reasoning: _reasoning, thinking: _thinking, selectedCatalogKey: _pickedKey, ...rest } = candidate;
+  if (!selected) {
+    const sources: ModelParameterSources = Object.fromEntries(MODEL_PARAMETER_FIELDS.filter(field => endpoint[field] !== undefined).map(field => [field, { source: "endpoint" as const }]));
+    return {
+      ...rest,
+      ...(endpoint.contextWindow === undefined ? {} : { contextWindow: endpoint.contextWindow }),
+      ...(endpoint.maxTokens === undefined ? {} : { maxTokens: endpoint.maxTokens }),
+      ...(endpoint.reasoning === undefined ? {} : { reasoning: endpoint.reasoning }),
+      ...(endpoint.thinkingConfig ? { thinking: endpoint.thinkingConfig.efforts } : {}),
+      parameters: endpoint,
+      parameterSources: sources,
+      enriched: false,
+      catalogChoices: choices,
+      adaptation: { ...adaptation, status: "ambiguous", candidates: [...choices], values: endpoint, sources },
+    };
+  }
   const values = mergeModelParameters(selected.values, endpoint);
   const sources: ModelParameterSources = Object.fromEntries(MODEL_PARAMETER_FIELDS.filter(field => values[field] !== undefined).map(field => [field, endpoint[field] !== undefined ? { source: "endpoint" } : { source: "catalog", catalogVersion: adaptation.catalogVersion, catalogModel: selected.key }]));
-  const { contextWindow: _ctx, maxTokens: _max, reasoning: _reasoning, thinking: _thinking, ...rest } = candidate;
-  return { ...rest, ...values, ...(values.thinkingConfig ? { thinking: values.thinkingConfig.efforts } : {}), parameters: values, parameterSources: sources, enriched: true, adaptation: { ...adaptation, status: "matched", candidates: [selected], values, sources } };
+  return { ...rest, ...values, ...(values.thinkingConfig ? { thinking: values.thinkingConfig.efforts } : {}), parameters: values, parameterSources: sources, enriched: true, catalogChoices: choices, selectedCatalogKey: selected.key, adaptation: { ...adaptation, status: "matched", candidates: [selected], values, sources } };
 }

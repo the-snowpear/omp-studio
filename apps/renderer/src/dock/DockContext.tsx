@@ -24,7 +24,7 @@ function samePageDefinitions(a: BrowserPageDefinitions, b: BrowserPageDefinition
       && !left.close === !right.close && left.close?.pending === right.close?.pending && left.close?.label === right.close?.label && left.close?.tip === right.close?.tip;
   });
 }
-type DockEngine = { store: DockStore; hosts: PanelHosts; definitions: readonly PanelDefinition[]; conversationTitle?: string | undefined; agentCatalog: AgentDockCatalog | null; setAgentCatalog: (catalog: AgentDockCatalog | null) => void; setFileViewDefinitions: (definitions: BrowserPageDefinitions) => void; setBrowserPageDefinitions: (definitions: BrowserPageDefinitions) => void };
+type DockEngine = { store: DockStore; hosts: PanelHosts; definitions: readonly PanelDefinition[]; conversationTitle?: string | undefined; railHiddenByDefault: boolean; newConversationRailOpened: boolean; setNewConversation: (active: boolean) => void; agentCatalog: AgentDockCatalog | null; setAgentCatalog: (catalog: AgentDockCatalog | null) => void; setFileViewDefinitions: (definitions: BrowserPageDefinitions) => void; setBrowserPageDefinitions: (definitions: BrowserPageDefinitions) => void };
 /** Extra instances reuse the registered tool's chrome, never its content adapter. */
 function scopedDefinition(id: ScopedPanelId, base: PanelDefinition): PanelDefinition {
   return {
@@ -44,6 +44,22 @@ export function DockProvider({ children, definitions, store, ownerId, conversati
   const { resolvedLanguage } = useI18n();
   const [engine] = useState(() => ({ store: store ?? new DockStore(), hosts: new PanelHosts() }));
   const snapshot = useSyncExternalStore(engine.store.subscribe, engine.store.getSnapshot);
+  const currentScopeKey = JSON.stringify([snapshot.scope.target, snapshot.scope.project, snapshot.scope.session, snapshot.preview]);
+  const [newConversation, setNewConversationState] = useState(false);
+  const [railOpenedScope, setRailOpenedScope] = useState<string | null>(null);
+  const setNewConversation = useCallback((active: boolean) => {
+    setNewConversationState(active);
+    if (!active) setRailOpenedScope(null);
+  }, []);
+  useLayoutEffect(() => {
+    engine.store.onRailReveal = () => {
+      const latest = engine.store.getSnapshot();
+      setRailOpenedScope(JSON.stringify([latest.scope.target, latest.scope.project, latest.scope.session, latest.preview]));
+    };
+    return () => { engine.store.onRailReveal = undefined; };
+  }, [engine.store]);
+  const newConversationRailOpened = railOpenedScope === currentScopeKey;
+  const railHiddenByDefault = newConversation && !newConversationRailOpened;
   const [agentCatalog, setCatalog] = useState<AgentDockCatalog | null>(null);
   const setAgentCatalog = useCallback((next: AgentDockCatalog | null) => setCatalog(previous =>
     previous?.open === next?.open && JSON.stringify([previous?.scope, previous?.entries]) === JSON.stringify([next?.scope, next?.entries]) ? previous : next), []);
@@ -71,7 +87,7 @@ export function DockProvider({ children, definitions, store, ownerId, conversati
     }), ...Object.entries(snapshot.layout.browserPages).map(([id, descriptor]): PanelDefinition => pageDefinitions.find(definition => definition.id === id)
       ?? { id: id as PanelId, title: descriptor.title || "Browser", icon: "globe", initialHeight: 320, minHeight: 180, compactLabel: (descriptor.title || "Browser").slice(0, 2) }), ...Object.entries(snapshot.layout.fileViews ?? {}).map(([id, descriptor]): PanelDefinition => fileDefinitions.find(definition => definition.id === id) ?? { id: id as PanelId, title: descriptor.title, icon: "file" })];
   }, [definitions, dynamicKey, scopedKey, resolvedLanguage, pageDefinitions, fileDefinitions]);
-  const value = useMemo(() => ({ ...engine, definitions: allDefinitions, conversationTitle, agentCatalog, setAgentCatalog, setFileViewDefinitions, setBrowserPageDefinitions }), [engine, allDefinitions, conversationTitle, agentCatalog, setAgentCatalog, setFileViewDefinitions, setBrowserPageDefinitions]);
+  const value = useMemo(() => ({ ...engine, definitions: allDefinitions, conversationTitle, railHiddenByDefault, newConversationRailOpened, setNewConversation, agentCatalog, setAgentCatalog, setFileViewDefinitions, setBrowserPageDefinitions }), [engine, allDefinitions, conversationTitle, railHiddenByDefault, newConversationRailOpened, setNewConversation, agentCatalog, setAgentCatalog, setFileViewDefinitions, setBrowserPageDefinitions]);
   const layer = useRef<HTMLDivElement>(null);
   const localLayer = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => { const detach = engine.hosts.attach(layer.current!); return () => { engine.store.flush(); detach(); }; }, [engine]);

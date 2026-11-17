@@ -28,7 +28,6 @@ import { pageDir, pagePhaseClass, useDeferredKey, useDeferredPresence, useOverla
 import { extractYamlMapEntry, mergeYamlMapEntry, parseStructured, readYamlMapEntryNode, StructuredEditor } from "./structured-editor";
 import { usePreviewMode } from "./preview/PreviewContext";
 import { MODEL_API_TYPES, getModelAuthTypes, createPreviewModelConfig } from "./preview/modelConfigFixtures";
-import { chooseFetchedModelCandidate, pickedCount, setAllPicked, togglePicked } from "./models/fetchedModels";
 import { draftProviderYamlNode, nestedProviderYamlNode, serializeModelsYmlNode } from "./models/providerYaml";
 import { SubagentsPanel } from "./SubagentsPanel";
 import { WebSearchPanel } from "./models/WebSearchPanel";
@@ -42,6 +41,7 @@ import { applyRoleSelector, assignedRoleIds, blankCustomForm, blankDraft, blankO
 import { SOURCE_GROUP, STATUS_META, formatPresetDesc, formatPresetGroup, formatPresetName, formatProviderStatusDetail, formatRoleDesc } from "./models/config/presentation";
 import { runProbe, runTest, runWrite } from "./models/config/commands";
 import { AuthTypeSelect, BrandMark, DiscoveryResultBlock, ModelCaps, ProviderTestRow, confirmDiscardDirty } from "./models/config/ProviderControls";
+import { FetchedModelsPanel } from "./models/config/FetchedModelsPanel";
 import { RoleAssignControl, RoleModelPicker, RoleThinkingSeg } from "./models/config/RoleControls";
 import { ModelParametersDialog } from "./models/config/ModelParametersDialog";
 
@@ -1500,75 +1500,15 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                 ) : null}
 
                 {candidates ? (
-                  <div className="mc-fetch-panel">
-                    <div className={`test-result ${fetchDetail?.ok === false ? "fail" : "ok"}`} role="status" style={{ marginTop: 0 }}>
-                      <Icon name={fetchDetail?.ok === false ? "alert" : "check"} extra="sm" />
-                      <div className="tr-lines">
-                        <b>{fetchDetail?.ok === false ? t("modelConfig.fetchFailed") : t("modelConfig.selectModelsToAdd")}</b>
-                        <span className="mono">{fetchDetail?.text ?? ""}</span>
-                      </div>
-                    </div>
-                    {candidates.length > 0 ? (
-                      <div className="mc-fetch-select" role="toolbar" aria-label={t("modelConfig.selectModelsToAdd")}>
-                        <span className="sec-desc">{t("modelConfig.importModelsCount", { count: pickedCount(candidates) })}</span>
-                        <button
-                          type="button"
-                          className="icon-btn small"
-                          aria-label={t("modelConfig.selectAll")}
-                          data-tip={t("modelConfig.selectAll")}
-                          disabled={pickedCount(candidates) === candidates.length}
-                          onClick={() => setCandidates(setAllPicked(candidates, true))}
-                        >
-                          <Icon name="check" extra="sm" />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn small"
-                          aria-label={t("modelConfig.deselectAll")}
-                          data-tip={t("modelConfig.deselectAll")}
-                          disabled={pickedCount(candidates) === 0}
-                          onClick={() => setCandidates(setAllPicked(candidates, false))}
-                        >
-                          <Icon name="x" extra="sm" />
-                        </button>
-                      </div>
-                    ) : null}
-                    {candidates.length === 0 ? (
-                      <div className="pm-empty"><Icon name="box" extra="sm" />{t("modelConfig.endpointNoModels")}</div>
-                    ) : candidates.map((item) => (
-                      <div className={`pm-row mc-fetch-row${item.existing ? " is-off" : ""}`} key={item.id}>
-                        <input type="checkbox" aria-label={item.name} checked={item.picked} onChange={() => setCandidates(togglePicked(candidates, item.id))} />
-                        <span className="pm-name">{item.name}</span>
-                        <span className="pm-sel ellipsis">{`${editor.id || "provider"}/${item.id}`}</span>
-                        <span className="pm-meta">
-                          {item.contextWindow ? <span className="chip gray xs">{fmtK(item.contextWindow)} ctx</span> : null}
-                          {item.maxTokens ? <span className="chip gray xs">{fmtK(item.maxTokens)} out</span> : null}
-                          {item.image ? <span className="chip blue xs chip-icon" data-tip={t("modelConfig.badgeImage")}><Icon name="image" extra="sm" /></span> : null}
-                          {item.reasoning ? <span className="chip purple xs chip-icon" data-tip={t("modelConfig.badgeReasoning")}><Icon name="brain" extra="sm" /></span> : null}
-                          {[...new Set(Object.values(item.parameterSources ?? {}).map(origin => origin.source))].map(source => <span key={source} className="chip gray xs">{t(`modelAdaptation.source.${source}`)}</span>)}
-                          {item.adaptation?.status === "ambiguous" ? <span className="chip gray xs">{t("modelAdaptation.ambiguousBadge")}</span> : null}
-                          {item.existing ? <span className="chip gray xs">{t("modelConfig.alreadyExists")}</span> : null}
-                        </span>
-                        {item.adaptation?.status === "ambiguous" ? <AppSelect aria-label={`${t("modelAdaptation.chooseModel")} · ${item.id}`} className="select" value="" onChange={event => {
-                          const selected = item.adaptation?.candidates.find(candidate => candidate.key === event.target.value);
-                          if (selected) setCandidates(current => current?.map(candidate => candidate.id === item.id ? chooseFetchedModelCandidate(candidate, selected) : candidate) ?? null);
-                        }}><option value="">{t("modelAdaptation.chooseModel")}</option>{item.adaptation.candidates.map(candidate => <option key={candidate.key} value={candidate.key}>{candidate.provider} / {candidate.id}</option>)}</AppSelect> : null}
-                      </div>
-                    ))}
-                    <div className="mc-fetch-foot">
-                      <span className="spacer" />
-                      <button type="button" className="btn small outline" onClick={() => { setCandidates(null); setFetchDetail(null); }}>{t("common.close")}</button>
-                      <button
-                        type="button"
-                        className="btn small primary"
-                        disabled={pickedCount(candidates) === 0}
-                        onClick={() => importCandidates(editor, candidates.filter((item) => item.picked))}
-                      >
-                        <Icon name="plus" extra="sm" />{t("modelConfig.importModelsCount", { count: pickedCount(candidates) })}
-                      </button>
-                    </div>
-                    <p className="sec-desc" style={{ marginTop: 8 }}>{t("modelConfig.importDraftNotice", { action: editExisting ? t("modelConfig.saveChanges") : t("modelConfig.addProvider") })}</p>
-                  </div>
+                  <FetchedModelsPanel
+                    providerId={editor.id}
+                    editExisting={editExisting}
+                    fetchDetail={fetchDetail}
+                    candidates={candidates}
+                    setCandidates={setCandidates}
+                    onImport={(picked) => importCandidates(editor, picked)}
+                    onClose={() => { setCandidates(null); setFetchDetail(null); }}
+                  />
                 ) : null}
 
                 {modelsTab === "catalog" ? (() => {

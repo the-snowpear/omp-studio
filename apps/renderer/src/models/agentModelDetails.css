@@ -1,32 +1,35 @@
-.agent-model-details {
-  margin: 8px 16px;
-  padding: 8px 0;
-  border-block: 1px solid var(--border);
-  font-size: var(--fs-12);
-}
-.agent-model-details summary {
-  cursor: pointer;
-  color: var(--text-2);
-  font-weight: var(--fw-medium);
-  margin-bottom: 8px;
-}
+/* 模型与思考：Agent Hub 档案面板里的一个折叠节（外壳样式见 agent-hub.css 的 .hub-dossier-fold）。 */
+.agent-model-details .amd-tags { display: flex; flex-wrap: wrap; gap: var(--sp-4); }
 .agent-model-details dl {
   display: grid;
-  gap: 5px;
+  gap: var(--sp-6);
+  margin: 0;
 }
 .agent-model-details dl > div {
   display: grid;
-  grid-template-columns: minmax(90px, 1fr) minmax(0, 2fr);
-  gap: 8px;
+  grid-template-columns: minmax(84px, 2fr) minmax(0, 3fr);
+  gap: var(--sp-8);
 }
-.agent-model-details dt {
-  color: var(--text-3);
-}
+.agent-model-details dt { color: var(--text-3); }
 .agent-model-details dd {
   margin: 0;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
   overflow-wrap: anywhere;
+}
+.agent-model-details .amd-chain-title {
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
 }
 .agent-model-details ol {
-  padding-left: 20px;
+  margin: 0;
+  padding-left: var(--sp-20);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  line-height: 1.7;
   overflow-wrap: anywhere;
 }
+.agent-model-details .amd-refresh { align-self: flex-start; }

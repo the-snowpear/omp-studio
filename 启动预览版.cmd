@@ -1,13 +1,40 @@
 @echo off
 setlocal EnableExtensions
-title OMP Studio Preview (Preview Data)
 cd /d "%~dp0"
 
+rem ---------------------------------------------------------------------------
+rem  Say which launcher this window is before anything gets built, and keep the
+rem  same label in the title bar so parallel windows stay distinguishable.
+rem ---------------------------------------------------------------------------
+set "OMP_LAUNCH_MODE=DEV PREVIEW + DEMO DATA"
+set "OMP_LAUNCH_DATA=demo fixtures on lists, trees, telemetry, conversations;"
+set "OMP_LAUNCH_DATA2=composer, terminal, approvals stay on the real Host"
+set "OMP_LAUNCH_ENV=OMP_PREVIEW_DATA=1  (renderer enters preview mode, marks off)"
+set "OMP_LAUNCH_UI=http://127.0.0.1:5173, Vite dev server with hot reload"
+
+set "OMP_GIT_BRANCH="
+set "OMP_GIT_COMMIT="
+set "OMP_GIT_STATE="
+for /f "delims=" %%b in ('git -C "%~dp0." rev-parse --abbrev-ref HEAD 2^>nul') do set "OMP_GIT_BRANCH=%%b"
+for /f "delims=" %%c in ('git -C "%~dp0." rev-parse --short HEAD 2^>nul') do set "OMP_GIT_COMMIT=%%c"
+for /f "delims=" %%d in ('git -C "%~dp0." status --porcelain --untracked-files=no 2^>nul') do set "OMP_GIT_STATE=+ local changes"
+if not defined OMP_GIT_BRANCH set "OMP_GIT_BRANCH=(not a git checkout)"
+if defined OMP_GIT_COMMIT if not defined OMP_GIT_STATE set "OMP_GIT_STATE=clean"
+if defined OMP_GIT_STATE set "OMP_GIT_BRANCH=%OMP_GIT_BRANCH%, %OMP_GIT_STATE%"
+
+title OMP Studio - %OMP_LAUNCH_MODE% [%OMP_GIT_BRANCH%]
+
 echo.
-echo  OMP Studio - One-click Preview (preview data)
-echo  ==============================================
-echo  Lists, trees, telemetry and conversations show demo fixtures.
-echo  Composer, terminal, approvals and pause/resume still use the real Host.
+echo  ====================================================================
+echo    OMP Studio  -  %OMP_LAUNCH_MODE%
+echo  ====================================================================
+echo    script : %~nx0
+echo    data   : %OMP_LAUNCH_DATA%
+echo             %OMP_LAUNCH_DATA2%
+echo    env    : %OMP_LAUNCH_ENV%
+echo    ui     : %OMP_LAUNCH_UI%
+echo    branch : %OMP_GIT_BRANCH%  %OMP_GIT_COMMIT%
+echo  ====================================================================
 echo.
 
 where node.exe >nul 2>nul
@@ -34,7 +61,7 @@ if not exist "node_modules\electron\package.json" (
   if errorlevel 1 goto :failed
 )
 
-echo [start] Building and opening OMP Studio (dev server, preview data). Please wait...
+echo [start] %OMP_LAUNCH_MODE% - building and opening OMP Studio. Please wait...
 set "OMP_PREVIEW_DATA=1"
 set "OMP_NPM_CLI=%ProgramFiles%\nodejs\node_modules\npm\bin\npm-cli.js"
 if not exist "%OMP_NPM_CLI%" set "OMP_NPM_CLI=%ProgramFiles(x86)%\nodejs\node_modules\npm\bin\npm-cli.js"

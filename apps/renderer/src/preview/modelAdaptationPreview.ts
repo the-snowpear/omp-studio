@@ -3,6 +3,8 @@ import { mergeModelParameters, MODEL_PARAMETER_FIELDS, type ModelAdaptationInput
 const entries: readonly ModelAdaptationCandidate[] = [
   { key: "demo/openai/glm-5", provider: "zhipu", api: "openai-completions", id: "glm-5", name: "GLM 5", aliases: ["glm-5-gateway"], values: { contextWindow: 202752, maxTokens: 65536, reasoning: true, thinkingConfig: { mode: "effort", efforts: ["low", "medium", "high"], defaultLevel: "high" } } },
   { key: "demo/openrouter/glm-5", provider: "openrouter", api: "openai-completions", id: "z-ai/glm-5", name: "GLM 5 (OpenRouter)", aliases: ["glm-5-gateway"], values: { contextWindow: 131072, maxTokens: 32768, reasoning: true, thinkingConfig: { mode: "effort", efforts: ["low", "high"], defaultLevel: "high" } } },
+  { key: "demo/qwen/qwen3-max", provider: "qwen", api: "openai-completions", id: "qwen3-max", name: "Qwen3 Max", values: { contextWindow: 262144, maxTokens: 65536, reasoning: true, thinkingConfig: { mode: "effort", efforts: ["low", "medium", "high"], defaultLevel: "medium" } } },
+  { key: "demo/openrouter/qwen3-max", provider: "openrouter", api: "openai-completions", id: "qwen/qwen3-max", name: "Qwen3 Max", aliases: ["qwen3-max"], values: { contextWindow: 131072, maxTokens: 32768, reasoning: false } },
   { key: "demo/openai/gpt-4.1", provider: "openai", api: "openai-completions", id: "gpt-4.1", name: "GPT 4.1", values: { contextWindow: 1047576, maxTokens: 32768, reasoning: false } },
   { key: "demo/anthropic/claude-opus", provider: "anthropic", api: "anthropic-messages", id: "claude-opus-4-1", name: "Claude Opus 4.1", values: { contextWindow: 200000, maxTokens: 32000, reasoning: true, thinkingConfig: { mode: "budget", efforts: ["low", "medium", "high"], defaultLevel: "medium" } } },
 ];

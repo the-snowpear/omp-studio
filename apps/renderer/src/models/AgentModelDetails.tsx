@@ -8,6 +8,7 @@ import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { previewAgentModel } from "../preview/agentModelPreview";
 import { hostErrorMessage, waitReceipt } from "../hostError";
+import { Icon } from "../icons";
 import "./agentModelDetails.css";
 export function AgentModelDetails({
   client,
@@ -113,13 +114,18 @@ export function AgentModelDetails({
   ]);
   return (
     <details
-      className="agent-model-details"
+      className="hub-dossier-fold agent-model-details"
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary>
-        {zh ? "模型与思考" : "Models and thinking"}
-        {preview && marks ? (zh ? " · 演示" : " · Demo") : ""}
+        <Icon name="cpu" extra="sm" />
+        <span>
+          {zh ? "模型与思考" : "Models and thinking"}
+          {preview && marks ? (zh ? " · 演示" : " · Demo") : ""}
+        </span>
+        <Icon name="chevron-r" extra="sm" />
       </summary>
+      <div className="hub-dossier-fold-body">
       {!enabled ? (
         <p className="tiny muted">
           {zh
@@ -133,6 +139,7 @@ export function AgentModelDetails({
       ) : null}
       {data ? (
         <>
+          <div className="amd-tags">
           <span className="chip gray xs">
             {data.source === "live"
               ? zh
@@ -151,6 +158,7 @@ export function AgentModelDetails({
               {zh ? "正在使用备用模型" : "Using a fallback model"}
             </span>
           ) : null}
+          </div>
           <dl>
             <div>
               <dt>{zh ? "配置模型" : "Selected model"}</dt>
@@ -171,7 +179,7 @@ export function AgentModelDetails({
               </dd>
             </div>
           </dl>
-          <b className="tiny">{zh ? "原生候选链" : "Native candidate chain"}</b>
+          <b className="amd-chain-title">{zh ? "原生候选链" : "Native candidate chain"}</b>
           {data.candidates ? (
             <ol>
               {data.candidates.map((model, index) => (
@@ -195,12 +203,15 @@ export function AgentModelDetails({
         </>
       ) : null}
       <button
-        className="btn small outline"
+        className="btn small ghost amd-refresh"
+        type="button"
         disabled={!enabled}
         onClick={() => setRefresh((value) => value + 1)}
       >
+        <Icon name="refresh" extra="sm" />
         {zh ? "刷新模型详情" : "Refresh model details"}
       </button>
+      </div>
     </details>
   );
 }

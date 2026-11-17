@@ -897,6 +897,7 @@ export class StudioHostClientFacade implements ClientTransport {
       case "runtime.close.confirm":
       case "interaction.form.read":
       case "agent.spawn.options.read":
+      case "agent.messages.list":
       case "session.lease.read":
       case "session.cache.get":
       case "extensions.links.list":

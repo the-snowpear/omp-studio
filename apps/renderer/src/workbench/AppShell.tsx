@@ -1916,7 +1916,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         else if (action.operation === "redo") dock.store.redo();
         else if (action.operation === "lock") dock.store.updatePreferences({ locked: !current.preferences.locked });
         else if (action.operation === "snap") dock.store.updatePreferences({ snap: !current.preferences.snap });
-        else if (action.operation === "rail") dock.store.dispatch({ type: "region", region: "rail", visible: current.layout.rail.mode === "hidden" });
+        else if (action.operation === "rail") dock.store.dispatch({ type: "region", region: "rail", visible: dock.railHiddenByDefault || current.layout.rail.mode === "hidden" });
         else if (action.operation === "files") dock.store.dispatch({ type: "open", panel: "files" });
         else if (action.operation === "file-browser") dock.store.dispatch({ type: "open", panel: "file-browser" });
         else if (action.operation === "reset") dock.store.resetFactory();
@@ -2390,18 +2390,31 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     else if (windowAction.kind === "delete") void deleteSessionThread(windowAction.entry);
     else runThreadRowAction(windowAction.entry, windowAction.workspaceId as WorkspaceId, windowAction.kind);
   }, [mdi?.active, windowAction?.id]);
+  const snapshotStarted = snapshot !== undefined && (
+    snapshot.isStreaming
+    || snapshot.isCompacting
+    || snapshot.pendingMessages > 0
+    || snapshot.lastTurnOutcome !== undefined
+    || snapshot.sessionTitle !== undefined
+    || snapshot.resumedFromSessionId !== undefined
+    || snapshot.continuationOf !== undefined
+    || provisionalThreadsBySession[String(snapshot.sessionId)]?.submitted === true
+    || state.model.history?.entries.some((entry) => entry.sessionId === snapshot.sessionId) === true
+  );
   useEffect(() => {
     if (!mdi || state.loading) return;
     const existing = mdi.store.getSnapshot().documents.find(doc => doc.id === mdi.document.id)!;
+    const sessionId = selected?.sessionId ?? existing.ref.sessionId ?? (snapshotStarted ? snapshot?.sessionId : undefined);
     const ref = { ...existing.ref, targetId: executionTarget.id,
       ...(previewMode.preview ? { workspaceId: previewProjectId, previewProjectId, previewThreadId } : {
         ...(dockSelection.project ? { workspaceId: dockSelection.project } : {}),
-        ...(viewedSessionId ? { sessionId: viewedSessionId, draftId: undefined } : {}),
+        ...(sessionId ? { sessionId, draftId: undefined } : {}),
         ...(selected?.threadId ? { threadId: selected.threadId, historyId: selected.historyId } : {}),
       }) };
     mdi.store.updateDocument(mdi.document.id, { ref, title: threadTitle, projectName: previewMode.preview ? findPreviewProject(previewProjectId, zh)?.name : selectedProject?.name });
-  }, [mdi?.document.id, threadTitle, viewedSessionId, dockSelection.project, selected?.threadId, selected?.historyId, previewProjectId, previewThreadId, previewMode.preview, previewMode.preview ? zh : false, executionTarget.id, selectedProject?.name, state.loading]);
-  const canvasSessionId = selectedProvisionalSessionId ?? selected?.sessionId ?? (mdi ? mdi.document.ref.sessionId ?? snapshot?.sessionId : undefined);
+  }, [mdi?.document.id, threadTitle, snapshot?.sessionId, snapshotStarted, dockSelection.project, selected?.sessionId, selected?.threadId, selected?.historyId, previewProjectId, previewThreadId, previewMode.preview, previewMode.preview ? zh : false, executionTarget.id, selectedProject?.name, state.loading]);
+  const canvasSessionId = selectedProvisionalSessionId ?? selected?.sessionId ?? mdi?.document.ref.sessionId;
+  const railPresented = !dock.railHiddenByDefault && dock.layout.rail.mode !== "hidden";
   // The workbench deck records the swarm under this scope and the Hub's deck reads it: same inputs, same history.
   const hubSwarmScope = agentSwarmScope(executionTarget.id, dockSelection.project ?? undefined,
     previewMode.preview ? `preview:${chrome.previewThreadId ?? "current"}` : canvasSessionId ?? snapshot?.sessionId, previewMode.preview);
@@ -2482,7 +2495,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
                      显示未勾选、点一次却只是重复设置 visible（store 无变化），用户
                      看到的是菜单没反应。展开/折叠由标签条上的箭头负责。 */
                   bottom: { visible: dock.layout.bottom.visible, presented: mdi ? bottomVisible : layout.bottomVisible },
-                  rail: { visible: dock.layout.rail.mode !== "hidden", presented: dock.layout.rail.mode !== "hidden" },
+                  rail: { visible: railPresented, presented: railPresented },
                 }}
               />
               <div className="menu-sep" />

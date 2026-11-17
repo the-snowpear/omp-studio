@@ -5,6 +5,8 @@ import { type SubagentHubTarget } from "../../conversation/toolMeta";
 import { isTickingAgentStatus } from "../../conversation/SubagentMetrics";
 import { type HubTab } from "../../pageIntents";
 import { type HubAgent, type HubJob, type HubStatus, type HubView } from "./types";
+import type { IconName } from "../../icons";
+import type { DeckTone } from "../deck/deckModel";
 
 export const STATUS_LABEL: Record<HubStatus, string> = {
   running: "running",
@@ -24,7 +26,7 @@ const HUB_WORDS: Record<string, string> = {
   vibe: "常规",
   Overview: "概览",
   Transcript: "对话记录",
-  Jobs: "任务",
+  Jobs: "后台任务",
   Messages: "消息",
   Task: "任务",
   Current: "当前活动",
@@ -63,13 +65,20 @@ export const STATUS_DOT: Record<HubStatus, string> = {
   aborted: "red",
 };
 
-export const TABS: ReadonlyArray<readonly [HubTab, string]> = [
-  ["overview", "Overview"],
-  ["transcript", "Transcript"],
-  ["jobs", "Jobs"],
-  ["messages", "Messages"],
-  ["btw", "BTW"],
+export const TABS: ReadonlyArray<readonly [HubTab, string, IconName]> = [
+  ["overview", "Overview", "info"],
+  ["transcript", "Transcript", "message"],
+  ["jobs", "Jobs", "terminal"],
+  ["messages", "Messages", "at"],
+  ["btw", "BTW", "sparkles"],
 ];
+
+/** The deck's tone for a Hub row, so its sigil reads the same in both places. */
+export function hubTone(agent: HubAgent): DeckTone {
+  if (agent.status === "aborted" || agent.rawStatus === "failed" || agent.activity === "failed") return "failed";
+  if (agent.activity === "waiting") return "waiting";
+  return agent.status;
+}
 
 function parseTs(value?: string): number {
   if (!value) return Number.NaN;

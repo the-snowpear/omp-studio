@@ -84,7 +84,6 @@ export type Caps = {
 export type Persisted = {
   selectedBySession: Record<string, string>;
   tab: HubTab;
-  view: HubView;
 };
 
 export type HubIntent = { agentId: string; tab?: HubTab; chat?: boolean };

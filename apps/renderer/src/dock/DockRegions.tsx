@@ -872,10 +872,10 @@ export function DockRail({ mode }: { mode: RailMode }) {
   return mode === "expanded" ? <ExpandedRail /> : <CompactRail key={scopeKey(scope, preview)} />;
 }
 export function DockRailToggle() {
-  const { layout } = useDock();
+  const { layout, railHiddenByDefault } = useDock();
   const transition = useRailTransition();
   const text = useLabels();
-  const visible = layout.rail.mode !== "hidden";
+  const visible = !railHiddenByDefault && layout.rail.mode !== "hidden";
   return <button type="button" className={`dock-icon-button dock-rail-toggle${visible ? " is-active" : ""}`} data-dock-entry="rail"
     aria-label={text("对话工具区", "Conversation tools")} aria-pressed={visible} data-tip={text("对话工具区", "Conversation tools")}
     onClick={() => transition({ type: "region", region: "rail", visible: !visible }, visible ? "hidden" : layout.rail.lastMode)}><Icon name="tool-list" /></button>;
@@ -1093,7 +1093,9 @@ export function DockCapsules() {
 /** Hosts live at the end of the document, so focus navigation follows their visual slots. */
 export function DockKeyboard() {
   const { document, window } = useConversationDom();
-  const { store } = useDock();
+  const { store, railHiddenByDefault } = useDock();
+  const railHiddenRef = useRef(railHiddenByDefault);
+  railHiddenRef.current = railHiddenByDefault;
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
@@ -1103,7 +1105,7 @@ export function DockKeyboard() {
       if (modifier && event.shiftKey && !event.altKey && event.key.toLowerCase() === "l") {
         if (target?.closest('input, textarea, [contenteditable="true"], .cm-editor, .xterm')) return;
         event.preventDefault();
-        store.dispatch({ type: "region", region: "rail", visible: store.getSnapshot().layout.rail.mode === "hidden" });
+        store.dispatch({ type: "region", region: "rail", visible: railHiddenRef.current || store.getSnapshot().layout.rail.mode === "hidden" });
         return;
       }
       if (event.key !== "F6" || event.ctrlKey || event.metaKey || event.altKey) return;

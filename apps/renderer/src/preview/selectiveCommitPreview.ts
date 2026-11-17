@@ -93,7 +93,7 @@ function demoPaths(): SelectiveCommitPath[] {
       path: "apps/renderer/src/conversation/SessionChanges.tsx", kind: "text", change: "modified", beforeMode: "100644", afterMode: "100644",
       workBytes: 18_204, staged: false, selected: "partial", ownership: ["own", "other"],
       hunks: [
-        { id: "1", headStart: 42, headCount: 7, workStart: 42, workCount: 11, units: [unit("1a", "main", ["own"], "all", 4, 1, { opIds: [12, 13], likely: true })] },
+        { id: "1", headStart: 42, headCount: 7, workStart: 42, workCount: 11, units: [unit("1a", "Main", ["own"], "all", 4, 1, { opIds: [12, 13], likely: true })] },
         { id: "2", headStart: 118, headCount: 6, workStart: 122, workCount: 9, units: [unit("2a", null, ["other"], "none", 3, 0, { reasons: [{ kind: "rewritten", by: "editor" }] })] },
       ],
     },
@@ -105,7 +105,7 @@ function demoPaths(): SelectiveCommitPath[] {
     {
       path: "README.md", kind: "text", change: "modified", beforeMode: "100644", afterMode: "100644",
       workBytes: 6_902, staged: false, selected: "none", ownership: ["review"],
-      hunks: [{ id: "1", headStart: 44, headCount: 6, workStart: 44, workCount: 7, units: [unit("1a", "main", ["own", "other"], "none", 2, 1, { reasons: [{ kind: "entangled", with: ["user edit"] }] })] }],
+      hunks: [{ id: "1", headStart: 44, headCount: 6, workStart: 44, workCount: 7, units: [unit("1a", "Main", ["own", "other"], "none", 2, 1, { reasons: [{ kind: "entangled", with: ["user edit"] }] })] }],
     },
     {
       path: "apps/renderer/public/omp-mark.png", kind: "binary", change: "modified", beforeMode: "100644", afterMode: "100644",
@@ -115,7 +115,7 @@ function demoPaths(): SelectiveCommitPath[] {
     {
       path: "scripts/release-plan.sh", kind: "mode", change: "modified", beforeMode: "100644", afterMode: "100755",
       workBytes: 912, staged: false, selected: "all", ownership: ["own"],
-      hunks: [{ id: "1", headStart: 0, headCount: 0, workStart: 0, workCount: 0, units: [unit("1a", "main", ["own"], "all", 0, 0, { reasons: [{ kind: "whole", reason: "mode", editors: ["main"] }] })] }],
+      hunks: [{ id: "1", headStart: 0, headCount: 0, workStart: 0, workCount: 0, units: [unit("1a", "Main", ["own"], "all", 0, 0, { reasons: [{ kind: "whole", reason: "mode", editors: ["Main"] }] })] }],
     },
   ];
 }
@@ -126,12 +126,12 @@ export function createPreviewCommitDraft(now = Date.now()): SelectiveCommitDraft
     runtimeEpoch: 1,
     expiresAt: now + PREVIEW_TTL_MS,
     view: {
-      id: "draft-demo", revision: 1, head: DEMO_HEAD, branch: "feat/session-changes", caller: "main",
+      id: "draft-demo", revision: 1, head: DEMO_HEAD, branch: "feat/session-changes", caller: "Main",
       scope: [], state: "open",
       agents: [
-        { id: "main", inScope: true, running: false },
-        { id: "explore-2", parent: "main", inScope: true, running: true },
-        { id: "review-1", parent: "main", inScope: false, running: false },
+        { id: "Main", inScope: true, running: false },
+        { id: "explore-2", parent: "Main", inScope: true, running: true },
+        { id: "review-1", parent: "Main", inScope: false, running: false },
       ],
       paths: demoPaths(),
       staged: ["packages/client/src/reducer.ts"],

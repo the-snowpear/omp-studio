@@ -29,19 +29,41 @@ afterEach(async () => {
 });
 
 /** 预览数据默认落在已有消息的会话 t1；侧栏第一行是空白新对话 t0。 */
-async function mountWorkbench(preview = true) {
+async function mountWorkbench(preview = true, blankInitialSession = false) {
   window.history.replaceState(null, "", preview ? "/?preview=1&marks=off" : "/");
   localStorage.setItem(STARTUP_NOTICE_STORAGE_KEY, STARTUP_NOTICE_ID);
-  __resetAppSettingsForTests(JSON.stringify({ language: "zh", startupPage: "workbench", rememberLayout: false, restoreLastSession: false }));
+  __resetAppSettingsForTests(JSON.stringify({ language: "zh", startupPage: "workbench", rememberLayout: false, restoreLastSession: blankInitialSession ? true : false }));
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   HTMLElement.prototype.scrollIntoView = vi.fn();
   const initial = structuredClone(contractFixtures.bootstrap);
   const listeners = new Set<(event: ClientEvent) => void>();
   const snapshot = initial.snapshot!;
+  const blankSessionId = "session-initial-blank" as typeof snapshot.sessionId;
   const transport = {
-    bootstrap: async () => ({ ...initial, cursor: "0", residents: { ...initial.residents, activeSessionId: snapshot.sessionId, residents: [] } }),
-    query: async (request: { queryName: string }) => structuredClone((contractFixtures.queryResponses as Record<string, unknown>)[request.queryName]),
+    bootstrap: async () => blankInitialSession
+      ? {
+          ...initial,
+          cursor: "0",
+          selected: { ...initial.selected, sessionId: blankSessionId },
+          snapshot: { ...snapshot, sessionId: blankSessionId },
+          residents: { ...initial.residents, activeSessionId: blankSessionId, residents: [] },
+        }
+      : { ...initial, cursor: "0", residents: { ...initial.residents, activeSessionId: snapshot.sessionId, residents: [] } },
+    query: async (request: { queryName: string }) => {
+      const response = structuredClone((contractFixtures.queryResponses as Record<string, unknown>)[request.queryName]) as Record<string, any>;
+      if (blankInitialSession && request.queryName === "conversation.open") {
+        response.result = {
+          ...response.result,
+          target: { kind: "session", sessionId: blankSessionId, conversationSessionId: blankSessionId },
+          page: { ...response.result.page, items: [], hasMoreBefore: false },
+        };
+      }
+      if (blankInitialSession && request.queryName === "session.transcript.readPage") {
+        response.result = { ...response.result, sessionId: blankSessionId, items: [], hasMoreBefore: false };
+      }
+      return response;
+    },
     command: async (request: { commandName: string; requestId: string }) => ({ commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: new Date().toISOString() }),
     subscribe: (_scope: unknown, listener: (event: ClientEvent) => void) => { listeners.add(listener); return () => listeners.delete(listener); },
     close: async () => {},
@@ -112,4 +134,20 @@ it.each([false, true])("keeps a fresh conversation free of tool cards while typi
     await waitFor(() => expect(document.querySelector(".dock-rail-expanded, .dock-rail-compact")).not.toBeNull());
     expect(document.querySelector(".composer-region > .ctx-strip")).toBeNull();
   }
+});
+
+it("hides the right tool cards by default on initial launch into a blank session and allows manual toggling", async () => {
+  await mountWorkbench(false, true);
+  await waitFor(() => expect(document.querySelector(".composer-region > .ctx-strip")).not.toBeNull());
+  expect(document.querySelector(".dock-rail-expanded, .dock-rail-compact")).toBeNull();
+  const toggle = document.querySelector<HTMLButtonElement>(".dock-rail-toggle")!;
+  expect(toggle.getAttribute("aria-pressed")).toBe("false");
+
+  fireEvent.click(toggle);
+  await waitFor(() => expect(document.querySelector(".dock-rail-expanded, .dock-rail-compact")).not.toBeNull());
+  expect(toggle.getAttribute("aria-pressed")).toBe("true");
+
+  fireEvent.click(toggle);
+  await waitFor(() => expect(document.querySelector(".dock-rail-expanded, .dock-rail-compact")).toBeNull());
+  expect(toggle.getAttribute("aria-pressed")).toBe("false");
 });

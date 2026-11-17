@@ -23,5 +23,11 @@ describe("welcomeGate new-session handoff", () => {
     const selected: ConversationWelcomeInput = { ...BASE, hydrateStatus: "loading", selectedSessionId: "s1" };
     expect(isNewConversationSurface(selected)).toBe(false);
     expect(shouldShowConversationWelcome(selected)).toBe(false);
+    const unavailable: ConversationWelcomeInput = { ...BASE, hydrateStatus: "unavailable", selectedSessionId: "s1" };
+    expect(isNewConversationSurface(unavailable)).toBe(false);
+    expect(shouldShowConversationWelcome(unavailable)).toBe(false);
+    const readyEmpty: ConversationWelcomeInput = { ...BASE, hydrateStatus: "ready", selectedSessionId: "s1" };
+    expect(isNewConversationSurface(readyEmpty)).toBe(true);
+    expect(shouldShowConversationWelcome(readyEmpty)).toBe(true);
   });
 });

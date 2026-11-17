@@ -87,7 +87,9 @@
   display: inline-flex; align-items: center; gap: var(--sp-4); height: 20px; padding: 0 var(--sp-6);
   border: 1px solid var(--border); border-radius: var(--r-full); color: var(--text-2); font-size: var(--fs-10);
 }
+.scm-agent { padding-left: var(--sp-3); }
 .scm-agent .icon, .scm-scope .icon { width: 11px; height: 11px; color: var(--text-3); }
+.scm-agent.is-caller { color: var(--text); font-weight: 600; }
 .scm-agent.is-out { opacity: 0.55; border-style: dashed; }
 .scm-pulse { width: 6px; height: 6px; border-radius: var(--r-full); background: var(--green); animation: omp-pulse var(--loop-pulse) var(--ease-loop) infinite; }
 .scm-scope { border-style: dashed; }

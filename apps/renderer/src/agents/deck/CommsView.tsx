@@ -20,7 +20,7 @@ function relative(at: number, now: number, d: (key: string, params?: Record<stri
   return d("time.hoursAgo", { count: Math.floor(seconds / 3600) });
 }
 
-export function CommsView({ comms, rows, now, replay, query, selectedId, onSelect, d }: {
+export function CommsView({ comms, rows, now, replay, query, selectedId, onSelect, d, only }: {
   comms: SwarmComms;
   rows: readonly DeckAgent[];
   now: number;
@@ -29,9 +29,14 @@ export function CommsView({ comms, rows, now, replay, query, selectedId, onSelec
   selectedId: string | null;
   onSelect: (id: string) => void;
   d: (key: string, params?: Record<string, string | number>) => string;
+  /** One agent's thread: only what it sent or received, without the people filter. */
+  only?: string;
 }) {
+  if (comms.status === "loading") return <div className="ad-empty is-inline" role="status"><Icon name="message" /><p>{d("comms.loading")}</p></div>;
   if (comms.status !== "ready") return <CommsUnavailable rows={rows} d={d} />;
-  return <CommsBoard messages={comms.messages} rows={rows} now={now} replay={replay} query={query} selectedId={selectedId} onSelect={onSelect} d={d} />;
+  const messages = only === undefined ? comms.messages : comms.messages.filter(message => message.from === only || message.to.includes(only));
+  return <CommsBoard key={only} messages={messages} rows={rows} now={now} replay={replay} query={query} selectedId={selectedId} onSelect={onSelect} d={d}
+    truncated={comms.truncated === true} {...(only === undefined ? {} : { only })} />;
 }
 
 function CommsUnavailable({ rows, d }: { rows: readonly DeckAgent[]; d: (key: string, params?: Record<string, string | number>) => string }) {
@@ -48,9 +53,9 @@ function CommsUnavailable({ rows, d }: { rows: readonly DeckAgent[]; d: (key: st
   </div>;
 }
 
-function CommsBoard({ messages, rows, now, replay, query, selectedId, onSelect, d }: {
+function CommsBoard({ messages, rows, now, replay, query, selectedId, onSelect, d, truncated, only }: {
   messages: readonly SwarmMessage[]; rows: readonly DeckAgent[]; now: number; replay: number | null; query: string; selectedId: string | null;
-  onSelect: (id: string) => void; d: (key: string, params?: Record<string, string | number>) => string;
+  onSelect: (id: string) => void; d: (key: string, params?: Record<string, string | number>) => string; truncated: boolean; only?: string;
 }) {
   const byId = useMemo(() => new Map(rows.map(row => [row.id, row])), [rows]);
   const [focus, setFocus] = useState<string | null>(null);
@@ -90,7 +95,7 @@ function CommsBoard({ messages, rows, now, replay, query, selectedId, onSelect, 
   const name = (id: string) => byId.get(id)?.name ?? id;
   const identity = (id: string) => { const row = byId.get(id); return { id, name: row?.name ?? id, hue: row?.hue ?? 0, main: row?.main ?? false }; };
   return <div className="ad-comms">
-    {people.length > 1 ? <div className="ad-comms-people" role="group" aria-label={d("comms.people")}>
+    {only === undefined && people.length > 1 ? <div className="ad-comms-people" role="group" aria-label={d("comms.people")}>
       <button type="button" className="ad-person is-all" aria-pressed={focus === null} onClick={() => setFocus(null)}>{d("comms.showAll")}<span>{messages.length}</span></button>
       {people.map(({ row, count }) => <button key={row.id} type="button" className="ad-person" aria-pressed={focus === row.id}
         data-tip={d("comms.filterAgent", { name: row.name })} aria-label={d("comms.filterAgent", { name: row.name })}
@@ -101,7 +106,8 @@ function CommsBoard({ messages, rows, now, replay, query, selectedId, onSelect, 
     <div className="ad-comms-scroll" ref={scrollRef} onScroll={onScroll} onWheel={event => { if (event.deltaY < 0) unpin(); }}
       onTouchMove={unpin} onKeyDown={event => { if (["ArrowUp", "PageUp", "Home"].includes(event.key)) unpin(); }} tabIndex={0}
       role="log" aria-label={d("views.comms")} aria-live="polite">
-      {shown.length === 0 ? <div className="ad-empty is-inline"><Icon name="message" /><p>{d("comms.empty")}</p></div> : null}
+      {truncated && shown.length > 0 ? <p className="ad-comms-older">{d("comms.older")}</p> : null}
+      {shown.length === 0 ? <div className="ad-empty is-inline"><Icon name="message" /><p>{only === undefined ? d("comms.empty") : d("comms.emptyAgent", { name: byId.get(only)?.name ?? only })}</p></div> : null}
       {shown.map(message => {
         const from = byId.get(message.from);
         const fresh = !initial.current!.has(message.id);

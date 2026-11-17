@@ -19,6 +19,10 @@ function ownedRefs(session: AgentSession): AgentRef[] {
 		}
 	});
 }
+/** This session's own agent and every descendant the registry knows, live or parked. */
+export function ownedStudioAgentRefs(session: AgentSession): AgentRef[] {
+	return ownedRefs(session);
+}
 export function ownedStudioSessionAgent(session: AgentSession, sessionId: string): AgentRef | undefined {
 	return ownedRefs(session).find(ref => ref.session?.sessionManager.getSessionId() === sessionId);
 }

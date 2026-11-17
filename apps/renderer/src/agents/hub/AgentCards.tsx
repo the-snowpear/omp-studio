@@ -1,9 +1,8 @@
 import { useI18n } from "../../i18n";
-import type { ReactNode } from "react";
 import { CompletionRing } from "../../conversation/JobWidget";
 import { Icon, type IconName } from "../../icons";
 import { type HubAgent, type HubStatus } from "./types";
-import { activityPill, fmtAge, fmtCost, fmtDur, fmtHM, fmtNum, hubDurationMs, hubWord, sparkLevel } from "./projection";
+import { activityPill, fmtAge, fmtCost, fmtDur, fmtHM, fmtNum, hubDurationMs, sparkLevel } from "./projection";
 
 export function KbdHint() {
   const zh = useI18n().resolvedLanguage === "zh";
@@ -315,24 +314,6 @@ export function TreeGroup({
           ))}
         </div>
       </div>
-    </div>
-  );
-}
-
-export function Kv({
-  label,
-  children,
-  mono,
-}: {
-  label: string;
-  children: ReactNode;
-  mono?: boolean;
-}) {
-  const zh = useI18n().resolvedLanguage === "zh";
-  return (
-    <div className="kv">
-      <div className="k">{hubWord(label, zh)}</div>
-      <div className={`v${mono ? " mono" : ""}`}>{children}</div>
     </div>
   );
 }

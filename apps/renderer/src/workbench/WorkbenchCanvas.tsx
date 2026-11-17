@@ -688,6 +688,11 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   /* 项目 / 分支 / 执行位置 / 变更统计条只属于「新对话且还没发送」的界面；
      已开始的对话整条不显示（项目与分支在顶栏里）。 */
   const showContextStrip = isNewConversation && !composerSubmitted;
+  const hideNewConversationRail = showContextStrip && !dock.newConversationRailOpened;
+  useLayoutEffect(() => {
+    dock.setNewConversation(showContextStrip);
+  }, [dock.setNewConversation, showContextStrip]);
+  useLayoutEffect(() => () => dock.setNewConversation(false), [dock.setNewConversation]);
   const showWelcome = shouldShowConversationWelcome(welcomeGate);
   /* 在屏面的欢迎态：由 ConversationPane 上报（leaving 期间保留旧屏）。壳层布局类
      跟它走，避免切换瞬间 minimap 占宽把还在淡出的欢迎页向左顶。 */
@@ -1684,7 +1689,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       if (promptTargetChanged({
         sent: { selectedSessionId: targetSessionId, selectedThreadId: targetThreadId },
         current: selectedTargetRef.current,
-        createdSessionId: readySessionId,
+        createdSessionId: readySessionId ?? (targetSessionId === undefined ? snapshot?.sessionId : undefined),
       })) {
         throw { code: "STATE_VERSION_CONFLICT", message: zhRef.current ? "发送期间已切换会话，本次发送已取消，草稿已恢复。" : "Session switched while sending; send cancelled and draft restored." };
       }
@@ -2198,7 +2203,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
             floating
             onOpenDiagnostics={() => onRoute("diagnostics")}
           />}
-          <DockRail mode={showContextStrip ? "hidden" : railMode} />
+          <DockRail mode={hideNewConversationRail ? "hidden" : railMode} />
           <DockCapsules />
           <SessionModelRecovery demo={previewThreadId === "t5"} client={client} currentSessionId={snapshot?.sessionId} targetSessionId={selectedSessionId} threadId={selectedThreadId} available={runtimeConnected && !connection?.resyncRequired} capabilities={capabilities} onOpenModels={() => onRoute("model-config")} />
           <CommandBlockProvider workspaceId={workspaceId} sessionId={snapshot?.sessionId} conversationId={mdi?.document.id}>
@@ -2964,12 +2969,12 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       <AgentsDock agents={dockAgents} ready={preview || rosterAgents !== undefined} source={agentRosterSource} scope={agentScope}
         openedIds={openedAgentIds} {...(inspectTarget === null ? {} : { selectedId: inspectTarget.agentId })}
         onMain={goMainAgent} onOpenRoster={openRosterAgent} links={agentDeckLinks}
-        commandContext={{ client, capabilities, preview, viewingLive: preview || agentRosterSource === "live", online: runtimeConnected && !connection?.resyncRequired }} />
+        commandContext={{ client, capabilities, preview, viewingLive: preview || agentRosterSource === "live", online: runtimeConnected && !connection?.resyncRequired, sessionId: snapshot?.sessionId }} />
       <ChangesDockMeter rows={convo.rows} />
       <BackgroundTasksDock client={client} snapshot={snapshot} sessionId={selectedSessionId ?? snapshot?.sessionId}
         scopeKey={`${executionTarget.id ?? "local"}:${workspaceId ?? ""}:${selectedSessionId ?? snapshot?.sessionId ?? ""}:${connection?.runtimeEpoch ?? ""}:${preview ? previewThreadId ?? "preview" : "real"}`}
         available={runtimeConnected && executionMatches && !connection?.resyncRequired && !sessionCreating}
-        jobsReady={preview || (executionMatches && !!snapshot)} workbenchVisible={workbenchVisible && !showContextStrip}
+        jobsReady={preview || (executionMatches && !!snapshot)} workbenchVisible={workbenchVisible && !hideNewConversationRail}
         canListServices={can("services.list")} canStopServices={can("services.stop")} canCancelJobs={can("job.cancel")} />
       <ContextDockPanel client={client} viewedSessionId={selectedSessionId as SessionId | undefined} liveSessionId={snapshot?.sessionId}
         liveTelemetry={state.clientState?.entities.telemetry ?? undefined} refreshToken={telemetryRefreshToken}

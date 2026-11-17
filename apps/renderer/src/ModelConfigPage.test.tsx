@@ -1,5 +1,6 @@
 import { previewModelAdaptation } from "./preview/modelAdaptationPreview";
 import { dragList } from "./test/drag-list";
+import { selectOption } from "./test/selectOption";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type {
@@ -473,6 +474,35 @@ describe("ModelConfigPage 自动获取模型", () => {
     expect(screen.getByText("GLM-5")).toBeTruthy();
     expect(await screen.findByRole("button", { name: /导入 4 个模型/ })).toBeTruthy();
     expect(client.command).not.toHaveBeenCalled();
+  });
+
+  it("lets the user disambiguate catalog matches, switch choices, and filter discovered models", async () => {
+    const ambiguousProbe: ModelDiscoveryResult = {
+      ok: true,
+      found: 2,
+      usable: 2,
+      models: [
+        { id: "glm-5-gateway", name: "GLM-5 Gateway" },
+        { id: "fresh", name: "Fresh One", contextWindow: 200_000 },
+      ],
+      latencyMs: 18,
+      detail: "探测成功",
+    };
+    await openEditor({ client: fakeClient(ambiguousProbe) });
+    fireEvent.click(screen.getByRole("button", { name: /自动获取模型/ }));
+
+    const matcher = await screen.findByRole("combobox", { name: "选择目录模型 · glm-5-gateway" });
+    expect(screen.getByText("选择匹配")).toBeTruthy();
+    selectOption(matcher, /openrouter \/ z-ai\/glm-5/);
+    expect(await screen.findByText("131k ctx")).toBeTruthy();
+    // Picker remains available so an accidental pick can be switched without re-probing.
+    selectOption(screen.getByRole("combobox", { name: "选择目录模型 · glm-5-gateway" }), /zhipu \/ glm-5/);
+    expect(await screen.findByText("203k ctx")).toBeTruthy();
+
+    // Search + batch clear only touches the filtered subset.
+    fireEvent.change(screen.getByRole("searchbox", { name: "搜索模型名称或 ID…" }), { target: { value: "Fresh" } });
+    fireEvent.click(screen.getByRole("button", { name: "全不选" }));
+    expect(await screen.findByRole("button", { name: /导入 1 个模型/ })).toBeTruthy();
   });
 });
 

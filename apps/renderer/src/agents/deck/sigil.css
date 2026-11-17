@@ -1,0 +1,71 @@
+/* ============================================================
+   Agent sigils — the pixel face an agent wears everywhere (deck, Hub,
+   workbench, conversation). Imported by AgentSigil.tsx, so any surface that
+   renders a sigil is styled without loading the deck.
+   The palette also feeds the deck's orbit nodes and timeline lanes, which draw
+   SigilArt straight into their own SVG. Loops (breathing beacon, blink) stay
+   with the deck: they run only under its [data-live].
+   ============================================================ */
+
+.sg,
+.ad-orbit-node,
+.ad-tl-lane {
+  --sg-tile: oklch(0.955 0.03 var(--sg-h));
+  --sg-head: oklch(0.63 0.125 var(--sg-h));
+  --sg-ink: oklch(0.36 0.08 var(--sg-h));
+  --sg-eye: oklch(0.99 0.01 var(--sg-h));
+  --sg-edge: oklch(0.6 0.07 var(--sg-h) / 0.22);
+  --sg-crown: oklch(0.8 0.14 82);
+}
+:root[data-theme="dark"] :is(.sg, .ad-orbit-node, .ad-tl-lane) {
+  --sg-tile: oklch(0.31 0.045 var(--sg-h));
+  --sg-head: oklch(0.79 0.105 var(--sg-h));
+  --sg-ink: oklch(0.27 0.04 var(--sg-h));
+  --sg-eye: oklch(0.23 0.03 var(--sg-h));
+  --sg-edge: oklch(0.8 0.06 var(--sg-h) / 0.18);
+}
+:root :is(.ad-orbit-node[data-main], .sg.is-main) {
+  --sg-tile: var(--text);
+  --sg-head: var(--surface);
+  --sg-ink: var(--text-3);
+  --sg-eye: var(--text);
+  --sg-edge: transparent;
+}
+.sg {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  overflow: hidden;
+  background: var(--sg-tile);
+  box-shadow: inset 0 0 0 1px var(--sg-edge);
+}
+.sg-tile { display: block; overflow: visible; }
+.sg-head { fill: var(--sg-head); }
+.sg-mouth { fill: var(--sg-ink); opacity: 0.8; }
+.sg-crown { fill: var(--sg-crown); }
+.sg-beacon { fill: var(--sg-head); }
+.sg-eyes { fill: var(--sg-eye); transform-box: fill-box; transform-origin: center; }
+[data-tone="running"] .sg-beacon { fill: var(--green); }
+[data-tone="waiting"] .sg-beacon, [data-tone="waiting"] .sg-eyes { fill: var(--amber); }
+[data-tone="failed"] .sg-eyes, [data-tone="failed"] .sg-beacon { fill: var(--red); }
+.sg:is([data-tone="parked"], [data-tone="stopped"]) { filter: saturate(0.2); opacity: 0.72; }
+.sg-ring-track { fill: none; stroke: color-mix(in srgb, var(--sg-head) 18%, transparent); stroke-width: 1.5; }
+.sg-ring {
+  fill: none;
+  stroke: var(--sg-head);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  transition: stroke-dasharray var(--dur-slow) var(--ease-out);
+}
+.sg.is-main .sg-ring-track { stroke: color-mix(in srgb, var(--surface) 22%, transparent); }
+.sg.is-main .sg-ring { stroke: var(--sg-crown); }
+
+/* No agent id yet (a subagent card before its spawn lands): a neutral tile with the generic glyph. */
+.sg.is-unknown {
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+  color: var(--text-3);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.sg.is-unknown > .icon { width: 62%; height: 62%; }

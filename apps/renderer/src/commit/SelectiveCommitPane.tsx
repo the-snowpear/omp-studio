@@ -19,7 +19,19 @@ import { hostErrorMessage } from "../hostError";
 import { useWideLayout } from "../layout/useWideLayout";
 import { GitPatch } from "../git/GitPatch";
 import { previewCommitSource, realCommitSource, type SelectiveCommitSource } from "./selectiveCommitSource";
+import { AgentAvatar } from "../agents/AgentAvatar";
 import "./selectiveCommit.css";
+
+/**
+ * The change journal names agents by their Runtime agent id (the same id the Hub
+ * and the deck use) and the session's own agent by OMP's MAIN_AGENT_ID.
+ */
+const MAIN_AGENT_ID = "Main";
+
+/** An agent's face in the draft: the deck's sigil, eyes open while it is still editing. */
+function DraftAgentAvatar({ id, running }: { id: string; running: boolean }) {
+  return <AgentAvatar agentId={id} main={id === MAIN_AGENT_ID} tone={running ? "running" : "idle"} size={14} />;
+}
 
 /** Opened from Git, Changes or `/commit`. `draft` is the native builtin.commit handle. */
 export interface SelectiveCommitIntent {
@@ -292,6 +304,7 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
     }
   };
   const actorLabel = (actor: string | null) => actor ?? tr("人工或未知", "Manual or unknown");
+  const running = (actor: string) => draft?.view.agents.some(agent => agent.id === actor && agent.running) ?? false;
   const owners = (list: readonly SelectiveCommitOwnership[]) => <span className="scm-owners">{list.map(owner => <span key={owner} className={`scm-owner is-${owner}`}>{ownerLabel(owner)}</span>)}</span>;
   const demo = preview && marks ? <span className="chip gray xs">{tr("演示", "Demo")}</span> : null;
 
@@ -408,9 +421,9 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
     body = <div className={`scm-pick${wide ? " is-wide" : ""}`}>
       <div className="scm-pick-main">
         {draft.view.agents.length ? <div className="scm-agents" aria-label={tr("参与的 Agent", "Agents involved")}>
-          {draft.view.agents.map(agent => <span key={agent.id} className={`scm-agent${agent.inScope ? "" : " is-out"}${agent.running ? " is-running" : ""}`}
+          {draft.view.agents.map(agent => <span key={agent.id} className={`scm-agent${agent.id === draft.view.caller ? " is-caller" : ""}${agent.inScope ? "" : " is-out"}${agent.running ? " is-running" : ""}`}
             data-tip={[agent.id === draft.view.caller ? tr("发起者", "Caller") : "", agent.inScope ? tr("在范围内", "In scope") : tr("不在范围", "Out of scope"), agent.running ? tr("仍在运行，结果可能变化", "Still running; results may change") : ""].filter(Boolean).join(" · ")}>
-            <Icon name={agent.id === draft.view.caller ? "user" : "bot"} extra="sm" />{agent.id}{agent.running ? <i className="scm-pulse" aria-hidden="true" /> : null}
+            <DraftAgentAvatar id={agent.id} running={agent.running} />{agent.id}{agent.running ? <i className="scm-pulse" aria-hidden="true" /> : null}
           </span>)}
           {draft.view.scope.length ? <span className="scm-scope mono" data-tip={tr("草稿范围", "Draft scope")}><Icon name="filter" extra="sm" />{draft.view.scope.join(" ")}</span> : null}
         </div> : null}
@@ -444,7 +457,7 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
                 {!whole ? <span className={`scm-chev${open ? " open" : ""}`} aria-hidden="true"><Icon name="chevron-r" extra="sm" /></span> : null}
               </div>
               {open ? <div className="scm-hunks">
-                {path.hunks.map(hunk => <HunkView key={hunk.id} hunk={hunk} path={path} busy={!!busy || expired} zh={zh} owners={owners} actorLabel={actorLabel} reasonText={reasonText} onToggle={toggleUnit} />)}
+                {path.hunks.map(hunk => <HunkView key={hunk.id} hunk={hunk} path={path} busy={!!busy || expired} zh={zh} owners={owners} actorLabel={actorLabel} running={running} reasonText={reasonText} onToggle={toggleUnit} />)}
                 {!wide ? <PatchPanel body={bodies[path.path]} zh={zh} title={tr("文件差异", "File diff")} onLoad={() => loadBody(path.path)} onMore={() => loadBody(path.path, true)} /> : null}
               </div> : null}
               {whole && focused === path.path && !wide ? <p className="scm-whole-note">{tr("该文件没有逐行差异，只能整项纳入或排除。", "This file has no line diff; include or exclude it as a whole.")}{path.hunks[0]?.units[0]?.reasons.map(reason => <span key={reasonText(reason)}> {reasonText(reason)}</span>)}</p> : null}
@@ -482,9 +495,9 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
   </section>;
 }
 
-function HunkView({ hunk, path, busy, zh, owners, actorLabel, reasonText, onToggle }: {
+function HunkView({ hunk, path, busy, zh, owners, actorLabel, running, reasonText, onToggle }: {
   hunk: SelectiveCommitHunk; path: SelectiveCommitPath; busy: boolean; zh: boolean;
-  owners(list: readonly SelectiveCommitOwnership[]): ReactNode; actorLabel(actor: string | null): string; reasonText(reason: SelectiveCommitReason): string;
+  owners(list: readonly SelectiveCommitOwnership[]): ReactNode; actorLabel(actor: string | null): string; running(actor: string): boolean; reasonText(reason: SelectiveCommitReason): string;
   onToggle(path: SelectiveCommitPath, unit: SelectiveCommitUnit): void;
 }) {
   return <div className="scm-hunk">
@@ -492,7 +505,7 @@ function HunkView({ hunk, path, busy, zh, owners, actorLabel, reasonText, onTogg
     {hunk.units.map(entry => <div key={entry.id} className={`scm-unit${entry.selected === "none" ? " is-unpicked" : ""}`}>
       <TriBox state={entry.selected} disabled={busy} label={zh ? `选择片段 ${entry.id}` : `Select unit ${entry.id}`} onToggle={() => onToggle(path, entry)} />
       <span className="scm-unit-id mono">{entry.id}</span>
-      <span className="scm-unit-actor"><Icon name={entry.actor ? "bot" : "user"} extra="sm" />{actorLabel(entry.actor)}</span>
+      <span className="scm-unit-actor">{entry.actor ? <DraftAgentAvatar id={entry.actor} running={running(entry.actor)} /> : <Icon name="user" extra="sm" />}{actorLabel(entry.actor)}</span>
       <span className="scm-lines"><span className="add">+{entry.added}</span><span className="del">−{entry.removed}</span></span>
       {owners(entry.ownership)}
       {entry.likely ? <span className="chip blue xs" data-tip={zh ? "Runtime 推测属于本会话" : "Runtime thinks this belongs to the session"}>{zh ? "推测" : "Likely"}</span> : null}

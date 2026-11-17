@@ -11,7 +11,6 @@ export type HubContract = {
   readonly spawn: string;
   readonly cancel: string;
   readonly transcript: string;
-  readonly irc: string;
   readonly previewWrite: string;
   readonly historicalWrite: string;
 };
@@ -24,7 +23,6 @@ const CONTRACT_ZH: HubContract = {
   spawn: "派生（暂未实现）",
   cancel: "取消（暂未实现）",
   transcript: "无 transcript",
-  irc: "IRC（暂未实现）",
   previewWrite: "预览模式",
   historicalWrite: "历史会话只读",
 };
@@ -37,7 +35,6 @@ const CONTRACT_EN: HubContract = {
   spawn: "Spawn (not available)",
   cancel: "Cancel (not available)",
   transcript: "No transcript",
-  irc: "IRC (not available)",
   previewWrite: "Preview mode",
   historicalWrite: "Historical session is read-only",
 };

@@ -23,7 +23,9 @@ export type ConversationWelcomeInput = {
  */
 export function isNewConversationSurface(input: ConversationWelcomeInput): boolean {
   if (input.preview) return input.previewThreadId === "t0";
-  if (input.selectedSessionId !== undefined) return false;
+  if (input.selectedSessionId !== undefined) {
+    return input.rowCount === 0 && !input.compacting && input.hydrateStatus === "ready";
+  }
   if (input.sessionCreating === true) return true;
   return input.rowCount === 0 && !input.compacting && NEW_CONVERSATION_HYDRATE.has(input.hydrateStatus);
 }

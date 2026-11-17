@@ -78,6 +78,7 @@ export const IMPLEMENTED_CAPABILITIES = Object.freeze([
   "runtime.close.confirm",
   "interaction.form.read",
   "agent.spawn.options.read",
+  "agent.messages.list",
   "session.lease.read",
   "extensions.links.list",
   "browser.webmcp.list",

@@ -36,6 +36,30 @@ export interface PromptCacheStatus {
 	warming?: { state: "scheduled" | "refreshing" | "inactive"; nextWarmAt?: number; stopsAt?: number; reason?: string };
 }
 
+/** One agent-to-agent message, as the recipient's session recorded it. */
+export interface StudioAgentMessage {
+	id: string;
+	from: string;
+	to: string;
+	body: string;
+	/** Epoch milliseconds. */
+	at: number;
+	/** Id of the message this one answers. */
+	replyTo?: string;
+	/** One leg of the main agent's message to everyone. */
+	broadcast?: boolean;
+	/** An interim note on something the recipient asked. */
+	progress?: boolean;
+	/** A woken agent's turn output, relayed back to the agent that woke it. */
+	relay?: boolean;
+}
+
+export interface StudioAgentMessages {
+	/** Oldest first; the newest 500. */
+	messages: StudioAgentMessage[];
+	truncated: boolean;
+}
+
 /** Transient reads, reversible close checks and media negotiation: no payload is persisted in the command ledger. */
 export type RuntimeViewOperation =
 	| Extract<SelectiveCommitOperation, { kind: keyof SelectiveCommitQueryInputMap }>
@@ -44,6 +68,7 @@ export type RuntimeViewOperation =
 	| { kind: "runtime.close.confirm"; sessionId: string }
 	| { kind: "interaction.form.read"; sessionId: string; interactionId: string; leaseGeneration: number }
 	| { kind: "agent.spawn.options.read"; sessionId: string; definition: string }
+	| { kind: "agent.messages.list"; sessionId: string }
 	| { kind: "session.lease.read"; sessionId: string; targetSessionIds: string[] }
 	| { kind: "extensions.links.list"; sessionId: string; sourceSessionId?: string; agentId?: string }
 	| { kind: "browser.webmcp.list"; sessionId: string; pageId: string; options?: WebMcpListOptions }
@@ -66,6 +91,7 @@ export interface RuntimeViewResultMap
 	"runtime.close.confirm": { allowed: boolean };
 	"interaction.form.read": { form: InteractionForm };
 	"agent.spawn.options.read": RuntimeFeatureResultMap["agent.spawn.options"];
+	"agent.messages.list": StudioAgentMessages;
 	"session.lease.read": RuntimeFeatureResultMap["session.lease.inspect"];
 	"extensions.links.list": { schemes: string[] };
 	"browser.webmcp.list": StudioWebMcpCatalog;
@@ -84,6 +110,7 @@ export const RUNTIME_VIEW_KINDS = [
 	"runtime.close.confirm",
 	"interaction.form.read",
 	"agent.spawn.options.read",
+	"agent.messages.list",
 	"session.lease.read",
 	"extensions.links.list",
 	"browser.webmcp.list",

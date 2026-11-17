@@ -9,6 +9,12 @@ import { candidatesToEntries, mergeImportedModels, toCandidates, type FetchedMod
 import { editorTestSecret, parseHeaders } from "./drafts";
 import { runProbe } from "./commands";
 import type { Draft, ModelsTab } from "./types";
+type RawFetchDetail =
+  | { ok: true; kind: "demo"; count: number }
+  | { ok: true; kind: "empty"; detail: string; latencyMs: number }
+  | { ok: true; kind: "stats"; total: number; added: number; latencyMs: number }
+  | { ok: boolean; text: string };
+
 export function useProviderDiscovery({ client, editorState, catalogVersion, setEditor, setModelsTab, toast }: {
   client: StudioClient; editorState: Draft | null; catalogVersion: string | undefined;
   setEditor: Dispatch<SetStateAction<Draft | null>>; setModelsTab: Dispatch<SetStateAction<ModelsTab>>; toast(text: string): void;
@@ -18,7 +24,7 @@ export function useProviderDiscovery({ client, editorState, catalogVersion, setE
   const [fetching, setFetching] = useState(false);
   const fetchGeneration = useRef(0);
   const fetchIdentity = useRef("");
-  const [fetchDetail, setFetchDetail] = useState<{ ok: boolean; text: string } | null>(null);
+  const [rawFetchDetail, setFetchDetail] = useState<RawFetchDetail | null>(null);
   const [candidates, setCandidates] = useState<FetchedModelCandidate[] | null>(null);
   const currentFetchIdentity = JSON.stringify([editorState?.id, editorState?.api, editorState?.endpointUrl]);
   fetchIdentity.current = currentFetchIdentity;
@@ -56,7 +62,7 @@ export function useProviderDiscovery({ client, editorState, catalogVersion, setE
       const matches = await adaptFetched(demo);
       if (!stillCurrent()) return;
       setCandidates(toCandidates(demo, draft.models, [], matches));
-      setFetchDetail({ ok: true, text: marks ? t("modelConfig.detailDemoFetchNoHost", { count: demo.length }) : resolvedLanguage === "zh" ? `获取到 ${demo.length} 个模型` : `Fetched ${demo.length} models` });
+      setFetchDetail({ ok: true, kind: "demo", count: demo.length });
       setModelsTab("custom");
       if (marks) toast(t("modelConfig.toastDemoAutoFetchNoHost"));
       return;
@@ -86,12 +92,11 @@ export function useProviderDiscovery({ client, editorState, catalogVersion, setE
       const next = toCandidates(result.models, draft.models, [], matches);
       setCandidates(next);
       setModelsTab("custom");
-      setFetchDetail({
-        ok: true,
-        text: next.length === 0
-          ? t("modelConfig.detailEndpointEmptyList", { detail: result.detail, latencyMs: result.latencyMs })
-          : t("modelConfig.detailFetchSuccessStats", { total: next.length, added: next.filter((item) => !item.existing).length, latencyMs: result.latencyMs }),
-      });
+      setFetchDetail(
+        next.length === 0
+          ? { ok: true, kind: "empty", detail: result.detail, latencyMs: result.latencyMs }
+          : { ok: true, kind: "stats", total: next.length, added: next.filter((item) => !item.existing).length, latencyMs: result.latencyMs },
+      );
     } catch (error) {
       if (stillCurrent()) setFetchDetail({ ok: false, text: hostErrorMessage(error, t("modelConfig.textFetchModelsFailed")) });
     } finally {
@@ -109,6 +114,23 @@ export function useProviderDiscovery({ client, editorState, catalogVersion, setE
     toast(t("modelConfig.toastImportDraftModels", { count: entries.length }));
   };
 
+  const fetchDetail: { ok: boolean; text: string } | null = !rawFetchDetail
+    ? null
+    : "kind" in rawFetchDetail
+      ? {
+          ok: rawFetchDetail.ok,
+          text:
+            rawFetchDetail.kind === "demo"
+              ? marks
+                ? t("modelConfig.detailDemoFetchNoHost", { count: rawFetchDetail.count })
+                : resolvedLanguage === "zh"
+                  ? `获取到 ${rawFetchDetail.count} 个模型`
+                  : `Fetched ${rawFetchDetail.count} models`
+              : rawFetchDetail.kind === "empty"
+                ? t("modelConfig.detailEndpointEmptyList", { detail: rawFetchDetail.detail, latencyMs: rawFetchDetail.latencyMs })
+                : t("modelConfig.detailFetchSuccessStats", { total: rawFetchDetail.total, added: rawFetchDetail.added, latencyMs: rawFetchDetail.latencyMs }),
+        }
+      : rawFetchDetail;
 
   return { fetching, fetchDetail, setFetchDetail, candidates, setCandidates, onFetchModels, importCandidates };
 }
