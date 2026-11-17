@@ -2,7 +2,7 @@ import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeEpoch, SessionId } from "@omp-studio/studio-protocol";
 import { ConversationPane } from "./ConversationPane";
-import { SWITCH_LEAVE_MS, SWITCH_REVEAL_MS, SWITCH_SETTLE_FRAMES } from "./conversationSwitchPhase";
+import { SWITCH_LEAVE_MS, SWITCH_REVEAL_MS, SWITCH_SETTLE_FRAMES, SWITCH_WARM_REVEAL_MS, SWITCH_WARM_SETTLE_FRAMES } from "./conversationSwitchPhase";
 import type { ConversationSnapshot } from "./conversationEngine";
 import { resetConversation, type HydrateStatus, type TimelineRow } from "./conversationViewModel";
 
@@ -60,12 +60,14 @@ describe("ConversationPane session switch", () => {
       expect(phase()).toBe("idle");
       root.removeAttribute("data-perf-tier");
       view.rerender(pane(snapshot("c", "ready", [userRow("normal")] )));
-      expect(phase()).toBe("leaving");
-      act(() => { vi.advanceTimersByTime(SWITCH_LEAVE_MS); });
-      settleLayout();
+      expect(phase()).toBe("settling");
+      expect(view.container.querySelector(".convo-body")?.getAttribute("data-warm")).toBe("true");
+      act(() => { vi.advanceTimersByTime(SWITCH_WARM_SETTLE_FRAMES * 20); });
       expect(phase()).toBe("revealing");
       act(() => { vi.advanceTimersByTime(0); });
       expect(phase()).toBe("revealing");
+      act(() => { vi.advanceTimersByTime(SWITCH_WARM_REVEAL_MS); });
+      expect(phase()).toBe("idle");
     } finally {
       if (previous === null) root.removeAttribute("data-perf-tier");
       else root.setAttribute("data-perf-tier", previous);

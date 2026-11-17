@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { contractFixtures } from "@omp-studio/testkit";
 import type { ClientEvent, ConversationTranscriptReadPage, SessionId, StudioClient, WorkspaceId } from "@omp-studio/client-contract";
-import { acquireProjectReads, DisplayCache } from "./projectReads";
+import { acquireProjectReads, DisplayCache, WARM_SESSION_BUDGET } from "./projectReads";
 
 afterEach(() => vi.useRealTimers());
 
@@ -84,12 +84,12 @@ it("display cache evicts by bytes and age without retaining a mounted owner", ()
   vi.advanceTimersByTime(1001); expect(cache.bytes).toBe(0);
 });
 
-it("idle warming reads at most two other recent pages and is cancelled on project release", async () => {
+it("idle warming reads up to WARM_SESSION_BUDGET recent pages and is cancelled on project release", async () => {
   vi.useFakeTimers();
   const archive = contractFixtures.queryResponses["session.transcript.readPage"];
   if (!archive.ok) throw new Error("fixture");
   const query = vi.fn(async (name: string, input: { sessionId?: SessionId }) => {
-    if (name === "history.list") return { entries: ["current", "one", "two", "three"].map(sessionId => ({ sessionId })), total: 4 };
+    if (name === "history.list") return { entries: ["current", "one", "two", "three", "four", "five", "six", "seven"].map(sessionId => ({ sessionId })), total: 8 };
     if (name === "session.transcript.prefetch") return { status: "ready", page: { ...archive.result, sessionId: input.sessionId } };
     return {};
   });
@@ -98,7 +98,8 @@ it("idle warming reads at most two other recent pages and is cancelled on projec
   handle.reads.warm("current" as SessionId);
   await vi.advanceTimersByTimeAsync(1999); expect(query).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(2);
-  expect(query.mock.calls.filter(call => call[0] === "session.transcript.prefetch").map(call => call[1].sessionId)).toEqual(["one", "two"]);
+  expect(WARM_SESSION_BUDGET).toBe(5);
+  expect(query.mock.calls.filter(call => call[0] === "session.transcript.prefetch").map(call => call[1].sessionId)).toEqual(["one", "two", "three", "four", "five"]);
   query.mockClear(); handle.reads.warm("current" as SessionId); handle.release();
   await vi.advanceTimersByTimeAsync(2001); expect(query).not.toHaveBeenCalled();
   await vi.runAllTimersAsync();

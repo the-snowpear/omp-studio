@@ -37,6 +37,34 @@ import { useWorkbenchPageMotion } from "./pageMotion";
 import { sessionSwitchPerformance } from "../sessionSwitchPerformance";
 import "./workspace.css";
 
+const pendingClientReleases = new WeakMap<StudioClient, ReturnType<typeof setTimeout>>();
+type HostSlotTracker = { byDoc: Map<string, string>; byView: Map<string, string> };
+function reconcileHostKeys(mode: "real" | "demo", tracker: HostSlotTracker, store: ConversationWorkspaceStore): ReadonlyMap<string, string> {
+  const mounted = store.mountedDocuments();
+  const views = store.getSnapshot().views;
+  const mountedIds = new Set(mounted.map(doc => doc.id));
+  for (const docId of [...tracker.byDoc.keys()]) {
+    if (!mountedIds.has(docId)) tracker.byDoc.delete(docId);
+  }
+  const usedSlots = new Set(tracker.byDoc.values());
+  for (const record of mounted) {
+    let slot = tracker.byDoc.get(record.id);
+    if (!slot) {
+      const view = views.find(item => item.documentId === record.id);
+      const inherited = view ? tracker.byView.get(view.id) : undefined;
+      slot = inherited && !usedSlots.has(inherited) ? inherited : `${mode}:slot:${crypto.randomUUID()}`;
+      tracker.byDoc.set(record.id, slot);
+      usedSlots.add(slot);
+    }
+  }
+  tracker.byView.clear();
+  for (const view of views) {
+    const slot = tracker.byDoc.get(view.documentId);
+    if (slot) tracker.byView.set(view.id, slot);
+  }
+  return tracker.byDoc;
+}
+
 export function ConversationWorkspace({ client, renderDocument }: { client: StudioClient; renderDocument: (client: StudioClient) => ReactNode }) {
   const { preview } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
@@ -46,6 +74,12 @@ export function ConversationWorkspace({ client, renderDocument }: { client: Stud
   const [real] = useState(() => new ConversationWorkspaceStore(localStorage, false, !preview));
   const [demo] = useState(() => new ConversationWorkspaceStore(null, true));
   const store = preview ? demo : real;
+  const slotTrackers = useRef<{ real: HostSlotTracker; demo: HostSlotTracker }>({
+    real: { byDoc: new Map(), byView: new Map() },
+    demo: { byDoc: new Map(), byView: new Map() },
+  });
+  const realSlots = visited.current.real ? reconcileHostKeys("real", slotTrackers.current.real, real) : undefined;
+  const demoSlots = visited.current.demo ? reconcileHostKeys("demo", slotTrackers.current.demo, demo) : undefined;
   if (!preview) real.enablePersistence();
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const activeDocument = state.documents.find(record => record.id === state.activeDocumentId);
@@ -116,8 +150,8 @@ export function ConversationWorkspace({ client, renderDocument }: { client: Stud
     {createPortal(<div className="dock-floating-layer">{state.views.filter(view => view.placement === "float" || view.placement === "native").map((view, order) => <ConversationWindow key={view.id} view={view} store={store} hosts={hosts} bounds={bounds} order={order} snapLayer={snapLayer} />)}</div>, document.body)}
     <ConversationLayoutPreview store={store} />
     {!windowed && state.views.some(view => view.minimized && view.placement !== "native") ? <div className="dock-pinned-capsules" role="group" aria-label={zh ? "最小化的对话" : "Minimized conversations"}>{state.views.filter(view => view.minimized && view.placement !== "native").map(view => <MinimizedCapsule key={view.id} owner={store} capsuleId={view.id} locked={layoutLocked} onClick={() => store.focus(view.id)}><Icon name="message" extra="sm" /><span className="dock-capsule-title">{store.documentFor(view.id)?.title}</span><Icon name="restore" extra="sm" /></MinimizedCapsule>)}</div> : null}
-    {visited.current.real && real.mountedDocuments().map(record => <PreviewSurface key={`real:${record.id}`} preview={false}><ConversationDocumentHost enabled={!preview} record={record} client={client} store={real} hosts={real.hosts} dock={dock} tabAdd={windowed ? tabAdd : null} renderDocument={renderDocument} /></PreviewSurface>)}
-    {visited.current.demo && demo.mountedDocuments().map(record => <PreviewSurface key={`demo:${record.id}`} preview><ConversationDocumentHost enabled={preview} record={record} client={client} store={demo} hosts={demo.hosts} dock={dock} tabAdd={windowed ? tabAdd : null} renderDocument={renderDocument} /></PreviewSurface>)}
+    {visited.current.real && real.mountedDocuments().map(record => <PreviewSurface key={realSlots!.get(record.id)!} preview={false}><ConversationDocumentHost enabled={!preview} record={record} client={client} store={real} hosts={real.hosts} dock={dock} tabAdd={windowed ? tabAdd : null} renderDocument={renderDocument} /></PreviewSurface>)}
+    {visited.current.demo && demo.mountedDocuments().map(record => <PreviewSurface key={demoSlots!.get(record.id)!} preview><ConversationDocumentHost enabled={preview} record={record} client={client} store={demo} hosts={demo.hosts} dock={dock} tabAdd={windowed ? tabAdd : null} renderDocument={renderDocument} /></PreviewSurface>)}
   </WorkspaceContext.Provider></WindowFocusContext.Provider>;
 }
 
@@ -128,25 +162,45 @@ function ConversationDocumentHost({ enabled, record, client: initialClient, stor
   zhRef.current = resolvedLanguage === "zh";
   const registry = useExecutionTargets();
   const registryRef = useRef(registry); registryRef.current = registry;
-  const [client] = useState(() => createConversationClient(async () => {
-    const target = store.demo || record.ref.targetId === null ? initialClient : await registryRef.current.readyClient(record.ref.targetId);
-    const workspaceId = record.ref.workspaceId ?? (!store.demo && record.ref.draftId !== "initial" ? (await initializeConversationClient(target)).selected?.workspaceId : undefined);
-    if (!workspaceId || store.demo) return { client: target, owned: false };
-    if (!target.openContext) throw new Error(zhRef.current ? "此 Host 需要升级后才能打开多个对话窗口。" : "Upgrade this Host to open multiple conversation windows.");
-    const opened = await target.openContext({ workspaceId: workspaceId as WorkspaceId, ...(record.ref.sessionId ? { sessionId: record.ref.sessionId as SessionId } : {}) });
-    const shared = acquireProjectReads(target, workspaceId as WorkspaceId);
-    return { client: opened, owned: true, project: shared.reads, releaseProject: shared.release };
-  }, !!record.ref.sessionId && !store.demo,
-  !store.demo && record.ref.workspaceId ? cachedProjectReads(record.ref.targetId === null ? initialClient : registryRef.current.client(record.ref.targetId), record.ref.workspaceId as WorkspaceId) : undefined, !store.demo));
+  const recordRef = useRef(record);
+  recordRef.current = record;
+  const prevRecordIdRef = useRef(record.id);
+  if (prevRecordIdRef.current !== record.id) {
+    const departedId = prevRecordIdRef.current;
+    prevRecordIdRef.current = record.id;
+    if (!store.mountedDocuments().some(item => item.id === departedId)) {
+      hosts.retarget(departedId, record.id);
+    }
+  }
+  const client = useMemo(() => {
+    const docId = record.id;
+    const initialRef = recordRef.current.ref;
+    return createConversationClient(async () => {
+      const ref = store.getSnapshot().documents.find(item => item.id === docId)?.ref ?? initialRef;
+      const target = store.demo || ref.targetId === null ? initialClient : await registryRef.current.readyClient(ref.targetId);
+      const workspaceId = ref.workspaceId ?? (!store.demo && ref.draftId !== "initial" ? (await initializeConversationClient(target)).selected?.workspaceId : undefined);
+      if (!workspaceId || store.demo) return { client: target, owned: false };
+      if (!target.openContext) throw new Error(zhRef.current ? "此 Host 需要升级后才能打开多个对话窗口。" : "Upgrade this Host to open multiple conversation windows.");
+      const opened = await target.openContext({ workspaceId: workspaceId as WorkspaceId, ...(ref.sessionId ? { sessionId: ref.sessionId as SessionId } : {}) });
+      const shared = acquireProjectReads(target, workspaceId as WorkspaceId);
+      return { client: opened, owned: true, project: shared.reads, releaseProject: shared.release };
+    }, !!initialRef.sessionId && !store.demo,
+    !store.demo && initialRef.workspaceId ? cachedProjectReads(initialRef.targetId === null ? initialClient : registryRef.current.client(initialRef.targetId), initialRef.workspaceId as WorkspaceId) : undefined, !store.demo);
+  }, [record.id, store, initialClient]);
   const host = hosts.get(record.id);
   const surface = useSyncExternalStore(useCallback(listener => { host.listeners.add(listener); return () => { host.listeners.delete(listener); }; }, [host]), () => host.surface);
   const view = state.views.find(view => view.documentId === record.id);
   const active = enabled && record.id === state.activeDocumentId;
   useLayoutEffect(() => { if (active) sessionSwitchPerformance.mark("switch.commit"); }, [active, record.id]);
   const [localDock] = useState(() => dock.fork({ target: record.ref.targetId ?? "local", project: record.ref.workspaceId ?? null, session: record.ref.sessionId ?? record.ref.draftId ?? record.id, ...(!record.ref.sessionId ? { draft: true } : {}) }, store.demo));
+  const prevDockDocRef = useRef(record.id);
+  localDock.documentId = record.id;
+  if (prevDockDocRef.current !== record.id) {
+    prevDockDocRef.current = record.id;
+    localDock.switchScope({ target: record.ref.targetId ?? "local", project: record.ref.workspaceId ?? null, session: record.ref.sessionId ?? record.ref.draftId ?? record.id, ...(!record.ref.sessionId ? { draft: true } : {}) }, store.demo);
+  }
   const dockedVisible = useSyncExternalStore(localDock.subscribe, () => view?.placement !== "docked" || active && dockedPanelVisible(localDock.getSnapshot().layout, conversationPanelId(view.id)));
   const visible = enabled && !!view && conversationVisible(view, state) && dockedVisible;
-  localDock.documentId = record.id;
   useLayoutEffect(() => {
     const release = localDock.bindWindows(store.manager, record.id, record.title);
     store.attachPendingDock(record.id);
@@ -175,16 +229,27 @@ function ConversationDocumentHost({ enabled, record, client: initialClient, stor
     id: conversationPanelId(view.id), title: record.title, icon: "message", initialHeight: 400, minHeight: 280, content,
     close: { run: () => store.close(view.id), label: resolvedLanguage === "zh" ? `关闭 ${record.title}` : `Close ${record.title}`, tip: resolvedLanguage === "zh" ? "关闭对话视图" : "Close conversation view" },
   }], [view?.id, content, record.title, store, resolvedLanguage]);
-  const releaseClient = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useLayoutEffect(() => {
     const releaseHost = hosts.retain(record.id);
-    clearTimeout(releaseClient.current);
-    return () => { releaseClient.current = setTimeout(() => {
-      void client.close();
-      localDock.dispose();
-      releaseHost();
-    }, 0); };
-  }, [client, localDock, hosts, record.id]);
+    const pending = pendingClientReleases.get(client);
+    if (pending !== undefined) {
+      clearTimeout(pending);
+      pendingClientReleases.delete(client);
+    }
+    return () => {
+      const timer = setTimeout(() => {
+        pendingClientReleases.delete(client);
+        void client.close();
+        releaseHost();
+      }, 0);
+      pendingClientReleases.set(client, timer);
+    };
+  }, [client, hosts, record.id]);
+  const releaseDock = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useLayoutEffect(() => {
+    clearTimeout(releaseDock.current);
+    return () => { releaseDock.current = setTimeout(() => localDock.dispose(), 0); };
+  }, [localDock]);
   const onSelectTarget = async (targetId: string | null) => {
     const target = await registryRef.current.readyClient(targetId);
     const bootstrap = await target.bootstrap();

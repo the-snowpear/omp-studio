@@ -34,6 +34,13 @@ export function useConversationReading({ memory, visible, snapshot, scrollerRef,
         ...(value.snapshot.state.identity?.sessionId === undefined ? {} : { conversationSessionId: value.snapshot.state.identity.sessionId }) };
     }
   }, [memory, scrollerRef]);
+  const lastMemory = useRef(memory);
+  if (lastMemory.current !== memory) {
+    lastMemory.current = memory;
+    restored.current = false;
+    previousCount.current = -1;
+    pending.current = memory?.reading;
+  }
   useLayoutEffect(() => {
     lifetime.current++;
     if (visible && memory) pending.current = memory.reading;

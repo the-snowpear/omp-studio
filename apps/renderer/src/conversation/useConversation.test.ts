@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, renderHook } from "@testing-library/react";
-import type { SessionId } from "@omp-studio/client-contract";
+import type { ConversationTranscriptReadPage, SessionId, StudioClient, WorkspaceId } from "@omp-studio/client-contract";
 import type { ConversationOpenResult, RuntimeEpoch } from "@omp-studio/studio-protocol";
+import { acquireProjectReads, bindProjectReads } from "../conversationWorkspace/projectReads";
 import { activeConversationEngineCount, type ConversationSnapshot } from "./conversationEngine";
 import type { ConversationClient } from "./conversationHost";
 import { resetConversation, type HydrateStatus } from "./conversationViewModel";
@@ -128,5 +129,42 @@ describe("useConversation hold lifecycle (W03)", () => {
     hook.unmount();
     expect(lastEngine.getSnapshot().rows).toEqual([]);
     expect(activeConversationEngineCount()).toBe(base);
+  });
+
+  it("paints cached archive pages synchronously even while Runtime is connected and does not rebuild archive engines on runtimeConnected flips", async () => {
+    const readGate = Promise.withResolvers<ConversationTranscriptReadPage>();
+    const cachedPage: ConversationTranscriptReadPage = {
+      sessionId: sessionA,
+      transcriptRevision: "rev-1",
+      branchLeafId: null,
+      items: [{ kind: "message", itemId: `${sessionA}-cached`, parentId: null, createdAt: "now", role: "user", content: [{ type: "text", text: "from display cache" }] }],
+      headCursor: "head" as never,
+      hasMoreBefore: false,
+    };
+    const client: ConversationClient = {
+      query: vi.fn(() => readGate.promise) as never,
+      subscribe: () => () => {},
+    };
+    const target = { subscribe: () => () => {} } as unknown as StudioClient;
+    const project = acquireProjectReads(target, "ws" as WorkspaceId);
+    project.reads.savePage(cachedPage);
+    bindProjectReads(client as unknown as StudioClient, project.reads);
+
+    const hook = renderHook(({ runtimeConnected }) =>
+      useConversation({ preview: false, client, identity: { sessionId: sessionA }, canRead: true, runtimeConnected }),
+    { initialProps: { runtimeConnected: false } });
+
+    expect(hook.result.current.rows).toHaveLength(1);
+    expect(hook.result.current.rows[0]).toMatchObject({ type: "user", text: "from display cache" });
+    const firstEngine = hook.result.current.engine;
+
+    hook.rerender({ runtimeConnected: true });
+    expect(hook.result.current.engine).toBe(firstEngine);
+    expect(hook.result.current.rows[0]).toMatchObject({ type: "user", text: "from display cache" });
+
+    readGate.resolve(cachedPage);
+    await vi.waitFor(() => expect(hook.result.current.state.hydrateStatus).toBe("ready"));
+    hook.unmount();
+    project.release();
   });
 });

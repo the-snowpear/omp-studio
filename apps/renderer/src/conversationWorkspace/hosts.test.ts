@@ -37,3 +37,31 @@ it("an old deferred cleanup does not release a reopened conversation", () => {
   expect(slot.childElementCount).toBe(0);
   expect(hosts.getDiagnostics().hosts).toBe(0);
 });
+
+it("retargets an attached host in place after capturing outgoing reading state", () => {
+  const hosts = new DocumentHosts(), slot = document.createElement("div");
+  document.body.append(slot);
+  const oldRelease = hosts.retain("first");
+  const oldDetach = hosts.attach("first", slot);
+  const firstHost = hosts.get("first");
+  let connectedDuringCapture = false;
+  hosts.onBeforeDetach("first", () => { connectedDuringCapture = firstHost.element.isConnected; });
+
+  const retargeted = hosts.retarget("first", "second");
+  const newRelease = hosts.retain("second");
+  oldDetach();
+  const newDetach = hosts.attach("second", slot);
+  oldRelease();
+
+  expect(connectedDuringCapture).toBe(true);
+  expect(retargeted).toBe(firstHost);
+  expect(hosts.get("second")).toBe(firstHost);
+  expect(slot.firstChild).toBe(firstHost.element);
+  expect(firstHost.element.dataset.conversationDocument).toBe("second");
+  expect(hosts.getDiagnostics(true)).toEqual({ hosts: 1, detachedHosts: 0, detachedNodes: 0 });
+
+  newDetach();
+  newRelease();
+  slot.remove();
+  expect(hosts.getDiagnostics(true)).toEqual({ hosts: 0, detachedHosts: 0, detachedNodes: 0 });
+});

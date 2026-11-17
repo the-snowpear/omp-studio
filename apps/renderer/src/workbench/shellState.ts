@@ -65,6 +65,29 @@ export function reduce(state: ViewState, action: Action): ViewState {
       const { error: _clearedError, hostError: _clearedHostError, ...rest } = state;
       return { ...rest, loading: false, bootstrap: action.bootstrap, ...(action.hostError ? { hostError: action.hostError } : {}), ...(action.clientState ? { clientState: action.clientState } : {}) };
     }
+    case "retarget": {
+      const selected = {
+        ...(action.workspaceId !== undefined ? { workspaceId: action.workspaceId } : state.bootstrap?.selected.workspaceId !== undefined ? { workspaceId: state.bootstrap.selected.workspaceId } : {}),
+        ...(action.sessionId !== undefined ? { sessionId: action.sessionId } : {}),
+        ...(action.threadId !== undefined ? { threadId: action.threadId } : {}),
+      };
+      const workspaces = state.model.workspaces && action.workspaceId
+        ? {
+            ...state.model.workspaces,
+            activeWorkspaceId: action.workspaceId,
+            workspaces: state.model.workspaces.workspaces.map(workspace => ({
+              ...workspace,
+              active: workspace.workspaceId === action.workspaceId,
+            })),
+          }
+        : state.model.workspaces;
+      return {
+        ...state,
+        ...(state.bootstrap ? { bootstrap: { ...state.bootstrap, selected } } : {}),
+        ...(state.clientState ? { clientState: { ...state.clientState, connection: { ...state.clientState.connection, selected } } } : {}),
+        ...(workspaces !== state.model.workspaces ? { model: { ...state.model, ...(workspaces ? { workspaces } : {}) } } : {}),
+      };
+    }
     case "state":
       return { ...state, clientState: action.clientState };
     case "model":

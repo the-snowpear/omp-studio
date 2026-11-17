@@ -297,7 +297,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   const composerDraftRef = useRef<ComposerSnapshot | undefined>(composerDraft);
   composerDraftRef.current = composerDraft;
   /* 精确草稿不重渲；渲染视图仅在状态边界或停止输入后发布。 */
-  const { draftLive, publishDraft, commitDraft } = useComposerDraft(draft, setDraft);
+  const { draftLive, publishDraft, commitDraft } = useComposerDraft(draft, setDraft, mdi?.document.id);
   const applyingDraft = useRef(false);
   const replaceDraft = useCallback((next: ComposerSnapshot) => {
     const editor = composerRef.current;
@@ -339,7 +339,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   const [composerExpanded, setComposerExpanded] = useState(true);
   const [modeCapsulesPresent, setModeCapsulesPresent] = useState(false);
   const composerInputRef = composerRef;
-  useEffect(() => {
+  useLayoutEffect(() => {
     const restored = composerDraftRef.current ?? draftLive.current;
     if (!snapshotIsEmpty(restored)) replaceDraft(restored);
   }, []);
@@ -425,24 +425,25 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   // Composer content belongs to the viewed conversation, not to the workbench
   // shell.  Clear the editor when navigation changes the conversation identity
   // so a draft from A can never leak into B (or the fresh-chat surface).
-  const composerViewRef = useRef<{ readonly sessionId: string | undefined; readonly threadId: string | undefined; readonly viewIdentity: string | undefined }>({
+  const composerViewRef = useRef<{ readonly documentId: string | undefined; readonly sessionId: string | undefined; readonly threadId: string | undefined; readonly viewIdentity: string | undefined }>({
+    documentId: mdi?.document.id,
     sessionId: selectedSessionId,
     threadId: selectedThreadId,
     viewIdentity,
   });
-  useEffect(() => {
+  useLayoutEffect(() => {
     const previous = composerViewRef.current;
-    composerViewRef.current = { sessionId: selectedSessionId, threadId: selectedThreadId, viewIdentity };
-    if (previous.sessionId === selectedSessionId && previous.threadId === selectedThreadId && previous.viewIdentity === viewIdentity) return;
-    if (previous.sessionId === undefined && selectedSessionId !== undefined
+    composerViewRef.current = { documentId: mdi?.document.id, sessionId: selectedSessionId, threadId: selectedThreadId, viewIdentity };
+    if (previous.documentId === mdi?.document.id && previous.sessionId === selectedSessionId && previous.threadId === selectedThreadId && previous.viewIdentity === viewIdentity) return;
+    if (previous.documentId === mdi?.document.id && previous.sessionId === undefined && selectedSessionId !== undefined
       && previous.viewIdentity === viewIdentity && snapshotFrom(state)?.sessionId === selectedSessionId) {
       onComposerDraftChange?.(selectedSessionId, composerRef.current?.getSnapshot() ?? draftLive.current);
       return;
     }
-    replaceDraft(composerDraftRef.current ?? emptySnapshot());
+    replaceDraft(composerDraftRef.current ?? (previous.documentId !== mdi?.document.id ? draft : emptySnapshot()));
     setComposerError(undefined);
     setQueueEdit(undefined);
-  }, [selectedSessionId, selectedThreadId, viewIdentity]);
+  }, [mdi?.document.id, selectedSessionId, selectedThreadId, viewIdentity, draft, replaceDraft, onComposerDraftChange, composerRef, draftLive, state]);
   const pendingComposerFillRef = useRef<{ sessionId: string; fill: UserMessageEditorFill } | undefined>(undefined);
   useEffect(() => {
     const pending = pendingComposerFillRef.current;
@@ -454,6 +455,8 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     queueMicrotask(() => composerInputRef.current?.focus());
   }, [selectedSessionId]);
   const snapshot = snapshotFrom(state);
+  const isolatedTerminalConversationId = mdi?.view && mdi.view.placement !== "main" ? mdi.document.id : undefined;
+  const isolatedTerminalSessionId = isolatedTerminalConversationId ? snapshot?.sessionId : undefined;
   const submittedPromptTitle = submittedPrompt !== undefined && submittedPrompt.sessionId === snapshot?.sessionId
     ? submittedPrompt.title
     : undefined;
@@ -2206,7 +2209,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
           <DockRail mode={hideNewConversationRail ? "hidden" : railMode} />
           <DockCapsules />
           <SessionModelRecovery demo={previewThreadId === "t5"} client={client} currentSessionId={snapshot?.sessionId} targetSessionId={selectedSessionId} threadId={selectedThreadId} available={runtimeConnected && !connection?.resyncRequired} capabilities={capabilities} onOpenModels={() => onRoute("model-config")} />
-          <CommandBlockProvider workspaceId={workspaceId} sessionId={snapshot?.sessionId} conversationId={mdi?.document.id}>
+          <CommandBlockProvider workspaceId={workspaceId} sessionId={isolatedTerminalSessionId} conversationId={isolatedTerminalConversationId}>
           <ConversationPane
             {...(preview && previewThreadId === "t15" ? { supplement: <ContentGallerySamples /> } : {})}
             runtimeTools={{ client, actions: client, sessionId: snapshot?.sessionId, enabled: preview || runtimeConnected && executionMatches && can("shell.view.read") }}
@@ -2693,6 +2696,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
               <div className="composer-ctx" aria-label={zh ? "已引用的上下文" : "Referenced context"} role="group" />
               <label className="sr-only" htmlFor="composerInput">{zh ? "消息输入框。发送给 Runtime 的文本。" : "Message input box. Text to send to the Runtime."}</label>
               <ChipComposer
+                key={mdi?.document.id ?? "standalone"}
                 prediction={{client,sessionId:snapshot?.sessionId,available:runtimeConnected&&executionMatches&&can("prediction.prepare"),nextMessageAvailable:can("composer.predictions")}}
                 ref={composerInputRef}
                 id="composerInput"
@@ -2711,6 +2715,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
                   // snapshot's session must not receive this draft.
                   const owner = composerOwner;
                   if (owner !== undefined) onComposerDraftChange?.(owner, next);
+                  executionTarget.memory.set("composer-current-draft", next);
                   // Keystrokes land in the live ref first; the render-visible
                   // `draft` follows only at a status boundary or a typing pause.
                   publishDraft(next, applyingDraft.current);
@@ -3022,7 +3027,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
           onOpenHub={agentId => { setHubIntent(agentId, "chat"); onRoute("agent-hub"); }}
           onRevealSource={target => target.toolCallId === undefined ? Promise.resolve(false) : revealConversationTarget(convoScrollerRef.current, { toolCallId: target.toolCallId })} />,
         btw: visibility => <><BtwPanel session={btwSession} onClose={() => dock.store.dispatch({ type: "hide", panels: ["btw"] })} visible={visibility.visible} {...(preview ? { demo: true, onDemoNext: onBtwDemoNext } : {})} /></>,
-        terminal: visibility => <><TerminalPane workspaceId={preview ? state.bootstrap?.selected?.workspaceId : workspaceId} sessionId={snapshot?.sessionId} conversationId={mdi?.document.id} visible={visibility.visible} /></>,
+        terminal: visibility => <><TerminalPane workspaceId={preview ? state.bootstrap?.selected?.workspaceId : workspaceId} sessionId={isolatedTerminalSessionId} conversationId={isolatedTerminalConversationId} visible={visibility.visible} /></>,
         problems: <>{preview ? <div className="dock-pad"><PreviewProblems /></div> : <Deferred title={t("shell.problemsUnavailableTitle")} detail={t("shell.problemsUnavailableDetail")} />}</>,
         tests: <div className="dock-pad">{preview ? <PreviewTests /> : (
               <AgentTestsPane

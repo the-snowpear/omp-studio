@@ -130,3 +130,41 @@ it("retains separate metadata cards for legacy and preview titles without an emb
   expect(screen.getByText("FIX")).toBeTruthy();
   expect(screen.getByText("SYNC")).toBeTruthy();
 });
+
+it("coalesces concurrent sidebar and topbar title inspections and serves cached rows on switch", async () => {
+  const command = vi.fn().mockResolvedValue({ requestId: "batch-1" });
+  const client = {
+    command,
+    getState: () => ({
+      commands: {
+        "batch-1": {
+          status: "completed",
+          result: {
+            result: {
+              rows: [
+                { sessionId: "s-1", state: "available", title: "One", source: "user" },
+                { sessionId: "s-2", state: "available", title: "Two", source: "user" },
+              ],
+            },
+          },
+        },
+      },
+    }),
+  } as unknown as StudioClient;
+  function Harness({ viewed }: { viewed: string }) {
+    const sidebar = useSessionTitles(client, { sessionId: "live", available: true, capabilities }, [
+      { id: "s-1", title: "One" },
+      { id: "s-2", title: "Two" },
+    ]);
+    const topbar = useSessionTitles(client, { sessionId: "live", available: true, capabilities }, [
+      { id: viewed, title: viewed === "s-1" ? "One" : "Two" },
+    ]);
+    return <output>{`${sidebar.rows.size}:${topbar.rows.get(viewed)?.title ?? "none"}`}</output>;
+  }
+  const mounted = render(<PreviewModeProvider switchEnabled><Harness viewed="s-1" /></PreviewModeProvider>);
+  await screen.findByText("2:One");
+  expect(command).toHaveBeenCalledTimes(1);
+  mounted.rerender(<PreviewModeProvider switchEnabled><Harness viewed="s-2" /></PreviewModeProvider>);
+  await screen.findByText("2:Two");
+  expect(command).toHaveBeenCalledTimes(1);
+});

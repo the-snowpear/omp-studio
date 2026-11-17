@@ -250,4 +250,15 @@ describe("conversation workspace", () => {
     expect(store.documentFor(created)?.ref).toMatchObject({ targetId: "ssh-b", workspaceId: "b" });
     expect(store.getSnapshot().views.find(view => view.id === created)?.placement).toBe("float");
   });
+  it("commits directory session switches and title updates in a single store notification", () => {
+    const store = new ConversationWorkspaceStore(null);
+    store.open(a, "current", undefined, "First chat");
+    let notifications = 0;
+    const off = store.subscribe(() => { notifications++; });
+    const viewId = store.openFromDirectory({ ...a, sessionId: "chat-next" }, "Next chat");
+    off();
+    expect(notifications).toBe(1);
+    expect(store.documentFor(viewId)?.title).toBe("Next chat");
+    expect(store.getSnapshot().activeViewId).toBe(viewId);
+  });
 });

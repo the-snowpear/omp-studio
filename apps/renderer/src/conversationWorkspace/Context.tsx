@@ -28,7 +28,7 @@ export const useConversationView = () => useContext(ConversationViewContext);
 export const useConversationWorkspace = () => useContext(WorkspaceContext);
 const noSubscribe = () => () => {};
 export function useConversationLayoutLocked(workspace: ConversationWorkspaceStore, documentId?: string) {
-  const store = documentId ? workspace.hosts.get(documentId).tools?.store : undefined;
+  const store = documentId ? workspace.hosts.peek(documentId)?.tools?.store : undefined;
   return useSyncExternalStore(store?.subscribe ?? noSubscribe, () => store?.getSnapshot().preferences.locked ?? false);
 }
 /** No conversation in the main area: the top bar lists conversation tabs and each window shows its own breadcrumb. */

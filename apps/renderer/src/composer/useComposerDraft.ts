@@ -12,13 +12,14 @@ function draftStatus(snapshot: ComposerSnapshot): number {
 }
 
 /** Exact live draft, with a trailing render publication while typing. */
-export function useComposerDraft(initial: ComposerSnapshot, onPublish: (snapshot: ComposerSnapshot) => void) {
+export function useComposerDraft(initial: ComposerSnapshot, onPublish: (snapshot: ComposerSnapshot) => void, scopeKey?: string) {
   const draftLive = useRef(initial);
   const publishedStatus = useRef<number | undefined>(undefined);
   if (publishedStatus.current === undefined) publishedStatus.current = draftStatus(initial);
   const publishTo = useRef(onPublish);
   publishTo.current = onPublish;
   const timer = useRef(0);
+  const lastScopeRef = useRef(scopeKey);
 
   const cancel = useCallback(() => {
     if (timer.current === 0) return;
@@ -26,6 +27,12 @@ export function useComposerDraft(initial: ComposerSnapshot, onPublish: (snapshot
     timer.current = 0;
   }, []);
 
+  if (lastScopeRef.current !== scopeKey) {
+    lastScopeRef.current = scopeKey;
+    cancel();
+    draftLive.current = initial;
+    publishedStatus.current = draftStatus(initial);
+  }
   const publishDraft = useCallback((next: ComposerSnapshot, immediate = false) => {
     draftLive.current = next;
     cancel();

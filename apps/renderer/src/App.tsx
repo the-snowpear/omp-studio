@@ -16,7 +16,7 @@ import { EMBED_SET_ROUTE_EVENT, WEBSITE_EMBED_SOURCE, consumePendingEmbedRoute, 
 import { conversationViewLeases } from "./conversation/conversationViews";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ConversationWidthProvider } from "./settings/ConversationWidthContext";
-import type { SessionHistoryEntry, SessionHistoryReadModel, StudioClient, WorkspaceId, WorkspaceListReadModel } from "@omp-studio/client-contract";
+import type { ClientBootstrap, SessionHistoryEntry, SessionHistoryReadModel, SessionId, StudioClient, WorkspaceId, WorkspaceListReadModel } from "@omp-studio/client-contract";
 import { type ClientState } from "@omp-studio/client";
 import { clientShellChanged, shouldRecordShellEvent } from "./shellMemory";
 import { Icon } from "./icons";
@@ -143,7 +143,32 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
   const changeWorkspaces = useCallback((workspaces: WorkspaceListReadModel) => dispatch({ type: "model", model: { workspaces } }), []);
   const selectHistory = useCallback((entry: SessionHistoryEntry) => { if (navigate("workbench")) setSelectedHistoryId(entry.historyId); }, [setSelectedHistoryId, navigate]);
   const newThread = useCallback(() => setSelectedHistoryId(null), [setSelectedHistoryId]);
-  const modelLoader = useMemo(() => createShellModelLoader(client), [client]);
+  const latestClientRef = useRef<StudioClient>(client);
+  latestClientRef.current = client;
+  const modelLoaderClient = useMemo<StudioClient>(() => ({
+    bootstrap: () => latestClientRef.current.bootstrap(),
+    query: (name, input) => latestClientRef.current.query(name, input),
+    command: (name, input, options) => latestClientRef.current.command(name, input, options),
+    subscribe: (scope, listener) => latestClientRef.current.subscribe(scope, listener),
+    close: () => latestClientRef.current.close(),
+  }), [executionTarget.id]);
+  const modelLoader = useMemo(() => createShellModelLoader(modelLoaderClient, { coalesce: true }), [modelLoaderClient]);
+  const hadWorkspacesRef = useRef(false);
+  hadWorkspacesRef.current = Boolean(state.model.workspaces);
+  const sessionRestoreTried = useRef(false);
+  const lastDocumentIdRef = useRef(mdi?.document.id);
+  if (lastDocumentIdRef.current !== mdi?.document.id) {
+    lastDocumentIdRef.current = mdi?.document.id;
+    sessionRestoreTried.current = false;
+    if (!state.loading) {
+      dispatch({
+        type: "retarget",
+        workspaceId: mdi?.document.ref.workspaceId as WorkspaceId | undefined,
+        sessionId: mdi?.document.ref.sessionId as SessionId | undefined,
+        threadId: mdi?.document.ref.threadId as ClientBootstrap["selected"]["threadId"] | undefined,
+      });
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -160,8 +185,7 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
       dispatch({ type: "state", clientState });
     });
     const load = async () => {
-      setCommittedModelScope(null);
-      setProjectsSettled(false);
+      if (!hadWorkspacesRef.current) setProjectsSettled(false);
       try {
         const bootstrap = await initializeConversationClient(client);
         if (cancelled) return;
@@ -200,7 +224,6 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
   useEffect(() => {
     if (state.loading || state.hostError) return;
     let cancelled = false;
-    setCommittedModelScope(null);
     void modelLoader.load(modelLoadScope, routeRef.current,
       model => { if (cancelled) return false; dispatch({ type: "model", model }); return true; },
       () => { if (!cancelled) setProjectsSettled(true); },
@@ -223,7 +246,6 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
 
   /* 启动时恢复最近会话：仅冷启动一次性尝试——无驻留 Runtime 会话、
      用户尚未选择过会话时，选中最近活跃的历史会话。 */
-  const sessionRestoreTried = useRef(false);
   useEffect(() => {
     if (sessionRestoreTried.current || state.loading || runtimeStatus === "connecting") return;
     if (mdi?.document.ref.draftId && mdi.document.ref.draftId !== "initial") return;

@@ -32,11 +32,11 @@ export type ViewState = {
 
 export type Action =
   | { type: "ready"; bootstrap: ClientBootstrap; clientState?: ClientState; hostError?: ClientError }
+  | { type: "retarget"; workspaceId?: WorkspaceId | undefined; sessionId?: SessionId | undefined; threadId?: ClientBootstrap["selected"]["threadId"] | undefined }
   | { type: "state"; clientState: ClientState }
   | { type: "model"; model: Model }
   | { type: "error"; error: ClientError }
   | { type: "event"; event: ClientEvent };
-
 export type ShellDialog = "about" | "shortcuts";
 
 export type ArchivePending =

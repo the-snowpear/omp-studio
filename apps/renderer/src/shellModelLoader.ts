@@ -21,7 +21,7 @@ export interface ShellModelScope {
   connecting?: boolean;
 }
 
-export function createShellModelLoader(client: StudioClient) {
+export function createShellModelLoader(client: StudioClient, options?: { readonly coalesce?: boolean }) {
   const pending = new Map<string, Promise<ShellModel>>();
   const committed = new Map<string, string>();
   const selected = new Map<string, string>();
@@ -37,6 +37,31 @@ export function createShellModelLoader(client: StudioClient) {
   return {
     async load(scope: ShellModelScope, route: string, publish: (value: ShellModel) => void | boolean, projectsSettled: () => void) {
       const requests: Promise<unknown>[] = [];
+      let queued: ShellModel | undefined;
+      let queuedCommits: Array<[string, string]> = [];
+      let flushPromise: Promise<void> | undefined;
+      const deliver = (name: string, key: string, value: ShellModel) => {
+        if (!options?.coalesce) {
+          if (publish(value) !== false) committed.set(name, key);
+          return;
+        }
+        queued = { ...queued, ...value };
+        queuedCommits.push([name, key]);
+        if (!flushPromise) {
+          flushPromise = Promise.resolve().then(() => Promise.resolve()).then(() => {
+            flushPromise = undefined;
+            const merged = queued;
+            const batch = queuedCommits;
+            queued = undefined;
+            queuedCommits = [];
+            if (merged && publish(merged) !== false) {
+              for (const [domain, domainKey] of batch) {
+                if (selected.get(domain) === domainKey) committed.set(domain, domainKey);
+              }
+            }
+          });
+        }
+      };
       const add = (name: string, key: string, load: () => Promise<ShellModel>) => {
         selected.set(name, key);
         if (committed.get(name) === key) return Promise.resolve();
@@ -45,7 +70,7 @@ export function createShellModelLoader(client: StudioClient) {
         const attempt = (retry: boolean): Promise<void> =>
           once(key, name, load).then(value => {
             if (selected.get(name) !== key) return;
-            if (publish(value) !== false) committed.set(name, key);
+            deliver(name, key, value);
           }).catch(error => {
             if (selected.get(name) !== key) return;
             if (retry) return attempt(false);
@@ -65,6 +90,7 @@ export function createShellModelLoader(client: StudioClient) {
       if (route === "home") add("home", scope.workspace, async () => ({ home: await client.query("home.get", {}) }));
       if (route === "diagnostics") add("diagnostics", scope.environment, async () => ({ diagnostics: await client.query("diagnostics.get", {}) }));
       await Promise.allSettled(requests);
+      if (flushPromise) await flushPromise;
     },
     async page(scope: ShellModelScope, route: string, publish: (value: ShellModel) => void) {
       const run = async (name: string, key: string, load: () => Promise<ShellModel>) => {

@@ -171,3 +171,24 @@ it("releases a context even when switching away before its bootstrap completes",
   await waitFor(() => expect(window.ompSessionPerf.snapshot().counters["real.hosts"]).toBe(1));
   expect(input.counts.opened).toBe(2);
 });
+
+it("keeps the workbench shell interactive and preserves sidebar scroll position while switching sessions", async () => {
+  let blockNext = false;
+  const gate = Promise.withResolvers<void>();
+  const input = await mount(fixture(() => blockNext ? gate.promise : Promise.resolve()));
+  await select(0);
+  const projectList = document.querySelector<HTMLElement>("#projectList")!;
+  projectList.scrollTop = 180;
+  blockNext = true;
+  fireEvent.click(row(1)!);
+  await waitFor(() => expect(input.counts.opened).toBe(2));
+  expect(document.querySelector<HTMLElement>("#projectList")).toBe(projectList);
+  expect(projectList.scrollTop).toBe(180);
+  expect(document.querySelector<HTMLElement>(".cw-main-conversation .convo-wrap")?.inert).toBeFalsy();
+  expect(document.querySelector<HTMLElement>(".cw-shared-right")?.inert).toBeFalsy();
+  expect(document.querySelector<HTMLElement>(".cw-shared-bottom")?.inert).toBeFalsy();
+  gate.resolve();
+  await expectConversation(1);
+  expect(document.querySelector<HTMLElement>("#projectList")).toBe(projectList);
+  expect(projectList.scrollTop).toBe(180);
+});

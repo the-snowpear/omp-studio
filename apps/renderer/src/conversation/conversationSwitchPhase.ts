@@ -25,6 +25,9 @@ export const SWITCH_LEAVE_MS = MOTION_MS.fast;
 export const SWITCH_SETTLE_FRAMES = 2;
 /** 新 transcript 淡入（与骨架淡出重叠）的时长：一整块表面到场（--dur-slower）。 */
 export const SWITCH_REVEAL_MS = MOTION_MS.slower;
+/** 热切换（数据已在内存）的稳定帧数与显现时长：跳过离场等待，用 --dur-fast 快速落定。 */
+export const SWITCH_WARM_SETTLE_FRAMES = 1;
+export const SWITCH_WARM_REVEAL_MS = MOTION_MS.fast;
 
 export type ConversationSwitchPhase = "idle" | "leaving" | "waiting" | "settling" | "revealing";
 
@@ -36,11 +39,13 @@ export type ConversationSwitchState = {
   readonly seq: number;
   /** 骨架是否在屏上——决定它该淡出还是直接卸载。 */
   readonly veil: boolean;
+  /** 是否为内存热切换快路径（跳过离场等待并使用快速显现）。 */
+  readonly warm?: boolean;
 };
 
 export type ConversationSwitchEvent =
-  /** 会话键变了。`paintable`：新会话此刻已有可画内容；`canFade`：上一屏还留着，可以淡出。 */
-  | { readonly type: "identity"; readonly key: string; readonly paintable: boolean; readonly canFade: boolean }
+  /** 会话键变了。`paintable`：新会话此刻已有可画内容；`canFade`：上一屏还留着，可以淡出；`warm`：热缓存直切。 */
+  | { readonly type: "identity"; readonly key: string; readonly paintable: boolean; readonly canFade: boolean; readonly warm?: boolean }
   /** 会话键变了，但屏上的面没变（欢迎页 → 欢迎页，如 session.create 回执把
    *  identity 从 null 换成新会话）：只换 key，不重跑淡出/淡入，否则同一块
    *  欢迎页会自己闪一遍。阶段与骨架保持原样，由既有事件继续推进。 */
@@ -58,9 +63,9 @@ export type ConversationSwitchEvent =
 export const IDLE_CONVERSATION_SWITCH: ConversationSwitchState = { phase: "idle", key: "", seq: 0, veil: false };
 
 /** 阶段时长；`null` 表示阶段由外部事件推进（`waiting` 等 IPC，`settling` 等两帧，`idle` 是终态）。 */
-export function switchPhaseMs(phase: ConversationSwitchPhase, reducedMotion = false): number | null {
+export function switchPhaseMs(phase: ConversationSwitchPhase, reducedMotion = false, warm = false): number | null {
   if (phase === "leaving") return reducedMotion ? 0 : SWITCH_LEAVE_MS;
-  if (phase === "revealing") return reducedMotion ? 0 : SWITCH_REVEAL_MS;
+  if (phase === "revealing") return reducedMotion ? 0 : (warm ? SWITCH_WARM_REVEAL_MS : SWITCH_REVEAL_MS);
   return null;
 }
 
@@ -85,15 +90,18 @@ export function nextConversationSwitch(
     // 新正文还不可见时换目标：有现成内容就重新稳定两帧；没有就回同一片骨架等待。
     if (state.phase === "settling") {
       return event.paintable
-        ? { ...state, key: event.key, seq: state.seq + 1 }
-        : { phase: "waiting", key: event.key, seq: state.seq + 1, veil: true };
+        ? { ...state, key: event.key, seq: state.seq + 1, ...(event.warm ? { warm: true } : { warm: false }) }
+        : { phase: "waiting", key: event.key, seq: state.seq + 1, veil: true, warm: false };
+    }
+    if (event.warm && event.paintable) {
+      return { phase: "settling", key: event.key, seq: state.seq + 1, veil: false, warm: true };
     }
     // 淡出进行中：保留正在跑的那个定时器（不动 seq），否则每次改目标都会重新
     // 计时，上一屏迟迟淡不完。
     if (state.phase === "leaving") return { ...state, key: event.key };
-    if (event.canFade) return { phase: "leaving", key: event.key, seq: state.seq + 1, veil: false };
-    if (event.paintable) return { phase: "settling", key: event.key, seq: state.seq + 1, veil: false };
-    return { phase: "waiting", key: event.key, seq: state.seq + 1, veil: true };
+    if (event.canFade) return { phase: "leaving", key: event.key, seq: state.seq + 1, veil: false, warm: false };
+    if (event.paintable) return { phase: "settling", key: event.key, seq: state.seq + 1, veil: false, warm: false };
+    return { phase: "waiting", key: event.key, seq: state.seq + 1, veil: true, warm: false };
   }
   if (event.type === "pending") {
     // leaving / waiting 已经在处理"没东西可画"；revealing 则是刚淡入的内容又被抽走
@@ -112,7 +120,7 @@ export function nextConversationSwitch(
   }
   if (event.type === "settled") {
     if (event.seq !== state.seq || state.phase !== "settling") return state;
-    return { phase: "revealing", key: state.key, seq: state.seq + 1, veil: state.veil };
+    return { phase: "revealing", key: state.key, seq: state.seq + 1, veil: state.veil, ...(state.warm ? { warm: true } : {}) };
   }
   if (event.seq !== state.seq) return state;
   if (state.phase === "leaving") {
@@ -120,6 +128,6 @@ export function nextConversationSwitch(
       ? { phase: "settling", key: state.key, seq: state.seq + 1, veil: false }
       : { phase: "waiting", key: state.key, seq: state.seq + 1, veil: true };
   }
-  if (state.phase === "revealing") return { phase: "idle", key: state.key, seq: state.seq + 1, veil: false };
+  if (state.phase === "revealing") return { phase: "idle", key: state.key, seq: state.seq + 1, veil: false, warm: false };
   return state;
 }
