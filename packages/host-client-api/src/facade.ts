@@ -2714,6 +2714,26 @@ export class StudioHostClientFacade implements ClientTransport {
     return service.get();
   }
 
+  async #ensureModelRuntime(): Promise<void> {
+    if (this.#runtimeSession() && this.#currentSnapshotRef()) return;
+    const runtime = this.#options.runtime;
+    if (!runtime?.ensure || !this.#options.workspaceCwd?.()) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        runtime.ensure(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(unavailableError(hostText(
+            "连接模型目录 Runtime 超时，请重试", "Timed out connecting the model catalog Runtime; retry",
+          ))), 30_000);
+        }),
+      ]);
+      this.#readLifetime.signal.throwIfAborted();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async #queryModels(attempt = 0): Promise<ModelConfigReadModel> {
     const service = this.#options.models;
     if (service === undefined) {
@@ -2746,6 +2766,12 @@ export class StudioHostClientFacade implements ClientTransport {
           advanced: { searxng: { endpoint: "", tokenSet: false, basicUsername: "", passwordSet: false }, exa: { enabled: true, searchDelayMs: 1000 } },
         },
       };
+    }
+    try {
+      await this.#ensureModelRuntime();
+    } catch (error) {
+      this.#readLifetime.signal.throwIfAborted();
+      return withRuntimeModels(await service.get(), undefined, toClientError(error).message);
     }
     const session = this.#runtimeSession();
     const snapshot = this.#currentSnapshotRef();
@@ -3172,6 +3198,7 @@ export class StudioHostClientFacade implements ClientTransport {
           result = await service.refreshCatalog();
           break;
         case "models.discovery.refresh": {
+          await this.#ensureModelRuntime();
           const runtime = this.#runtimeSession();
           const snapshot = this.#currentSnapshotRef();
           if (runtime || snapshot) {
