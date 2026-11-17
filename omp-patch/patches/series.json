@@ -1,7 +1,7 @@
 {
   "upstreamCommit": "7c49c11aa5bbaf3f418406583096168ad5b8c6dc",
-  "patchsetVersion": "studio.7",
-  "patchsetDigest": "sha256:dca3807f109b16018fe23f1a665bb395f9bd9d626ce5dbd4e0f87f88dfc6b99d",
+  "patchsetVersion": "studio.8",
+  "patchsetDigest": "sha256:340863aa6d9ff57cb5c99839dea63373e423510d2b2e4e4fbf0ff6aac6e85a7c",
   "patches": [
     "0001-studio-cli-entry.patch",
     "0002-studio-session-runtime.patch",

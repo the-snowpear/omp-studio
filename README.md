@@ -47,7 +47,7 @@
 </p>
 
 > [!NOTE]
-> **[0.2.3](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.3)** 为 Linux 客户端（AppImage / deb）补齐了应用内差分更新，将指挥台与 Agent 间真实通讯并入 Agent Hub，重做了右侧 Agent 档案与模型拉取筛选，并修复了多处模型读取、配置审批与工作区恢复问题（内置 Runtime `18.20.2-studio.7`）。各平台下载和更新内容见 [发布说明](docs/releases/v0.2.3.md)。
+> **[0.2.3](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.3)** 为 Linux 客户端（AppImage / deb）补齐了应用内差分更新，将指挥台与 Agent 间真实通讯并入 Agent Hub，重做了右侧 Agent 档案与模型拉取筛选，并修复了多处模型读取、配置审批与工作区恢复问题（内置 Runtime `18.20.2-studio.8`）。各平台下载和更新内容见 [发布说明](docs/releases/v0.2.3.md)。
 
 <table>
 <tr>
