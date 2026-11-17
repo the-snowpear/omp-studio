@@ -48,7 +48,7 @@ describe("Agent roster density", () => {
     render(<PreviewModeProvider switchEnabled><AgentRosterPanel agents={PREVIEW_DOCK_AGENTS} visible ready onOpen={vi.fn()} onMain={vi.fn()} /></PreviewModeProvider>);
     fireEvent.click(screen.getByRole("button", { name: "极简" }));
     expect(document.querySelector('.agent-roster[data-density="minimal"]')).toBeTruthy();
-    expect(screen.getByText("gpt-5-mini")).toBeTruthy();
+    expect(screen.getAllByText("gpt-5-mini").length).toBeGreaterThan(0);
     expect(getAppSettings().agentRosterDensity).toBe("standard");
     expect(localStorage.getItem("omp.appSettings")).toBe(stored);
   });

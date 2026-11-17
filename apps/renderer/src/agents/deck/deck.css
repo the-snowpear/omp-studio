@@ -869,6 +869,16 @@
 .ad-side { min-width: 0; min-height: 0; overflow: auto; border-left: 1px solid var(--ad-line); background: var(--ad-wash); scrollbar-width: thin; }
 .ad[data-tier="bridge"] .ad-card:not([data-selected]):not(:hover):not(.is-main) { background: transparent; }
 
+/* ---------- Embedded (the Agent Hub) ----------------------------------------
+   The host page keeps its own inspector beside the deck, so the bridge is crew
+   and stage only, and the deck sits on the page as one more card. */
+.ad[data-embedded] {
+  border: 1px solid var(--border);
+  border-radius: var(--r-10);
+}
+.ad[data-embedded] .ad-bridge { grid-template-columns: clamp(288px, 35%, 380px) minmax(0, 1fr); }
+.ad[data-embedded][data-short] .ad-bridge { grid-template-columns: clamp(220px, 26%, 300px) minmax(0, 1fr); }
+
 /* ---------- Empty states ---------------------------------------------------- */
 .ad-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-8); flex: 1; padding: var(--sp-24); color: var(--text-3); text-align: center; }
 .ad-empty h3 { margin: var(--sp-6) 0 0; color: var(--text); font-size: var(--fs-14); font-weight: var(--fw-semibold); }

@@ -15,7 +15,17 @@ const PREVIEW_TIMES: Record<string, { started: number; updated: number; tps?: nu
   "agent-019fcb17": { started: 663, updated: 63 },
   "agent-019fcb55": { started: 438, updated: 400 },
   "agent-019fcb20": { started: 294, updated: 8, tps: 38 },
+  "advisor-019fab10": { started: 1380, updated: 1200 },
+  "agent-019fc8a0": { started: 1320, updated: 905 },
+  "agent-019fc77e": { started: 1240, updated: 1195 },
 };
+
+/** Hub story members beyond the side fixture, in the order the lead brought them in. */
+const HUB_EXTRAS =["agent-019fcb20", "agent-019fc9d2", "advisor-019fab10", "agent-019fc8a0", "agent-019fc77e"] as const;
+
+function snapshotStatus(status: string): StudioAgentSnapshot["status"] {
+  return status === "parked" || status === "idle" || status === "aborted" ? status : "running";
+}
 
 /** One fixture feeds the roster, the deck and the detail; no preview values enter Host state. */
 export function getPreviewDockAgents(zh = isZh()): readonly StudioAgentSnapshot[] {
@@ -64,22 +74,25 @@ export function getPreviewDockAgents(zh = isZh()): readonly StudioAgentSnapshot[
       activeJobIds: [],
     };
   });
-  // The Hub story's nested typecheck run and its parked docs writer, so the
-  // roster shows a second generation, a parked agent and a fallback model.
-  const extra = (["agent-019fcb20", "agent-019fc9d2"] as const).flatMap((id): StudioAgentSnapshot[] => {
+  // The rest of the Hub story: the nested typecheck run, the parked docs writer
+  // and audit, the read-only advisor and the spike the user stopped. The roster,
+  // the deck and the Hub list then show the same members.
+  const extra = HUB_EXTRAS.flatMap((id): StudioAgentSnapshot[] => {
     const hub = hubAgent(id);
     if (!hub) return [];
     return [{
       agentId: id as AgentId,
       generation: 1 as Generation,
-      kind: "task",
+      kind: hub.kind === "advisor" ? "advisor" : "task",
+      ...(hub.readOnly ? { readOnly: true } : {}),
+      ...(hub.isolated ? { isolated: true } : {}),
       displayName: hub.name,
       ...(hub.resolvedModel === undefined ? {} : { resolvedModel: hub.resolvedModel }),
       ...(hub.fallback ? { modelIsFallback: true } : {}),
       ...(hub.modelRole === undefined ? {} : { modelRole: hub.modelRole }),
       parentAgentId: (hub.parentId === "main" ? mainId : hub.parentId) as AgentId,
       assignment: hub.task,
-      status: hub.status === "parked" ? "parked" : "running",
+      status: snapshotStatus(hub.status),
       ...((hub.stage ?? hub.lastIntent) ? { stage: (hub.stage ?? hub.lastIntent)! } : {}),
       ...(hub.completionPercent === undefined ? {} : { completionPercent: hub.completionPercent }),
       ...timed(id),
@@ -87,7 +100,7 @@ export function getPreviewDockAgents(zh = isZh()): readonly StudioAgentSnapshot[
       ...(hub.outputPath ? { outputPath: hub.outputPath } : {}),
       ...(hub.patchPath ? { patchPath: hub.patchPath } : {}),
       ...(hub.branchName ? { branchName: hub.branchName } : {}),
-      hasLiveSession: hub.status !== "parked",
+      hasLiveSession: hub.status === "running" || hub.status === "idle",
       hasTranscript: true,
       unreadCount: hub.ircUnread ?? 0,
       activeJobIds: [],

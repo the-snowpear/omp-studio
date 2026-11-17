@@ -18,9 +18,40 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-14);
+  transition: max-width var(--dur-slow) var(--ease-nav);
 }
 .hub-page > .workspace-panel:not([hidden]) { display: flex; flex-direction: column; gap: var(--sp-14); }
 .hub-page.is-chat-preview > .workspace-panel:not([hidden]) { flex: 1; min-height: 0; }
+
+/* ---------- 指挥台视图：页面放宽、吃满视口高度，指挥台 | Hub 详情 ----------
+   页面至少是内容高度（舞台不低于 440px，窗口太矮时整页滚动），
+   有余量时撑满视口；分栏的行高由余量决定，不由详情内容决定。 */
+.page-body:has(.hub-page.is-deck) { display: flex; flex-direction: column; }
+.hub-page.is-deck {
+  max-width: min(1600px, 100%);
+  width: 100%;
+  flex: 1 0 auto;
+}
+/* 对话预览打开时沿用上面的 flex:1 / min-height:0：两列都钉在视口里各自滚动。 */
+.hub-page.is-deck:not(.is-chat-preview) > .workspace-panel:not([hidden]) { flex: 1 0 auto; }
+.hub-cols.is-deck {
+  flex: 1 1 0;
+  min-height: 440px;
+  align-items: stretch;
+  grid-template-columns: minmax(0, 64fr) minmax(0, 36fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+.hub-deck-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.hub-deck-col > .ad { flex: 1; height: auto; }
+/* 行高由视口决定，详情面自己滚动。 */
+.hub-cols.is-deck .hub-detail { min-height: 0; }
+.hub-cols.is-deck .hub-face[data-hub-face="detail"] { overflow-y: auto; scrollbar-width: thin; }
+.hub-view-seg button { display: inline-flex; align-items: center; gap: var(--sp-4); }
 .hub-page > .workspace-tabbar { flex-shrink: 0; margin-bottom: 0; }
 
 /* ---------- 连接横幅（offline / reconnecting / stale / resync / limited） ---------- */
@@ -697,6 +728,8 @@
 .hub-drawer-back { display: none; }
 @media (max-width: 900px) {
   .hub-cols { grid-template-columns: 1fr; }
+  /* 指挥台占满宽度；详情照旧是抽屉，打开对话预览也不再分栏。 */
+  .hub-page .hub-cols.is-deck { grid-template-columns: minmax(0, 1fr); }
   .hub-detail {
     position: fixed;
     top: var(--topbar-h);

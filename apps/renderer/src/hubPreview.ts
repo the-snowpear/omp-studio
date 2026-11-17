@@ -286,7 +286,7 @@ export function buildPreviewHub(now = Date.now(), zh = isZh()): PreviewHub {
         metrics: { cost: 1.23, durationMs: 412000, durationKind: "active", requests: 15, tools: 21, tokens: 40300, contextTokens: 88200, contextWindow: 200000 },
         outputPath: "agent-019fc8a0.md", patchPath: "agent-019fc8a0.patch",
         isolated: true, nestedPatchPaths: ["agent-019fc8a0.nested-0-library.patch"],
-        children: [], createdAt: ago(5200), lastActivity: ago(3612), hasTranscript: true,
+        children: [], createdAt: ago(1320), lastActivity: ago(905), hasTranscript: true,
       },
       {
         id: "agent-019fc77e", name: zh ? "spike 子 Agent" : "spike subagent", kind: "sub", parentId: "main",
@@ -295,7 +295,7 @@ export function buildPreviewHub(now = Date.now(), zh = isZh()): PreviewHub {
         lastIntent: zh ? "方案被否决后由用户 kill（tombstone 已写入）" : "Killed by user after proposal rejection (tombstone written)",
         modelRole: "@spike", resolvedModel: "gpt-5-mini",
         metrics: { cost: 0.09, durationMs: 41000, durationKind: "active", requests: 3, tools: 4, tokens: 2900 },
-        children: [], createdAt: ago(7400), lastActivity: ago(6200), hasTranscript: true,
+        children: [], createdAt: ago(1240), lastActivity: ago(1195), hasTranscript: true,
       },
       {
         id: "advisor-019fab10", name: "advisor", kind: "advisor", parentId: "main",
@@ -305,7 +305,7 @@ export function buildPreviewHub(now = Date.now(), zh = isZh()): PreviewHub {
         modelRole: "@advisor", resolvedModel: "claude-opus-4.8",
         metrics: { cost: 0.44, durationMs: 95000, durationKind: "active", requests: 2, tools: 0, tokens: 9600, contextTokens: 21400, contextWindow: 200000 },
         readOnly: true, outputPath: "advisor-019fab10.md",
-        children: [], createdAt: ago(2400), lastActivity: ago(1200), hasTranscript: true,
+        children: [], createdAt: ago(1380), lastActivity: ago(1200), hasTranscript: true,
       },
     ],
     jobAgents: [

@@ -81,6 +81,7 @@ import { ConversationPane } from "../conversation/ConversationPane";
 import { CommandBlockProvider } from "../conversation/CommandBlock";
 import { SubagentHoverProvider } from "../conversation/SubagentHoverPreview";
 import { AgentsDock } from "../agents/deck/AgentsDock";
+import { agentSwarmScope } from "../agents/deck/swarmScope";
 import type { DeckLinks } from "../agents/deck/AgentDeck";
 import { BackgroundTasksDock } from "../backgroundTasks/BackgroundTasksDock";
 import { AgentDetailPanel } from "../agents/AgentDetailPanel";
@@ -458,7 +459,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     : undefined;
   const rosterAgents = viewedAgents ?? (selectedSessionId === undefined || selectedSessionId === snapshot?.sessionId ? snapshot?.agents : undefined);
   const agentParentSessionId = preview ? `preview:${previewThreadId ?? "current"}` : selectedSessionId ?? snapshot?.sessionId;
-  const agentScope = JSON.stringify([executionTarget.id, workspaceId, agentParentSessionId, preview]);
+  const agentScope = agentSwarmScope(executionTarget.id, workspaceId, agentParentSessionId, preview);
   const recentAgentPanel = agentDockLayout.lastAgentPanel;
   const recentAgent = recentAgentPanel ? agentDockLayout.agentPanels[recentAgentPanel] : undefined;
   const inspectTarget = recentAgent?.scope === agentScope && recentAgentPanel && locatePanel(agentDockLayout, recentAgentPanel) ? recentAgent.target : null;
