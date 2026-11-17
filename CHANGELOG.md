@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 配置更改审批按「允许一次」或「本会话允许」绑定确认凭据，修复点击批准后提交失败、最终超时的问题。
+- 工作区模型列表与刷新操作先连接当前 Runtime，避免已配置模型一直显示未验证、对话模型列表为空或刷新本地缓存无法完成。
+
 ## [0.2.2] - 2026-11-16
 
 ### Added
