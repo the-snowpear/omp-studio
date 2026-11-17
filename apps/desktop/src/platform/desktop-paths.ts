@@ -47,14 +47,18 @@ export function resolveDesktopPaths(input: DesktopPathInputs): DesktopPaths {
     const appDataRoot = env.APPDATA ?? win32.join(home, "AppData", "Roaming");
     const localRoot = win32.join(env.LOCALAPPDATA ?? win32.join(home, "AppData", "Local"), STATE_DIRECTORY_NAME);
     const stateRoot = win32.join(appDataRoot, STATE_DIRECTORY_NAME);
+    // The production-preview launcher keeps its Runtime and update journal
+    // separate while retaining the user's normal profile and workspace data.
+    const previewRoot = env.OMP_PRODUCTION_PREVIEW_STATE;
+    const runtimeStateRoot = previewRoot && win32.isAbsolute(previewRoot) ? previewRoot : localRoot;
     return {
       appDataRoot,
       stateRoot,
       logsRoot: win32.join(stateRoot, "logs"),
       keysRoot: win32.join(stateRoot, "keys"),
-      runtimesRoot: win32.join(localRoot, "runtimes"),
-      updatesV2Root: win32.join(localRoot, "updates-v2"),
-      legacyStagingRoot: win32.join(localRoot, "updates"),
+      runtimesRoot: win32.join(runtimeStateRoot, "runtimes"),
+      updatesV2Root: win32.join(runtimeStateRoot, "updates-v2"),
+      legacyStagingRoot: win32.join(runtimeStateRoot, "updates"),
       endpointRegistryRoot: win32.join(appDataRoot, ENDPOINT_REGISTRY_DIRECTORY_NAME),
     };
   }

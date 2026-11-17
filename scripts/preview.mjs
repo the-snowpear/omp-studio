@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { cp, mkdir, readdir, rm, rename, symlink } from "node:fs/promises";
+import { cp, mkdir, rm, rename } from "node:fs/promises";
 import { dirname, join, sep } from "node:path";
 import process from "node:process";
 
@@ -40,10 +40,10 @@ const electronDist = join(root, "node_modules", "electron", "dist");
  * distribution (see preparePreviewElectron). Never copied forward.
  */
 const staleRuntimeDir = join(electronDist, "runtime");
-const previewElectronDir = join(root, "outputs", "preview-electron");
+const previewElectronDir = production
+  ? join(root, "outputs", "production-preview", "electron")
+  : join(root, "outputs", "preview-electron");
 const previewElectronExe = join(previewElectronDir, "OMP Studio.exe");
-const previewRuntimePayload = join(root, "packaging", "runtime-payload");
-const previewRuntimeKeys = join(root, "packaging", "runtime-keys");
 const appIcon = join(root, "apps", "desktop", "resources", "icon.ico");
 const rceditExe = join(root, "node_modules", "electron-winstaller", "vendor", "rcedit.exe");
 
@@ -221,48 +221,19 @@ Add-Type -TypeDefinition $code -Language CSharp
   }
 }
 
-async function stagePreviewRuntime() {
+async function stagePreviewRuntime(runtime) {
   // 开发预览的 exe 保持 electron.exe 这个名字，app.isPackaged === false，
   // 桌面端不会读 <previewElectronDir>/runtime，改从 AppData 的已装 Runtime
   // 与 repo 内产物发现。因此这里无需 stage，也就不必要求已签名产物存在。
   if (!production) return;
 
-  if (!existsSync(previewRuntimePayload)) {
-    throw new Error(
-      "Signed Runtime payload is missing. Run `npm run pack:win:prepare`, then retry.",
-    );
-  }
-  if (
-    !existsSync(join(previewRuntimeKeys, "key-id.txt")) ||
-    !existsSync(join(previewRuntimeKeys, "trusted-public.pem"))
-  ) {
-    throw new Error(
-      "Runtime verification keys are missing. Run `npm run pack:win:prepare`, then retry.",
-    );
-  }
-
-  const versions = (await readdir(previewRuntimePayload, { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."));
-  if (versions.length === 0) {
-    throw new Error("Signed Runtime payload contains no version directory.");
-  }
-  for (const version of versions) {
-    const directory = join(previewRuntimePayload, version.name);
-    for (const required of ["omp.exe", "runtime-manifest.json", "checksums.json", "runtime-signature.json"]) {
-      if (!existsSync(join(directory, required))) {
-        throw new Error(`Signed Runtime payload ${version.name} is missing ${required}.`);
-      }
-    }
-  }
-
   // The renamed executable reports app.isPackaged=true. Mirror electron-builder's
   // extraFiles layout so production preview exercises the same managed Runtime
   // discovery, verification and activation path as an installed build.
-  await cp(previewRuntimePayload, join(previewElectronDir, "runtime", "versions"), { recursive: true });
-  await cp(previewRuntimeKeys, join(previewElectronDir, "runtime-keys"), { recursive: true });
+  await (await import("./production-preview-runtime.mjs")).stageProductionPreviewRuntime(runtime, previewElectronDir);
 }
 
-async function preparePreviewElectron() {
+async function preparePreviewElectron(runtime) {
   if (!existsSync(electronDist)) {
     throw new Error("Electron distribution is missing. Run `npm install` once, then retry.");
   }
@@ -310,7 +281,7 @@ async function preparePreviewElectron() {
   if (production) {
     await rename(join(previewElectronDir, "electron.exe"), previewElectronExe);
   }
-  await stagePreviewRuntime();
+  await stagePreviewRuntime(runtime);
 
   await run(rceditExe, [
     exePath,
@@ -362,7 +333,10 @@ async function main() {
   console.log("[preview] Bundling sandboxed preload...");
   bundlePreload();
 
-  const electronExecutable = await preparePreviewElectron();
+  const runtime = production && process.platform === "win32"
+    ? await (await import("./production-preview-runtime.mjs")).prepareProductionPreviewRuntime({ npmCli })
+    : undefined;
+  const electronExecutable = await preparePreviewElectron(runtime);
 
   /**
    * 生产模式（OMP_PREVIEW_MODE=production）：跳过 vite dev server。改名后的
@@ -402,6 +376,7 @@ async function main() {
     env: {
       ...process.env,
       OMP_APP_USER_MODEL_ID: previewAumid,
+      ...(runtime ? { OMP_PRODUCTION_PREVIEW_STATE: runtime.stateDirectory } : {}),
       ...(production ? {} : { OMP_RENDERER_DEV_URL: rendererEntryUrl }),
     },
   });

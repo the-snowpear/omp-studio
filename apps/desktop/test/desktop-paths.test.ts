@@ -27,6 +27,21 @@ test("Windows falls back to the home directory when the profile variables are mi
   assert.equal(paths.runtimesRoot, "C:\\Users\\me\\AppData\\Local\\omp-studio\\runtimes");
 });
 
+test("production preview isolates Runtime and update state while keeping the user's profile", () => {
+  const paths = resolveDesktopPaths({
+    platform: "win32",
+    env: {
+      APPDATA: "C:\\Users\\me\\AppData\\Roaming",
+      LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local",
+      OMP_PRODUCTION_PREVIEW_STATE: "D:\\Studio preview\\state",
+    },
+  });
+  assert.equal(paths.stateRoot, "C:\\Users\\me\\AppData\\Roaming\\omp-studio");
+  assert.equal(paths.runtimesRoot, "D:\\Studio preview\\state\\runtimes");
+  assert.equal(paths.updatesV2Root, "D:\\Studio preview\\state\\updates-v2");
+  assert.equal(paths.legacyStagingRoot, "D:\\Studio preview\\state\\updates");
+});
+
 test("macOS keeps every writable location under Application Support", () => {
   const paths = resolveDesktopPaths({ platform: "darwin", env: { APPDATA: "ignored", LOCALAPPDATA: "ignored" }, homedir: "/Users/me" });
   assert.deepEqual(paths, {

@@ -73,6 +73,19 @@ The top-bar **预览** switch is a renderer display flag
 (`apps/renderer/src/preview/mode.ts`). It is **not** a Host capability and
 must not enter `client-contract`.
 
+On Windows, `启动生产版.cmd` builds the current desktop and checks the Runtime
+identity from the pinned upstream and patch series before opening it. It reuses
+a matching signed artifact, downloads one from a release with the same source
+digest when available, or builds and signs it locally. A new artifact is
+verified and smoke-tested before activation. The Runtime, downloaded artifacts,
+and update transactions are kept under `outputs/production-preview/`; the
+installed application's Runtime is not replaced. Workspaces, conversations,
+model credentials, and other profile data continue to use the normal user
+profile. Close another running Studio instance before opening this preview.
+`启动预览.cmd` and `启动预览版.cmd` retain their development-preview behaviour.
+If the vendor overlay or patches have uncaptured changes, preserve and capture
+them using the normal Runtime workflow before starting production preview.
+
 | | Read surfaces | Mutations |
 |---|---|---|
 | Preview on | Fixtures overlay the snapshot | Still the real API |
