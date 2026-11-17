@@ -98,7 +98,8 @@ describe("AppNavRail", () => {
 
   it("gives the workbench its own icon instead of the sidebar-region glyph", () => {
     /* `layout` is the titlebar's "toggle the left region" mark; a destination
-       reusing it would read as the same command twice in one window. */
+       reusing it would read as the same command twice in one window. The
+       workbench glyph keeps the outer frame but adds a second divider. */
     const svgInner = (html: string) => {
       const host = document.createElement("div");
       host.innerHTML = html;

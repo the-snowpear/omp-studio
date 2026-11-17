@@ -17,9 +17,10 @@ export type NavRailRoute =
   | "settings";
 
 const NAV_RAIL_ITEMS: ReadonlyArray<{ route: NavRailRoute; icon: IconName; labelKey: string }> = [
-  /* `workbench` (three panes), not `layout`: the latter is the "toggle the left
-     region" glyph in the titlebar and the View menu, and two identical marks in
-     one window read as the same command. */
+  /* `workbench` is the prototype's `bench` mark (frame + left column + two right
+     rows), not `layout`: the latter is the "toggle the left region" glyph in the
+     titlebar and the View menu, and two identical marks in one window read as
+     the same command. */
   { route: "workbench", icon: "workbench", labelKey: "nav.workbench" },
   { route: "home", icon: "home", labelKey: "nav.home" },
   { route: "history", icon: "history", labelKey: "nav.history" },

@@ -64,11 +64,11 @@ const PATHS = {
   more: '<circle cx="3.5" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="12.5" cy="8" r="1.1" fill="currentColor" stroke="none"/>',
   filter: '<path d="M2 3.5h12l-4.5 5v4l-3 1.5v-5.5z"/>',
   layout: '<rect x="2" y="2.5" width="12" height="11" rx="1.2"/><path d="M6 2.5v11"/>',
-  /* 工作台：一块竖长面板 + 右侧两块叠放。`layout` / `panel` / `columns` 全是
-     「矩形 + 一条分割线」，表示「切换某一栏」；工作台是目的地，必须一眼分开，
-     所以改用彼此分离的块面拼贴（无外框），剪影与那三个都不同。三块留 1.4 的缝、
-     1.3 圆角，18px 下最窄的孔仍有 3px，不糊。 */
-  workbench: '<rect x="2.2" y="2.6" width="5.2" height="10.8" rx="1.3"/><rect x="8.8" y="2.6" width="5" height="4.7" rx="1.3"/><rect x="8.8" y="8.7" width="5" height="4.7" rx="1.3"/>',
+  /* 工作台：外框里一条左栏 + 右侧上下两行，取自 Agent 画布原型 rail 的 `bench`
+     （ui_reference/agent-canvas/canvas.js）。`layout` / `panel` / `columns` / `rows`
+     各只有一条分割线，这块是唯一同时给出「一栏 + 两行」的，所以四者不重影；
+     18px 描边 1.6 下左栏净宽约 2.7、右侧每行约 3.4，都不糊。 */
+  workbench: '<path d="M2 3h12v10H2zM6 3v10M6 8h8"/>',
   columns: '<rect x="2" y="2.5" width="12" height="11" rx="1.2"/><path d="M8 2.5v11"/>',
   /* 对话工具区：两行「圆钮 + 条目」，读作一列可展开的工具卡片，而不是
      「切换某一栏」的矩形+分割线（panel / columns 那族），避免和右侧栏开关撞脸。 */
