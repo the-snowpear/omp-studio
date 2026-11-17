@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 会话标题已内嵌 emoji 和短码时不再额外绘制一份标签，避免工作区、侧栏和历史会话标题重复显示。
+
 ## [0.2.2] - 2026-11-16
 
 ### Added
