@@ -39,7 +39,7 @@ export function applyTheme(root: HTMLElement, theme: string): void {
     if (state.pending === apply) state.pending = null;
     root.setAttribute("data-theme", theme);
   };
-  if (view === null || typeof document.startViewTransition !== "function" || document.visibilityState !== "visible" || motionReduced()) {
+  if (view === null || typeof document.startViewTransition !== "function" || document.visibilityState !== "visible" || motionReduced() || root.getAttribute("data-embed") === "1") {
     apply();
     return;
   }

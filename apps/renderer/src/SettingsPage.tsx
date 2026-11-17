@@ -22,6 +22,7 @@ import { useEffect, useRef, useState } from "react";
 import { tabPaneClass, tabPaneRole, useOverlappingTabs } from "./pageTransition";
 import { useI18n } from "./i18n";
 import { usePreviewMode } from "./preview/PreviewContext";
+import { isEmbedMode } from "./embed/websiteEmbed";
 import { PREVIEW_APP_SETTINGS, PREVIEW_APPROVAL_MODE, usePreviewAppSettings, useRuntimeDemo } from "./preview/settingsPreview";
 import { type AppSettings, useAppSettings } from "./settings/appSettings";
 import { ConversationWidthProvider, useConversationWidth } from "./settings/ConversationWidthContext";
@@ -71,6 +72,18 @@ export interface RuntimeSettingsApi {
   readonly pendingKey?: StudioRuntimeSettingKey;
   readonly error?: string;
   readonly onSet?: (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue, persist?: boolean) => void | Promise<void>;
+}
+
+const EMBED_LIVE_APP_KEYS = ["theme", "density", "light", "fileTypePalette"] as const;
+
+function extractEmbedLivePatch(patch: Partial<AppSettings>): Partial<AppSettings> {
+  const livePatch: Partial<AppSettings> = {};
+  for (const key of EMBED_LIVE_APP_KEYS) {
+    if (patch[key] !== undefined) {
+      (livePatch as Record<string, unknown>)[key] = patch[key];
+    }
+  }
+  return livePatch;
 }
 
 /** Reuse the global provider; standalone settings surfaces keep a local demo boundary. */
@@ -125,6 +138,7 @@ function SettingsPageContent({
   const groupIndex = groups.findIndex(([id]) => id === group);
   const { incoming, outgoing, dir, live, stageRef } = useOverlappingTabs(group, groupIndex >= 0 ? groupIndex : 0);
   const { preview, marks } = usePreviewMode();
+  const embed = isEmbedMode();
 
   const real = useAppSettings();
   const conversationWidth = useConversationWidth();
@@ -207,12 +221,22 @@ function SettingsPageContent({
       preview: true,
       app: {
         ...previewApp.app,
+        ...(embed ? {
+          theme: real.settings.theme,
+          density: real.settings.density,
+          light: real.settings.light,
+          fileTypePalette: real.settings.fileTypePalette,
+        } : {}),
         conversationWidthMode: conversationWidth.mode,
         conversationCustomWidth: conversationWidth.customWidth,
       },
       updateApp: (patch) => {
         previewApp.patch(patch);
         conversationWidth.update(patch);
+        if (embed) {
+          const livePatch = extractEmbedLivePatch(patch);
+          if (Object.keys(livePatch).length > 0) real.update(livePatch);
+        }
         flashDemo();
       },
       resetApp: (keys) => {
@@ -222,6 +246,10 @@ function SettingsPageContent({
         }
         previewApp.patch(patch);
         conversationWidth.update(patch);
+        if (embed) {
+          const livePatch = extractEmbedLivePatch(patch);
+          if (Object.keys(livePatch).length > 0) real.update(livePatch);
+        }
         flashDemo();
       },
       approvalMode: PREVIEW_APPROVAL_MODE,

@@ -6,6 +6,7 @@ import { useI18n } from "../i18n";
 import { PreviewModeProvider, usePreviewMode } from "../preview/PreviewContext";
 import { StartupNotice } from "../StartupNotice";
 import { PreviewSwitch } from "../preview/surfaces";
+import { isEmbedMode } from "../embed/websiteEmbed";
 
 export function Titlebar({
   canBack,
@@ -27,6 +28,7 @@ export function Titlebar({
   const { window } = useConversationDom();
   const { t } = useI18n();
   const previewMode = usePreviewMode();
+  const embed = isEmbedMode();
   return (
     <header className="app-titlebar">
       <button
@@ -49,14 +51,16 @@ export function Titlebar({
       </button>
       <nav className="title-menus" aria-label={t("nav.menu")}>{menus}</nav>
       <div className="titlebar-end">
-        <PreviewSwitch
-          enabled={previewMode.enabled}
-          preview={previewMode.preview}
-          onToggle={() => {
-            if (modelConfigHasUnsavedChanges() && !window.confirm(t("shell.unsavedModelConfigConfirm"))) return;
-            previewMode.setPreview(!previewMode.preview);
-          }}
-        />
+        {!embed ? (
+          <PreviewSwitch
+            enabled={previewMode.enabled}
+            preview={previewMode.preview}
+            onToggle={() => {
+              if (modelConfigHasUnsavedChanges() && !window.confirm(t("shell.unsavedModelConfigConfirm"))) return;
+              previewMode.setPreview(!previewMode.preview);
+            }}
+          />
+        ) : null}
       </div>
     </header>
   );

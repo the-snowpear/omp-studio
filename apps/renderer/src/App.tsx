@@ -12,6 +12,7 @@ import "./dock/integration.css";
 import { ExecutionTargets, useExecutionTarget, useTargetMemory } from "./workspaces/ExecutionTargets";
 import { RemoteScopeNotice } from "./workspaces/RemoteScopeNotice";
 import { modelConfigHasUnsavedChanges } from "./models/modelConfigState";
+import { EMBED_SET_ROUTE_EVENT, WEBSITE_EMBED_SOURCE, consumePendingEmbedRoute, isEmbedMode, postEmbedMessage, setCurrentEmbedRoute } from "./embed/websiteEmbed";
 import { conversationViewLeases } from "./conversation/conversationViews";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ConversationWidthProvider } from "./settings/ConversationWidthContext";
@@ -96,14 +97,48 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
     else setTargetRoute(next);
   }, [mdi?.store, mdi?.document.id, setTargetRoute]);
   const [selectedHistoryId, setSelectedHistoryId] = useTargetMemory<string | null>("selected-history", () => mdi?.document.ref.historyId ?? null);
+  const embed = isEmbedMode();
   const routeRef = useRef(route);
   routeRef.current = route;
+  const hostRouteRef = useRef<Route | null>(null);
+  const reportedRouteRef = useRef<Route>(route);
+  useEffect(() => {
+    if (!embed) return;
+    setCurrentEmbedRoute(route);
+    if (reportedRouteRef.current === route) return;
+    reportedRouteRef.current = route;
+    if (hostRouteRef.current === route) {
+      hostRouteRef.current = null;
+      return;
+    }
+    hostRouteRef.current = null;
+    postEmbedMessage({ source: WEBSITE_EMBED_SOURCE, type: "route-changed", route });
+  }, [embed, route]);
+  useEffect(() => {
+    if (!embed) return;
+    const apply = (next: Route) => {
+      if (next === routeRef.current) return;
+      hostRouteRef.current = next;
+      routeRef.current = next;
+      setRoute(next);
+    };
+    const pending = consumePendingEmbedRoute();
+    if (pending !== null) apply(pending);
+    const onSetRoute = (event: Event) => {
+      consumePendingEmbedRoute();
+      const next = (event as CustomEvent<{ route: Route }>).detail?.route;
+      if (next) apply(next);
+    };
+    window.addEventListener(EMBED_SET_ROUTE_EVENT, onSetRoute);
+    return () => window.removeEventListener(EMBED_SET_ROUTE_EVENT, onSetRoute);
+  }, [embed, setRoute]);
   const navigate = useCallback((next: Route) => {
-    if (next !== routeRef.current && modelConfigHasUnsavedChanges() && !window.confirm(pickLocale("有未保存的模型配置更改，确定离开吗？", "You have unsaved model configuration changes. Leave anyway?"))) return false;
+    if (!embed && next !== routeRef.current && modelConfigHasUnsavedChanges() && !window.confirm(pickLocale("有未保存的模型配置更改，确定离开吗？", "You have unsaved model configuration changes. Leave anyway?"))) return false;
+    hostRouteRef.current = null;
     routeRef.current = next;
     setRoute(next);
     return true;
-  }, [setRoute]);
+  }, [embed, setRoute]);
   const changeHistory = useCallback((history: SessionHistoryReadModel) => dispatch({ type: "model", model: { history } }), []);
   const changeWorkspaces = useCallback((workspaces: WorkspaceListReadModel) => dispatch({ type: "model", model: { workspaces } }), []);
   const selectHistory = useCallback((entry: SessionHistoryEntry) => { if (navigate("workbench")) setSelectedHistoryId(entry.historyId); }, [setSelectedHistoryId, navigate]);

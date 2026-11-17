@@ -55,6 +55,7 @@ import { applyLightLevel } from "../lux/lightLevel";
 import { LuxAmbient } from "../lux/LuxAmbient";
 import { LuxSpotlight } from "../lux/LuxSpotlight";
 import { applyTheme } from "../themeTransition";
+import { isEmbedMode, notifyInternalThemeIfChanged } from "../embed/websiteEmbed";
 import { desktopNotice } from "../settings/desktopNotice";
 import { openOnboardingTour } from "../onboarding/onboardingState";
 import { AppUpdateDialog } from "../AppUpdateDialog";
@@ -733,12 +734,19 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     }
   }, [expandProject, expandedProjects, expandedProjectsMemory, loadProjectHistory, previewMode.preview, previewProjectId, state.model.workspaces]);
 
+  const embed = isEmbedMode();
+  const prevEmbedThemeRef = useRef(appSettings.theme);
   useEffect(() => {
     if (mdi && !mdi.active) return;
     // Shared appearance is authoritative in the main document, even when this
     // shell's conversation surface is in a native window. Floats mirror it.
     const root = globalThis.document.documentElement;
     applyTheme(root, appSettings.theme);
+    if (embed && prevEmbedThemeRef.current !== appSettings.theme) {
+      const prev = prevEmbedThemeRef.current;
+      prevEmbedThemeRef.current = appSettings.theme;
+      notifyInternalThemeIfChanged(appSettings.theme, prev);
+    }
     root.setAttribute("data-density", appSettings.density);
     applyLightLevel(root, appSettings.light);
     /* 文件图标着色：tri 时根元素挂 data-palette，CSS 只覆盖 token。
@@ -1997,7 +2005,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         go("settings");
         return;
       case "openModelConfig":
-        if (modelConfigHasUnsavedChanges() && !window.confirm(zh ? "有未保存的模型配置更改，重新打开会丢弃草稿。确定继续？" : "You have unsaved model configuration changes. Reopening will discard the draft. Continue?")) return;
+        if (!embed && modelConfigHasUnsavedChanges() && !window.confirm(zh ? "有未保存的模型配置更改，重新打开会丢弃草稿。确定继续？" : "You have unsaved model configuration changes. Reopening will discard the draft. Continue?")) return;
         setModelConfigIntent({ tab: action.tab });
         setMcNonce((value) => value + 1);
         go("model-config");
