@@ -12,6 +12,10 @@ export function SessionTitleMark({
     zh = resolvedLanguage === "zh";
   if (row?.state !== "available" || !row.card || row.title !== title)
     return null;
+  // Native titles already contain their card as "emoji CODE: title".
+  // Keep that stored text intact; only legacy/preview titles need another mark.
+  if (row.card.emoji && title.startsWith(`${row.card.emoji} ${row.card.code}: `))
+    return null;
   const source =
     row.source === "user"
       ? zh
