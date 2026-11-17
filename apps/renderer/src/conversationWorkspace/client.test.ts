@@ -9,6 +9,37 @@ function target() {
   return { bootstrap: vi.fn(async () => structuredClone(contractFixtures.bootstrap)), subscribe: vi.fn(() => () => {}), query: vi.fn(), command: vi.fn(), close: vi.fn(), transportLost: vi.fn() } as unknown as StudioClient & { bootstrap: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn> };
 }
 describe("conversation resource lifetime", () => {
+  it("reads authorized models from each conversation while keeping skills shared by project", async () => {
+    vi.useFakeTimers();
+    const root = target(), project = target(), first = target(), second = target();
+    const workspaceId = "shared-project" as import("@omp-studio/client-contract").WorkspaceId;
+    Object.assign(root, { openContext: vi.fn(async () => project) });
+    const fixture = contractFixtures.queryResponses["models.get"];
+    if (!fixture.ok) throw new Error("fixture");
+    const configured = { ...fixture.result, availableModels: [], availability: { status: "unverified", source: "none" } };
+    const firstModels = { ...configured, availableModels: [{ id: "first-model", provider: "first-provider" }], availability: { status: "verified", source: "runtime", sessionId: "first-session" } };
+    const secondModels = { ...configured, availableModels: [{ id: "second-model", provider: "second-provider" }], availability: { status: "verified", source: "runtime", sessionId: "second-session" } };
+    const skills = { entries: [] };
+    vi.mocked(project.query).mockImplementation(async name => (name === "models.get" ? configured : skills) as never);
+    vi.mocked(first.query).mockResolvedValue(firstModels as never);
+    vi.mocked(second.query).mockResolvedValue(secondModels as never);
+    const sharedFirst = acquireProjectReads(root, workspaceId), sharedSecond = acquireProjectReads(root, workspaceId);
+    const firstClient = createConversationClient(async () => ({ client: first, owned: true, project: sharedFirst.reads, releaseProject: sharedFirst.release }));
+    const secondClient = createConversationClient(async () => ({ client: second, owned: true, project: sharedSecond.reads, releaseProject: sharedSecond.release }));
+    try {
+      expect(await firstClient.query("models.get", {})).toEqual(firstModels);
+      expect(await secondClient.query("models.get", {})).toEqual(secondModels);
+      expect(await firstClient.query("skills.get", {})).toEqual(skills);
+      expect(await secondClient.query("skills.get", {})).toEqual(skills);
+      expect(project.query).not.toHaveBeenCalledWith("models.get", {});
+      expect(project.query).toHaveBeenCalledTimes(1);
+      expect(first.query).toHaveBeenCalledWith("models.get", {});
+      expect(second.query).toHaveBeenCalledWith("models.get", {});
+    } finally {
+      await firstClient.close(); await secondClient.close();
+      await vi.runAllTimersAsync(); vi.useRealTimers();
+    }
+  });
   it("warms the startup project without creating a conversation or closing the root client", async () => {
     vi.useFakeTimers();
     const root = target(), project = target();
@@ -21,7 +52,8 @@ describe("conversation resource lifetime", () => {
     await client.bootstrap(); await vi.advanceTimersByTimeAsync(2100);
     expect(openContext).toHaveBeenCalledWith({ workspaceId });
     expect(openContext).toHaveBeenCalledTimes(1);
-    expect(project.query).toHaveBeenCalledWith("models.get", {});
+    expect(project.query).toHaveBeenCalledWith("skills.get", {});
+    expect(project.query).not.toHaveBeenCalledWith("models.get", {});
     await client.close(); await vi.runAllTimersAsync();
     expect(project.close).toHaveBeenCalledTimes(1); expect(root.close).not.toHaveBeenCalled();
     vi.useRealTimers();

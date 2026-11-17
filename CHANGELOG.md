@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 对话模型目录从当前会话的 Runtime 读取，避免项目共享上下文返回空目录或串用其他会话的授权模型；保留辅助读取等待正文呈现的调度。
+
 ## [0.2.2] - 2026-11-16
 
 ### Added
