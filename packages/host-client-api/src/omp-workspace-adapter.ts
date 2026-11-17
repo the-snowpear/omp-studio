@@ -53,6 +53,7 @@ function toRecord(stored: StoredWorkspace, activeId: string | undefined): Worksp
     root: stored.canonicalPath,
     lastOpenedAt: stored.lastOpenedAt,
     active: stored.workspaceId === activeId,
+    ...(stored.unavailable ? { unavailable: true as const } : {}),
   };
 }
 
@@ -72,7 +73,19 @@ export function createOmpWorkspaceService(options: OmpWorkspaceAdapterOptions): 
   };
 
   return {
-    list(): WorkspaceListReadModel {
+    async list(): Promise<WorkspaceListReadModel> {
+      const previous = options.registry.activeWorkspaceId;
+      await options.registry.refreshAvailability();
+      const active = options.registry.activeWorkspaceId;
+      if (active !== undefined && active !== previous) await activate(options.registry.get(active)!);
+      return toModel(options.registry);
+    },
+
+    async forgetUnavailable(): Promise<WorkspaceListReadModel> {
+      const previous = options.registry.activeWorkspaceId;
+      await options.registry.forgetUnavailable();
+      const active = options.registry.activeWorkspaceId;
+      if (active !== undefined && active !== previous) await activate(options.registry.get(active)!);
       return toModel(options.registry);
     },
 

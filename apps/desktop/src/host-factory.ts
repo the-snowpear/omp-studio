@@ -579,7 +579,9 @@ export function createProductionHostFactory(options?: {
   const registry = new WorkspaceRegistry(productionWorkspaceRegistryPath());
   let registryReady: Promise<void> | undefined;
   const ensureRegistry = (): Promise<void> => {
-    registryReady ??= registry.load();
+    registryReady ??= registry.load().then(() => {
+      for (const workspace of registry.list()) if (workspace.unavailable) hostLog.write("warn", "workspace.stale", `workspace=${workspace.workspaceId}`);
+    });
     return registryReady;
   };
   const pickDirectory = createProductionPickDirectory();
@@ -626,6 +628,7 @@ export function createProductionHostFactory(options?: {
     list: () => innerWorkspaces.list(),
     pick: (input?: { readonly name?: string }) => innerWorkspaces.pick(input),
     openPath: (input: { readonly path: string }) => innerWorkspaces.openPath!(input),
+    forgetUnavailable: () => innerWorkspaces.forgetUnavailable!(),
     async open(input: { readonly workspaceId: WorkspaceId }) {
       const alreadyActive = registry.activeWorkspaceId === input.workspaceId;
       const runtimeBound = activeComposition?.status === "ready";

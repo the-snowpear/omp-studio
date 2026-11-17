@@ -29,6 +29,9 @@ function fakeClient(): StudioClient & { readonly query: ReturnType<typeof vi.fn>
   };
 }
 
+// The recovery inventory uses a root client, independent of the Runtime fixtures below.
+const recoveryClient = { query: async () => ({ workspaces: [] }) } as unknown as StudioClient;
+
 function renderPage(options: {
   preview?: boolean;
   client?: StudioClient;
@@ -41,6 +44,7 @@ function renderPage(options: {
     <PreviewModeProvider switchEnabled>
       <DiagnosticsPage
         client={client}
+        recoveryClient={recoveryClient}
         {...(options.runtime === undefined ? {} : { runtime: options.runtime })}
         {...(options.environment === undefined ? {} : { environment: options.environment })}
       />
@@ -305,6 +309,7 @@ describe("DiagnosticsPage", () => {
       <PreviewModeProvider switchEnabled>
         <DiagnosticsPage
           client={fakeClient()}
+          recoveryClient={recoveryClient}
           runtime={environment.runtime}
           environment={environment}
         />
@@ -376,6 +381,7 @@ describe("DiagnosticsPage", () => {
       <PreviewModeProvider switchEnabled>
         <DiagnosticsPage
           client={fakeClient()}
+          recoveryClient={recoveryClient}
           runtime={environment.runtime}
           environment={environment}
           diagnostics={{
@@ -420,6 +426,7 @@ describe("DiagnosticsPage", () => {
       <PreviewModeProvider switchEnabled>
         <DiagnosticsPage
           client={fakeClient()}
+          recoveryClient={recoveryClient}
           runtime={environment.runtime}
           environment={environment}
         />

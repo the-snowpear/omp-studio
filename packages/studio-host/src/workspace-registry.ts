@@ -11,7 +11,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { lstat, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { canonicalWorkspacePath, sameWorkspacePath } from "./workspace-path.js";
 
@@ -25,6 +25,8 @@ export interface StoredWorkspace {
   name: string;
   /** ISO last-opened timestamp. */
   lastOpenedAt: string;
+  /** Current directory availability; recomputed from disk, never persisted. */
+  unavailable?: true;
 }
 
 /** Persisted file shape: the active id plus the workspace list. */
@@ -47,6 +49,7 @@ function assertStoredWorkspace(value: unknown): asserts value is StoredWorkspace
 
 export class WorkspaceRegistry {
   readonly #workspaces = new Map<string, StoredWorkspace>();
+  readonly #unavailable = new Set<string>();
   #activeWorkspaceId: string | undefined;
 
   constructor(readonly path: string) {}
@@ -67,6 +70,7 @@ export class WorkspaceRegistry {
       throw new TypeError("Workspace registry file must contain a workspaces array");
     }
     this.#workspaces.clear();
+    this.#unavailable.clear();
     this.#activeWorkspaceId = undefined;
     for (const entry of file.workspaces) {
       assertStoredWorkspace(entry);
@@ -78,22 +82,56 @@ export class WorkspaceRegistry {
       }
       this.#activeWorkspaceId = file.activeWorkspaceId;
     }
+    await this.refreshAvailability();
   }
 
   /** Workspaces sorted by `lastOpenedAt` descending. */
   list(): StoredWorkspace[] {
     return [...this.#workspaces.values()]
       .sort((left, right) => right.lastOpenedAt.localeCompare(left.lastOpenedAt))
-      .map((entry) => structuredClone(entry));
+      .map((entry) => this.get(entry.workspaceId)!);
   }
 
   get(workspaceId: string): StoredWorkspace | undefined {
     const entry = this.#workspaces.get(workspaceId);
-    return entry === undefined ? undefined : structuredClone(entry);
+    return entry === undefined ? undefined : {
+      ...structuredClone(entry),
+      ...(this.#unavailable.has(workspaceId) ? { unavailable: true as const } : {}),
+    };
   }
 
   get activeWorkspaceId(): string | undefined {
     return this.#activeWorkspaceId;
+  }
+
+  /** A removed/moved project must not remain the startup execution directory. */
+  async refreshAvailability(): Promise<void> {
+    const unavailable = await Promise.all([...this.#workspaces.values()].map(async entry => {
+      try {
+        const metadata = await lstat(entry.canonicalPath);
+        return !metadata.isDirectory() || metadata.isSymbolicLink() ? entry.workspaceId : undefined;
+      } catch (error) {
+        if (["ENOENT", "ENOTDIR", "EACCES", "EPERM"].includes((error as NodeJS.ErrnoException).code ?? "")) return entry.workspaceId;
+        throw error;
+      }
+    }));
+    this.#unavailable.clear();
+    for (const id of unavailable) if (id !== undefined) this.#unavailable.add(id);
+    if (this.#activeWorkspaceId !== undefined && this.#unavailable.has(this.#activeWorkspaceId)) {
+      await this.#saveRecoveryCopy();
+      this.#activeWorkspaceId = this.list().find(entry => !entry.unavailable)?.workspaceId;
+      await this.#flush();
+    }
+  }
+
+  /** Explicit recovery action: forget records only, preserving projects and sessions. */
+  async forgetUnavailable(): Promise<void> {
+    await this.refreshAvailability();
+    if (this.#unavailable.size === 0) return;
+    await this.#saveRecoveryCopy();
+    for (const id of this.#unavailable) this.#workspaces.delete(id);
+    this.#unavailable.clear();
+    await this.#flush();
   }
 
   /**
@@ -128,6 +166,7 @@ export class WorkspaceRegistry {
         lastOpenedAt: nowIso,
       };
       this.#workspaces.set(refreshed.workspaceId, refreshed);
+      this.#unavailable.delete(refreshed.workspaceId);
       if (activate) this.#activeWorkspaceId = refreshed.workspaceId;
       await this.#flush();
       return structuredClone(refreshed);
@@ -166,6 +205,7 @@ export class WorkspaceRegistry {
     }
     const refreshed: StoredWorkspace = { ...existing, lastOpenedAt: nowIso };
     this.#workspaces.set(refreshed.workspaceId, refreshed);
+    this.#unavailable.delete(refreshed.workspaceId);
     this.#activeWorkspaceId = refreshed.workspaceId;
     await this.#flush();
     return structuredClone(refreshed);
@@ -183,7 +223,7 @@ export class WorkspaceRegistry {
     await mkdir(dirname(this.path), { recursive: true });
     const file: StoredRegistryFile = {
       ...(this.#activeWorkspaceId === undefined ? {} : { activeWorkspaceId: this.#activeWorkspaceId }),
-      workspaces: this.list(),
+      workspaces: this.list().map(({ unavailable, ...entry }) => entry),
     };
     const temporary = `${this.path}.${randomBytes(6).toString("hex")}.tmp`;
     await writeFile(temporary, `${JSON.stringify(file, null, 2)}\n`, {
@@ -191,6 +231,10 @@ export class WorkspaceRegistry {
       flag: "wx",
     });
     await rename(temporary, this.path);
+  }
+
+  async #saveRecoveryCopy(): Promise<void> {
+    await copyFile(this.path, `${this.path}.recovery-${randomBytes(6).toString("hex")}.json`);
   }
 }
 
