@@ -11,14 +11,14 @@ it("a configuration write prevents an older read from replacing the new settings
   const query = vi.fn().mockReturnValueOnce(new Promise<object>(resolve => { resolveOld = resolve; })).mockResolvedValue({ version: "new" });
   const target = { subscribe: () => () => {}, openContext: async () => ({ query, close: async () => {}, subscribe: () => () => {} }) } as unknown as StudioClient;
   const handle = acquireProjectReads(target, "workspace" as WorkspaceId);
-  const old = handle.reads.read("models.get", {});
+  const old = handle.reads.read("skills.get", {});
   await vi.waitFor(() => expect(query).toHaveBeenCalledTimes(1));
-  handle.reads.observe({ kind: "command.receipt", authorityEpoch: 1, receipt: { status: "completed", commandName: "models.roles.write" } } as ClientEvent);
-  const fresh = handle.reads.read("models.get", {});
+  handle.reads.observe({ kind: "command.receipt", authorityEpoch: 1, receipt: { status: "completed", commandName: "skills.setEnabled" } } as ClientEvent);
+  const fresh = handle.reads.read("skills.get", {});
   await vi.waitFor(() => expect(query).toHaveBeenCalledTimes(2));
   resolveOld({ version: "old" });
   await old; expect(await fresh).toEqual({ version: "new" });
-  expect(await handle.reads.read("models.get", {})).toEqual({ version: "new" });
+  expect(await handle.reads.read("skills.get", {})).toEqual({ version: "new" });
   handle.release(); await vi.runAllTimersAsync();
 });
 
@@ -30,11 +30,11 @@ it("a late context opening cannot subscribe or replace a reopened project's conn
   const openContext = vi.fn().mockReturnValueOnce(new Promise<StudioClient>(resolve => { finishOld = resolve; })).mockResolvedValue(current);
   const target = { subscribe: () => () => {}, openContext } as unknown as StudioClient;
   const first = acquireProjectReads(target, "workspace" as WorkspaceId);
-  const pending = first.reads.read("models.get", {});
+  const pending = first.reads.read("skills.get", {});
   const rejected = expect(pending).rejects.toThrow("closed while opening");
   first.release(); await vi.advanceTimersByTimeAsync(30_001);
   const second = acquireProjectReads(target, "workspace" as WorkspaceId);
-  await second.reads.read("skills.get", {});
+  await second.reads.read("projects.list", {});
   finishOld(old as unknown as StudioClient); await rejected;
   await second.reads.read("history.list", {});
   expect(openContext).toHaveBeenCalledTimes(2);
@@ -45,14 +45,14 @@ it("a late context opening cannot subscribe or replace a reopened project's conn
 
 it("reopening a conversation reuses project data and releases the project context after grace", async () => {
   vi.useFakeTimers();
-  const query = vi.fn(async () => ({ models: [] })), close = vi.fn(async () => {});
+  const query = vi.fn(async () => ({ entries: [] })), close = vi.fn(async () => {});
   const target = { subscribe: () => () => {}, openContext: vi.fn(async () => ({ query, close, subscribe: () => () => {} })) } as unknown as StudioClient;
   const a = acquireProjectReads(target, "workspace" as WorkspaceId);
-  await Promise.all([a.reads.read("models.get", {}), a.reads.read("models.get", {})]);
+  await Promise.all([a.reads.read("skills.get", {}), a.reads.read("skills.get", {})]);
   a.release();
   await vi.advanceTimersByTimeAsync(500);
   const b = acquireProjectReads(target, "workspace" as WorkspaceId);
-  await b.reads.read("models.get", {});
+  await b.reads.read("skills.get", {});
   expect(query).toHaveBeenCalledTimes(1); expect(target.openContext).toHaveBeenCalledTimes(1);
   b.release(); await vi.advanceTimersByTimeAsync(30_000);
   expect(close).toHaveBeenCalledTimes(1);

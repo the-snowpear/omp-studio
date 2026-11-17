@@ -49,12 +49,13 @@ export function bindBodyReady(client: ReadClient, ready: () => void): void { bod
 export function conversationBodyReady(client: ReadClient): void { bodySignals.get(client)?.(); }
 
 const metadataTtl: Partial<Record<QueryName, number>> = {
-  "models.get": 30_000, "skills.get": 30_000, "projects.list": 5_000,
+  // Authorized model availability belongs to the conversation's Runtime.
+  "skills.get": 30_000, "projects.list": 5_000,
   "history.list": 3_000, "workspace.fileTree": 3_000, "git.repository.get": 3_000, "git.repository.summary": 3_000,
 };
 export function isProjectRead(name: QueryName): boolean { return name in metadataTtl; }
 export function isAuxiliaryRead(name: QueryName): boolean {
-  return isProjectRead(name) || name === "session.telemetry.read" || name === "session.agents.list" || name.startsWith("evaluations.");
+  return isProjectRead(name) || name === "models.get" || name === "session.telemetry.read" || name === "session.agents.list" || name.startsWith("evaluations.");
 }
 
 class ConnectionReads {
@@ -221,7 +222,8 @@ export class ProjectReads {
     this.owner.background = this.owner.background.catch(() => {}).then(async () => {
       if (signal.aborted) return;
       await wait(2000);
-      for (const name of ["models.get", "skills.get"] as const) { if (!await idle()) return; await this.read(name, {}, true).catch(() => {}); }
+      if (!await idle()) return;
+      await this.read("skills.get", {}, true).catch(() => {});
       if (!await idle()) return;
       const history = await this.read("history.list", { workspaceId: this.workspaceId, limit: 6, status: "active" }, true);
       if (!await idle()) return;
