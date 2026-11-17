@@ -1,5 +1,4 @@
-/* Reset and the few behaviours every concept shares. Each concept owns its
-   own palette, type and layout; nothing visual lives here. */
+/* Base reset and foundational defaults. Visual tokens and layout live in src/ and ui.css. */
 *,
 *::before,
 *::after {

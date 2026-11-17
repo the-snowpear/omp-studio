@@ -1,8 +1,8 @@
 // Review screenshots with the local Chromium, without depending on the Browser pane.
-//   node tools/shot.mjs a/ hero.png
-//   node tools/shot.mjs a/ feat.png --scroll 1800 --w 1440 --h 900
-//   node tools/shot.mjs b/ m.png --w 390 --h 844 --full
-//   node tools/shot.mjs a/ x.png --eval "document.querySelector('.x').click()" --wait 800
+//   node tools/shot.mjs . hero.png
+//   node tools/shot.mjs . feat.png --scroll 1800 --w 1440 --h 900
+//   node tools/shot.mjs . m.png --w 390 --h 844 --full
+//   node tools/shot.mjs . x.png --eval "document.querySelector('.x').click()" --wait 800
 // Options: --w --h --scroll <px|selector> --full --dark --reduce --wait <ms> --eval <js> --dpr <n> --seq <px,px,...>
 //          --mouse "move 600 120; down; move 20 300; up; wait 500; click 30 40"  (real pointer input, runs before --eval)
 // Page errors and console errors are printed. Output goes to .shots/.
@@ -34,8 +34,8 @@ page.on("pageerror", (e) => console.log("[pageerror]", e.message));
 page.on("console", (m) => m.type() === "error" && console.log("[console.error]", m.text()));
 page.on("requestfailed", (r) => !r.url().includes("api.github.com") && console.log("[requestfailed]", r.url()));
 
-// Git Bash rewrites a leading "/" into its install path; write routes as "a/" or "kit.html".
-await page.goto(`http://localhost:5190/${route.replace(/^.*Git\//, "").replace(/^\//, "")}`, { waitUntil: "load" });
+// Git Bash rewrites a leading "/" into its install path; write routes as "." or "kit.html".
+await page.goto(`http://localhost:5190/${route === "." ? "" : route.replace(/^.*Git\//, "").replace(/^\//, "")}`, { waitUntil: "load" });
 await page.evaluate(() => document.fonts.ready);
 await page.waitForTimeout(Number(opt("wait", 900)));
 

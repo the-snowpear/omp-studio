@@ -12,5 +12,5 @@
     "skipLibCheck": true,
     "isolatedModules": true
   },
-  "include": ["a", "b", "c", "shared", "vite.config.ts"]
+  "include": ["src", "shared", "vite.config.ts"]
 }

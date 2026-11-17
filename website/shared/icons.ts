@@ -1,7 +1,5 @@
-// Icons used across the three concepts. Lucide strokes for product chrome,
+// Icons used across the site. Lucide strokes for product chrome,
 // hand-drawn marks for brands Lucide does not carry.
-import activity from "lucide-static/icons/activity.svg?raw";
-import arrowDown from "lucide-static/icons/arrow-down.svg?raw";
 import arrowLeft from "lucide-static/icons/arrow-left.svg?raw";
 import arrowRight from "lucide-static/icons/arrow-right.svg?raw";
 import arrowUp from "lucide-static/icons/arrow-up.svg?raw";
@@ -12,7 +10,6 @@ import brain from "lucide-static/icons/brain.svg?raw";
 import check from "lucide-static/icons/check.svg?raw";
 import chevronDown from "lucide-static/icons/chevron-down.svg?raw";
 import chevronRight from "lucide-static/icons/chevron-right.svg?raw";
-import clock from "lucide-static/icons/clock.svg?raw";
 import code from "lucide-static/icons/code.svg?raw";
 import copy from "lucide-static/icons/copy.svg?raw";
 import download from "lucide-static/icons/download.svg?raw";
@@ -34,18 +31,12 @@ import mic from "lucide-static/icons/mic.svg?raw";
 import minus from "lucide-static/icons/minus.svg?raw";
 import monitor from "lucide-static/icons/monitor.svg?raw";
 import moon from "lucide-static/icons/moon.svg?raw";
-import mousePointer from "lucide-static/icons/mouse-pointer-2.svg?raw";
-import panelBottom from "lucide-static/icons/panel-bottom.svg?raw";
-import panelLeft from "lucide-static/icons/panel-left.svg?raw";
-import panelRight from "lucide-static/icons/panel-right.svg?raw";
 import paperclip from "lucide-static/icons/paperclip.svg?raw";
-import pictureInPicture from "lucide-static/icons/picture-in-picture-2.svg?raw";
 import pin from "lucide-static/icons/pin.svg?raw";
 import plus from "lucide-static/icons/plus.svg?raw";
 import refresh from "lucide-static/icons/rotate-cw.svg?raw";
 import ruler from "lucide-static/icons/ruler.svg?raw";
 import scrollText from "lucide-static/icons/scroll-text.svg?raw";
-import search from "lucide-static/icons/search.svg?raw";
 import server from "lucide-static/icons/server.svg?raw";
 import settings from "lucide-static/icons/settings.svg?raw";
 import shield from "lucide-static/icons/shield-alert.svg?raw";
@@ -59,11 +50,11 @@ const brand = (d: string, vb = "0 0 24 24") =>
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" fill="currentColor" aria-hidden="true"><path d="${d}"/></svg>`;
 
 export const icon = {
-  activity, arrowDown, arrowLeft, arrowRight, arrowUp, atSign, bot, boxes, brain, check,
-  chevronDown, chevronRight, clock, code, copy, download, file, fileDiff, folder, folderOpen,
+  arrowLeft, arrowRight, arrowUp, atSign, bot, boxes, brain, check,
+  chevronDown, chevronRight, code, copy, download, file, fileDiff, folder, folderOpen,
   gitBranch, globe, history, house, keyboard, layers, layoutGrid, maximize, messageCircle,
-  messageSquare, mic, minus, monitor, moon, mousePointer, panelBottom, panelLeft, panelRight,
-  paperclip, pictureInPicture, pin, plus, refresh, ruler, scrollText, search, server, settings,
+  messageSquare, mic, minus, monitor, moon,
+  paperclip, pin, plus, refresh, ruler, scrollText, server, settings,
   shield, slash, sparkles, sun, terminal, x,
   windows: brand("M3 5.1 10.6 4v7.4H3zM11.6 3.9 21 2.5v8.9h-9.4zM3 12.4h7.6v7.5L3 18.8zM11.6 12.4H21v9l-9.4-1.3z"),
   apple: brand(

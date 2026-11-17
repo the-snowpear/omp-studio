@@ -1,8 +1,6 @@
 import { resolve } from "node:path";
 import { defineConfig } from "vite";
 
-const page = (name: string) => resolve(import.meta.dirname, name);
-
 export default defineConfig({
   base: "./",
   server: { port: 5190, strictPort: true },
@@ -10,10 +8,7 @@ export default defineConfig({
     target: "es2022",
     rollupOptions: {
       input: {
-        index: page("index.html"),
-        a: page("a/index.html"),
-        b: page("b/index.html"),
-        c: page("c/index.html"),
+        index: resolve(import.meta.dirname, "index.html"),
       },
     },
   },

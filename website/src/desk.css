@@ -1,4 +1,4 @@
-/* Concept A: the playable desk, its windows, the layout picker and the tool shelf. */
+/* The playable desk, its windows, the layout picker and the tool shelf. */
 .desk {
   position: relative;
   min-width: 0;
@@ -273,6 +273,80 @@ html[data-wm-dragging] {
 .dock-item:focus-visible .dock-tip {
   opacity: 1;
   translate: 0;
+}
+
+/* ---------- cues: pointing at a task or a tool in the side panel lights up what it is about ---------- */
+@keyframes cue-ring {
+  from {
+    outline: 2px solid color-mix(in srgb, var(--accent) 85%, transparent);
+    outline-offset: 0;
+  }
+  to {
+    outline: 2px solid transparent;
+    outline-offset: 7px;
+  }
+}
+html[data-cue="pin"] .wm-win [data-act="pin"],
+html[data-cue="layout"] .wm-win [data-act="max"] {
+  background: var(--o-accent-soft);
+  color: var(--o-accent);
+  animation: cue-ring 1.2s var(--ease-out) infinite;
+}
+html[data-cue="theme"] #theme {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent-ink);
+  animation: cue-ring 1.2s var(--ease-out) infinite;
+}
+html[data-cue="open"] .dock,
+.dock-item[data-cue] {
+  animation: cue-ring 1.2s var(--ease-out) infinite;
+}
+.dock-item[data-cue] {
+  --grow: 0.7;
+  background: color-mix(in srgb, var(--tint) 14%, var(--o-surface));
+}
+.dock-item[data-cue] .dock-tip {
+  opacity: 1;
+  translate: 0;
+}
+/* Snapping: the title bar to take hold of, and the two edges to carry it to. */
+html[data-cue="snap"] .wm-win[data-focused] .ow-bar {
+  background-image: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--o-accent) 30%, transparent) 50%, transparent 70%);
+  background-size: 240% 100%;
+  animation: cue-sweep 1.4s linear infinite;
+}
+@keyframes cue-sweep {
+  from { background-position: 130% 0; }
+  to { background-position: -130% 0; }
+}
+.desk::before,
+.desk::after {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 80px;
+  z-index: 8990;
+  width: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 22px 4px color-mix(in srgb, var(--accent) 55%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s;
+}
+.desk::before {
+  left: 4px;
+}
+.desk::after {
+  right: 4px;
+}
+html[data-cue="snap"] .desk::before,
+html[data-cue="snap"] .desk::after {
+  opacity: 0.9;
+  animation: cue-edge 0.9s ease-in-out infinite alternate;
+}
+@keyframes cue-edge {
+  to { opacity: 0.3; }
 }
 
 /* ---------- pinned layer: windows that stay above the page ---------- */

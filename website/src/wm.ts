@@ -394,17 +394,20 @@ export class Workbench {
     let base = start.rect;
     let moving = false;
     let zone: Cell | null = null;
+    document.documentElement.dataset.wmDragging = "";
 
     const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return;
       const dx = ev.clientX - start.px;
       const dy = ev.clientY - start.py;
       if (!moving) {
         if (Math.hypot(dx, dy) < 4) return;
         moving = true;
-        bar.setPointerCapture(e.pointerId);
+        try {
+          bar.setPointerCapture(e.pointerId);
+        } catch { /* synthetic pointers may not support capture */ }
         win.tween?.kill();
         win.el.dataset.dragging = "";
-        document.documentElement.dataset.wmDragging = "";
         if (win.cell) {
           // Leaving a snap: shrink back to the floating size under the pointer.
           const grab = (start.px - win.el.getBoundingClientRect().left) / win.rect.w;
@@ -428,13 +431,13 @@ export class Workbench {
     };
 
     const finish = (cancelled: boolean) => {
-      bar.removeEventListener("pointermove", move);
-      bar.removeEventListener("pointerup", up);
-      bar.removeEventListener("pointercancel", cancel);
+      removeEventListener("pointermove", move);
+      removeEventListener("pointerup", up);
+      removeEventListener("pointercancel", cancel);
       removeEventListener("keydown", esc, true);
-      if (!moving) return;
       delete win.el.dataset.dragging;
       delete document.documentElement.dataset.wmDragging;
+      if (!moving) return;
       this.preview.removeAttribute("data-on");
       if (cancelled) {
         win.cell = start.cell;
@@ -450,16 +453,20 @@ export class Workbench {
         this.emit("move");
       }
     };
-    const up = () => finish(false);
-    const cancel = () => finish(true);
+    const up = (ev: PointerEvent) => {
+      if (ev.pointerId === e.pointerId) finish(false);
+    };
+    const cancel = (ev: PointerEvent) => {
+      if (ev.pointerId === e.pointerId) finish(true);
+    };
     const esc = (ev: KeyboardEvent) => {
       if (ev.key !== "Escape" || !moving) return;
       ev.preventDefault();
       finish(true);
     };
-    bar.addEventListener("pointermove", move);
-    bar.addEventListener("pointerup", up);
-    bar.addEventListener("pointercancel", cancel);
+    addEventListener("pointermove", move);
+    addEventListener("pointerup", up);
+    addEventListener("pointercancel", cancel);
     addEventListener("keydown", esc, true);
   }
 
@@ -469,12 +476,16 @@ export class Workbench {
     e.preventDefault();
     e.stopPropagation();
     const grip = e.currentTarget as HTMLElement;
-    grip.setPointerCapture(e.pointerId);
+    try {
+      grip.setPointerCapture(e.pointerId);
+    } catch { /* synthetic pointers may not support capture */ }
     win.tween?.kill();
     win.cell = null;
     const start = { px: e.clientX, py: e.clientY, ...win.rect };
     win.el.dataset.dragging = "";
+    document.documentElement.dataset.wmDragging = "";
     const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return;
       const dx = ev.clientX - start.px;
       const dy = ev.clientY - start.py;
       const r = win.rect;
@@ -490,15 +501,19 @@ export class Workbench {
       }
       this.apply(win);
     };
-    const up = () => {
-      grip.removeEventListener("pointermove", move);
+    const up = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return;
+      removeEventListener("pointermove", move);
+      removeEventListener("pointerup", up);
+      removeEventListener("pointercancel", up);
       delete win.el.dataset.dragging;
+      delete document.documentElement.dataset.wmDragging;
       if (!win.pinned) win.float = { ...win.rect };
       this.emit("move");
     };
-    grip.addEventListener("pointermove", move);
-    grip.addEventListener("pointerup", up, { once: true });
-    grip.addEventListener("pointercancel", up, { once: true });
+    addEventListener("pointermove", move);
+    addEventListener("pointerup", up);
+    addEventListener("pointercancel", up);
   }
 
   // ---------- keyboard ----------

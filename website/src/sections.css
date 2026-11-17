@@ -1,4 +1,4 @@
-/* Concept A: sections below the hero. Rules miniature, feature viewer, download, footer. */
+/* Sections below the hero. Rules miniature, feature viewer, download, footer. */
 .sec {
   padding: clamp(72px, 11vh, 128px) clamp(20px, 4vw, 64px) 0;
 }

@@ -6,15 +6,22 @@
 <title>OMP Studio：把 Agent 装进一张随你摆放的工作台</title>
 <meta name="description" content="OMP Studio 是 oh-my-pi 的桌面工作台。对话、Git、终端和浏览器都是窗口：拖出来，吸附分屏，停到任意一侧，或钉成独立窗口。支持 Windows 与 macOS。">
 <meta name="theme-color" content="#f6f5fb">
-<link rel="icon" href="../favicon.ico">
+<link rel="icon" href="./favicon.ico">
 <script>
   // Before first paint, so a returning dark-theme visitor never sees a light flash.
   try {
     const saved = localStorage.getItem("omp-site-theme");
     if (saved === "dark" || (!saved && matchMedia("(prefers-color-scheme: dark)").matches)) document.documentElement.dataset.theme = "dark";
   } catch {}
+  // The side panel plays an entrance. Hold it back until the script takes over, and give up waiting after a while.
+  if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    document.documentElement.dataset.intro = "pending";
+    setTimeout(() => {
+      if (document.documentElement.dataset.intro === "pending") delete document.documentElement.dataset.intro;
+    }, 3500);
+  }
 </script>
-<script type="module" src="./main.ts"></script>
+<script type="module" src="./src/main.ts"></script>
 </head>
 <body>
 <a class="skip" href="#windows">跳过演示，直接看介绍</a>
@@ -36,22 +43,38 @@
 <main>
   <!-- The hero is laid out like the app itself: a side panel and a workspace. -->
   <section class="hero" id="desk">
-    <div class="pitch">
-      <h1>把 Agent 装进<br>一张随你摆放的<br>工作台</h1>
-      <p class="lede">OMP Studio 是 <a href="https://github.com/can1357/oh-my-pi">oh-my-pi</a> 的桌面工作台。对话、Git、终端和浏览器都是窗口：拖出来，吸附分屏，停到任意一侧，或钉成独立窗口。</p>
-      <div class="cta">
-        <a class="btn btn-primary btn-lg" href="#download" data-dl-primary><span data-dl-icon></span><span data-dl-label>下载 OMP Studio</span></a>
-        <span class="cta-note" data-dl-note>Windows 与 macOS，MIT 开源</span>
+    <div class="pitch" id="pitch">
+      <div class="pitch-top">
+        <!-- The headline is read from the first span; the second is the same sentence set as movable type. -->
+        <h1>
+          <span class="sr-only">把 Agent 装进一张随你摆放的工作台</span>
+          <span class="h-vis" aria-hidden="true">
+            <span class="h-line">把 Agent 装进</span>
+            <span class="h-line">一张<span class="h-move" id="h-move"><span class="h-slot"></span><span class="h-piece"><span class="h-frame"><i></i><i></i><i></i><i></i></span><span class="h-ink">随你摆放</span></span><span class="h-cursor"><svg viewBox="0 0 20 20" width="20" height="20"><path d="M3.3 2.4 16.7 8.7 10.8 10.7 8.8 16.6z"/></svg><b>你</b></span></span>的</span>
+            <span class="h-line">工作台</span>
+          </span>
+        </h1>
+        <p class="lede">OMP Studio 是 <a href="https://github.com/can1357/oh-my-pi">oh-my-pi</a> 的桌面工作台。<button type="button" class="tw" data-open="chat">对话</button>、<button type="button" class="tw" data-open="git">Git</button>、<button type="button" class="tw" data-open="terminal">终端</button>和<button type="button" class="tw" data-open="browser">浏览器</button>都是窗口：拖出来，吸附分屏，或钉成独立窗口。</p>
       </div>
 
-      <section class="quests" aria-labelledby="quests-h">
-        <h2 id="quests-h"><span class="wide-only">右边</span><span class="narrow-only">下面</span>这张是真的能用的，试试看</h2>
+      <div class="cta">
+        <a class="dl-btn" href="#download" data-dl-primary><span class="dl-btn-os" data-dl-icon></span><span data-dl-label>下载 OMP Studio</span></a>
+        <p class="cta-meta"><span id="cta-meta">Windows、macOS 与 Linux</span><a href="#download">其他平台</a></p>
+      </div>
+
+      <div class="pitch-gap" aria-hidden="true"></div>
+
+      <section class="quests" id="quests-card" aria-labelledby="quests-h">
+        <header class="quests-head">
+          <h2 id="quests-h"><span class="wide-only">右边</span><span class="narrow-only">下面</span>这张是真的能用的，试试看</h2>
+          <span class="q-meter" id="q-meter" role="img" aria-label="已完成 0 项，共 5 项"><span aria-hidden="true"><b id="q-count">0</b> / 5</span></span>
+        </header>
         <ol id="quests">
-          <li data-quest="snap"><span class="q-box"></span><span>拖住窗口顶栏，贴到左右边缘，吸附成半屏</span></li>
-          <li data-quest="layout"><span class="q-box"></span><span><span class="hover-only">鼠标停在最大化按钮上</span><span class="touch-only">点一下最大化按钮</span>，选一个布局模板</span></li>
-          <li data-quest="open"><span class="q-box"></span><span>从底部工具架再打开一个工具</span></li>
-          <li data-quest="pin"><span class="q-box"></span><span>点图钉钉住一个窗口，然后往下滚动</span></li>
-          <li data-quest="theme"><span class="q-box"></span><span>点右上角的月亮，换成深色</span></li>
+          <li data-quest="snap"><span class="q-box"></span><span class="q-text">拖住窗口顶栏，贴到左右边缘，吸附成半屏</span></li>
+          <li data-quest="layout"><span class="q-box"></span><span class="q-text"><span class="hover-only">鼠标停在最大化按钮上</span><span class="touch-only">点一下最大化按钮</span>，选一个布局模板</span></li>
+          <li data-quest="open"><span class="q-box"></span><span class="q-text">从底部工具架再打开一个工具</span></li>
+          <li data-quest="pin"><span class="q-box"></span><span class="q-text">点图钉钉住一个窗口，然后往下滚动</span></li>
+          <li data-quest="theme"><span class="q-box"></span><span class="q-text">点右上角的月亮，换成深色</span></li>
         </ol>
         <p class="quests-done" id="quests-done" hidden>五项都做完了，真实的 OMP Studio 就是这样用的。<a href="#download">去下载</a></p>
       </section>

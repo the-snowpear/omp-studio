@@ -44,19 +44,19 @@ const snapshotAsset = (platform: Platform, file: string, bytes: number): Asset =
   label: META[platform].label,
   requires: META[platform].requires,
   file,
-  url: `${RELEASES_URL}/download/v0.1.17/${file}`,
+  url: `${RELEASES_URL}/download/v0.2.0/${file}`,
   bytes,
 });
 
 const SNAPSHOT: Release = {
-  version: "0.1.17",
-  date: "2026-10-29",
-  page: `${RELEASES_URL}/tag/v0.1.17`,
+  version: "0.2.0",
+  date: "2026-11-13",
+  page: `${RELEASES_URL}/tag/v0.2.0`,
   live: false,
   assets: [
-    snapshotAsset("win-x64", "OMP-Studio-Setup-0.1.17-windows-x64.exe", 221068034),
-    snapshotAsset("win-arm64", "OMP-Studio-Setup-0.1.17-windows-arm64.exe", 209474548),
-    snapshotAsset("mac-arm64", "OMP-Studio-0.1.17-macos-arm64.dmg", 252853023),
+    snapshotAsset("win-x64", "OMP-Studio-Setup-0.2.0-windows-x64.exe", 232629277),
+    snapshotAsset("win-arm64", "OMP-Studio-Setup-0.2.0-windows-arm64.exe", 218641142),
+    snapshotAsset("mac-arm64", "OMP-Studio-0.2.0-macos-arm64.dmg", 259376896),
   ],
 };
 
@@ -129,7 +129,7 @@ export function predatesWorkbench(release: Release): boolean {
 }
 
 export const SOURCE_COMMANDS = [
-  "git clone --recurse-submodules https://github.com/the-snowpear/omp-studio.git",
+  `git clone --branch ${WORKBENCH_VERSION} --recurse-submodules https://github.com/the-snowpear/omp-studio.git`,
   "cd omp-studio",
   "npm install",
   "npm run omp:overlay:apply",

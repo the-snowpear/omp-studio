@@ -173,13 +173,12 @@ export function ompWindow(options: WindowOptions): HTMLElement {
 // ---------------- Screenshots of the app's full pages ----------------
 const shotUrls = import.meta.glob<string>("./shots/*.webp", { eager: true, query: "?url", import: "default" });
 
-export type Shot = "home" | "history" | "agent-hub" | "model-config" | "capabilities" | "settings" | "workbench" | "snap-picker";
+export type Shot = "home" | "history" | "agent-hub" | "model-config" | "capabilities" | "settings";
 
 /** URL of a real screenshot (recorded in preview mode with demo data). */
 export const shot = (name: Shot, theme: Theme = "light") => shotUrls[`./shots/${name}-${theme}.webp`]!;
 
-// ---------------- Copy shared by all three concepts ----------------
-// Facts only; each concept writes its own headlines around them.
+// ---------------- Shared copy & layout definitions ----------------
 
 /** The six layout templates of the snap picker, as [x, y, w, h] fractions. */
 export const LAYOUTS: { name: string; cells: [number, number, number, number][] }[] = [
@@ -228,11 +227,4 @@ export const EXTRAS: Extra[] = [
   { icon: "mic", title: "语音输入", text: "点击或按住空格听写，内容插入到光标位置。" },
   { icon: "ruler", title: "评测工作区", text: "原生基准与指令遵循评测，后台执行，历史对比。" },
   { icon: "keyboard", title: "键盘可达", text: "F6 在区域间切换焦点，方向键微调分界线，Esc 取消拖动。" },
-];
-
-export const FACTS = [
-  { n: "5", label: "种停靠位置" },
-  { n: "6", label: "种分屏模板" },
-  { n: "8", label: "向窗口缩放" },
-  { n: "3", label: "个桌面安装包" },
 ];

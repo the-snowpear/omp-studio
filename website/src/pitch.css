@@ -1,0 +1,488 @@
+/* The hero's side panel: headline, lede, download, things to try.
+   At rest it is type and one button. Everything else waits for the visitor to do something. */
+
+.pitch {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: clamp(24px, 4vh, 48px) clamp(24px, 2.8vw, 46px) clamp(20px, 3.2vh, 34px);
+  border-right: 1px solid var(--line);
+  background: radial-gradient(90% 48% at 0% 0%, color-mix(in srgb, var(--wall-a) 70%, transparent), transparent 70%), var(--panel);
+  overflow: hidden auto;
+  container-type: inline-size;
+}
+/* Spare height goes above the headline and above the list, a little more to the list. */
+.pitch::before {
+  content: "";
+  flex: 2 1 0;
+}
+.pitch-gap {
+  flex: 3 1 0;
+  min-height: 28px;
+}
+/* Held back until the entrance takes over (see the script in index.html). */
+html[data-intro="pending"] .pitch > * {
+  opacity: 0;
+}
+
+/* ---------- headline ---------- */
+.pitch-top {
+  display: grid;
+  gap: clamp(16px, 2.6vh, 26px);
+}
+.pitch h1 {
+  /* The middle line is seven characters; it must never wrap. */
+  font-size: min(var(--step-4), 13.6cqi);
+  font-weight: 800;
+  line-height: 1.16;
+  letter-spacing: -0.035em;
+}
+.h-vis,
+.h-line {
+  display: block;
+}
+.h-line {
+  white-space: nowrap;
+}
+.ch,
+.ch-i {
+  display: inline-block;
+}
+/* Each character rises out of its own slot; the slot only exists while the entrance runs. */
+html[data-intro] .ch {
+  clip-path: inset(-0.16em -0.08em -0.22em);
+}
+
+/* "随你摆放" is a thing you can pick up. Its frame only shows when a pointer is on it;
+   in the air it leaves a slot behind and snaps back into it. */
+.h-move {
+  position: relative;
+  display: inline-block;
+  margin-inline: 0.07em 0.09em;
+}
+.h-slot,
+.h-frame {
+  position: absolute;
+  inset: 0.06em -0.085em 0 -0.06em;
+  border-radius: 0.11em;
+}
+.h-slot {
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 60%, transparent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+.h-move[data-away] .h-slot {
+  opacity: 1;
+}
+.h-slot[data-snap] {
+  animation: slot-snap 0.6s var(--ease-out);
+}
+@keyframes slot-snap {
+  from {
+    opacity: 1;
+    scale: 1.06 1.18;
+    border-style: solid;
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  to {
+    opacity: 0;
+    scale: 1;
+    border-style: solid;
+  }
+}
+.h-piece {
+  position: relative;
+  display: inline-block;
+  font-family: var(--display);
+  font-weight: 800;
+  line-height: 1.16;
+  letter-spacing: -0.035em;
+  white-space: nowrap;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  isolation: isolate;
+}
+.h-frame {
+  z-index: -1;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  opacity: 0;
+  transition: opacity 0.35s, background 0.25s, box-shadow 0.25s;
+}
+.h-frame i {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid var(--accent);
+  border-radius: 2px;
+  background: var(--panel);
+}
+.h-frame i:nth-child(1) { top: -4px; left: -4px; }
+.h-frame i:nth-child(2) { top: -4px; right: -4px; }
+.h-frame i:nth-child(3) { bottom: -4px; left: -4px; }
+.h-frame i:nth-child(4) { bottom: -4px; right: -4px; }
+.h-piece[data-lifted] .h-frame {
+  opacity: 1;
+  background: var(--panel);
+  box-shadow: 0 2px 4px rgba(24, 20, 48, 0.06), 0 22px 44px -16px rgba(40, 24, 110, 0.34);
+}
+@media (hover: hover) {
+  .h-piece:hover .h-frame {
+    opacity: 1;
+    transition-duration: 0.15s, 0.25s, 0.25s;
+  }
+}
+.h-piece[data-lifted] {
+  cursor: grabbing;
+}
+:root[data-theme="dark"] .h-piece[data-lifted] .h-frame {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5), 0 22px 44px -16px rgba(0, 0, 0, 0.9);
+}
+/* The one piece of colour in the panel. */
+.h-ink {
+  background: linear-gradient(96deg, var(--brand-b) 8%, var(--brand-c) 96%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+/* While it is in the air the piece lives above the whole page, so it can cross onto the desk. */
+.h-ghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+
+/* The cursor that sets the phrase down as the page opens. It leaves once that is done. */
+.h-cursor {
+  position: absolute;
+  top: calc(100% - 0.13em);
+  left: calc(100% - 0.02em);
+  z-index: 3;
+  display: flex;
+  align-items: flex-start;
+  opacity: 0;
+  pointer-events: none;
+}
+.h-cursor svg {
+  flex: none;
+  overflow: visible;
+  filter: drop-shadow(0 2px 3px rgba(40, 24, 110, 0.28));
+}
+.h-cursor path {
+  fill: var(--accent);
+  stroke: #fff;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.h-cursor b {
+  margin: 13px 0 0 -5px;
+  padding: 0 8px;
+  border-radius: 4px 999px 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-family: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  letter-spacing: 0;
+}
+
+/* ---------- lede: the four tools are words you can press ---------- */
+.lede {
+  max-width: 30em;
+  color: var(--ink-2);
+  font-size: 1.0625rem;
+  line-height: 1.8;
+  text-wrap: pretty;
+}
+.lede a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.3em;
+  transition: text-decoration-color 0.15s;
+}
+.lede a:hover {
+  text-decoration-color: var(--accent);
+}
+/* Plain words until pointed at; then each takes its window's colour. */
+.tw {
+  --tint: var(--accent);
+  margin: 0 -0.2em;
+  padding: 0.05em 0.2em;
+  border: 0;
+  border-radius: 0.4em;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 0.2s, color 0.2s;
+}
+.tw:hover,
+.tw:focus-visible {
+  background: color-mix(in srgb, var(--tint) 13%, transparent);
+  color: color-mix(in srgb, var(--tint) 62%, var(--ink));
+}
+
+/* ---------- download ---------- */
+.cta {
+  display: grid;
+  justify-items: start;
+  gap: 14px;
+  margin-top: clamp(24px, 3.8vh, 40px);
+}
+.dl-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 48px;
+  padding: 0 22px 0 18px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 1rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 1px 2px rgba(40, 24, 110, 0.18), 0 10px 22px -14px var(--accent);
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  transition: translate 0.3s var(--ease-out), scale 0.15s var(--ease-out), box-shadow 0.3s;
+}
+/* One pass of light when the pointer arrives; nothing moves until then. */
+.dl-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, 0.26) 50%, transparent 62%);
+  translate: -101% 0;
+  pointer-events: none;
+}
+@media (hover: hover) {
+  .dl-btn:hover {
+    translate: 0 -2px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 1px 2px rgba(40, 24, 110, 0.18), 0 18px 28px -14px var(--accent);
+  }
+  .dl-btn:hover::after {
+    translate: 101% 0;
+    transition: translate 0.75s var(--ease-out);
+  }
+}
+.dl-btn:active {
+  translate: 0;
+  scale: 0.98;
+}
+.dl-btn-os {
+  display: inline-flex;
+  width: 1.1em;
+  height: 1.1em;
+}
+.dl-btn-os:empty {
+  display: none;
+}
+.cta-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 14px;
+  color: var(--ink-3);
+  font-size: var(--step--1);
+}
+.cta-meta span + span::before {
+  content: "·";
+  margin: 0 0.5em;
+  opacity: 0.6;
+}
+/* The file size is the first thing to go when the panel is too narrow for one line. */
+@container (max-width: 350px) {
+  .cta-meta .wide {
+    display: none;
+  }
+}
+.cta-meta a {
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.3em;
+  transition: color 0.15s, text-decoration-color 0.15s;
+}
+.cta-meta a:hover {
+  color: var(--ink);
+  text-decoration-color: var(--accent);
+}
+
+/* ---------- things to try: a short list under a rule, no box ---------- */
+.quests {
+  padding-top: clamp(14px, 2.2vh, 20px);
+  border-top: 1px solid var(--line);
+}
+.quests-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.quests h2 {
+  font-family: var(--text);
+  font-size: var(--step--1);
+  font-weight: 600;
+  line-height: 1.6;
+  letter-spacing: 0;
+  color: var(--ink);
+}
+.q-meter {
+  flex: none;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.q-meter b {
+  display: inline-block;
+  font-weight: inherit;
+  transition: color 0.3s;
+}
+.q-meter[data-some] b {
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.q-meter[data-bump] b {
+  animation: q-bump 0.5s var(--ease-out);
+}
+@keyframes q-bump {
+  35% { scale: 1.5; }
+}
+.quests ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.quests li {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 5px 0;
+  color: var(--ink-2);
+  font-size: var(--step--1);
+  line-height: 1.6;
+  transition: color 0.2s;
+}
+.q-text {
+  flex: 1;
+  min-width: 0;
+}
+.q-box {
+  position: relative;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--line-2);
+  transition: box-shadow 0.2s, background 0.25s;
+}
+.q-box svg {
+  position: absolute;
+  inset: 0;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: var(--on-accent);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 14;
+  stroke-dashoffset: 14;
+  transition: stroke-dashoffset 0.35s 0.1s var(--ease-out);
+}
+@media (hover: hover) {
+  .quests li:not([data-done]):hover {
+    color: var(--ink);
+  }
+  .quests li:not([data-done]):hover .q-box {
+    box-shadow: inset 0 0 0 1.5px var(--accent);
+  }
+}
+.quests li[data-done] {
+  color: var(--ink-3);
+}
+.quests li[data-done] .q-box {
+  background: var(--accent);
+  box-shadow: none;
+  animation: q-pop 0.5s var(--ease-out);
+}
+.quests li[data-done] .q-box svg {
+  stroke-dashoffset: 0;
+}
+@keyframes q-pop {
+  40% { scale: 1.3; }
+}
+.quests-done {
+  margin-top: 8px;
+  color: var(--ink-2);
+  font-size: var(--step--1);
+  animation: rise-in 0.6s var(--ease-out) backwards;
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+  }
+}
+.quests-done a {
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+/* ---------- effects drawn above the page: the spark that carries a finished task to its box ---------- */
+.fx-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  overflow: hidden;
+  pointer-events: none;
+}
+.fx-layer > i {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform, opacity;
+}
+/* A head and a tail of smaller, fainter copies that start a moment later. */
+.spark {
+  --k: 0;
+  --d: calc(7px - var(--k) * 0.3px);
+  width: var(--d);
+  height: var(--d);
+  margin: calc(var(--d) / -2);
+  border-radius: 50%;
+  background: var(--brand-b);
+  opacity: calc(0.9 - var(--k) * 0.055);
+}
+.spark[data-head] {
+  box-shadow: 0 0 10px 2px color-mix(in srgb, var(--brand-b) 50%, transparent);
+}
+.burst-ring {
+  width: 16px;
+  height: 16px;
+  margin: -8px;
+  border: 1.5px solid var(--accent);
+  border-radius: 50%;
+}
+/* All five done: confetti cut as small windows, a title bar and a pane. */
+.bit {
+  width: 11px;
+  height: 9px;
+  margin: -5px;
+  border-radius: 2.5px;
+  background: linear-gradient(var(--c) 0 3px, color-mix(in srgb, var(--c) 34%, var(--panel)) 3px);
+  box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--c) 60%, transparent);
+}
