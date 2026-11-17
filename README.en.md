@@ -47,7 +47,7 @@
 </p>
 
 > [!NOTE]
-> **[0.2.3](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.3)** enables in-app differential updates on Linux (`AppImage` &amp; `deb`), brings the Command Deck and real inter-agent comms into Agent Hub alongside a redesigned Agent Dossier and model fetch filters, and fixes model catalog routing, configuration approvals, and stale workspace recovery (bundled Runtime `18.20.2-studio.6`). See the [release notes](docs/releases/v0.2.3.md) for downloads and upgrade details.
+> **[0.2.3](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.3)** enables in-app differential updates on Linux (`AppImage` &amp; `deb`), brings the Command Deck and real inter-agent comms into Agent Hub alongside a redesigned Agent Dossier and model fetch filters, and fixes model catalog routing, configuration approvals, and stale workspace recovery (bundled Runtime `18.20.2-studio.7`). See the [release notes](docs/releases/v0.2.3.md) for downloads and upgrade details.
 
 <table>
 <tr>

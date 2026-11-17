@@ -1,3 +1,20 @@
+diff --git a/bazel/toolchains/darwin/sdk.bzl b/bazel/toolchains/darwin/sdk.bzl
+index 7208c5b8b0..503abf1129 100644
+--- a/bazel/toolchains/darwin/sdk.bzl
++++ b/bazel/toolchains/darwin/sdk.bzl
+@@ -24,9 +24,9 @@ Update _URL, _SHA256 and _SDK together (the SDK directory name is printed by
+ extract_pkg.py's "no <member>" error when it changes).
+ """
+ 
+-_URL = "https://swcdn.apple.com/content/downloads/58/48/082-83364-A_KCEBOO2NJS/0d2rj4y5ucjlkgcvqt6f6a4pergug5tu2b/CLTools_macOSNMOS_SDK.pkg"
+-_SHA256 = "d55351824fd17742fd6e1e7a252fa1028698f32147ee48be9a6b75442bf30575"
+-_SDK = "MacOSX27.0.sdk"
++_URL = "https://swcdn.apple.com/content/downloads/53/49/142-50405-A_WOBLDDXP4W/wk3d2yw94ir1jieuddcu9b9tffxrb09bq8/CLTools_macOSNMOS_SDK.pkg"
++_SHA256 = "1eb5196e069ad6e0abde1d750d967b7ea58f5b97f179dbf07aee2d00ca6c813e"
++_SDK = "MacOSX27.2.sdk"
+ _EXCLUDES = [
+     "System/iOSSupport",
+     "System/Library/Perl",
 diff --git a/crates/pi-natives/src/desktop/ax.rs b/crates/pi-natives/src/desktop/ax.rs
 index dc5dd45f53..fdcae768aa 100644
 --- a/crates/pi-natives/src/desktop/ax.rs
@@ -7203,84 +7220,6 @@ index ce67cbaad3..4bb1b506f0 100644
  
  /** Submitted value of one control: text, a number for `number`/`range` inputs, or a group's checked values. */
  export type HtmlFormValue = string | number | string[];
-diff --git a/packages/tui/src/html-form/model.ts b/packages/tui/src/html-form/model.ts
-new file mode 100644
-index 0000000000..f0c137b6db
---- /dev/null
-+++ b/packages/tui/src/html-form/model.ts
-@@ -0,0 +1,72 @@
-+/** Browser-safe native form model. Parsing and terminal rendering are separate consumers of these types. */
-+export type FormSpanStyle = "code" | "strong" | "em";
-+
-+/** A run of inline text; `"\n"` inside `text` is a hard line break (`<br>`). */
-+export interface FormSpan {
-+	text: string;
-+	style?: FormSpanStyle;
-+}
-+
-+export interface ChoiceOption {
-+	value: string;
-+	label: FormSpan[];
-+	checked: boolean;
-+	disabled: boolean;
-+}
-+
-+export interface ChoiceField {
-+	kind: "choice";
-+	name: string;
-+	multi: boolean;
-+	select: boolean;
-+	/** Added only to radio/checkbox groups of two or more options which don't offer their own Other. */
-+	other: boolean;
-+	label: FormSpan[];
-+	options: ChoiceOption[];
-+	required: boolean;
-+}
-+
-+export interface TextField {
-+	kind: "text";
-+	name: string;
-+	type: string;
-+	multiline: boolean;
-+	label: FormSpan[];
-+	value: string;
-+	placeholder: string;
-+	required: boolean;
-+	min?: number;
-+	max?: number;
-+	pattern?: string;
-+	minLength?: number;
-+	maxLength?: number;
-+	rows: number;
-+}
-+
-+export type FormField = ChoiceField | TextField;
-+
-+export type FormBlock =
-+	| { kind: "text"; spans: FormSpan[]; heading: boolean }
-+	| { kind: "list"; items: FormSpan[][]; ordered: boolean }
-+	| { kind: "pre"; text: string }
-+	| { kind: "table"; rows: FormSpan[][][]; headerRows: number }
-+	| { kind: "image"; src: string; alt: string }
-+	| { kind: "svg"; markup: string; alt: string }
-+	| { kind: "field"; field: FormField; optionsEnd?: number };
-+
-+export interface FormSection {
-+	title: FormSpan[];
-+	blocks: FormBlock[];
-+	fieldset: boolean;
-+}
-+
-+export interface HtmlForm {
-+	sections: FormSection[];
-+	fields: FormField[];
-+	hidden: [name: string, value: string][];
-+}
-+
-+/** Plain text of spans; shared by parser, result formatting and graphical hosts. */
-+export function spansText(spans: readonly FormSpan[]): string {
-+	return spans.map(span => span.text).join("");
-+}
 diff --git a/packages/tui/src/html-form/parse.ts b/packages/tui/src/html-form/parse.ts
 index 3199f1f193..e1adc4bc2b 100644
 --- a/packages/tui/src/html-form/parse.ts

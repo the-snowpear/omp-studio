@@ -226,6 +226,7 @@ export const SEAM_GROUPS = Object.freeze([
       "crates/pi-vcs/src/git/mutate.rs",
       "crates/pi-vcs/src/types.rs",
       "crates/pi-natives/src/vcs.rs",
+      "bazel/toolchains/darwin/sdk.bzl",
       "packages/coding-agent/test/extensions-runner.test.ts",
     ],
   },
