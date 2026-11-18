@@ -16,7 +16,7 @@ import type { FormEvent as ReactFormEvent, KeyboardEvent as ReactKeyboardEvent, 
 import type { ClientBootstrap, SessionId, StudioClient, WorkspaceId, WorkspaceFileNode } from "@omp-studio/client-contract";
 import { AppIcon, Icon } from "../icons";
 import { MenuItem } from "../menus";
-import { pickLocale, useI18n } from "../i18n";
+import { useI18n } from "../i18n";
 import { SHORTCUTS, formatShortcut } from "../keyboard/shortcuts";
 import { fileLabel } from "../composer/types";
 import { formatRuntimeClassification, formatRuntimeStatusLabel, runtimeCanReconnect, runtimeCanRestart } from "../diagnosticsModel";
@@ -35,7 +35,7 @@ import { ThreadSpin } from "./ThreadSpin";
 import { ThreadWaitChip } from "./ThreadWaitChip";
 import { residentForSession, residentRowsOf, threadRunningFromLive } from "./threadRunning";
 import { sidebarProjectOrder } from "./projectOrder";
-import { projectHasSession, provisionalThreadForHistoryEntry, sidebarThreadTitle } from "./provisionalThread";
+import { isPlaceholderSessionTitle, projectHasSession, provisionalThreadForHistoryEntry, sidebarThreadTitle } from "./provisionalThread";
 import { waitKindFromLive } from "./threadWait";
 import { useGitRepository } from "../git/useGitRepository";
 import { buildGitStatusLookup } from "../git/treeStatus";
@@ -45,11 +45,11 @@ import { snapshotFrom } from "../workbench/shellState";
 import { AppMenu, ThreadActionMenuItems, ThreadRowMenu } from "../workbench/menus";
 import { PROJECT_THREADS_INITIAL } from "../workbench/sessionSelection";
 
-function relativeTime(iso: string): string {
+function relativeTime(iso: string, zh: boolean): string {
   const then = Date.parse(iso);
   if (!Number.isFinite(then)) return "";
   const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (seconds < 60) return pickLocale("刚刚", "just now");
+  if (seconds < 60) return zh ? "刚刚" : "just now";
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
   if (seconds < 86400 * 7) return `${Math.floor(seconds / 86400)}d`;
@@ -214,8 +214,37 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
     [state.model.workspaces],
   );
   const liveSnapshot = snapshotFrom(state);
-  const titleEntries = chrome.projectHistories?.[chrome.selectedProject?.id ?? ""]?.model?.entries ?? [];
-  const titleMetadata = useSessionTitles(client,{sessionId:liveSnapshot?.sessionId,available:runtime?.status === "connected",capabilities:usableCapabilityManifest(state.model.capabilities,state.clientState?.connection.capabilityManifest,state.bootstrap?.capabilityManifest)},titleEntries.flatMap(entry=>entry.sessionId?[{id:entry.sessionId,title:entry.title}]:[]),state.route === "workbench");
+  const liveSnapshotTitle = liveSnapshot?.sessionTitle !== undefined
+    && (liveSnapshot.sessionTitleSource === "user" || !isPlaceholderSessionTitle(liveSnapshot.sessionTitle))
+    ? liveSnapshot.sessionTitle
+    : undefined;
+  const titleTargets = useMemo(() => {
+    const targets: { id: string; title?: string | undefined }[] = [];
+    const seen = new Set<string>();
+    const pushTarget = (id: string | undefined, title: string | undefined) => {
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      targets.push({ id, title: id === liveSnapshot?.sessionId && liveSnapshotTitle ? liveSnapshotTitle : title });
+    };
+    for (const thread of chrome.provisionalThreads) {
+      if (chrome.expandedProjects.has(String(thread.workspaceId))) {
+        pushTarget(thread.sessionId, thread.title);
+      }
+    }
+    for (const workspace of sidebarProjects) {
+      if (!chrome.expandedProjects.has(workspace.workspaceId)) continue;
+      const limit = chrome.projectThreadLimits[workspace.workspaceId] ?? PROJECT_THREADS_INITIAL;
+      const entries = (chrome.projectHistories?.[workspace.workspaceId]?.model?.entries ?? []).slice(0, limit);
+      for (const entry of entries) pushTarget(entry.sessionId, entry.title);
+    }
+    if (targets.length === 0 && chrome.selectedProject?.id) {
+      for (const entry of chrome.projectHistories?.[chrome.selectedProject.id]?.model?.entries ?? []) {
+        pushTarget(entry.sessionId, entry.title);
+      }
+    }
+    return targets;
+  }, [chrome.expandedProjects, chrome.projectHistories, chrome.projectThreadLimits, chrome.provisionalThreads, chrome.selectedProject?.id, liveSnapshot?.sessionId, liveSnapshotTitle, sidebarProjects]);
+  const titleMetadata = useSessionTitles(client,{sessionId:liveSnapshot?.sessionId,available:runtime?.status === "connected",capabilities:usableCapabilityManifest(state.model.capabilities,state.clientState?.connection.capabilityManifest,state.bootstrap?.capabilityManifest)},titleTargets,state.route === "workbench");
   // 会话行 ⋯ 菜单：同一时刻至多一个弹层；Escape / 点外部关闭。
   const [openRowMenuId, setOpenRowMenuId] = useState<string | null>(null);
   /** 非 null = 当前弹层由行右键打开，贴该光标点；null = 由 ⋯ 按钮打开。 */
@@ -510,6 +539,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
           </div>
         </div>
         <div className="sb-scroll" id="projectList" onScroll={event => {
+          if (openRowMenuId !== null) setOpenRowMenuId(null);
           if (mdi?.active) mdi.store.sidebarScrollTop = event.currentTarget.scrollTop;
         }}>
           {preview ? getPreviewProjects(zh).map((project) => {
@@ -667,7 +697,11 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                       (thread) => !projectHasSession(entries, thread.sessionId),
                     );
                     return (<>
-                      {transientThreads.map((thread) => (
+                      {transientThreads.map((thread) => {
+                        const transientTitle = thread.sessionId === liveSnapshot?.sessionId && liveSnapshotTitle
+                          ? liveSnapshotTitle
+                          : thread.title;
+                        return (
                         <div
                           className={`thread-row${thread.running ? " running" : ""}`}
                           key={`provisional:${thread.sessionId}`}
@@ -678,13 +712,13 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                             type="button"
                             className={`thread${chrome.activeProvisionalSessionId === thread.sessionId ? " active" : ""}`}
                             {...(chrome.activeProvisionalSessionId === thread.sessionId ? { "aria-current": "page" as const } : {})}
-                            aria-label={thread.title}
+                            aria-label={transientTitle}
                             data-window-drag={mdi ? "" : undefined}
-                            onPointerDown={event => { if (mdi) dragConversation(event, mdi.store, { ref: { targetId: mdi.document.ref.targetId, workspaceId: thread.workspaceId, ...(thread.submitted ? { sessionId: thread.sessionId } : { draftId: thread.sessionId }) }, title: thread.title }); }}
+                            onPointerDown={event => { if (mdi) dragConversation(event, mdi.store, { ref: { targetId: mdi.document.ref.targetId, workspaceId: thread.workspaceId, ...(thread.submitted ? { sessionId: thread.sessionId } : { draftId: thread.sessionId }) }, title: transientTitle }); }}
                             onClick={() => chrome.onSelectProvisionalThread(thread)}
                           >
                             <ThreadSpin running={thread.running} />
-                            <span className="t-title"><span className="t-scroll">{thread.title}</span></span>
+                            <span className="t-title"><SessionTitleMark row={titleMetadata.rows.get(String(thread.sessionId))} title={transientTitle}/><span className="t-scroll">{transientTitle}</span></span>
                           </button>
                           {thread.submitted ? (
                             <span className="t-actions">
@@ -729,9 +763,14 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                             </span>
                           ) : null}
                         </div>
-                      ))}
+                        );
+                      })}
                       {entries.map((entry) => {
                         const provisional = provisionalThreadForHistoryEntry(chrome.provisionalThreads, entry);
+                        const entryLiveTitle = entry.sessionId !== undefined && entry.sessionId === liveSnapshot?.sessionId
+                          ? liveSnapshotTitle
+                          : undefined;
+                        const resolvedEntryTitle = sidebarThreadTitle(entry, provisional, t("conversation.untitledSession"), entryLiveTitle);
                         const wait = threadWaitForSession(entry.sessionId);
                         const running = threadRunningFromLive({
                           ...(entry.sessionId === undefined ? {} : { sessionId: entry.sessionId }),
@@ -754,15 +793,15 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                             className={`thread${chrome.selectedHistoryId === entry.historyId || chrome.activeProvisionalSessionId === entry.sessionId ? " active" : ""}`}
                             aria-current={chrome.selectedHistoryId === entry.historyId ? "page" : undefined}
                             data-window-drag={mdi ? "" : undefined}
-                            onPointerDown={event => { if (mdi) dragConversation(event, mdi.store, { ref: { targetId: mdi.document.ref.targetId, workspaceId: workspace.workspaceId, sessionId: entry.sessionId, threadId: entry.threadId, historyId: entry.historyId }, title: sidebarThreadTitle(entry, provisional, t("conversation.untitledSession")) }); }}
+                            onPointerDown={event => { if (mdi) dragConversation(event, mdi.store, { ref: { targetId: mdi.document.ref.targetId, workspaceId: workspace.workspaceId, sessionId: entry.sessionId, threadId: entry.threadId, historyId: entry.historyId }, title: resolvedEntryTitle }); }}
                             onClick={() => chrome.onSelectThread(entry, workspace.workspaceId as WorkspaceId)}
                           >
                             <ThreadSpin running={running} />
                             <span className="t-title">
                               {entry.pinned === true ? <span className="t-pin" role="img" aria-label={t("history.pinned")}><Icon name="pin" extra="sm" /></span> : null}
-                              <SessionTitleMark row={titleMetadata.rows.get(entry.sessionId ?? "")} title={sidebarThreadTitle(entry, provisional, t("conversation.untitledSession"))}/><span className="t-scroll">{sidebarThreadTitle(entry, provisional, t("conversation.untitledSession"))}</span>
+                              <SessionTitleMark row={titleMetadata.rows.get(entry.sessionId ?? "")} title={resolvedEntryTitle}/><span className="t-scroll">{resolvedEntryTitle}</span>
                             </span>
-                            {wait || running ? null : <span className="t-meta">{relativeTime(entry.lastActiveAt)}</span>}
+                            {wait || running ? null : <span className="t-meta">{relativeTime(entry.lastActiveAt, zh)}</span>}
                           {wait ? <ThreadWaitChip kind={wait} /> : null}
                           </button>
                           {/* 悬停操作区：最右「归档」（session.archive），其左 ⋯ 菜单（顶栏同款；
@@ -893,8 +932,8 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                 if (action.type !== "copyRelative") return;
                 void navigator.clipboard
                   .writeText(target.path)
-                  .then(() => setPreviewFileMessage(pickLocale("已复制相对路径", "Copied relative path")))
-                  .catch(() => setPreviewFileMessage(pickLocale("复制相对路径失败", "Failed to copy relative path")));
+                  .then(() => setPreviewFileMessage(zh ? "已复制相对路径" : "Copied relative path"))
+                  .catch(() => setPreviewFileMessage(zh ? "复制相对路径失败" : "Failed to copy relative path"));
               }}
             />
           ) : chrome.selectedProject ? (
@@ -1017,7 +1056,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                   </span>
                 </span>
               </button>
-              {hasUpdate && (
+              {hasUpdate && (!preview || marks) && (
                 <div
                   style={{
                     margin: "4px 8px 8px",
@@ -1038,7 +1077,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.82rem", fontWeight: 600, color: "var(--accent, #3b82f6)" }}>
                     <Icon name="update" extra="sm" />
-                    <span>{t("appUpdate.foundNewVersion")} v{effectiveUpdate?.version}</span>
+                    <span>{t("appUpdate.foundNewVersion")}{effectiveUpdate?.version ? ` v${effectiveUpdate.version}` : ""}</span>
                   </div>
                   <button type="button" className="btn primary sm" style={{ padding: "2px 8px", fontSize: "0.72rem" }}>
                     {t("common.details")}

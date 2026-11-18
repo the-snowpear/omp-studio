@@ -60,17 +60,17 @@ export function useProcessMemory(enabled: boolean): {
   const alive = useRef(true);
   const inFlight = useRef(false);
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback((): Promise<void> => {
     // `app.getAppMetrics()` may be slow under memory pressure. Never let the
     // fixed interval enqueue overlapping Main-process samples indefinitely.
-    if (inFlight.current) return;
+    if (inFlight.current || globalThis.document?.hidden) return Promise.resolve();
     const chrome = globalThis.ompStudioChrome;
     if (chrome?.sampleProcessMemory === undefined) {
       setUnsupported(true);
-      return;
+      return Promise.resolve();
     }
     inFlight.current = true;
-    void chrome
+    return chrome
       .sampleProcessMemory()
       .then((next) => {
         if (!alive.current) return;
@@ -94,9 +94,34 @@ export function useProcessMemory(enabled: boolean): {
 
   useEffect(() => {
     if (!enabled) return;
-    refresh();
-    const timer = window.setInterval(refresh, SAMPLE_INTERVAL_MS);
-    return () => window.clearInterval(timer);
+    let active = true;
+    let timer: number | undefined;
+    const clear = () => {
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+        timer = undefined;
+      }
+    };
+    const tick = () => {
+      clear();
+      if (!active || globalThis.document?.hidden) return;
+      void refresh().finally(() => {
+        if (active && !globalThis.document?.hidden) {
+          timer = window.setTimeout(tick, SAMPLE_INTERVAL_MS);
+        }
+      });
+    };
+    const onVisibility = () => {
+      if (globalThis.document?.hidden) clear();
+      else tick();
+    };
+    tick();
+    globalThis.document?.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      active = false;
+      clear();
+      globalThis.document?.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [enabled, refresh]);
 
   return { sample, unsupported, refresh };

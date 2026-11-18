@@ -30,13 +30,31 @@ async function fixture(t) {
   const startup = join(cwd, "mock-gh.sh");
   await writeFile(startup, `gh() {
     printf '%s\\n' "$*" >> "$REQUEST_LOG"
-    if [[ "$CACHE_HIT" = legacy && "$2" != *name=* ]]; then
+    local endpoint="$2"
+    if [ "$endpoint" = "--paginate" ]; then endpoint="$3"; fi
+    if [[ "$endpoint" == */actions/runs/* ]]; then
+      local id="\${endpoint##*/}"
+      if [[ "$id" = "99" ]]; then
+        return
+      fi
+      echo "$id"
+      return
+    fi
+    if [[ "$CACHE_HIT" = legacy && "$endpoint" != *name=* ]]; then
       printf '%s\\t84\\t%s\\n' "$LEGACY_NAME" "$LEGACY_SHA"
       return
     fi
-    case "$CACHE_HIT:$2" in
-      desktop:*) echo 42 ;;
+    if [[ "$CACHE_HIT" = untrusted-legacy && "$endpoint" != *name=* ]]; then
+      printf '%s\\t99\\t%s\\n' "$LEGACY_NAME" "$LEGACY_SHA"
+      return
+    fi
+    case "$CACHE_HIT:$endpoint" in
+      desktop:*name=*-remote*) ;;
+      desktop:*name=*) echo 42 ;;
       remote:*name=*-remote*) echo 84 ;;
+      untrusted-fallback:*name=*-remote*) ;;
+      untrusted-fallback:*name=*) printf '99\\n42\\n' ;;
+      untrusted-only:*name=*) echo 99 ;;
     esac
   }
   `);
@@ -74,7 +92,13 @@ test("Runtime reuse downloads the matching desktop or remote artifact; force byp
   assert.equal(forced.requests, "");
   const missing = await run("none");
   assert.equal(missing.run_id, "");
+  assert.equal(missing.name, desktop.key);
   assert.equal(missing.key, desktop.key);
+  assert.match(desktop.requests, /api --paginate repos\/example\/studio\/actions\/artifacts\?name=/u);
+  assert.match(desktop.requests, /api repos\/example\/studio\/actions\/runs\/42 --jq select\(\(\.event == "push" or \.event == "workflow_dispatch"\) and \.head_repository\.full_name == "example\/studio"\)/u);
+  const fallback = await run("untrusted-fallback");
+  assert.equal(fallback.run_id, "42");
+  assert.equal((await run("untrusted-only")).run_id, "");
 });
 
 test("Runtime identity survives desktop edits and changes with Runtime sources or signing keys", async t => {
@@ -97,6 +121,7 @@ test("cache migration preserves signed Runtime bytes after orchestration edits a
   assert.notEqual(reused.key, legacy.LEGACY_NAME);
   assert.equal(reused.name, legacy.LEGACY_NAME);
   assert.equal(reused.run_id, "84");
+  assert.equal((await run("untrusted-legacy", "false", legacy)).run_id, "");
   await write("omp-patch/overlay/host.ts", "changed Runtime source"); commit();
   assert.equal((await run("legacy", "false", legacy)).run_id, "");
 });

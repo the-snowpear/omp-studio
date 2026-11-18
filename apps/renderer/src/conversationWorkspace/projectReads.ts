@@ -90,6 +90,21 @@ const bodySignals = new WeakMap<ReadClient, () => void>();
 export function bindProjectReads(client: ReadClient, reads: ProjectReads): void { bindings.set(client, reads); }
 export function projectReadsFor(client: ReadClient): ProjectReads | undefined { return bindings.get(client); }
 export function cachedProjectReads(target: StudioClient, workspaceId: WorkspaceId): ProjectReads | undefined { return targets.get(target)?.projects.get(workspaceId); }
+export function invalidateProjectHistoryReads(client: ReadClient, workspaceId?: WorkspaceId): void {
+  const bound = bindings.get(client);
+  if (bound) {
+    if (workspaceId === undefined || bound.workspaceId === workspaceId) bound.invalidate("history.list");
+    else bound.owner.projects.get(workspaceId)?.invalidate("history.list");
+    return;
+  }
+  const root = targets.get(client as StudioClient);
+  if (!root) return;
+  if (workspaceId !== undefined) {
+    root.projects.get(workspaceId)?.invalidate("history.list");
+    return;
+  }
+  for (const project of root.projects.values()) project.invalidate("history.list");
+}
 export function bindBodyReady(client: ReadClient, ready: () => void): void { bodySignals.set(client, ready); }
 export function conversationBodyReady(client: ReadClient): void { bodySignals.get(client)?.(); }
 
@@ -113,6 +128,7 @@ class ConnectionReads {
   prefetchSupported = true;
   epoch = 0;
   authorityEpoch: string | undefined;
+  readonly sessionTitles = new Map<string, string | undefined>();
   #offRoot: (() => void) | undefined;
   #rootTimer: ReturnType<typeof setTimeout> | undefined;
   #unregister: (() => void) | undefined;
@@ -133,7 +149,7 @@ class ConnectionReads {
       this.#unregister?.(); this.#unregister = undefined;
     }, 30_000);
   }
-  invalidateMetadata() { this.epoch++; this.metadata.clear(); this.pending.clear(); }
+  invalidateMetadata() { this.epoch++; this.metadata.clear(); this.pending.clear(); this.sessionTitles.clear(); }
   invalidate() { this.invalidateMetadata(); this.pages.clear(); }
   trim() {
     this.metadata.prune(); this.pages.prune();
@@ -205,6 +221,23 @@ export class ProjectReads {
     this.owner.authorityEpoch = authority;
     if (event.kind === "resync.required") this.owner.invalidate();
     if (event.kind === "git.repository.changed") this.invalidate("git.");
+    if (event.kind === "snapshot") {
+      const sessionId = String(event.snapshot.sessionId);
+      const nextTitle = event.snapshot.sessionTitle?.trim() || undefined;
+      const hadSession = this.owner.sessionTitles.has(sessionId);
+      const previousTitle = this.owner.sessionTitles.get(sessionId);
+      this.owner.sessionTitles.set(sessionId, nextTitle);
+      if (nextTitle !== previousTitle || (!hadSession && event.snapshot.isStreaming)) {
+        this.invalidate("history.list");
+      }
+    }
+    if (
+      event.kind === "conversation.changed"
+      && event.update.kind === "conversation.message.started"
+      && event.update.role === "user"
+    ) {
+      this.invalidate("history.list");
+    }
     if (event.kind === "command.receipt" && event.receipt.status === "completed") {
       const name = event.receipt.commandName;
       if (/^(models\.|skills\.|plugins\.|config\.|runtime\.install)/.test(name)) this.owner.invalidateMetadata();

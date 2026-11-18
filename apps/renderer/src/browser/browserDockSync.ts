@@ -50,8 +50,12 @@ export function planBrowserDockSync({ layout, sessionId, state, memory, selectin
   const focused = layout.lastBrowserPage && isBrowserPagePanelId(layout.lastBrowserPage) ? layout.browserPages[layout.lastBrowserPage] : undefined;
   const focusedPage = focused?.sessionId === sessionId ? focused.pageId : undefined;
   if (layout.lastBrowserPage !== memory.lastBrowserPage && focusedPage && focusedPage !== state.activePageId && live.has(focusedPage)) return { actions, select: focusedPage, memory: next };
-  // While a clicked tab's select is in flight, an older active page must not pull focus back.
-  if (state.activePageId !== memory.activePageId && state.activePageId && state.activePageId !== focusedPage && (!selecting || selecting === state.activePageId)) {
+  // While a clicked tab's select is in flight, an older active page must not pull focus back,
+  // nor commit its activePageId to memory before the in-flight select settles.
+  if (state.activePageId !== memory.activePageId && state.activePageId && state.activePageId !== focusedPage) {
+    if (selecting && selecting !== state.activePageId) {
+      return { actions, memory: { ...next, activePageId: memory.activePageId } };
+    }
     const panel = browserPagePanelId(sessionId, state.activePageId);
     if (placed(panel)) {
       actions.push({ type: "browser-page-focus", panel });

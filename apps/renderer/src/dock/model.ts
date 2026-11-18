@@ -648,7 +648,8 @@ export function browserRevealTarget(layout: DockLayout, sessionId?: string): Pan
   return layout.lastBrowserPage && pages.includes(layout.lastBrowserPage) ? layout.lastBrowserPage : pages[0] ?? "browser";
 }
 
-export function builtInPresets(): DockPreset[] {
+export function builtInPresets(zh?: boolean): DockPreset[] {
+  const pick = <T,>(zhValue: T, enValue: T): T => zh === undefined ? pickLocale(zhValue, enValue) : (zh ? zhValue : enValue);
   const standard = createDefaultLayout();
   const focus = createDefaultLayout();
   focus.presetId = "focus";
@@ -664,7 +665,7 @@ export function builtInPresets(): DockPreset[] {
   debug.bottom.expanded = true;
   debug.bottom.groups = [{ id: "bottom-terminal", panels: ["terminal", "problems", "tests", "output"], active: "terminal" }, { id: "bottom-logs", panels: ["logs", "pvlogs"], active: "logs" }];
   debug.rail.mode = debug.rail.lastMode = "compact";
-  return [{ id: "default", name: pickLocale("默认", "Default"), layout: standard, builtin: true }, { id: "focus", name: pickLocale("专注", "Focus"), layout: focus, builtin: true }, { id: "debug", name: pickLocale("调试", "Debug"), layout: debug, builtin: true }];
+  return [{ id: "default", name: pick("默认", "Default"), layout: standard, builtin: true }, { id: "focus", name: pick("专注", "Focus"), layout: focus, builtin: true }, { id: "debug", name: pick("调试", "Debug"), layout: debug, builtin: true }];
 }
 
 function readRect(value: unknown): DockRect {

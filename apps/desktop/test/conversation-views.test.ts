@@ -11,6 +11,10 @@ test("visible-window union preserves siblings, hidden windows do not keep target
   assert.equal(latest, undefined);
   views.report(first, { runtimeEpoch: 1, visibleSessionIds: ["main"] });
   assert.equal(latest, undefined, "an older second preload keeps the connection foreground");
+  views.setVisible(second, false);
+  assert.deepEqual(latest, ["main"], "a hidden unreported window does not force foreground legacy mode");
+  views.setVisible(second, true);
+  assert.equal(latest, undefined);
   views.report(second, { runtimeEpoch: 1, visibleSessionIds: ["child"] });
   assert.deepEqual(latest, ["child", "main"]);
   for (let i = 0; i < 50; i++) {

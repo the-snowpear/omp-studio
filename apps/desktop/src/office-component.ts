@@ -1,11 +1,11 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { access, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { isInside, writeJsonAtomic } from "@omp-studio/runtime-installer";
-import { downloadOne } from "./artifact-download.js";
+import { createProgressThrottle, downloadOne } from "./artifact-download.js";
 import type { FileResources } from "./file-resources.js";
 import type { OfficeComponentState } from "./file-viewer-shared.js";
 import { verifyOfficeComponent, type SignedOfficeComponent } from "./office-component-manifest.js";
@@ -70,10 +70,12 @@ export class OfficeComponent {
       return this.publish({ status: "ready", message: desktopText("已安装最新版本", "Latest version is already installed") });
     }
     const staging = join(this.root, `.staging-${randomUUID()}`), archive = join(this.root, `${envelope.manifest.version}.zip`);
+    const progress = createProgressThrottle(receivedBytes => this.publish({ receivedBytes }));
     try {
       await mkdir(staging, { recursive: true });
       this.publish({ status: "downloading", receivedBytes: 0, message: "" });
-      await downloadOne({ url: envelope.manifest.archive.url, destination: archive, expectedSha256: envelope.manifest.archive.sha256, expectedSize: envelope.manifest.archive.bytes, signal: controller.signal, fetcher: this.options.fetcher, mirror: this.options.mirror?.(), onProgress: receivedBytes => this.publish({ receivedBytes }) });
+      await downloadOne({ url: envelope.manifest.archive.url, destination: archive, expectedSha256: envelope.manifest.archive.sha256, expectedSize: envelope.manifest.archive.bytes, signal: controller.signal, fetcher: this.options.fetcher, mirror: this.options.mirror?.(), onProgress: (receivedBytes, totalBytes) => progress.report(receivedBytes, totalBytes) });
+      progress.flush();
       this.publish({ status: "installing" });
       if (process.platform === "win32") await execute(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe"), ["-xf", archive, "-C", staging], { windowsHide: true, signal: controller.signal, timeout: 180_000 });
       else await execute("/usr/bin/ditto", ["-xk", archive, staging], { signal: controller.signal, timeout: 180_000 });
@@ -88,7 +90,7 @@ export class OfficeComponent {
       await this.removeOwned(archive);
       return this.publish({ status: "ready", installedVersion: envelope.manifest.version, message: "", receivedBytes: envelope.manifest.archive.bytes });
     } catch (error) { return this.publish({ status: this.installed ? "ready" : "error", message: controller.signal.aborted ? desktopText("已取消安装", "Installation cancelled") : error instanceof Error ? error.message : String(error) }); }
-    finally { await this.removeOwned(staging); }
+    finally { progress.dispose(); await this.removeOwned(staging); }
   }
   cancel() { this.controller?.abort(); }
   async uninstall(): Promise<OfficeComponentState> {
@@ -104,6 +106,30 @@ export class OfficeComponent {
   private async removeOwned(path: string) {
     if (!isInside(this.root, path) || resolve(path) === resolve(this.root)) throw new Error("Invalid component cleanup path");
     await rm(path, { recursive: true, force: true });
+  }
+  private async pruneCache(keepKey: string): Promise<void> {
+    const cacheDir = join(this.root, "cache");
+    const entries = await readdir(cacheDir, { withFileTypes: true }).catch(() => []);
+    const busyKeys = new Set([...this.conversions.keys()].map(op => op.split(":")[0]));
+    busyKeys.add(keepKey);
+    const items: { key: string; path: string; size: number; mtimeMs: number }[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const dir = join(cacheDir, entry.name);
+      const info = await stat(join(dir, "preview.pdf")).catch(() => undefined);
+      if (!info) continue;
+      items.push({ key: entry.name, path: dir, size: info.size, mtimeMs: info.mtimeMs });
+    }
+    items.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    let totalBytes = items.reduce((sum, item) => sum + item.size, 0);
+    let count = items.length;
+    for (let index = items.length - 1; index >= 0 && (count > 32 || totalBytes > 268_435_456); index--) {
+      const candidate = items[index]!;
+      if (busyKeys.has(candidate.key)) continue;
+      await this.removeOwned(candidate.path).catch(() => {});
+      count--;
+      totalBytes -= candidate.size;
+    }
   }
   async convert(resources: FileResources, id: string, owner: number): Promise<string> {
     await this.init();
@@ -131,6 +157,7 @@ export class OfficeComponent {
         await access(generated).catch(() => { throw new Error(desktopText("Office 转换未生成预览。文件可能已加密或格式不受支持。", "Office conversion did not produce a preview. The file may be encrypted or in an unsupported format.")); });
         await this.removeOwned(input);
         await rename(generated, pdf);
+        await this.pruneCache(key).catch(() => {});
         return pdf;
       } catch (error) { await this.removeOwned(directory); throw error; }
       finally { await this.removeOwned(profile); }

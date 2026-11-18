@@ -84,6 +84,7 @@ export function createHostFileLog(options: {
   readonly append?: (path: string, line: string) => Promise<void>;
 }): HostLog {
   const now = options.now ?? (() => new Date());
+  const canBatch = options.append === undefined;
   const append = options.append ?? defaultAppend;
   let directoryReady: Promise<void> | undefined;
 
@@ -114,9 +115,20 @@ export function createHostFileLog(options: {
         while (pending.length > 0) {
           const next = pending.shift();
           if (next === undefined) break;
+          let payload = next.line;
+          if (canBatch && pending.length > 0 && pending[0]?.path === next.path) {
+            const chunk = [next.line];
+            let chars = next.line.length;
+            while (pending.length > 0 && pending[0]?.path === next.path && chunk.length < 64 && chars < 65_536) {
+              const extra = pending.shift()!;
+              chunk.push(extra.line);
+              chars += extra.line.length;
+            }
+            payload = chunk.join("");
+          }
           try {
             await ensureDirectory();
-            await append(next.path, next.line);
+            await append(next.path, payload);
           } catch {
             // Logging must never take down the Host.
           }

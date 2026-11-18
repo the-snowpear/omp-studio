@@ -72,6 +72,8 @@ export function ComputerWorkspace(props: ComputerPaneProps) {
   const validTarget = !!snapshot?.targets.some(target => target.id === targetId);
   const observeAllowed = isVisible && !selection && validTarget && !!snapshot?.capabilities.capture && !!snapshot?.capabilities.observationOnly && !snapshot.screen.locked && !snapshot.screen.asleep && can("computer.observe.open") && can("computer.observe.close") && can("computer.frame.capture");
   const structureAllowed = isVisible && !selection && validTarget && !!snapshot?.capabilities.accessibility && !!snapshot?.capabilities.observationOnly && !snapshot.screen.locked && !snapshot.screen.asleep && can("computer.observe.open") && can("computer.observe.close") && can("computer.structure.get");
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   const selectFrame = useCallback(async (action?: ComputerAction, frameId?: string) => {
     const stamp = ++selectionGeneration.current;
     setSelection({ ...(action ? { action } : {}), ...(frameId ? { frameId } : {}) });
@@ -81,8 +83,8 @@ export function ComputerWorkspace(props: ComputerPaneProps) {
       const selected = preview ? demo.snapshot.frames.find(item => item.frameId === frameId) ?? previewComputerFrame(sessionId) : await source.getFrame(frameId);
       if (stamp !== selectionGeneration.current) return;
       setSelection({ ...(action ? { action } : {}), frameId, ...(selected ? { frame: selected } : { missing: true }) });
-    } catch (cause) { if (stamp === selectionGeneration.current) { setSelection({ ...(action ? { action } : {}), frameId, missing: true }); setError(hostErrorMessage(cause, zh ? "无法读取历史画面" : "Cannot read historical frame")); } }
-  }, [source, preview, demo.snapshot.frames, sessionId, zh]);
+    } catch (cause) { if (stamp === selectionGeneration.current) { setSelection({ ...(action ? { action } : {}), frameId, missing: true }); setError(hostErrorMessage(cause, zhRef.current ? "无法读取历史画面" : "Cannot read historical frame")); } }
+  }, [source, preview, demo.snapshot.frames, sessionId]);
   const selectFrameRef = useRef(selectFrame); selectFrameRef.current = selectFrame;
   useEffect(() => {
     const intent = props.frameIntent;
@@ -98,9 +100,9 @@ export function ComputerWorkspace(props: ComputerPaneProps) {
     return source.observe(targetId, update => {
       if (update.frame) setExtraFrame(update.frame);
       if (update.error) setError(update.error);
-      if (update.paused) { setAutomatic(false); setNotice(zh ? "自动观察已暂停；空闲 30 秒、锁屏或目标不可用时不再采集。" : "Automatic observation paused after 30 seconds idle, screen lock, or target loss."); }
+      if (update.paused) { setAutomatic(false); setNotice(zhRef.current ? "自动观察已暂停；空闲 30 秒、锁屏或目标不可用时不再采集。" : "Automatic observation paused after 30 seconds idle, screen lock, or target loss."); }
     });
-  }, [automatic, observeAllowed, source, targetId, preview, sessionId, zh]);
+  }, [automatic, observeAllowed, source, targetId, preview, sessionId]);
   const capture = async () => {
     if (!observeAllowed || capturing) return;
     const stamp = generation.current;

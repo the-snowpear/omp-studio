@@ -82,6 +82,13 @@ and update transactions are kept under `outputs/production-preview/`; the
 installed application's Runtime is not replaced. Workspaces, conversations,
 model credentials, and other profile data continue to use the normal user
 profile. Close another running Studio instance before opening this preview.
+After a successful build, the launcher caches its source and dependency
+fingerprint and checks the output files on later starts. Unchanged inputs and
+intact outputs skip the workspace build and reuse the staged Electron copy;
+Runtime identity and signatures are still checked on every start. A changed or
+missing input/output triggers a rebuild, and the last successful workspace build
+remains in `outputs/production-preview/build-snapshots/` if that build fails.
+The first launch after adding the cache builds once before it can be reused.
 The production preview loads the build made at startup and does not watch or
 automatically reload when source files change; restart it to pick up changes.
 `启动预览.cmd` and `启动预览版.cmd` retain their development-preview behaviour.

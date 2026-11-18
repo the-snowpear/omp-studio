@@ -47,6 +47,11 @@ export function useBottomPanelMotion(
     return () => observer.disconnect();
   }, [panel]);
 
+  useLayoutEffect(() => () => {
+    running.current?.cancel();
+    running.current = null;
+  }, []);
+
   useLayoutEffect(() => {
     const element = panel.current;
     const before = previous.current;

@@ -1,6 +1,7 @@
 import type { StudioClient, WorkspaceFileInfo, WorkspaceFileText } from "@omp-studio/client-contract";
 import { hostErrorMessage } from "../hostError";
 import { inspectFileBackend, readFileBackend, writeFileBackend } from "./fileBackend";
+import { normalizeFileIdentityPath } from "./fileTypes";
 import { pickLocale } from "../i18n";
 import { previewFile, previewFileText } from "../preview/filesPreview";
 
@@ -104,6 +105,35 @@ export class FileDocument {
     } finally { this.patch({ saving: false }); }
   }
   discard() { this.pendingSave = undefined; this.patch({ text: this.state.baseline, dirty: false, external: undefined, diskText: undefined }); }
+  syncIdentity(next: FileDocumentIdentity) {
+    const effectiveVersion = this.state.dirty ? this.state.file.version : (next.version ?? this.state.file.version);
+    const effectiveSource = next.source ?? this.state.file.source;
+    const { version: _dropPrevVersion, source: _dropPrevSource, ...prevRest } = this.state.file;
+    const { version: _dropNextVersion, source: _dropNextSource, ...nextRest } = next;
+    const merged: FileDocumentIdentity = {
+      ...prevRest,
+      ...nextRest,
+      ...(effectiveVersion !== undefined ? { version: effectiveVersion } : {}),
+      ...(effectiveSource !== undefined ? { source: effectiveSource } : {}),
+    };
+    if (this.state.dirty) {
+      const external = next.version && this.state.file.version && next.version !== this.state.file.version
+        ? (next as WorkspaceFileInfo)
+        : this.state.external;
+      if (merged.id !== this.state.file.id || merged.path !== this.state.file.path || external !== this.state.external) {
+        this.patch({ file: merged, external });
+      }
+      return;
+    }
+    if (this.state.loaded && next.version && this.state.file.version && next.version !== this.state.file.version) {
+      this.patch({ file: { ...this.state.file, id: next.id, path: next.path, name: next.name } });
+      void this.load();
+      return;
+    }
+    if (merged.id !== this.state.file.id || merged.path !== this.state.file.path || merged.version !== this.state.file.version) {
+      this.patch({ file: merged });
+    }
+  }
   hideComparison() { this.patch({ diskText: undefined }); }
   closeView(id: string) { this.closedViews.add(id); }
   isViewClosed(id: string) { return this.closedViews.has(id); }
@@ -116,13 +146,20 @@ export function subscribeDirtyFiles(listener: () => void) { dirtyListeners.add(l
 export function fileDocumentKey(target: string | null, file: FileDocumentIdentity, preview: boolean) { return JSON.stringify([preview, target, file.workspaceId, file.id, file.source ?? "workspace"]); }
 export function getFileDocument(target: string | null, file: FileDocumentIdentity, client: () => Promise<StudioClient>, preview: boolean): FileDocument {
   const key = fileDocumentKey(target, file, preview);
+  const normalizedPath = normalizeFileIdentityPath(file.path);
+  const expectedSource = file.source ?? "workspace";
   let value = documents.get(key);
   if (!value) for (const [storedKey, document] of documents) {
     const [mode, targetId, workspace, , source] = JSON.parse(storedKey) as [boolean, string | null, string, string, string];
-    if (mode === preview && targetId === target && source === (file.source ?? "workspace") && workspace === file.workspaceId && document.getSnapshot().file.id === file.id) { value = document; documents.set(key, value); break; }
+    const current = document.getSnapshot().file;
+    if (mode === preview && targetId === target && source === expectedSource && workspace === file.workspaceId && (current.id === file.id || normalizeFileIdentityPath(current.path) === normalizedPath)) {
+      value = document;
+      documents.set(key, value);
+      break;
+    }
   }
   if (!value) { value = new FileDocument(file, client, preview); documents.set(key, value); }
-  else value.client = client;
+  else { value.client = client; value.syncIdentity(file); }
   return value;
 }
 export function dirtyFileDocuments() { return [...new Set(documents.values())].filter(item => !item.preview && item.getSnapshot().dirty); }

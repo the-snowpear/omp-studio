@@ -17,6 +17,7 @@ export interface ShellModelScope {
   workspace: string;
   runtime: string;
   environment: string;
+  locale?: string | undefined;
   workspaceId?: WorkspaceId | undefined;
   connecting?: boolean;
 }
@@ -74,19 +75,21 @@ export function createShellModelLoader(client: StudioClient, options?: { readonl
         requests.push(request);
         return request;
       };
+      const localeSuffix = scope.locale ? `:${scope.locale}` : "";
       void add("projects", scope.authority, async () => ({ workspaces: await client.query("projects.list", {}) })).then(projectsSettled, projectsSettled);
       if (!scope.connecting) {
-        add("capabilities", scope.runtime, async () => ({ capabilities: await client.query("capabilities.get", {}) }));
-        add("commands", scope.runtime, async () => ({ commandManifest: await client.query("commands.getManifest", {}) }));
+        add("capabilities", `${scope.runtime}${localeSuffix}`, async () => ({ capabilities: await client.query("capabilities.get", {}) }));
+        add("commands", `${scope.runtime}${localeSuffix}`, async () => ({ commandManifest: await client.query("commands.getManifest", {}) }));
       }
       add("history", scope.workspace, async () => ({ history: await client.query("history.list", { limit: 20, status: "active", ...(scope.workspaceId === undefined ? {} : { workspaceId: scope.workspaceId }) }) }));
-      if (!scope.connecting) add("environment", scope.environment, async () => ({ environment: await queryWithTimeout(() => client.query("environment.get", {})) }));
-      if (route === "home") add("home", scope.workspace, async () => ({ home: await client.query("home.get", {}) }));
-      if (route === "diagnostics") add("diagnostics", scope.environment, async () => ({ diagnostics: await client.query("diagnostics.get", {}) }));
+      if (!scope.connecting) add("environment", `${scope.environment}${localeSuffix}`, async () => ({ environment: await queryWithTimeout(() => client.query("environment.get", {})) }));
+      if (route === "home") add("home", `${scope.workspace}${localeSuffix}`, async () => ({ home: await client.query("home.get", {}) }));
+      if (route === "diagnostics") add("diagnostics", `${scope.environment}${localeSuffix}`, async () => ({ diagnostics: await client.query("diagnostics.get", {}) }));
       await Promise.allSettled(requests);
       if (flushPromise) await flushPromise;
     },
     async page(scope: ShellModelScope, route: string, publish: (value: ShellModel) => void) {
+      const localeSuffix = scope.locale ? `:${scope.locale}` : "";
       const run = async (name: string, key: string, load: () => Promise<ShellModel>) => {
         try {
           publish(await once(key, name, load));
@@ -96,8 +99,8 @@ export function createShellModelLoader(client: StudioClient, options?: { readonl
           console.warn(`[omp-studio] shell model ${name} failed`, error);
         }
       };
-      if (route === "home") await run("home", scope.workspace, async () => ({ home: await client.query("home.get", {}) }));
-      if (route === "diagnostics") await run("diagnostics", scope.environment, async () => ({ diagnostics: await client.query("diagnostics.get", {}) }));
+      if (route === "home") await run("home", `${scope.workspace}${localeSuffix}`, async () => ({ home: await client.query("home.get", {}) }));
+      if (route === "diagnostics") await run("diagnostics", `${scope.environment}${localeSuffix}`, async () => ({ diagnostics: await client.query("diagnostics.get", {}) }));
     },
   };
 }

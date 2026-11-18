@@ -1,13 +1,15 @@
 import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { useI18n } from "../i18n";
-import { AssistantRunView, ConversationItemView, type AssistantRunEntry } from "./ConversationItemView";
-import type { AssistantSegment, TimelineRow } from "./conversationViewModel";
-import { timelineRowKey, timelineShapeToken, timelineStructureToken } from "./conversationViewModel";
+import { AssistantRunView, ConversationItemView, type AssistantRunEntry, type RowPlanBind } from "./ConversationItemView";
+import { jsonString, timelineRowKey, timelineShapeToken, timelineStructureToken, type AssistantSegment, type TimelineRow } from "./conversationViewModel";
 import {
   assistantRunRanges,
-  collectPlanProposal,
   collectTurnFileChanges,
+  isPlanProposeTool,
+  planArtifactWriteContent,
+  planProposalRawTitle,
   sessionChangeTurnIdForRange,
+  toolFields,
   type SubagentHubTarget,
   type TurnFileChange,
 } from "./toolMeta";
@@ -83,57 +85,173 @@ function turnSliceClosed(slice: readonly TimelineRow[]): boolean {
   return !slice.some((row) => row.type === "assistant" && row.turnOpen === true);
 }
 
+export type TurnChangeCacheEntry = {
+  readonly sliceRows: readonly TimelineRow[];
+  readonly defaultOpen: boolean;
+  readonly turnId: string;
+  readonly bind: TurnChangeBind | undefined;
+};
+
 /** Attach one change card to the last assistant row of each completed turn. */
-export function turnChangeBinds(rows: readonly TimelineRow[]): ReadonlyArray<TurnChangeBind | undefined> {
+export function turnChangeBinds(
+  rows: readonly TimelineRow[],
+  cache?: Map<string, TurnChangeCacheEntry>,
+): ReadonlyArray<TurnChangeBind | undefined> {
   const binds: Array<TurnChangeBind | undefined> = rows.map(() => undefined);
   const ranges = assistantRunRanges(rows);
   const latest = lastAssistantIndex(rows);
+  const seenKeys = cache ? new Set<string>() : undefined;
 
   for (const range of ranges) {
     const slice = rows.slice(range.start, range.end + 1);
     if (!turnSliceClosed(slice)) continue;
+    const defaultOpen = range.end === latest;
+    const turnId = sessionChangeTurnIdForRange(rows, range, ranges);
+    const cacheKey = `${timelineRowKey(rows[range.start]!)}:${turnId}`;
+    seenKeys?.add(cacheKey);
+    const previous = cache?.get(cacheKey);
+    if (
+      previous !== undefined
+      && previous.defaultOpen === defaultOpen
+      && previous.turnId === turnId
+      && sameDeps(previous.sliceRows, slice)
+    ) {
+      binds[range.end] = previous.bind;
+      continue;
+    }
     const files = collectTurnFileChanges(collectAssistantSegments(slice));
-    if (files.length === 0) continue;
-    binds[range.end] = {
-      files,
-      defaultOpen: range.end === latest,
-      turnId: sessionChangeTurnIdForRange(rows, range, ranges),
-    };
+    const bind: TurnChangeBind | undefined = files.length === 0 ? undefined : { files, defaultOpen, turnId };
+    cache?.set(cacheKey, { sliceRows: slice, defaultOpen, turnId, bind });
+    binds[range.end] = bind;
+  }
+  if (cache && seenKeys) {
+    for (const key of cache.keys()) {
+      if (!seenKeys.has(key)) cache.delete(key);
+    }
   }
   return binds;
 }
 
-function resolvedPlanLink(planLink: PlanCreatedLink, title: string): PlanCreatedLink {
+function resolvedPlanLink(planLink: PlanCreatedLink, title: string, body?: string): PlanCreatedLink {
   return {
-    onOpen: planLink.onOpen,
+    onOpen: (origin) => planLink.onOpen(origin, body !== undefined ? { title, body } : undefined),
     title,
+    ...(body === undefined ? {} : { body }),
     ...(planLink.demo === true ? { demo: true } : {}),
   };
 }
 
+export type PlanBindCacheEntry = {
+  readonly sig: string;
+  readonly linkRef: PlanCreatedLink;
+  readonly bind: RowPlanBind;
+};
+
 /**
- * Pin the Created Plan card on the assistant row that actually ran `xd://propose`.
- * After approval the execution turn may continue in the same assistant run;
- * do not follow `range.end` to the latest message.
+ * Pin each Created Plan card inline at the exact `write xd://propose` tool call.
+ * After approval the execution turn continues below the card in the same assistant run;
+ * `read xd://propose` doc lookups are ignored, and `attachEvenWithoutPropose` only
+ * falls back to the tail row when no `xd://propose` exists in the transcript.
  */
 export function planCreatedBinds(
   rows: readonly TimelineRow[],
   planLink?: PlanCreatedLink,
-): ReadonlyArray<PlanCreatedLink | undefined> {
-  const binds: Array<PlanCreatedLink | undefined> = rows.map(() => undefined);
+  cache?: Map<string, PlanBindCacheEntry>,
+): ReadonlyArray<RowPlanBind | undefined> {
+  const binds: Array<RowPlanBind | undefined> = rows.map(() => undefined);
   if (planLink === undefined) return binds;
-  let attached = false;
-  for (let index = 0; index < rows.length; index += 1) {
-    const row = rows[index];
-    if (row?.type !== "assistant") continue;
-    const proposal = collectPlanProposal(row.segments);
-    if (proposal === undefined) continue;
-    binds[index] = resolvedPlanLink(planLink, planLink.title?.trim() || proposal.title);
-    attached = true;
+
+  type MatchedProposal = {
+    readonly rowIndex: number;
+    readonly toolCallId: string;
+    readonly rawTitle: string | undefined;
+    readonly body: string | undefined;
+  };
+  const proposals: MatchedProposal[] = [];
+  let runningBody = "";
+
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex];
+    if (row?.type !== "assistant") {
+      runningBody = "";
+      continue;
+    }
+    for (const segment of row.segments) {
+      if (segment.type !== "batch") continue;
+      for (const call of segment.tools) {
+        if (call.status === "failed" || call.status === "aborted" || call.status === "missing") continue;
+        const written = planArtifactWriteContent(call);
+        if (written !== undefined) {
+          runningBody = written;
+          continue;
+        }
+        if (!isPlanProposeTool(call)) continue;
+        const proposedBody = jsonString(toolFields(call).planContent);
+        if (proposedBody !== undefined && proposedBody.length > 0) runningBody = proposedBody;
+        const resolvedBody =
+          proposedBody !== undefined && proposedBody.length > 0
+            ? proposedBody
+            : runningBody.length > 0
+              ? runningBody
+              : undefined;
+        proposals.push({
+          rowIndex,
+          toolCallId: call.toolCallId,
+          rawTitle: planProposalRawTitle(call),
+          body: resolvedBody,
+        });
+      }
+    }
   }
-  if (!attached && planLink.attachEvenWithoutPropose === true) {
+
+  if (proposals.length > 0) {
+    const grouped = new Map<number, { sigParts: string[]; map: Record<string, PlanCreatedLink> }>();
+    for (let index = 0; index < proposals.length; index += 1) {
+      const proposal = proposals[index]!;
+      const isLast = index === proposals.length - 1;
+      const title = proposal.rawTitle || (isLast ? planLink.title?.trim() : undefined) || "Plan";
+      const body = proposal.body ?? (isLast ? planLink.body : undefined);
+      let entry = grouped.get(proposal.rowIndex);
+      if (entry === undefined) {
+        entry = { sigParts: [], map: {} };
+        grouped.set(proposal.rowIndex, entry);
+      }
+      entry.sigParts.push(`${proposal.toolCallId}\0${title}\0${body ?? ""}\0${planLink.demo === true ? "1" : "0"}`);
+      entry.map[proposal.toolCallId] = resolvedPlanLink(planLink, title, body);
+    }
+    for (const [rowIndex, entry] of grouped) {
+      const row = rows[rowIndex];
+      const cacheKey = row?.type === "assistant" ? `inline:${row.itemId}` : `inline:${rowIndex}`;
+      const sig = entry.sigParts.join("\n");
+      const previous = cache?.get(cacheKey);
+      if (previous !== undefined && previous.sig === sig && previous.linkRef === planLink) {
+        binds[rowIndex] = previous.bind;
+      } else {
+        const bind: RowPlanBind = { byToolCallId: entry.map };
+        cache?.set(cacheKey, { sig, linkRef: planLink, bind });
+        binds[rowIndex] = bind;
+      }
+    }
+    return binds;
+  }
+
+  if (planLink.attachEvenWithoutPropose === true) {
     const last = lastAssistantIndex(rows);
-    if (last >= 0) binds[last] = resolvedPlanLink(planLink, planLink.title?.trim() || "Plan");
+    if (last >= 0) {
+      const title = planLink.title?.trim() || "Plan";
+      const body = planLink.body;
+      const row = rows[last];
+      const cacheKey = row?.type === "assistant" ? `fallback:${row.itemId}` : `fallback:${last}`;
+      const sig = `${title}\0${body ?? ""}\0${planLink.demo === true ? "1" : "0"}`;
+      const previous = cache?.get(cacheKey);
+      if (previous !== undefined && previous.sig === sig && previous.linkRef === planLink) {
+        binds[last] = previous.bind;
+      } else {
+        const bind: RowPlanBind = { fallback: resolvedPlanLink(planLink, title, body) };
+        cache?.set(cacheKey, { sig, linkRef: planLink, bind });
+        binds[last] = bind;
+      }
+    }
   }
   return binds;
 }
@@ -176,8 +294,26 @@ export function ConvoTranscript({
   // `renderItems` 只按行 type 把行分成 row / assistantRun，与工具集无关，所以挂在
   // shape 令牌上：否则每次工具启停都要对全对话重算一遍分组。
   const shapeToken = timelineShapeToken(rows);
-  const binds = useMemo(() => turnChangeBinds(rows), [structureToken]);
-  const createdBinds = useMemo(() => planCreatedBinds(rows, planLink), [planLink, structureToken]);
+  const turnBindCacheRef = useRef<Map<string, TurnChangeCacheEntry>>(new Map());
+  const binds = useMemo(() => turnChangeBinds(rows, turnBindCacheRef.current), [structureToken]);
+  const planBindCacheRef = useRef<Map<string, PlanBindCacheEntry>>(new Map());
+  const createdBinds = useMemo(() => {
+    const cache = planBindCacheRef.current;
+    const result = planCreatedBinds(rows, planLink, cache);
+    if (cache.size > rows.length + 8) {
+      const liveIds = new Set<string>();
+      for (const row of rows) {
+        if (row.type === "assistant") {
+          liveIds.add(`inline:${row.itemId}`);
+          liveIds.add(`fallback:${row.itemId}`);
+        }
+      }
+      for (const key of cache.keys()) {
+        if (!liveIds.has(key)) cache.delete(key);
+      }
+    }
+    return result;
+  }, [planLink, structureToken]);
   const visualItems = useMemo(() => renderItems(rows), [shapeToken]);
   const revealRef = useRef<((index: number, mounted: () => void) => void) | null>(null);
   const revealData = useRef({ rows, visualItems });
@@ -232,11 +368,11 @@ export function ConvoTranscript({
           const candidate = rows[rowIndex];
           if (candidate?.type !== "assistant") continue;
           const bind = binds[rowIndex];
-          const rowPlanLink = createdBinds[rowIndex];
+          const rowPlanBind = createdBinds[rowIndex];
           entries.push({
             row: candidate,
             ...(bind === undefined ? {} : { fileChanges: bind.files, changesDefaultOpen: bind.defaultOpen, turnId: bind.turnId }),
-            ...(rowPlanLink === undefined ? {} : { planLink: rowPlanLink }),
+            ...(rowPlanBind === undefined ? {} : { planBind: rowPlanBind }),
           });
         }
         // 「重试上一轮」只挂在链尾 run 上，且仅当其最后一个 assistant 行以
@@ -270,7 +406,7 @@ export function ConvoTranscript({
       }
       const row = rows[visualItem.index]!;
       const bind = binds[visualItem.index];
-      const rowPlanLink = createdBinds[visualItem.index];
+      const rowPlanBind = createdBinds[visualItem.index];
       return (
         <ConversationItemView
           row={row}
@@ -285,7 +421,7 @@ export function ConvoTranscript({
           {...(onReviewChanges === undefined || bind === undefined ? {} : { onReviewChanges: () => onReviewChanges(bind.turnId) })}
           {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })}
           {...(liveAgents === undefined ? {} : { liveAgents })}
-          {...(rowPlanLink === undefined ? {} : { planLink: rowPlanLink })}
+          {...(rowPlanBind === undefined ? {} : { planBind: rowPlanBind })}
         />
       );
     },

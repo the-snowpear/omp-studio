@@ -1,8 +1,10 @@
-import { lstat, open, readdir, rm, unlink, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { lstat, open, readdir, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { Dirent } from "node:fs";
 import type { SessionPurgeResult } from "@omp-studio/studio-protocol";
 import type { SessionPurgeInput } from "./session-purge-maintenance.js";
+import { TimeTravelStore } from "./time-travel-store.js";
 
 import { readGunzipPrefix } from "./gzip-file.js";
 import {
@@ -47,6 +49,9 @@ export interface SessionDeleteServiceOptions {
   readonly purgeRows?: (input: SessionPurgeInput) => Promise<SessionPurgeResult>;
   /** Rejects deletion while the session is resident in a Runtime. */
   readonly isResident?: (sessionId: string) => boolean | Promise<boolean>;
+  /** Optional Time Travel cleanup port or Host profile directory for residue removal. */
+  readonly timeTravel?: { readonly removeSession: (sessionId: string) => Promise<unknown> | unknown };
+  readonly profileDirectory?: string;
 }
 
 export interface SessionDeleteResult {
@@ -79,6 +84,8 @@ export class StudioSessionDeleteService {
   readonly #agentDir: string;
   readonly #purgeRows: SessionDeleteServiceOptions["purgeRows"];
   readonly #isResident: ((sessionId: string) => boolean | Promise<boolean>) | undefined;
+  readonly #timeTravel: SessionDeleteServiceOptions["timeTravel"];
+  readonly #profileDirectory: string | undefined;
 
   constructor(options: SessionDeleteServiceOptions) {
     if (options.allowedCwd.length === 0) throw new TypeError("allowedCwd is required");
@@ -89,6 +96,10 @@ export class StudioSessionDeleteService {
     this.#agentDir = resolve(options.agentDir ?? dirname(this.#sessionsRoot));
     this.#purgeRows = options.purgeRows;
     this.#isResident = options.isResident;
+    this.#timeTravel = options.timeTravel;
+    this.#profileDirectory = options.profileDirectory === undefined || options.profileDirectory.length === 0
+      ? undefined
+      : resolve(options.profileDirectory);
     if (!Number.isSafeInteger(this.#maxScanFiles) || this.#maxScanFiles <= 0) {
       throw new TypeError("maxScanFiles must be positive");
     }
@@ -117,6 +128,11 @@ export class StudioSessionDeleteService {
     this.#assertWorkspace(located);
 
     const nativeCleanup = await this.#removeSessionWithArtifacts(located.path, sessionId);
+    if (this.#timeTravel !== undefined) {
+      await Promise.resolve(this.#timeTravel.removeSession(sessionId)).catch(() => undefined);
+    } else if (this.#profileDirectory !== undefined) {
+      await new TimeTravelStore(this.#profileDirectory).removeSession(sessionId).catch(() => undefined);
+    }
     return { sessionId, deleted: true, nativeCleanup };
   }
 
@@ -240,7 +256,25 @@ export async function removeSessionPin(sessionId: string, agentDir: string): Pro
   if (parsed.some((value) => typeof value !== "string" || value.length === 0 || value.length > SESSION_PIN_ID_MAX_CHARS)) return;
   const next = parsed.filter((value) => value !== sessionId);
   if (next.length === parsed.length) return;
-  await writeFile(pinPath, `${JSON.stringify(next, null, "\t")}`, { encoding: "utf8" });
+  const temporary = `${pinPath}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(next, null, "\t")}`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        await rename(temporary, pinPath);
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException)?.code;
+        if ((code === "EPERM" || code === "EACCES" || code === "EBUSY") && attempt < 4) {
+          await new Promise((resolve) => setTimeout(resolve, 10 * (attempt + 1)));
+          continue;
+        }
+        throw error;
+      }
+    }
+  } finally {
+    await rm(temporary, { force: true }).catch(() => {});
+  }
 }
 
 async function listFilesWithSuffix(root: string, suffix: string, limit: number): Promise<string[]> {

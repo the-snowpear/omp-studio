@@ -1,6 +1,7 @@
 import { revealWorkspaceFile } from "../fileBrowser/fileBrowserLinks";
 import { useWorkspaceFileActions } from "../files/useWorkspaceFileActions";
 import { ConversationTitleSurface, SharedSurface, useConversationView, useConversationDom } from "../conversationWorkspace/Context";
+import { invalidateProjectHistoryReads } from "../conversationWorkspace/projectReads";
 import { EvaluationActivity } from "../evaluation/EvaluationActivity";
 import { agentSwarmScope } from "../agents/deck/swarmScope";
 import { useDock } from "../dock/DockContext";
@@ -16,7 +17,7 @@ import { AnnotationsProvider } from "../annotations/Annotations";
 import { setCapIntent, setModelConfigIntent, setSettingsIntent, setDiagnosticsIntent } from "../pageIntents";
 import { modelConfigHasUnsavedChanges } from "../models/modelConfigState";
 import { WorkbenchHealth } from "../WorkbenchHealth";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { applyTypography } from "../settings/typography";
 import { useWorkbenchLayout } from "../layout/useWorkbenchLayout";
 import { beforeConversationLayoutChange } from "../conversation/conversationReflow";
@@ -71,7 +72,7 @@ import { usableCapabilityManifest } from "../deck/interactionGate";
 import { residentForSession } from "../sidebar/threadRunning";
 import { sidebarProjectOrder } from "../sidebar/projectOrder";
 import { readExpandedProjects, writeExpandedProjects } from "../sidebar/expandMemory";
-import { isPlaceholderSessionTitle, reconcileProvisionalProjectThread, resolveProvisionalHistoryTitle, type ProvisionalProjectThread } from "../sidebar/provisionalThread";
+import { isPlaceholderSessionTitle, ProvisionalThreadStore, provisionalThreadForHistoryEntry, reconcileProvisionalProjectThread, resolveProvisionalHistoryTitle, sidebarThreadTitle, type ProvisionalProjectThread } from "../sidebar/provisionalThread";
 import { workspaceForSession } from "../sidebar/sessionTitle";
 import { type ThreadWaitKind } from "../sidebar/threadWait";
 import { streamingProjectHistoryRefreshKey, useProjectHistories } from "../sidebar/useProjectHistories";
@@ -154,13 +155,16 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   const [showAppUpdateDialog, setShowAppUpdateDialog] = useState(false);
   const [localAppVersion, setLocalAppVersion] = useState<string | null>(null);
   useEffect(() => {
-    if (previewMode.preview) return;
+    if (previewMode.preview || (mdi && !mdi.active)) return;
     let disposed = false;
     void globalThis.ompStudioChrome?.getAppVersion?.().then((info) => {
       if (!disposed) setLocalAppVersion(info.version);
     }).catch(() => {});
-    void appUpdate.check(true);
     return () => { disposed = true; };
+  }, [previewMode.preview, mdi?.active]);
+  useEffect(() => {
+    if (previewMode.preview || (mdi && !mdi.active)) return;
+    void appUpdate.check(true);
   }, [previewMode.preview, appUpdate.check]);
   const previewOn = () => previewMode.preview;
   const dock = useDock();
@@ -242,6 +246,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     load: loadProjectHistory,
     refresh: refreshProjectHistory,
     loadMore: loadMoreProjectHistory,
+    applySessionTitle: applyProjectSessionTitle,
   } = projectHistories;
   const expandProject = useCallback((workspaceId: string) => {
     setExpandedProjects((current) => {
@@ -301,11 +306,10 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   const [sessionActionError, setSessionActionError] = useState<string | undefined>(undefined);
   /** 后台 session.create 进行中：欢迎区先出现，composer 可输入；发送时再等这条 Promise。 */
   const [creatingSession, setCreatingSession] = useState(false);
-  const [provisionalThreadsBySession, setProvisionalThreadsBySession] = useState<
-    Readonly<Record<string, ProvisionalProjectThread>>
-  >({});
-  /** Prevent a late Workbench effect from resurrecting a successfully archived row. */
-  const archivedProvisionalSessionIdsRef = useRef<ReadonlySet<string>>(new Set());
+  const [ownProvisionalStore] = useState(() => new ProvisionalThreadStore());
+  const provisionalStore = mdi?.store.provisional(executionTarget.id) ?? ownProvisionalStore;
+  const provisionalThreadsBySession = useSyncExternalStore(provisionalStore.subscribe, provisionalStore.getSnapshot);
+  const setProvisionalThreadsBySession = provisionalStore.setCache;
   /** In-flight unarchive commands; a second click on the same row is a no-op. */
   const unarchiveBusyThreadIdsRef = useRef<ReadonlySet<string>>(new Set());
   /** 左上菜单「新建项目」：递增后 WorkbenchCanvas 打开已有创建项目对话框。 */
@@ -478,10 +482,16 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       return [];
     }
   }, [previewMode.preview, client, hubFileIndex, zh]);
-  const selected = state.model.history?.entries.find((entry) => entry.historyId === selectedHistoryId)
-    ?? historyAll?.entries.find((entry) => entry.historyId === selectedHistoryId)
-    ?? Object.values(projectHistoryCache).flatMap((historyState) => historyState.model?.entries ?? [])
+  const selected = (() => {
+    const fromModel = state.model.history?.entries.find((entry) => entry.historyId === selectedHistoryId);
+    const fromAll = historyAll?.entries.find((entry) => entry.historyId === selectedHistoryId);
+    const fromProject = Object.values(projectHistoryCache)
+      .flatMap((historyState) => historyState.model?.entries ?? [])
       .find((entry) => entry.historyId === selectedHistoryId);
+    const base = fromProject ?? fromModel ?? fromAll;
+    if (base === undefined || !isPlaceholderSessionTitle(base.title)) return base;
+    return [fromProject, fromModel, fromAll].find((entry) => entry !== undefined && !isPlaceholderSessionTitle(entry.title)) ?? base;
+  })();
   const viewedSessionId = selected?.sessionId ?? snapshot?.sessionId;
   const btwTargetId = selectedProvisionalSessionId ?? viewedSessionId;
   const btwTargetRef = useRef({ sessionId: btwTargetId, threadId: selected?.threadId });
@@ -653,12 +663,13 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     if (composerInsertion && composerInsertion.owner !== activeComposerOwner) setComposerInsertion(undefined);
   }, [composerInsertion, activeComposerOwner]);
   const activeComposerOwnsSnapshot = snapshot?.sessionId !== undefined && activeComposerOwner === snapshot.sessionId;
+  const viewedTitleSessionId = selectedProvisionalSessionId ?? selected?.sessionId ?? mdi?.document.ref.sessionId ?? (activeComposerOwnsSnapshot ? snapshot?.sessionId : undefined);
   const snapshotTitleIsCurrent = snapshot?.sessionId !== undefined
     && snapshot.sessionTitle !== undefined
     && (snapshot.sessionTitleSource === "user" || !isPlaceholderSessionTitle(snapshot.sessionTitle))
-    && activeComposerOwnsSnapshot;
-  const provisionalCurrentTitle = activeComposerOwnsSnapshot
-    ? provisionalThreadsBySession[String(snapshot?.sessionId)]?.title
+    && (activeComposerOwnsSnapshot || snapshot.sessionId === viewedTitleSessionId);
+  const provisionalCurrentTitle = viewedTitleSessionId !== undefined
+    ? provisionalThreadsBySession[String(viewedTitleSessionId)]?.title
     : undefined;
   const selectedOrProvisionalTitle = isPlaceholderSessionTitle(selected?.title)
     ? provisionalCurrentTitle ?? selected?.title
@@ -672,6 +683,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   const threadTitle = state.loading && mdi ? mdi.document.title : previewMode.preview
     ? (previewThread?.thread.title ?? (zh ? "跟踪上游 pi-web 更新到 omp-web" : "Track upstream pi-web updates to omp-web"))
     : currentThreadTitle ?? (state.route === "history" ? t("menu.history") : state.route === "home" ? t("menu.home") : state.route === "agent-hub" ? "Agent Hub" : state.route === "capabilities" ? t("menu.capabilities") : state.route === "model-config" ? t("menu.modelConfig") : untitledThreadTitle);
+  const selectedTitleIsPlaceholder = isPlaceholderSessionTitle(selected?.title);
   const onProvisionalSessionChange = useCallback((change: {
     readonly sessionId?: SessionId;
     readonly workspaceId?: WorkspaceId;
@@ -686,25 +698,47 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         preview: previewMode.preview,
         sessionCreating: creatingSession,
         selectedHistoryId,
+        selectedTitleIsPlaceholder,
         untitledTitle: t("conversation.untitledSession"),
-        excludedSessionIds: archivedProvisionalSessionIdsRef.current,
+        excludedSessionIds: provisionalStore.excludedSessionIds,
       }),
     );
-  }, [creatingSession, previewMode.preview, selectedHistoryId, t]);
+  }, [creatingSession, previewMode.preview, provisionalStore, selectedHistoryId, selectedTitleIsPlaceholder, setProvisionalThreadsBySession, t]);
   useEffect(() => {
+    const untitledTitle = t("conversation.untitledSession");
     setProvisionalThreadsBySession((current) => {
       let next: Record<string, ProvisionalProjectThread> | undefined;
       for (const [key, thread] of Object.entries(current)) {
-        const persisted = projectHistoryCache[String(thread.workspaceId)]?.model?.entries.find(
+        const bucket = projectHistoryCache[String(thread.workspaceId)];
+        const persisted = bucket?.model?.entries.find(
           (entry) => entry.sessionId === thread.sessionId,
         );
-        if (persisted === undefined || isPlaceholderSessionTitle(persisted.title)) continue;
-        next ??= { ...current };
-        delete next[key];
+        if (persisted !== undefined && !isPlaceholderSessionTitle(persisted.title)) {
+          next ??= { ...current };
+          delete next[key];
+          continue;
+        }
+        if (persisted === undefined && thread.persistedSeen === true && bucket?.status === "ready" && bucket.model !== undefined) {
+          next ??= { ...current };
+          delete next[key];
+          continue;
+        }
+        const nextSeen = persisted !== undefined ? true : thread.persistedSeen;
+        const nextTitle = thread.titleState === "missing" && isPlaceholderSessionTitle(thread.title)
+          ? untitledTitle
+          : thread.title;
+        if (nextSeen !== thread.persistedSeen || nextTitle !== thread.title) {
+          next ??= { ...current };
+          next[key] = {
+            ...thread,
+            title: nextTitle,
+            ...(nextSeen ? { persistedSeen: true } : {}),
+          };
+        }
       }
       return next ?? current;
     });
-  }, [projectHistoryCache]);
+  }, [projectHistoryCache, t]);
 
   useEffect(() => {
     if (previewMode.preview) {
@@ -766,6 +800,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   const residentLongNotifiedRef = useRef<Set<string>>(new Set());
   const previousResidentsRef = useRef<Map<string, string>>(new Map());
   useEffect(() => {
+    const shouldNotify = !mdi || mdi.active;
     const runtimeDisconnected = runtime?.status === "disconnected" || runtime?.status === "unavailable";
     if (residentModel === undefined || residentModel === null) {
       const now = snapshot?.isStreaming === true && !runtimeDisconnected;
@@ -773,7 +808,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       if (now && !previous.on) streamingSinceRef.current = { on: true, since: Date.now() };
       if (!now && previous.on) {
         streamingSinceRef.current = { on: false, since: 0 };
-        desktopNotice("task", zhRef.current ? "任务结束" : "Task finished", zhRef.current ? "会话任务已结束或停止" : "Session task finished or stopped");
+        if (shouldNotify) desktopNotice("task", zhRef.current ? "任务结束" : "Task finished", zhRef.current ? "会话任务已结束或停止" : "Session task finished or stopped");
       }
       return;
     }
@@ -791,7 +826,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         residentStartedAtRef.current.delete(id);
         residentLongNotifiedRef.current.delete(id);
       }
-      if (wasActive && resident.phase === "idle") {
+      if (wasActive && resident.phase === "idle" && shouldNotify) {
         desktopNotice("task", zhRef.current ? "任务结束" : "Task finished", zhRef.current ? "会话任务已结束" : "Session task finished");
       }
     }
@@ -800,12 +835,13 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       if (!current.has(id)) {
         residentStartedAtRef.current.delete(id);
         residentLongNotifiedRef.current.delete(id);
-        desktopNotice("task", zhRef.current ? "任务停止" : "Task stopped", zhRef.current ? "会话已停止或断开" : "Session stopped or disconnected");
+        if (shouldNotify) desktopNotice("task", zhRef.current ? "任务停止" : "Task stopped", zhRef.current ? "会话已停止或断开" : "Session stopped or disconnected");
       }
     }
     previousResidentsRef.current = current;
-  }, [residentModel, residentRows, runtime?.status, snapshot?.isStreaming]);
+  }, [mdi?.active, residentModel, residentRows, runtime?.status, snapshot?.isStreaming]);
   useEffect(() => {
+    if (mdi && !mdi.active) return;
     const runtimeDisconnected = runtime?.status === "disconnected" || runtime?.status === "unavailable";
     if (residentModel === undefined || residentModel === null) {
       if (snapshot?.isStreaming !== true || runtimeDisconnected || !appSettings.notifyLongTasks) return;
@@ -843,7 +879,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       desktopNotice("longTask", zhRef.current ? "任务仍在运行" : "Task still running", zhRef.current ? "当前任务已连续运行超过 5 分钟" : "The current task has been running for over 5 minutes");
     }, remaining);
     return () => window.clearTimeout(timer);
-  }, [appSettings.notifyLongTasks, residentModel, residentRows, runtime?.status, snapshot?.isStreaming]);
+  }, [mdi?.active, appSettings.notifyLongTasks, residentModel, residentRows, runtime?.status, snapshot?.isStreaming]);
 
   useEffect(() => {
     if (openMenu === null) return;
@@ -966,10 +1002,11 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     return true;
   }, [onRoute, trail, trailAt, state.model.workspaces]);
   useEffect(() => {
+    if (mdi && !mdi.active) return;
     const reveal = (event: Event) => { (event as CustomEvent<{ accepted: boolean }>).detail.accepted = go("workbench"); };
     window.addEventListener("omp:dock-reveal-workbench", reveal);
     return () => window.removeEventListener("omp:dock-reveal-workbench", reveal);
-  }, [go]);
+  }, [go, mdi?.active, window]);
 
   /** The rail's workbench entry behaves like Back/Forward: `go` switches the
    *  route, `enterWorkbench` re-activates the active workspace when needed. */
@@ -1101,6 +1138,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       return refreshed;
     }
     const loaded = state.model.history?.entries.length ?? 20;
+    invalidateProjectHistoryReads(client);
     try {
       const [active, all] = await Promise.all([
         client.query("history.list", { limit: Math.min(Math.max(loaded, 20), PROJECT_THREADS_QUERY_MAX), status: "active" }),
@@ -1184,11 +1222,29 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   });
   const titleRefresh = useRef(refreshHistoryAfterTitle);
   titleRefresh.current = refreshHistoryAfterTitle;
+  const historyModelRef = useRef(state.model.history);
+  historyModelRef.current = state.model.history;
   useEffect(() => {
     if (previewMode.preview || semanticTitleKey === undefined || snapshot?.sessionId === undefined || snapshot.sessionTitle === undefined) return;
     const title = snapshot.sessionTitle.trim();
     if (title.length === 0 || (snapshot.sessionTitleSource !== "user" && isPlaceholderSessionTitle(title))) return;
-    const key = String(snapshot.sessionId);
+    const sessionId = snapshot.sessionId;
+    const key = String(sessionId);
+    applyProjectSessionTitle(sessionId, title);
+    const currentHistory = historyModelRef.current;
+    if (currentHistory?.entries.some((entry) => entry.sessionId === sessionId && entry.title !== title)) {
+      onHistoryChange({
+        ...currentHistory,
+        entries: currentHistory.entries.map((entry) => entry.sessionId === sessionId ? { ...entry, title } : entry),
+      });
+    }
+    setHistoryAll((previous) => {
+      if (!previous?.entries.some((entry) => entry.sessionId === sessionId && entry.title !== title)) return previous;
+      return {
+        ...previous,
+        entries: previous.entries.map((entry) => entry.sessionId === sessionId ? { ...entry, title } : entry),
+      };
+    });
     setProvisionalThreadsBySession((current) => {
       const thread = current[key];
       if (thread === undefined) return current;
@@ -1196,7 +1252,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       return next === thread ? current : { ...current, [key]: next };
     });
     void titleRefresh.current(currentSessionWorkspaceId);
-  }, [currentSessionWorkspaceId, previewMode.preview, semanticTitleKey, snapshot?.sessionId, snapshot?.sessionTitle, snapshot?.sessionTitleSource]);
+  }, [applyProjectSessionTitle, currentSessionWorkspaceId, onHistoryChange, previewMode.preview, semanticTitleKey, setProvisionalThreadsBySession, snapshot?.sessionId, snapshot?.sessionTitle, snapshot?.sessionTitleSource]);
 
   const sessionTitleRefreshTimers = useRef<number[]>([]);
   const refreshSessionTitles = useCallback((workspaceId?: WorkspaceId) => {
@@ -1242,10 +1298,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       const handle = await client.command("session.archive", { threadId: entry.threadId });
       await waitReceipt(client, handle.requestId);
       if (entry.sessionId !== undefined) {
-        archivedProvisionalSessionIdsRef.current = new Set([
-          ...archivedProvisionalSessionIdsRef.current,
-          String(entry.sessionId),
-        ]);
+        provisionalStore.exclude(String(entry.sessionId));
         setProvisionalThreadsBySession((current) => {
           const key = String(entry.sessionId);
           if (current[key] === undefined) return current;
@@ -1309,9 +1362,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         const handle = await client.command("session.unarchive", { threadId: entry.threadId });
         await waitReceipt(client, handle.requestId);
         if (entry.sessionId !== undefined) {
-          const nextExcluded = new Set(archivedProvisionalSessionIdsRef.current);
-          nextExcluded.delete(String(entry.sessionId));
-          archivedProvisionalSessionIdsRef.current = nextExcluded;
+          provisionalStore.unexclude(String(entry.sessionId));
         }
         await refreshHistoryModels(targetWorkspaceId);
         setShellNotice({ text: zhRef.current ? `已恢复「${entry.title}」` : `Restored "${entry.title}"`, icon: "check" });
@@ -1339,10 +1390,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         const removal = await waitReceipt<{ message?: string; cleanup?: "complete" | "partial" }>(client, handle.requestId);
         if (entry.sessionId) dock.store.deleteSession({ target: executionTarget.id ?? "local", project: targetWorkspaceId ?? null, session: entry.sessionId });
         if (entry.sessionId !== undefined) {
-          archivedProvisionalSessionIdsRef.current = new Set([
-            ...archivedProvisionalSessionIdsRef.current,
-            String(entry.sessionId),
-          ]);
+          provisionalStore.exclude(String(entry.sessionId));
           setProvisionalThreadsBySession((current) => {
             const key = String(entry.sessionId);
             if (current[key] === undefined) return current;
@@ -1495,7 +1543,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
           return;
         }
         if (action === "pin") {
-          if (!snapshot?.sessionId || !entry.sessionId) throw new Error(zhRef.current ? "请先连接 Runtime / Connect a Runtime first" : "Connect a Runtime first");
+          if (!snapshot?.sessionId || !entry.sessionId) throw new Error(zhRef.current ? "请先连接 Runtime" : "Connect a Runtime first");
           const handle = await client.command("session.history.pin", { sessionId: snapshot.sessionId, targetSessionId: entry.sessionId, pinned: !entry.pinned });
           await waitReceipt(client, handle.requestId);
           await refreshHistoryModels();
@@ -1748,7 +1796,13 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       真正成为 Runtime 活动会话；失败时向上抛出，由调用方统一报告并中止后续动作。 */
   const openHistoryEntry = (entry: SessionHistoryEntry, workspaceId?: WorkspaceId, opts?: { resumeForAction?: boolean; skipQueue?: boolean }): Promise<void> => {
     if (mdi && !opts?.resumeForAction) {
-      const viewId = mdi.store.openFromDirectory({ targetId: executionTarget.id, workspaceId: workspaceId ?? mdi.document.ref.workspaceId, sessionId: entry.sessionId, threadId: entry.threadId, historyId: entry.historyId }, entry.title ?? t("conversation.untitledSession"));
+      const provisional = provisionalThreadForHistoryEntry(Object.values(provisionalThreadsBySession), entry);
+      const liveTitle = entry.sessionId !== undefined && entry.sessionId === snapshot?.sessionId
+        && (snapshot.sessionTitleSource === "user" || !isPlaceholderSessionTitle(snapshot.sessionTitle))
+        ? snapshot.sessionTitle
+        : undefined;
+      const resolvedTitle = sidebarThreadTitle(entry, provisional, t("conversation.untitledSession"), liveTitle);
+      const viewId = mdi.store.openFromDirectory({ targetId: executionTarget.id, workspaceId: workspaceId ?? mdi.document.ref.workspaceId, sessionId: entry.sessionId, threadId: entry.threadId, historyId: entry.historyId }, resolvedTitle);
       globalThis.window.dispatchEvent(new CustomEvent("omp:conversation-focus", { detail: viewId }));
       return Promise.resolve();
     }
@@ -2036,16 +2090,19 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   const paletteGroups = useMemo(() => buildPaletteGroups({
     preview: previewMode.preview,
     zh,
+    t,
     untitledTitle: t("conversation.untitledSession"),
     historyEntries: state.model.history?.entries ?? [],
     workspaces: sidebarProjectOrder(state.model.workspaces),
     ...(selectedProject ? { activeProjectName: selectedProject.name } : {}),
     inventory: paletteInventory,
     query: paletteQuery,
-  }), [previewMode.preview, previewMode.preview ? zh : false, state.model.history, state.model.workspaces, selectedProject, paletteInventory, paletteQuery, t]);
+  }), [previewMode.preview, zh, state.model.history, state.model.workspaces, selectedProject, paletteInventory, paletteQuery, t]);
 
   useEffect(() => {
+    if (mdi && !mdi.active) return;
     const onKey = (event: KeyboardEvent) => {
+      if (mdi && !mdi.active) return;
       if (event.key === "Escape") {
         if (paletteOpen) {
           closePalette();
@@ -2089,7 +2146,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [archiveBusy, archivePending, toggleBottom, toggleSidebar, dialog, go, skillsOpen, paletteOpen, closePalette, openPalette, startNewChat]);
+  }, [mdi?.active, window, archiveBusy, archivePending, toggleBottom, toggleSidebar, dialog, go, skillsOpen, paletteOpen, closePalette, openPalette, startNewChat]);
 
   // macOS menu bar: the same actions as the shortcuts above plus a few menu-only ones.
   const runMenuCommand = useRef<(command: string) => void>(() => {});
@@ -2413,6 +2470,21 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   }, [mdi?.document.id, threadTitle, snapshot?.sessionId, snapshotStarted, dockSelection.project, selected?.sessionId, selected?.threadId, selected?.historyId, previewProjectId, previewThreadId, previewMode.preview, previewMode.preview ? zh : false, executionTarget.id, selectedProject?.name, state.loading]);
   const canvasSessionId = selectedProvisionalSessionId ?? selected?.sessionId ?? mdi?.document.ref.sessionId;
   const railPresented = !dock.railHiddenByDefault && dock.layout.rail.mode !== "hidden";
+  const flushDockHosts = useCallback(() => {
+    if (!mdi) {
+      dock.hosts.flush();
+      return;
+    }
+    let flushedOwn = false;
+    for (const record of mdi.store.manager.getSnapshot().records) {
+      const tools = mdi.store.hosts.existing(record.content.documentId)?.tools;
+      if (tools) {
+        tools.hosts.flush();
+        if (tools.hosts === dock.hosts) flushedOwn = true;
+      }
+    }
+    if (!flushedOwn) dock.hosts.flush();
+  }, [mdi, dock.hosts]);
   // The workbench deck records the swarm under this scope and the Hub's deck reads it: same inputs, same history.
   const hubSwarmScope = agentSwarmScope(executionTarget.id, dockSelection.project ?? undefined,
     previewMode.preview ? `preview:${chrome.previewThreadId ?? "current"}` : canvasSessionId ?? snapshot?.sessionId, previewMode.preview);
@@ -2517,7 +2589,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       {/* The rail lives outside .app-body: sidebar overlays and the workbench
           width observer must never cover or measure it. */}
       <div className="app-shell">
-        {identityFlight.ghost}
+        {(!mdi || mdi.active) ? identityFlight.ghost : null}
         <SharedSurface region="navigation">
         <AppNavRail
           activeRoute={state.route}
@@ -2538,7 +2610,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
           /* Dock panels are fixed-position bodies positioned from their slot's
              rect; a rail width change moves slots without resizing them, so the
              dock has to be re-measured on every frame of the slide. */
-          onLayoutShift={dock.hosts.flush}
+          onLayoutShift={flushDockHosts}
           avatarRef={railAvatarRef}
         />
         </SharedSurface>
@@ -2611,7 +2683,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
                       throw error;
                     }
                   }}
-                  onImportedOpen={(sessionId, workspaceId) => { void client.query("history.list", { workspaceId, limit: PROJECT_THREADS_QUERY_MAX }).then(history => { const entry = history.entries.find(item => item.sessionId === sessionId); if (entry) void openHistoryEntry(entry, workspaceId); else setSessionActionError("Imported session is not yet available; refresh history"); }); }}
+                  onImportedOpen={(sessionId, workspaceId) => { void client.query("history.list", { workspaceId, limit: PROJECT_THREADS_QUERY_MAX }).then(history => { const entry = history.entries.find(item => item.sessionId === sessionId); if (entry) void openHistoryEntry(entry, workspaceId); else setSessionActionError(zhRef.current ? "导入的会话尚未出现在目录中，请刷新会话历史" : "Imported session is not yet available; refresh history"); }); }}
                   {...(historyModel ? { history: historyModel } : {})}
                   onRoute={go}
                   onSelectThread={chrome.onSelectThread}
@@ -2915,14 +2987,14 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       <ToastHost message={shellNotice?.partialDeletion ? partialSessionDeletionNotice(shellNotice.partialDeletion.title, shellNotice.partialDeletion.details, resolvedLanguage === "zh") : shellNotice?.text ?? null} icon={shellNotice?.icon ?? "info"} sticky={shellNotice?.sticky === true} onDismiss={() => setShellNotice(null)} />
       <CommandPalette
         ref={paletteRef}
-        open={paletteOpen}
+        open={paletteOpen && (!mdi || mdi.active)}
         query={paletteQuery}
         groups={paletteGroups}
         onQueryChange={setPaletteQuery}
         onClose={closePalette}
         onRun={runPaletteAction}
       />
-      {showAppUpdateDialog && effectiveUpdate ? (
+      {(!mdi || mdi.active) && showAppUpdateDialog && effectiveUpdate ? (
         <AppUpdateDialog
           update={effectiveUpdate}
           preview={previewMode.preview}

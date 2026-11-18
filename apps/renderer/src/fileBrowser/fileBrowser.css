@@ -320,8 +320,6 @@
   border-radius: var(--r-6);
   cursor: default;
   color: var(--text-2);
-  content-visibility: auto;
-  contain-intrinsic-size: auto var(--fb-row);
   transition: background-color var(--dur-fast) var(--ease);
 }
 .fb-row:hover { background: var(--surface-hover); }

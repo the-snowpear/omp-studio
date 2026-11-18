@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { realpathSync, watch, type FSWatcher } from "node:fs";
+import { watch, type FSWatcher } from "node:fs";
 import { lstat, mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
@@ -160,6 +160,16 @@ function switchBlockedFiles(stderr: string): string[] | undefined {
   return files.length > 0 ? files : undefined;
 }
 
+/** Line count of a non-binary buffer without UTF-8 string/array allocation. */
+function countBufferLines(buffer: Buffer): number | undefined {
+  if (buffer.includes(0)) return undefined;
+  if (buffer.length === 0) return 0;
+  let newlines = 0;
+  let pos = -1;
+  while ((pos = buffer.indexOf(10, pos + 1)) !== -1) newlines += 1;
+  return buffer[buffer.length - 1] === 10 ? newlines : newlines + 1;
+}
+
 /** Line count of an untracked text file inside the worktree, or undefined. */
 async function countUntrackedLines(identity: RepositoryIdentity, path: string): Promise<number | undefined> {
   const target = resolve(identity.topLevel, ...path.split("/"));
@@ -168,9 +178,8 @@ async function countUntrackedLines(identity: RepositoryIdentity, path: string): 
   try {
     const stat = await lstat(target);
     if (!stat.isFile() || stat.size > UNTRACKED_STAT_SIZE_LIMIT) return undefined;
-    const content = await readFile(target, "utf8");
-    if (content.includes("\0")) return undefined;
-    return content.split("\n").length - (content.endsWith("\n") ? 1 : 0);
+    if (stat.size === 0) return 0;
+    return countBufferLines(await readFile(target));
   } catch {
     return undefined;
   }
@@ -668,21 +677,15 @@ export class DesktopGitService implements HostGitService {
         deletions += Number(removed) || 0;
       }
     }
-    const untracked = changes.filter((change) => change.worktree === "untracked");
-    for (const change of untracked.slice(0, UNTRACKED_STAT_FILE_LIMIT)) {
-      const target = resolve(identity.topLevel, ...change.path.split("/"));
-      const escaped = relative(identity.topLevel, target);
-      if (escaped === ".." || escaped.startsWith(`..${sep}`)) continue;
-      try {
-        const stat = await lstat(target);
-        if (!stat.isFile() || stat.size > UNTRACKED_STAT_SIZE_LIMIT) continue;
-        const content = await readFile(target, "utf8");
-        if (content.includes("\0")) continue;
-        insertions += content.split("\n").length - (content.endsWith("\n") ? 1 : 0);
-      } catch {
-        // Missing or unreadable untracked files contribute nothing.
+    const untracked = changes.filter((change) => change.worktree === "untracked").slice(0, UNTRACKED_STAT_FILE_LIMIT);
+    let cursor = 0;
+    await Promise.all(Array.from({ length: Math.min(8, untracked.length) }, async () => {
+      while (cursor < untracked.length) {
+        const change = untracked[cursor++]!;
+        const lines = await countUntrackedLines(identity, change.path);
+        if (lines !== undefined) insertions += lines;
       }
-    }
+    }));
     return { insertions, deletions };
   }
 
@@ -731,17 +734,26 @@ export class DesktopGitService implements HostGitService {
   ): Promise<string> {
     const hash = createHash("sha256").update(status).update(`\0operation:${operation ?? "none"}`);
     const paths = [...new Set(changes.flatMap((change) => [change.path, ...(change.originalPath === undefined ? [] : [change.originalPath])]))].sort();
-    for (const path of paths) {
-      const target = resolve(identity.topLevel, ...path.split("/"));
-      const escaped = relative(identity.topLevel, target);
-      if (escaped === ".." || escaped.startsWith(`..${sep}`)) continue;
-      try {
-        const stat = await lstat(target, { bigint: true });
-        hash.update(`\0${path}\0${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}:${stat.mode}`);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") hash.update(`\0${path}\0missing`);
-        else throw error;
+    const fragments = new Array<string | undefined>(paths.length);
+    let cursor = 0;
+    await Promise.all(Array.from({ length: Math.min(16, paths.length) }, async () => {
+      while (cursor < paths.length) {
+        const index = cursor++;
+        const path = paths[index]!;
+        const target = resolve(identity.topLevel, ...path.split("/"));
+        const escaped = relative(identity.topLevel, target);
+        if (escaped === ".." || escaped.startsWith(`..${sep}`)) continue;
+        try {
+          const stat = await lstat(target, { bigint: true });
+          fragments[index] = `\0${path}\0${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}:${stat.mode}`;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") fragments[index] = `\0${path}\0missing`;
+          else throw error;
+        }
       }
+    }));
+    for (const fragment of fragments) {
+      if (fragment !== undefined) hash.update(fragment);
     }
     try {
       const index = await lstat(join(identity.gitDir, "index"), { bigint: true });
@@ -791,42 +803,44 @@ export class DesktopGitService implements HostGitService {
   async #worktreeEntries(identity: RepositoryIdentity): Promise<Array<GitWorktreeRecord & { internalPath: string }>> {
     const result = await this.#git(identity.cwd, ["worktree", "list", "--porcelain", "-z"], { readOnly: true });
     const records = result.stdout.split("\0");
-    const output: Array<GitWorktreeRecord & { internalPath: string }> = [];
+    const parsedEntries: Array<Record<string, string | true>> = [];
     let current: Record<string, string | true> = {};
-    const flush = () => {
-      const path = current.worktree;
-      if (typeof path !== "string") { current = {}; return; }
-      let canonical = resolve(path);
-      try { canonical = realpathSync(canonical); } catch { /* keep normalized path for prunable entries */ }
-      const branchValue = typeof current.branch === "string" ? current.branch.replace(/^refs\/heads\//u, "") : undefined;
-      const worktreeId = opaqueId("wt", canonical) as GitWorktreeId;
-      const workspace = this.options.registry.list().find((entry) => (process.platform === "win32" ? entry.canonicalPath.toLowerCase() === canonical.toLowerCase() : entry.canonicalPath === canonical));
-      output.push({
-        worktreeId,
-        name: basename(canonical),
-        ...(branchValue === undefined ? {} : { branch: branchValue }),
-        ...(typeof current.HEAD === "string" ? { headOid: current.HEAD } : {}),
-        current: worktreeId === identity.worktreeId,
-        detached: current.detached === true,
-        bare: current.bare === true,
-        locked: current.locked !== undefined,
-        ...(typeof current.locked === "string" ? { lockReason: current.locked } : {}),
-        prunable: current.prunable !== undefined,
-        ...(workspace === undefined ? {} : { workspaceId: workspace.workspaceId as WorkspaceId }),
-        internalPath: canonical,
-      });
+    const collectEntry = () => {
+      if (typeof current.worktree === "string") parsedEntries.push(current);
       current = {};
     };
     for (const record of records) {
-      if (!record) { flush(); continue; }
+      if (!record) { collectEntry(); continue; }
       const boundary = record.indexOf(" ");
       const key = boundary < 0 ? record : record.slice(0, boundary);
       const value = boundary < 0 ? true : record.slice(boundary + 1);
-      if (key === "worktree" && current.worktree !== undefined) flush();
+      if (key === "worktree" && current.worktree !== undefined) collectEntry();
       current[key] = value;
     }
-    flush();
-    return output;
+    collectEntry();
+    const workspaces = this.options.registry.list();
+    return await Promise.all(parsedEntries.map(async (entry) => {
+      const rawPath = entry.worktree as string;
+      let canonical = resolve(rawPath);
+      try { canonical = await realpath(canonical); } catch { /* keep normalized path for prunable entries */ }
+      const branchValue = typeof entry.branch === "string" ? entry.branch.replace(/^refs\/heads\//u, "") : undefined;
+      const worktreeId = opaqueId("wt", canonical) as GitWorktreeId;
+      const workspace = workspaces.find((item) => (process.platform === "win32" ? item.canonicalPath.toLowerCase() === canonical.toLowerCase() : item.canonicalPath === canonical));
+      return {
+        worktreeId,
+        name: basename(canonical),
+        ...(branchValue === undefined ? {} : { branch: branchValue }),
+        ...(typeof entry.HEAD === "string" ? { headOid: entry.HEAD } : {}),
+        current: worktreeId === identity.worktreeId,
+        detached: entry.detached === true,
+        bare: entry.bare === true,
+        locked: entry.locked !== undefined,
+        ...(typeof entry.locked === "string" ? { lockReason: entry.locked } : {}),
+        prunable: entry.prunable !== undefined,
+        ...(workspace === undefined ? {} : { workspaceId: workspace.workspaceId as WorkspaceId }),
+        internalPath: canonical,
+      };
+    }));
   }
 
   async worktrees(input: { readonly workspaceId: WorkspaceId }): Promise<GitWorktreeListReadModel> {
@@ -841,8 +855,8 @@ export class DesktopGitService implements HostGitService {
     const names = (await this.#git(identity.cwd, ["remote"], { readOnly: true })).stdout.split(/\r?\n/u).filter(Boolean);
     const remotes: GitRemoteRecord[] = [];
     for (const name of names) {
-      const fetch = safeRemoteUrl((await this.#git(identity.cwd, ["remote", "get-url", name], { readOnly: true })).stdout);
-      const push = safeRemoteUrl((await this.#git(identity.cwd, ["remote", "get-url", "--push", name], { readOnly: true })).stdout);
+      const fetch = safeRemoteUrl((await this.#git(identity.cwd, ["remote", "get-url", "--", name], { readOnly: true })).stdout);
+      const push = safeRemoteUrl((await this.#git(identity.cwd, ["remote", "get-url", "--push", "--", name], { readOnly: true })).stdout);
       remotes.push({ name, fetchUrl: fetch.display, pushUrl: push.display, ...(fetch.host === undefined ? {} : { host: fetch.host }), ...(fetch.repository === undefined ? {} : { repository: fetch.repository }) });
     }
     return { workspaceId: input.workspaceId, remotes };

@@ -823,7 +823,7 @@ export function DiagnosticsPage({
         </div>
       </section>
 
-      <ProcessMemoryPanel enabled={!preview} />
+      <ProcessMemoryPanel enabled={!preview && workspaceTab === "runtime"} />
       <WorkspaceRecoveryPane client={recoveryClient ?? client} {...(onOpenRecoveryWorkspace ? { onOpenWorkspace: onOpenRecoveryWorkspace } : {})} {...(onChooseRemoteWorkspace ? { onChooseRemoteWorkspace } : {})} />
       {busy !== null ? (
         <ActionProgressBar label={busy.label} step={busy.step} steps={busy.steps} />

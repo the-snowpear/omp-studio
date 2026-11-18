@@ -8,6 +8,19 @@ import { afterPreviewScroll, usePreviewVisibility } from "./previewActivity";
 import { graphicResultCache, type GraphicResultLease } from "./graphic-result-cache";
 import "./graphics.css";
 const GraphicScene = lazy(() => import("./GraphicScene"));
+
+function isStatic2DGraphic(value: GraphicResult | undefined): boolean {
+  return value?.kind === "document" && !["wrl", "x3dv"].includes(value.bundle.format);
+}
+
+function hashGraphicSource(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
 export function GraphicPreview({
   name,
   src,
@@ -35,7 +48,12 @@ export function GraphicPreview({
   }, []);
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
+  const resultRef = useRef<GraphicResult | undefined>(undefined);
+  resultRef.current = result;
   useEffect(() => {
+    resultRef.current = undefined;
     setResult(undefined); setPoster(undefined);
     if (posterUrl.current) URL.revokeObjectURL(posterUrl.current);
     posterUrl.current = undefined;
@@ -43,9 +61,10 @@ export function GraphicPreview({
   }, [name, src, text]);
   useEffect(() => {
     if (!visible || collapsed) return;
+    if (isStatic2DGraphic(resultRef.current)) return;
     if (typeof Worker === "undefined") {
       setError(
-        zh ? "当前环境不支持图形 Worker" : "Graphics workers are unavailable",
+        zhRef.current ? "当前环境不支持图形 Worker" : "Graphics workers are unavailable",
       );
       return;
     }
@@ -79,18 +98,29 @@ export function GraphicPreview({
       cached = undefined; current = undefined;
     };
     failure.current = fail;
-    const commit = (result: GraphicResult) => {
-      current = result;
-      cancelCommit = afterPreviewScroll(host.current!, () => {
+    const commit = (nextResult: GraphicResult) => {
+      if (isStatic2DGraphic(nextResult)) releaseSlot();
+      const target = host.current;
+      if (!target) {
+        release(nextResult);
+        return;
+      }
+      current = nextResult;
+      cancelCommit = afterPreviewScroll(target, () => {
         if (!active) return;
-        cached = graphicResultCache.store(name, text ?? src ?? "", result);
+        cached = graphicResultCache.store(name, text ?? src ?? "", nextResult);
         current = undefined;
         setResult(cached.result); setBusy(false);
       });
     };
     const startWorker = () => {
       cached = graphicResultCache.read(name, text ?? src ?? "");
-      if (cached) { setResult(cached.result); setBusy(false); return; }
+      if (cached) {
+        if (isStatic2DGraphic(cached.result)) releaseSlot();
+        setResult(cached.result);
+        setBusy(false);
+        return;
+      }
       worker = new Worker(new URL("./graphic.worker.ts", import.meta.url), {
         type: "module",
       });
@@ -114,7 +144,7 @@ export function GraphicPreview({
         commit(event.data.result);
       };
       worker.onerror = () =>
-        fail(zh ? "图形解析失败" : "Graphic parsing failed");
+        fail(zhRef.current ? "图形解析失败" : "Graphic parsing failed");
       const run = async () => {
         let bytes: ArrayBuffer;
         if (text !== undefined) bytes = new TextEncoder().encode(text).buffer;
@@ -154,7 +184,7 @@ export function GraphicPreview({
         deadline = setTimeout(
           () =>
             fail(
-              zh
+              zhRef.current
                 ? "图形解析超过 8 秒限额"
                 : "Graphic parsing exceeded the 8 second limit",
             ),
@@ -190,14 +220,15 @@ export function GraphicPreview({
       if (cached) cached.release();
       else release(current);
       setBusy(false);
-      setResult(result => result?.kind === "document" && !["wrl", "x3dv"].includes(result.bundle.format) ? result : undefined);
+      setResult(prev => isStatic2DGraphic(prev) ? prev : undefined);
     };
-  }, [visible, collapsed, name, src, text, zh]);
+  }, [visible, collapsed, name, src, text]);
   return (
     <div className="graphic-preview" ref={host}>
       <div className="graphic-controls">
         <span>{name}</span>
         <button
+          type="button"
           className="btn small outline"
           onClick={() => setCollapsed((value) => !value)}
         >
@@ -364,13 +395,17 @@ function X3DPreview({
   const [ready, setReady] = useState(false);
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   useEffect(() => {
+    const iframe = frame.current;
+    const ownerWin = iframe?.ownerDocument?.defaultView ?? window;
     setError("");
     setReady(false);
     const timer = setTimeout(() => {
-      setError(
-        zh ? "三维预览超过加载限额" : "3D preview exceeded its loading budget",
-      );
+      const msg = zhRef.current ? "三维预览超过加载限额" : "3D preview exceeded its loading budget";
+      setError(msg);
+      onFailure(msg);
       if (frame.current) frame.current.src = "about:blank";
     }, 10000);
     const receive = (event: MessageEvent) => {
@@ -391,16 +426,17 @@ function X3DPreview({
         if (frame.current) frame.current.src = "about:blank";
       }
     };
-    window.addEventListener("message", receive);
+    ownerWin.addEventListener("message", receive);
     return () => {
       clearTimeout(timer);
-      window.removeEventListener("message", receive);
+      ownerWin.removeEventListener("message", receive);
+      if (iframe) iframe.src = "about:blank";
     };
-  }, [source, resources, name, zh, onFailure, onPoster]);
+  }, [source, resources, name, onFailure, onPoster]);
   return (
     <div className="graphic-scene">
       <iframe
-        key={name + source.length}
+        key={`${name}:${source.length}:${hashGraphicSource(source)}`}
         ref={frame}
         sandbox="allow-scripts"
         src={document.location.protocol === "file:" ? "omp-graphics://viewer/graphic-preview.html" : new URL("graphic-preview.html", document.baseURI).href}
@@ -412,6 +448,7 @@ function X3DPreview({
           {zh ? "拖动旋转 · 滚轮缩放" : "Drag to orbit · Scroll to zoom"}
         </span>
         <button
+          type="button"
           className="btn small outline"
           disabled={!ready}
           onClick={() =>

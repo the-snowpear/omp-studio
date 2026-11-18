@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createServer, type Socket } from "node:net";
+import { createServer, type Server, type Socket } from "node:net";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -166,4 +166,67 @@ test("v2 prediction transport attaches Runtime metadata, isolates windows and im
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("overlapping attaches keep both prediction channels usable in one window", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "omp-predict-"));
+  const directory = join(root, "prediction");
+  await mkdir(directory);
+  const peers = new Set<Socket>();
+  const servers: Server[] = [];
+  const manager = new DesktopPrediction({
+    directory: () => root,
+    socketDirectory: async () => root,
+    chooseHistory: async () => undefined,
+  });
+  context.after(async () => {
+    manager.dispose();
+    for (const peer of peers) peer.destroy();
+    await Promise.all(servers.map(server => new Promise<void>(resolve => server.close(() => resolve()))));
+    await rm(root, { recursive: true, force: true });
+  });
+  const sender: TerminalSender = {
+    id: 7,
+    isDestroyed: () => false,
+    getURL: () => "file:///studio/index.html",
+    send: () => {},
+    once: () => {},
+    off: () => {},
+  };
+  async function openChannel(sessionId: string) {
+    const channelId = randomUUID();
+    const token = randomBytes(32).toString("hex");
+    const endpoint = process.platform === "win32"
+      ? "\\\\.\\pipe\\omp-studio-predict-" + channelId
+      : join(root, `p-${createHash("sha256").update(channelId).digest("hex").slice(0, 16)}.sock`);
+    let receive!: (data: string) => void;
+    const received = new Promise<string>(resolve => { receive = resolve; });
+    const server = createServer(socket => {
+      peers.add(socket);
+      socket.setEncoding("utf8");
+      socket.once("data", data => {
+        assert.equal(data, token + "\n");
+        socket.write("OK\n");
+        socket.once("data", receive);
+      });
+    });
+    servers.push(server);
+    await new Promise<void>(resolve => server.listen(endpoint, resolve));
+    await writeFile(join(directory, `${channelId}.json`), JSON.stringify({
+      version: 1,
+      channelId,
+      sessionId,
+      token,
+      endpoint,
+      expiresAt: Date.now() + 15000,
+    }));
+    return { channel: { channelId, sessionId }, received };
+  }
+  const [composer, settings] = await Promise.all([openChannel("composer"), openChannel("settings")]);
+  await Promise.all([manager.attach(sender, composer.channel), manager.attach(sender, settings.channel)]);
+  manager.input(sender, { channelId: settings.channel.channelId, input: { kind: "ping" } });
+  assert.equal(await settings.received, '{"kind":"ping"}\n');
+  manager.detach(sender, settings.channel);
+  manager.input(sender, { channelId: composer.channel.channelId, input: { kind: "ping" } });
+  assert.equal(await composer.received, '{"kind":"ping"}\n');
 });

@@ -397,4 +397,54 @@ describe("ConversationStore", () => {
     expect(afterHydrate.store.getSnapshot().state.pendingUsers).toEqual([]);
     expect(afterHydrate.store.getSnapshot().rows).toHaveLength(2);
   });
+
+  it("keeps paged-out turn items out of the tail on hydrate replay and preserves chronological loadOlder", () => {
+    const { store, sessionId } = create();
+    const withTool = (id: string, createdAt: string, callId: string, output: string): ConversationMessageItem => ({
+      kind: "message",
+      itemId: id,
+      parentId: null,
+      createdAt,
+      role: "assistant",
+      content: [
+        { type: "toolCall", toolCallId: callId, toolName: "Read" },
+        { type: "toolResult", toolCallId: callId, toolName: "Read", output, isError: false },
+      ],
+    });
+    const m0: ConversationMessageItem = { ...item("m-0", "user", "00:33 prompt"), createdAt: "2026-11-18T00:33:00.000Z" };
+    const m1 = withTool("m-1", "2026-11-18T00:33:10.000Z", "call-1", "early output");
+    const m2 = withTool("m-2", "2026-11-18T00:37:00.000Z", "call-2", "mid output");
+    const m3: ConversationMessageItem = { ...item("m-3", "user", "00:49 steer"), parentId: "m-2", createdAt: "2026-11-18T00:49:00.000Z" };
+    const m4 = withTool("m-4", "2026-11-18T00:50:00.000Z", "call-4", "late output");
+    const m5: ConversationMessageItem = { ...item("m-5", "assistant", "00:51 post-page"), parentId: "m-4", createdAt: "2026-11-18T00:51:00.000Z" };
+    const shell = (entry: ConversationMessageItem): ConversationMessageItem => ({
+      ...entry,
+      content: entry.content.filter((block) => block.type !== "toolResult"),
+    });
+    store.hydrate(
+      { items: [m2, m3, m4], olderCursor: "cursor-m2" as never, headCursor: "cursor-m4" as never, hasMoreBefore: true },
+      [
+        { streamSeq: 1, update: { kind: "conversation.message.completed", sessionId, turnId: "turn-1", messageId: "m-0", item: m0 } },
+        { streamSeq: 2, update: { kind: "conversation.message.completed", sessionId, turnId: "turn-1", messageId: "m-1", item: shell(m1) } },
+        { streamSeq: 3, update: { kind: "conversation.tool.started", sessionId, turnId: "turn-1", messageId: "m-1", toolCallId: "call-1", toolName: "Read", startedAt: m1.createdAt } },
+        { streamSeq: 4, update: { kind: "conversation.tool.completed", sessionId, turnId: "turn-1", toolCallId: "call-1", completedAt: m1.createdAt, result: { type: "toolResult", toolCallId: "call-1", toolName: "Read", output: "early output", isError: false } } },
+        { streamSeq: 5, update: { kind: "conversation.message.completed", sessionId, turnId: "turn-1", messageId: "m-2", item: shell(m2) } },
+        { streamSeq: 6, update: { kind: "conversation.message.completed", sessionId, turnId: "turn-1", messageId: "m-3", item: m3 } },
+        { streamSeq: 7, update: { kind: "conversation.message.completed", sessionId, turnId: "turn-1", messageId: "m-4", item: shell(m4) } },
+        { streamSeq: 8, update: { kind: "conversation.message.completed", sessionId, turnId: "turn-1", messageId: "m-5", item: m5 } },
+      ],
+      8,
+    );
+    const afterHydrate = store.getSnapshot().state;
+    expect(afterHydrate.items.map((entry) => entry.itemId)).toEqual(["m-2", "m-3", "m-4", "m-5"]);
+    expect(afterHydrate.items[0]).toBe(m2);
+    expect(afterHydrate.items[2]).toBe(m4);
+    expect(Object.keys(afterHydrate.openTurnItems)).toEqual(["m-2", "m-3", "m-4", "m-5"]);
+    expect(afterHydrate.liveTools["call-1"]).toBeUndefined();
+
+    store.prepend({ items: [m0, m1], headCursor: "cursor-m4" as never, hasMoreBefore: false });
+    expect(store.getSnapshot().state.items.map((entry) => entry.itemId)).toEqual(["m-0", "m-1", "m-2", "m-3", "m-4", "m-5"]);
+    expect(store.getSnapshot().state.hasMoreBefore).toBe(false);
+    store.dispose();
+  });
 });

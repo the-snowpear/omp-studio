@@ -11,7 +11,7 @@ import { GitDiffPlaceholder, GitDiffResizer, useGitDiffHeight } from "../git/Git
 import { GitMoreActionsMenu } from "../git/GitMoreActionsMenu";
 import { GitPanelSplit } from "../git/GitPanelSplit";
 import { GitTip } from "../git/GitTip";
-import { readGitGraphLayout, writeGitGraphLayout } from "../git/gitGraphMemory";
+import { readGitGraphLayout } from "../git/gitGraphMemory";
 import { useGitWorkspace } from "../git/GitWorkspaceContext";
 import {
   getPreviewChanges,
@@ -434,7 +434,6 @@ export function PreviewGitPanel({ view, focusPath, focusKey }: { view?: "changes
   }, [selectedCommit, selectedCommitPath]);
   const persistGraphLayout = (next: typeof graphLayout) => {
     setGraphLayout(next);
-    writeGitGraphLayout(next);
   };
   const group = (title: string, rows: typeof staged, target: "staged" | "working", extra?: ReactNode) => (
     <div className="ch-group">

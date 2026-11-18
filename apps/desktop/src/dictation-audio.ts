@@ -96,7 +96,8 @@ export class DesktopDictationAudio {
     else if (!this.#hidden.has(windowId)) { this.#hidden.add(windowId); this.retainWindow(windowId); }
   }
   retainWindow(windowId: number): void {
-    const capture = this.#capture; if (capture?.windowId === windowId) this.#retain(capture, true);
+    const capture = this.#capture;
+    if (capture?.windowId === windowId && capture.state.phase !== "complete") this.#retain(capture, true);
   }
 
   async attach(windowId: number, raw: unknown): Promise<void> {
@@ -115,7 +116,10 @@ export class DesktopDictationAudio {
       capture.retry = true; capture.retained = false; capture.inputClosed = true;
       capture.tailUntil = 0; capture.tailSamples = 0;
     } else {
-      if (capture) throw failure("recovery-pending", "Resolve the existing dictation before starting another capture.");
+      if (capture) {
+        if (capture.windowId !== windowId) throw failure("capture-busy", "Another window is already using dictation.");
+        throw failure("recovery-pending", "Resolve the existing dictation before starting another capture.");
+      }
       capture = { windowId, owner: { sessionId: owner.sessionId, draftId: owner.draftId, ...(owner.label ? { label: owner.label } : {}) },
         audioId: id, channel, generation: 0, state: { phase: "prepared", committedText: "", partialText: "", submit: false },
         pcm: [], bytes: 0, sequence: 0, retained: false, inputClosed: false, limited: false, retry: false, tailUntil: 0, tailSamples: 0 };
@@ -366,9 +370,9 @@ export function registerDictationAudioIpc(options: {
   ipcMain: TerminalIpcMain; isTrustedSender(sender: TerminalSender): boolean;
   isVisible(sender: TerminalSender): boolean; manager: DesktopDictationAudio;
 }): { dispose(): void } {
-  const senders = new Map<number, TerminalSender>(); let disposed = false;
+  const senders = new Map<number, { sender: TerminalSender; teardown(): void }>(); let disposed = false;
   const unsubscribe = options.manager.onEvent((windowId, event) => {
-    const sender = senders.get(windowId);
+    const sender = senders.get(windowId)?.sender;
     if (sender && !sender.isDestroyed() && options.isTrustedSender(sender)) sender.send(DICTATION_AUDIO_CHANNELS.event, event);
   });
   for (const [kind, channel] of Object.entries(DICTATION_AUDIO_CHANNELS)) {
@@ -376,10 +380,26 @@ export function registerDictationAudioIpc(options: {
     options.ipcMain.handle(channel, async ({ sender }, payload): Promise<DictationAudioResult> => {
       if (sender.isDestroyed() || !options.isTrustedSender(sender)) throw failure("untrusted-sender", "Untrusted dictation sender.");
       if (!senders.has(sender.id)) {
-        senders.set(sender.id, sender);
-        sender.once("destroyed", () => { if (!disposed) { senders.delete(sender.id); options.manager.disposeWindow(sender.id); } });
-        const onNavigate = () => { if (!disposed && !sender.isDestroyed()) { options.manager.retainWindow(sender.id); sender.once("did-navigate", onNavigate); } };
+        const onDestroyed = () => {
+          teardown();
+          if (!disposed) options.manager.disposeWindow(sender.id);
+        };
+        const onNavigate = () => {
+          if (!disposed && !sender.isDestroyed()) { options.manager.retainWindow(sender.id); sender.once("did-navigate", onNavigate); }
+        };
+        const onGone = () => {
+          if (!disposed && !sender.isDestroyed()) { options.manager.retainWindow(sender.id); sender.once("render-process-gone", onGone); }
+        };
+        const teardown = () => {
+          senders.delete(sender.id);
+          sender.off("destroyed", onDestroyed);
+          sender.off("did-navigate", onNavigate);
+          sender.off("render-process-gone", onGone);
+        };
+        senders.set(sender.id, { sender, teardown });
+        sender.once("destroyed", onDestroyed);
         sender.once("did-navigate", onNavigate);
+        sender.once("render-process-gone", onGone);
       }
       options.manager.setVisible(sender.id, options.isVisible(sender));
       try {
@@ -400,7 +420,7 @@ export function registerDictationAudioIpc(options: {
   }
   return { dispose() {
     disposed = true; unsubscribe();
-    for (const windowId of senders.keys()) options.manager.disposeWindow(windowId);
+    for (const [windowId, entry] of [...senders.entries()]) { entry.teardown(); options.manager.disposeWindow(windowId); }
     senders.clear();
     for (const [kind, channel] of Object.entries(DICTATION_AUDIO_CHANNELS)) if (kind !== "event") options.ipcMain.removeHandler(channel);
   } };

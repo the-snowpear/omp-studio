@@ -1,17 +1,17 @@
-.ev-body .md-command { position: relative; }
-.ev-body .md-command .md-code-pre {
+:is(.ev-body, .tc-body) .md-command { position: relative; }
+:is(.ev-body, .tc-body) .md-command .md-code-pre {
   padding: 12px 84px 12px 14px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.ev-body .md-command .md-code-pre code { color: var(--green); }
-.ev-body .md-command .hljs-built_in { color: var(--blue); }
-.ev-body .md-command .hljs-attr,
-.ev-body .md-command .hljs-literal,
-.ev-body .md-command .hljs-keyword { color: var(--purple); }
-.ev-body .md-command .hljs-variable { color: var(--amber); }
-.ev-body .md-command .hljs-operator { color: var(--text-2); }
-.ev-body .md-command .hljs-comment { color: var(--text-faint); }
+:is(.ev-body, .tc-body) .md-command .md-code-pre code { color: var(--green); }
+:is(.ev-body, .tc-body) .md-command .hljs-built_in { color: var(--blue); }
+:is(.ev-body, .tc-body) .md-command .hljs-attr,
+:is(.ev-body, .tc-body) .md-command .hljs-literal,
+:is(.ev-body, .tc-body) .md-command .hljs-keyword { color: var(--purple); }
+:is(.ev-body, .tc-body) .md-command .hljs-variable { color: var(--amber); }
+:is(.ev-body, .tc-body) .md-command .hljs-operator { color: var(--text-2); }
+:is(.ev-body, .tc-body) .md-command .hljs-comment { color: var(--text-faint); }
 .md-command-actions {
   position: absolute;
   top: 7px;
@@ -20,7 +20,7 @@
   align-items: center;
   gap: 2px;
 }
-.ev-body .md-command-actions button {
+:is(.ev-body, .tc-body) .md-command-actions button {
   display: grid;
   place-items: center;
   width: 30px;
@@ -33,8 +33,8 @@
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
-.ev-body .md-command-actions button:hover { background: var(--surface-hover); color: var(--text); }
-.ev-body .md-command-actions button:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
-.ev-body .md-command-actions button:disabled { opacity: .4; cursor: default; }
+:is(.ev-body, .tc-body) .md-command-actions button:hover { background: var(--surface-hover); color: var(--text); }
+:is(.ev-body, .tc-body) .md-command-actions button:focus-visible { outline: 2px solid var(--text-2); outline-offset: 1px; }
+:is(.ev-body, .tc-body) .md-command-actions button:disabled { opacity: .4; cursor: default; }
 .md-command-demo { font-size: var(--fs-11); color: var(--text-faint); }
 .md-command-notice { padding: 0 14px 10px; font-size: var(--fs-11); color: var(--text-2); overflow-wrap: anywhere; }

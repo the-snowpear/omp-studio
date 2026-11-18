@@ -14,7 +14,8 @@ export function readProviderOrder(): string[] {
   }
 }
 
-export function writeProviderOrder(order: ReadonlyArray<string>): void {
+export function writeProviderOrder(order: ReadonlyArray<string>, preview = false): void {
+  if (preview) return;
   try {
     localStorage.setItem(PROVIDER_ORDER_KEY, JSON.stringify(order));
   } catch {

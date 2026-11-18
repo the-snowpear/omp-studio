@@ -1,5 +1,6 @@
 import type { RuntimeViewOperation } from "@omp-studio/studio-protocol";
-import type { EvaluationCoordinator } from "@omp-studio/studio-host";
+import { TimeTravelStore, type EvaluationCoordinator } from "@omp-studio/studio-host";
+import { dirname } from "node:path";
 import { isComputerWorkspaceCommand, type ComputerWorkspaceQuery, type ContextViewOperation } from "@omp-studio/studio-protocol";
 import { isWorkbenchOperationKind, type ArtifactTextInput } from "@omp-studio/studio-protocol";
 import { hostText, isHostLocaleZh } from "./locale.js";
@@ -3031,7 +3032,33 @@ export class StudioHostClientFacade implements ClientTransport {
       acceptedAt,
     };
     this.#bus.emit({ kind: "command.accepted", accepted });
-    void this.#runArchiveToggle(() => service.delete!({ threadId, ...(request.input.deleteManagedArtifacts === undefined ? {} : { deleteManagedArtifacts: request.input.deleteManagedArtifacts }) }), request.requestId, "session.delete");
+    void this.#runArchiveToggle(async () => {
+      const bindingsPath = this.#options.backend?.bindings?.path;
+      const canCleanupTimeTravel =
+        this.#options.timeTravel?.removeSession !== undefined ||
+        (typeof bindingsPath === "string" && bindingsPath.length > 0);
+      let targetSessionId: string | undefined;
+      if (canCleanupTimeTravel) {
+        const catalogEntries = await Promise.resolve(this.#options.catalog.list()).catch(() => []);
+        targetSessionId = catalogEntries.find((entry) => threadIdFor(entry.sessionId) === threadId)?.sessionId;
+        if (targetSessionId === undefined) {
+          const residentModel = await Promise.resolve(this.#options.residents?.list()).catch(() => undefined);
+          targetSessionId = residentModel?.residents.find((entry) => threadIdFor(entry.sessionId) === threadId)?.sessionId;
+        }
+      }
+      const result = await service.delete!({
+        threadId,
+        ...(request.input.deleteManagedArtifacts === undefined ? {} : { deleteManagedArtifacts: request.input.deleteManagedArtifacts }),
+      });
+      if (targetSessionId !== undefined) {
+        if (this.#options.timeTravel?.removeSession !== undefined) {
+          await this.#options.timeTravel.removeSession(targetSessionId).catch(() => undefined);
+        } else if (typeof bindingsPath === "string" && bindingsPath.length > 0) {
+          await new TimeTravelStore(dirname(bindingsPath)).removeSession(targetSessionId).catch(() => undefined);
+        }
+      }
+      return result;
+    }, request.requestId, "session.delete");
     return accepted;
   }
 

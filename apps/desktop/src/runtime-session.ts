@@ -28,9 +28,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { lstat, readFile, rm, mkdir } from "node:fs/promises";
+import { StringDecoder } from "node:string_decoder";
 import { RuntimeInstaller, writeJsonAtomic } from "@omp-studio/runtime-installer";
 import type { Socket } from "node:net";
 import { join, resolve } from "node:path";
+import { terminateProcessTree } from "./platform/process-tree.js";
 
 import { redactText, type HostRuntimeHelloView, type HostRuntimeDisconnect, type HostRuntimeUnavailable } from "@omp-studio/host-client-api";
 import {
@@ -140,13 +142,17 @@ export interface DesktopRuntimeSessionPortOptions {
   }) => DesktopRuntimeSessionPort;
 }
 
-/** P1 fallback containment: plain `kill()` with a force-kill fallback. */
+/** P1 fallback containment: tree-aware force-kill fallback. */
 const KILL_BASED_CONTAINMENT: RuntimeContainmentPort = {
-  requestStop(process: ChildProcess): void {
-    process.kill();
+  requestStop(child: ChildProcess): void {
+    if (process.platform === "win32") {
+      child.kill();
+      return;
+    }
+    terminateProcessTree(child, "SIGTERM");
   },
-  forceStop(process: ChildProcess): void {
-    process.kill("SIGKILL");
+  forceStop(child: ChildProcess): void {
+    terminateProcessTree(child, "SIGKILL");
   },
 };
 
@@ -1912,6 +1918,8 @@ function createSingleDesktopRuntimeSessionPort(
   };
 }
 
+const MAX_RUNTIME_LOG_LINE_CHARS = 16_384;
+
 function attachRuntimeOutput(child: ChildProcess, log: HostLog | undefined): void {
   if (log === undefined) {
     // stderr is spawned as a pipe, so an unread stream buffers inside Node
@@ -1921,16 +1929,42 @@ function attachRuntimeOutput(child: ChildProcess, log: HostLog | undefined): voi
     return;
   }
   const pipe = (stream: NodeJS.ReadableStream | null | undefined, event: "runtime.stdout" | "runtime.stderr"): void => {
-    stream?.on("data", (chunk: Buffer | string) => {
-      const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      for (const line of text.split(/\r?\n/u)) {
-        const trimmed = line.trim();
-        if (trimmed.length === 0) {
-          continue;
-        }
+    if (!stream) return;
+    const decoder = new StringDecoder("utf8");
+    let buffer = "";
+    const emitLine = (raw: string): void => {
+      const trimmed = raw.trim();
+      if (trimmed.length > 0) {
         log.write("info", event, trimmed);
       }
+    };
+    const consume = (text: string): void => {
+      buffer += text;
+      let newline = buffer.indexOf("\n");
+      while (newline >= 0) {
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        emitLine(line);
+        newline = buffer.indexOf("\n");
+      }
+      if (buffer.length > MAX_RUNTIME_LOG_LINE_CHARS) {
+        emitLine(buffer.slice(0, MAX_RUNTIME_LOG_LINE_CHARS));
+        buffer = "";
+      }
+    };
+    stream.on("data", (chunk: Buffer | string) => {
+      consume(typeof chunk === "string" ? chunk : decoder.write(chunk));
     });
+    const flushTail = (): void => {
+      const tail = decoder.end();
+      if (tail.length > 0) buffer += tail;
+      if (buffer.length > 0) {
+        emitLine(buffer);
+        buffer = "";
+      }
+    };
+    stream.once("end", flushTail);
+    stream.once("close", flushTail);
   };
   pipe(child.stdout, "runtime.stdout");
   pipe(child.stderr, "runtime.stderr");

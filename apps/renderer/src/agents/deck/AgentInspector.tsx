@@ -23,12 +23,13 @@ export type InspectorActions = {
   readonly notice: DeckNotice | null;
 };
 
-export function AgentInspector({ row, rows, lane, now, actions, onSelect, onClose, d }: {
+export function AgentInspector({ row, rows, lane, now, actions, marks = true, onSelect, onClose, d }: {
   row: DeckAgent;
   rows: readonly DeckAgent[];
   lane: Lane | undefined;
   now: number;
   actions: InspectorActions;
+  marks?: boolean | undefined;
   onSelect: (id: string | null) => void;
   onClose?: (() => void) | undefined;
   d: D;
@@ -43,7 +44,8 @@ export function AgentInspector({ row, rows, lane, now, actions, onSelect, onClos
   const caps = actions.caps(row);
   const identity = { id: row.id, name: row.name, hue: row.hue, main: row.main };
   const trail = useMemo(() => (lane?.marks ?? []).slice(-6).reverse(), [lane]);
-  const notice = actions.notice?.agentId === row.id ? actions.notice : null;
+  const rawNotice = actions.notice?.agentId === row.id ? actions.notice : null;
+  const notice = rawNotice && (marks || rawNotice.key !== "commandPreview") ? rawNotice : null;
   const context = row.context ? Math.min(1, row.context.used / row.context.window) : undefined;
   const tiles: [string, string][] = [
     [d("inspector.duration"), duration === undefined ? "—" : formatClock(duration)],

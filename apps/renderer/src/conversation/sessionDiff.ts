@@ -116,13 +116,23 @@ function addAstEdit(files: Map<string, DiffBlock[]>, tool: ToolView): void {
       if (after !== undefined) for (const line of after.split("\n")) lines.push(diffLine("+", "", "", line));
       byFile.set(path, lines);
     }
-    for (const [path, lines] of byFile) addBlock(files, path, { kind: "ast_edit", lines, ...(tool.truncated ? { truncated: true } : {}) });
+    for (const [path, lines] of byFile) {
+      addBlock(files, path, {
+        kind: "ast_edit",
+        lines: lines.slice(0, PATCH_LINE_CAP),
+        ...(tool.truncated || lines.length > PATCH_LINE_CAP ? { truncated: true } : {}),
+      });
+    }
     return;
   }
   const display = jsonString(fields.displayContent);
   if (display === undefined) return;
   for (const [path, lines] of astEditDisplayDiffs(display)) {
-    addBlock(files, path, { kind: "ast_edit", lines, ...(tool.truncated ? { truncated: true } : {}) });
+    addBlock(files, path, {
+      kind: "ast_edit",
+      lines: lines.slice(0, PATCH_LINE_CAP),
+      ...(tool.truncated || lines.length > PATCH_LINE_CAP ? { truncated: true } : {}),
+    });
   }
 }
 
@@ -154,7 +164,12 @@ export function sessionFileDiffs(segments: readonly AssistantSegment[]): Readonl
       const fields = toolFields(tool);
       const path = toolPath(tool);
       if (kind === "edit") {
-        addBlock(files, path, { kind, lines: editLines(toolResultFields(tool).diff ?? fields.diff), ...(tool.truncated ? { truncated: true } : {}) });
+        const lines = editLines(toolResultFields(tool).diff ?? fields.diff);
+        addBlock(files, path, {
+          kind,
+          lines: lines.slice(0, PATCH_LINE_CAP),
+          ...(tool.truncated || lines.length > PATCH_LINE_CAP ? { truncated: true } : {}),
+        });
         continue;
       }
       const raw = contentLines(fields.content);

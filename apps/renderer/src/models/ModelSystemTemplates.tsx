@@ -18,6 +18,8 @@ export function ModelSystemTemplates({ context, visible, models = [], onDirty, o
   context: ModelServiceContext; visible: boolean; models?: readonly AvailableModelRecord[]; onDirty?: (dirty: boolean) => void; onSaved?: () => void;
 }) {
   const { preview, marks } = usePreviewMode(), { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   const [list, setList] = useState<ModelSystemTemplatesList>();
   const [draft, setDraft] = useState<BindingDraft>();
   const [file, setFile] = useState<ModelSystemTemplateFile>();
@@ -39,8 +41,8 @@ export function ModelSystemTemplates({ context, visible, models = [], onDirty, o
     try {
       const next = preview ? PREVIEW_SYSTEM_TEMPLATES : await context.client!.query("models.systemTemplates.list", { sessionId: context.sessionId! });
       if (generation === epoch.current) { setList(next); setError(""); }
-    } catch (cause) { if (generation === epoch.current) setError(hostErrorMessage(cause, zh ? "无法读取系统模板配置" : "System template configuration unavailable")); }
-  }, [visible, listAvailable, preview, context.client, context.sessionId, zh]);
+    } catch (cause) { if (generation === epoch.current) setError(hostErrorMessage(cause, zhRef.current ? "无法读取系统模板配置" : "System template configuration unavailable")); }
+  }, [visible, listAvailable, preview, context.client, context.sessionId]);
   useEffect(() => {
     epoch.current++; setList(undefined); setDraft(undefined); setFile(undefined); setText(""); setError(""); setBusy(false); lock.current = false;
     return () => { epoch.current++; };
@@ -136,15 +138,17 @@ export function ModelSystemTemplates({ context, visible, models = [], onDirty, o
 
 export function ModelSystemTemplateInspector({ context, selector, visible }: { context: ModelServiceContext; selector: string; visible: boolean }) {
   const { preview, marks } = usePreviewMode(), { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   const [inspection, setInspection] = useState<ModelSystemTemplateInspection>();
   const [error, setError] = useState(""), [refresh, setRefresh] = useState(0);
   const available = preview || modelServiceAvailable(context, "models.systemTemplates.inspect");
   useEffect(() => {
     let active = true; setInspection(undefined); setError("");
     if (!visible || !selector || !available) return;
-    void (preview ? Promise.resolve(previewSystemTemplateInspection(selector)) : context.client!.query("models.systemTemplates.inspect", { sessionId: context.sessionId!, selector })).then(result => { if (active) setInspection(result); }).catch(cause => { if (active) setError(hostErrorMessage(cause, zh ? "系统提示检查不可用" : "System prompt inspection unavailable")); });
+    void (preview ? Promise.resolve(previewSystemTemplateInspection(selector)) : context.client!.query("models.systemTemplates.inspect", { sessionId: context.sessionId!, selector })).then(result => { if (active) setInspection(result); }).catch(cause => { if (active) setError(hostErrorMessage(cause, zhRef.current ? "系统提示检查不可用" : "System prompt inspection unavailable")); });
     return () => { active = false; };
-  }, [context.client, context.sessionId, visible, selector, available, preview, refresh, zh]);
+  }, [context.client, context.sessionId, visible, selector, available, preview, refresh]);
   if (!visible) return null;
   const selection = inspection?.live?.selection ?? inspection?.selection;
   const sourceName = selection ? ({ bundled: zh ? "原生内置提示" : "Native bundled prompt", "explicit-template": zh ? "显式系统模板" : "Explicit template", "explicit-text": zh ? "显式系统提示" : "Explicit prompt", "discovered-template": "SYSTEM_TEMPLATE.md", "discovered-text": "SYSTEM.md", "model-template": "config.yml · systemPromptTemplates" }[selection.source]) : "";

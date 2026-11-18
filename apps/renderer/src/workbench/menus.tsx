@@ -206,6 +206,7 @@ export function CrumbMenu({ id, openId, onToggle, tip, current, children, menu }
   children: ReactNode;
   menu: ReactNode;
 }) {
+  const { document, window } = useConversationDom();
   const open = openId === id;
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -221,7 +222,7 @@ export function CrumbMenu({ id, openId, onToggle, tip, current, children, menu }
     position();
     window.addEventListener("resize", position);
     return () => window.removeEventListener("resize", position);
-  }, [open]);
+  }, [open, window]);
 
   return (
     <div className="crumb-menu" onMouseDown={(event) => event.stopPropagation()}>
@@ -287,7 +288,7 @@ export function ThreadActionMenuItems({ live, busy, compacting, forkBusy = compa
         {...(live ? {} : { title: reason })}
         onClick={onRename}
       >{t("conversation.renameThread")}</MenuItem>
-      {onPin ? <MenuItem icon="pin" disabled={!live} onClick={onPin}>{pinned ? (zh ? "取消置顶 / Unpin" : "Unpin") : (zh ? "置顶 / Pin" : "Pin")}</MenuItem> : null}
+      {onPin ? <MenuItem icon="pin" disabled={!live} onClick={onPin}>{pinned ? (zh ? "取消置顶" : "Unpin") : (zh ? "置顶" : "Pin")}</MenuItem> : null}
       <MenuItem
         icon="fork"
         disabled={!live || forkBusy}

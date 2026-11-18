@@ -9,6 +9,14 @@ import { pickLocale } from "./i18n";
 
 const RECEIPT_TIMEOUT_MS = 120_000;
 
+export class HostReceiptTimeout extends Error {
+  readonly code = "UNAVAILABLE";
+
+  constructor() {
+    super(pickLocale("等待 Host 回执超时", "Timed out waiting for Host receipt"));
+  }
+}
+
 type ReceiptClient = Pick<StudioClient, "subscribe">;
 
 function commandStateOf(client: ReceiptClient, requestId: string): CommandState | undefined {
@@ -98,7 +106,7 @@ export async function waitReceipt<T>(client: ReceiptClient, requestId: string, t
       reject(error);
     };
     // A native human picker has no protocol deadline; closing or resync still settles through command state.
-    const timer = timeoutMs === null ? undefined : setTimeout(() => fail({ code: "UNAVAILABLE", message: pickLocale("等待 Host 回执超时", "Timed out waiting for Host receipt") }), timeoutMs);
+    const timer = timeoutMs === null ? undefined : setTimeout(() => fail(new HostReceiptTimeout()), timeoutMs);
     const unsub = client.subscribe({ scope: "command", requestId: requestId as CommandRequestId }, (event) => {
       if (event.kind !== "command.receipt" || event.receipt.requestId !== requestId) return;
       settleReceipt(event.receipt, succeed, fail);

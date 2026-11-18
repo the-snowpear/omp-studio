@@ -52,10 +52,16 @@ export function useSubagentComposer(input: {
   const composerRef = useRef<ChipComposerHandle | null>(null);
   const [localState] = useState(createSubagentViewState);
   const viewState = input.viewState ?? localState;
-  const [draft, setDraft] = useSubagentViewField(viewState, "draft");
+  const [draft, setDraftRaw] = useSubagentViewField(viewState, "draft");
   const [queued, setQueued] = useSubagentViewField(viewState, "queued");
   const [queueEdit, setQueueEdit] = useSubagentViewField(viewState, "queueEdit");
   const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
+  const editRevisionRef = useRef(0);
+  const setDraft = useCallback<typeof setDraftRaw>((action) => {
+    editRevisionRef.current += 1;
+    setDraftRaw(action);
+  }, [setDraftRaw]);
   const [error, setError] = useSubagentViewField(viewState, "error");
   const flushBusyRef = useRef(false);
   const [flushTick, setFlushTick] = useState(0);
@@ -91,11 +97,12 @@ export function useSubagentComposer(input: {
     text: string,
     images?: readonly PromptImage[],
   ): Promise<boolean> => {
-    if (!input.enabled) return false;
+    if (!input.enabled || sendingRef.current) return false;
     if (input.preview === true) return true;
     const client = input.client;
     const agent = input.agent;
     if (client === null || agent === undefined || agent.generation === undefined) return false;
+    sendingRef.current = true;
     setSending(true);
     setError(undefined);
     try {
@@ -112,6 +119,7 @@ export function useSubagentComposer(input: {
       setError(hostErrorMessage(cause, zhRef.current ? "发送给子 Agent 失败" : "Failed to send to subagent"));
       return false;
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   }, [input.agent, input.client, input.preview, input.enabled, setError]);
@@ -136,10 +144,11 @@ export function useSubagentComposer(input: {
       setDraft(result.composer);
       return;
     }
-    if (!promptEnabled) return;
+    if (!promptEnabled || sendingRef.current) return;
     const payload = takeSnapshot();
+    const revAtSend = editRevisionRef.current;
     void sendSnapshot(payload, "prompt").then((ok) => {
-      if (ok) clearDraft();
+      if (ok && editRevisionRef.current === revAtSend && takeSnapshot().text === payload.text) clearDraft();
     });
   };
 
@@ -152,10 +161,11 @@ export function useSubagentComposer(input: {
       setDraft(result.composer);
       return;
     }
-    if (!followUpEnabled) return;
+    if (!followUpEnabled || sendingRef.current) return;
     const payload = takeSnapshot();
+    const revAtSend = editRevisionRef.current;
     void sendSnapshot(payload, "followUp").then((ok) => {
-      if (ok) clearDraft();
+      if (ok && editRevisionRef.current === revAtSend && takeSnapshot().text === payload.text) clearDraft();
     });
   };
 
@@ -231,12 +241,12 @@ export function useSubagentComposer(input: {
     });
   };
 
-  // Restore only when the editor is mounted, never overwrite typing on status updates.
+  // Restore only when the editor mounts or switches viewState, never overwrite active IME typing on status updates.
   useLayoutEffect(() => {
     const editor = composerRef.current;
     editor?.setSnapshot(viewState.draft, { preserveFocus: true });
     return () => { if (editor) viewState.draft = editor.getSnapshot(); };
-  }, [viewState, input.enabled]);
+  }, [viewState]);
 
   useEffect(() => {
     if (queueKey === undefined || flushBusyRef.current || sending) return;

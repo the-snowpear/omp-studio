@@ -12,7 +12,6 @@ import type {
   Unsubscribe,
 } from "@omp-studio/client-contract";
 
-import { cloneEnvelopeValue } from "./clone.js";
 import { WebTransportError } from "./errors.js";
 
 /**
@@ -87,27 +86,27 @@ export class WebClientTransport implements ClientTransport {
         "bootstrap result is not an object",
       );
     }
-    return cloneEnvelopeValue(bootstrap);
+    return bootstrap;
   }
 
   async query<TName extends QueryName>(
     request: ClientQueryRequest<TName>,
   ): Promise<ClientQueryResponse<TName>> {
     this.#throwIfClosed();
-    const response = await this.#api.query(cloneEnvelopeValue(request));
+    const response = await this.#api.query(request);
     this.#throwIfClosed();
     this.#assertQueryEnvelope(request, response);
-    return cloneEnvelopeValue(response);
+    return response;
   }
 
   async command<TName extends CommandName>(
     request: ClientCommandRequest<TName>,
   ): Promise<ClientCommandAccepted<TName>> {
     this.#throwIfClosed();
-    const accepted = await this.#api.command(cloneEnvelopeValue(request));
+    const accepted = await this.#api.command(request);
     this.#throwIfClosed();
     this.#assertCommandAccepted(request, accepted);
-    return cloneEnvelopeValue(accepted);
+    return accepted;
   }
 
   subscribe(scope: SubscriptionScope, listener: EventListener): Unsubscribe {
@@ -117,10 +116,10 @@ export class WebClientTransport implements ClientTransport {
     // unsubscribe or close are dropped before the listener ever runs.
     const wrapped: EventListener = (event) => {
       if (this.#subscriptions.has(teardown)) {
-        listener(cloneEnvelopeValue(event));
+        listener(event);
       }
     };
-    const apiUnsubscribe = this.#api.subscribe(cloneEnvelopeValue(scope), wrapped);
+    const apiUnsubscribe = this.#api.subscribe(scope, wrapped);
     if (typeof apiUnsubscribe !== "function") {
       throw new WebTransportError(
         "TRANSPORT_ERROR",

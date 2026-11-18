@@ -892,7 +892,7 @@ export function HomePage({
             <ProfileAvatar name={profile.displayName} src={profile.avatarSrc} className="home-avatar" />
           </span>
           <div className="home-identity-copy">
-            <h1>{greeting(new Date(), t)}，{profile.displayName}</h1>
+            <h1>{greeting(new Date(), t)}{resolvedLanguage === "zh" ? "，" : ", "}{profile.displayName}</h1>
             <p className="muted">{statusText}</p>
           </div>
           <button

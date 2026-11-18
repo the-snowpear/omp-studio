@@ -428,6 +428,125 @@ describe("studio-host runtime", () => {
 		expect(revived).toBe(1);
 		expect(disposed).toBe(2);
 	});
+
+	test("keeps reserved message ids aligned across harness-injected users, skipped assistant turns, and worker revival", async () => {
+		using tempDir = TempDir.createSync("@omp-studio-revive-projector-");
+		const initialManager = SessionManager.create(tempDir.path(), tempDir.path());
+		await initialManager.ensureOnDisk();
+		const sessionFile = initialManager.getSessionFile()!;
+
+		const reservedUser = initialManager.reserveMessageId("user");
+		initialManager.appendMessage({ role: "user", content: "synthetic nudge", synthetic: true, timestamp: 1 });
+		initialManager.appendMessage({
+			role: "user",
+			content: "peer steer",
+			steering: true,
+			attribution: "agent",
+			timestamp: 2,
+		});
+		const persistedUser = initialManager.appendMessage({
+			role: "user",
+			content: "real operator prompt",
+			timestamp: 3,
+		});
+		expect(persistedUser).toBe(reservedUser);
+
+		initialManager.reserveMessageId("assistant");
+		initialManager.discardReservedMessageId("assistant");
+		const reservedAssistant = initialManager.reserveMessageId("assistant");
+		const persistedAssistant = initialManager.appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "persisted reply" }],
+			api: "openai-completions",
+			provider: "openai",
+			model: "test-model",
+			usage: {
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 2,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: 4,
+		});
+		expect(persistedAssistant).toBe(reservedAssistant);
+		await initialManager.flush();
+
+		const initialListeners = new Set<(event: unknown) => void>();
+		const nextListeners = new Set<(event: unknown) => void>();
+		const revivedManager = await SessionManager.open(sessionFile);
+		try {
+			const initial = {
+				...fakeSession(initialManager.getSessionId(), { getSessionFile: () => sessionFile }),
+				sessionManager: initialManager,
+				activeToolExecutionUpdates: () => [],
+				subscribe: (listener: (event: unknown) => void) => {
+					initialListeners.add(listener);
+					return () => initialListeners.delete(listener);
+				},
+				dispose: async () => {
+					await initialManager.close();
+				},
+			} as unknown as AgentSession;
+			const next = {
+				...fakeSession(revivedManager.getSessionId(), { getSessionFile: () => sessionFile }),
+				sessionManager: revivedManager,
+				activeToolExecutionUpdates: () => [],
+				subscribe: (listener: (event: unknown) => void) => {
+					nextListeners.add(listener);
+					return () => nextListeners.delete(listener);
+				},
+				dispose: async () => {
+					await revivedManager.close();
+				},
+			} as unknown as AgentSession;
+
+			const liveIds: string[] = [];
+			let persistedRevivedUser = "";
+			await runStudioHostMode(
+				initial,
+				{ endpoint: "omp-studio-test", tokenFile: "C:\\temp\\omp-studio.token", runtimeEpoch: 19 },
+				async runtime => {
+					runtime.services.conversation?.onEvent(event => {
+						if (event.kind === "conversation.message.completed") liveIds.push(event.messageId);
+					});
+					if (runtime.workerResidency?.() !== "dormant") {
+						const { promise, resolve } = Promise.withResolvers<void>();
+						const stop = runtime.onWorkerStateChange?.(() => {
+							if (runtime.workerResidency?.() !== "dormant") return;
+							stop?.();
+							resolve();
+						});
+						await promise;
+					}
+					expect(runtime.workerResidency?.()).toBe("dormant");
+					await runtime.ensureWorkerLive?.();
+					expect(runtime.workerResidency?.()).toBe("active");
+					const revivedUser = { role: "user" as const, content: "after revival", timestamp: Date.now() };
+					for (const listener of nextListeners) {
+						listener({ type: "agent_start" });
+						listener({ type: "message_start", message: revivedUser });
+						listener({ type: "message_end", message: revivedUser });
+					}
+					persistedRevivedUser = revivedManager.appendMessage(revivedUser);
+					const page = runtime.services.transcript.read({ limit: 50 });
+					expect(page.items.at(-1)?.itemId).toBe(persistedRevivedUser);
+				},
+				{
+					createBridge: silentBridge,
+					recreateSession: async () => next,
+					workerIdleSleepMs: 1,
+					workerIdleRecycleMs: 2,
+				},
+			);
+			expect(liveIds).toEqual([persistedRevivedUser]);
+		} finally {
+			await initialManager.close().catch(() => {});
+			await revivedManager.close().catch(() => {});
+		}
+	});
 });
 
 beforeEach(async () => {

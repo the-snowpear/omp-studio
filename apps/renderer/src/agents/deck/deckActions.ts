@@ -18,6 +18,7 @@ export type DeckCommandContext = {
   readonly client?: StudioClient | undefined;
   readonly capabilities?: ClientBootstrap["capabilityManifest"] | undefined;
   readonly preview: boolean;
+  readonly marks?: boolean | undefined;
   /** The roster is the live session (not history, not the last state before a disconnect). */
   readonly viewingLive: boolean;
   readonly online: boolean;
@@ -29,6 +30,7 @@ function subject(row: DeckAgent): CapsSubject {
   return {
     kind: row.agent.kind,
     status: hubStatus(row.agent.status),
+    rawStatus: row.agent.status,
     readOnly: row.agent.readOnly === true,
     ...(row.agent.isolated === undefined ? {} : { isolated: row.agent.isolated }),
     ...(row.agent.canRevive === undefined ? {} : { canRevive: row.agent.canRevive }),
@@ -55,14 +57,14 @@ export function useDeckCommands(context: DeckCommandContext, zh: boolean) {
   }, [notice]);
 
   const caps = useCallback((row: DeckAgent): Caps => {
-    const { capabilities, online, preview, viewingLive, client } = contextRef.current;
-    return capsFor(subject(row), online, capabilities, client !== undefined, preview, viewingLive, zhRef.current);
+    const { capabilities, online, preview, marks = true, viewingLive, client } = contextRef.current;
+    return capsFor(subject(row), online, capabilities, client !== undefined, preview, viewingLive, zhRef.current, marks);
   }, []);
 
   const run = useCallback(async (kind: "kill" | "revive", row: DeckAgent): Promise<boolean> => {
-    const { client, preview } = contextRef.current;
+    const { client, preview, marks = true } = contextRef.current;
     if (preview) {
-      setNotice({ kind: "warn", agentId: row.id, key: "commandPreview" });
+      if (marks) setNotice({ kind: "warn", agentId: row.id, key: "commandPreview" });
       return false;
     }
     if (!client) return false;

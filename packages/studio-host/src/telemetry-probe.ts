@@ -98,7 +98,29 @@ export function createNodeSessionTelemetryProbe(
   const now = options.now ?? (() => Date.now());
   const spawnProcess = options.spawnProcess ?? spawn;
   const children = new Set<ReturnType<SpawnFunction>>();
+  const killTimers = new Map<ReturnType<SpawnFunction>, ReturnType<typeof setTimeout>>();
   let disposed = false;
+  const terminateChild = (child: ReturnType<SpawnFunction>): void => {
+    try {
+      child.kill();
+    } catch {
+      return;
+    }
+    if (!killTimers.has(child)) {
+      const timer = setTimeout(() => {
+        killTimers.delete(child);
+        if (child.exitCode === null && child.signalCode === null) {
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            // Best-effort force termination after SIGTERM grace.
+          }
+        }
+      }, 500);
+      timer.unref?.();
+      killTimers.set(child, timer);
+    }
+  };
   const emitDiagnostic = (info: SessionTelemetryProbeDiagnostic): void => {
     try {
       options.onDiagnostic?.(info);
@@ -127,12 +149,20 @@ export function createNodeSessionTelemetryProbe(
       },
     );
     children.add(child);
-    const closed = new Promise<void>(resolve => child.once("close", () => { children.delete(child); resolve(); }));
+    const closed = new Promise<void>(resolve => child.once("close", () => {
+      const killTimer = killTimers.get(child);
+      if (killTimer !== undefined) {
+        clearTimeout(killTimer);
+        killTimers.delete(child);
+      }
+      children.delete(child);
+      resolve();
+    }));
     let cancelled = input.signal?.aborted === true;
-    const abort = () => { cancelled = true; failure.reason = "cancelled"; child.kill(); };
+    const abort = () => { cancelled = true; failure.reason = "cancelled"; terminateChild(child); };
     input.signal?.addEventListener("abort", abort, { once: true });
     if (child.stdin === null || child.stdout === null || child.stderr === null) {
-      child.kill();
+      terminateChild(child);
       await closed;
       input.signal?.removeEventListener("abort", abort);
       return {
@@ -151,7 +181,7 @@ export function createNodeSessionTelemetryProbe(
         if (settled) return;
         settled = true;
         failure.reason = "timeout";
-        child.kill();
+        terminateChild(child);
         resolve({ ok: false, reason: "UNAVAILABLE" });
       }, timeoutMs);
       if (timer.unref !== undefined) timer.unref();
@@ -170,7 +200,7 @@ export function createNodeSessionTelemetryProbe(
         if (stdoutBytes > maxStdoutBytes) {
           overflowed = true;
           failure.reason = "overflow";
-          child.kill();
+          terminateChild(child);
           return;
         }
         stdoutChunks.push(chunk);
@@ -180,7 +210,7 @@ export function createNodeSessionTelemetryProbe(
         if (stderrBytes > maxStderrBytes) {
           overflowed = true;
           failure.reason = "overflow";
-          child.kill();
+          terminateChild(child);
         }
       });
       child.on("close", (exitCode) => {
@@ -278,7 +308,7 @@ export function createNodeSessionTelemetryProbe(
     run,
     dispose(): void {
       disposed = true;
-      for (const child of children) child.kill();
+      for (const child of children) terminateChild(child);
     },
   };
 }

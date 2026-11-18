@@ -218,24 +218,35 @@ export function useRowMenuAnchor(open: boolean, contextPoint: { x: number; y: nu
       if (contextPoint !== null) {
         left = contextPoint.x;
         top = contextPoint.y;
+        if (height > 0 && top + height > window.innerHeight - pad) {
+          top = Math.max(pad, window.innerHeight - height - pad);
+        }
       } else {
         const rect = buttonRef.current?.getBoundingClientRect();
         if (!rect) return;
         left = rect.right - width;
         top = rect.bottom + 4;
+        if (height > 0 && top + height > window.innerHeight - pad) {
+          const above = rect.top - height - 4;
+          top = above >= pad ? above : Math.max(pad, window.innerHeight - height - pad);
+        }
       }
       left = Math.max(pad, Math.min(left, window.innerWidth - width - pad));
-      if (height > 0 && top + height > window.innerHeight - pad) {
-        top = Math.max(pad, window.innerHeight - height - pad);
-      }
       setAnchor({ top, left });
+    };
+    const onScroll = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Node && menuRef.current?.contains(target)) return;
+      place();
     };
     place();
     const frame = window.requestAnimationFrame(place);
     window.addEventListener("resize", place);
+    window.addEventListener("scroll", onScroll, true);
     return () => {
       window.cancelAnimationFrame(frame);
       window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", onScroll, true);
     };
   }, [contextPoint, open, window]);
 

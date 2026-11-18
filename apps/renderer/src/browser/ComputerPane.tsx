@@ -99,6 +99,9 @@ function LegacyComputerPane({ client, sessionId, available, visible, capabilitie
     setError("");
   }, [selected, clearCapture]);
 
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
+
   useEffect(() => {
     generation.current++;
     captureGeneration.current++;
@@ -123,7 +126,7 @@ function LegacyComputerPane({ client, sessionId, available, visible, capabilitie
           if (active && !document.hidden) applyStatus(value);
         }
       } catch (cause) {
-        if (active) setLoadError(hostErrorMessage(cause, zh ? "无法读取电脑状态" : "Cannot read computer status"));
+        if (active) setLoadError(hostErrorMessage(cause, zhRef.current ? "无法读取电脑状态" : "Cannot read computer status"));
       } finally {
         if (active && !preview) timer = setTimeout(() => void poll(), 4000);
       }
@@ -147,7 +150,7 @@ function LegacyComputerPane({ client, sessionId, available, visible, capabilitie
       document.removeEventListener("visibilitychange", onHide);
       release();
     };
-  }, [visible, canRead, preview, sessionId, invoke, clearCapture, applyStatus, zh, document]);
+  }, [visible, canRead, preview, sessionId, invoke, clearCapture, applyStatus, document]);
 
   const refreshCapture = async () => {
     if (!selected || capturing || !can("computer.capture") || !status?.available || !desktopCapture) return;

@@ -265,13 +265,17 @@ export class ConversationEventFanout {
         return;
       case "conversation.tool.updated": {
         const key = `tool-updated:${event.toolCallId}`;
+        const existing = session.events.get(key)?.envelope.event;
+        const previous = existing?.kind === "conversation.tool.updated" ? existing : undefined;
+        const presentation = event.presentation ?? previous?.presentation;
+        const progress = event.progress ?? previous?.progress;
+        const replies = event.replies ?? previous?.replies;
         if (this.options.incrementalToolReplay === true) {
           if (session.overflowed === true) return;
           let buffer = session.toolBuffers.get(key);
           if (buffer === undefined) {
             buffer = new ReplayTextBuffer(CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
-            const previous = session.events.get(key)?.envelope.event;
-            if (previous?.kind === "conversation.tool.updated") buffer.replace(previous.output ?? "");
+            if (previous !== undefined) buffer.replace(previous.output ?? "");
             session.toolBuffers.set(key, buffer);
           }
           const truncated = event.updateMode === "replace" ? buffer.replace(event.output ?? "") : buffer.append(event.output ?? "");
@@ -280,13 +284,15 @@ export class ConversationEventFanout {
             envelope: { ...forward.envelope, event: { ...event, updateMode: "replace",
               ...(event.output !== undefined || buffer.byteLength > 0 ? { output: "" } : {}),
               ...(event.truncated === true || truncated ? { truncated: true } : {}),
+              ...(presentation !== undefined ? { presentation } : {}),
+              ...(progress !== undefined ? { progress } : {}),
+              ...(replies !== undefined ? { replies } : {}),
             } },
           };
           this.#store(session, key, metadata, utf8ByteLength(JSON.stringify(metadata)) + buffer.jsonBytes);
           return;
         }
-        const previous = session.events.get(key)?.envelope.event;
-        const previousOutput = previous?.kind === "conversation.tool.updated" ? (previous.output ?? "") : "";
+        const previousOutput = previous?.output ?? "";
         const raw = event.updateMode === "replace" ? (event.output ?? "") : previousOutput + (event.output ?? "");
         const bounded = truncateUtf8(raw, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
         this.#store(session, key, {
@@ -298,6 +304,9 @@ export class ConversationEventFanout {
               updateMode: "replace",
               ...(bounded.text.length === 0 ? {} : { output: bounded.text }),
               ...(event.truncated === true || bounded.truncated ? { truncated: true } : {}),
+              ...(presentation !== undefined ? { presentation } : {}),
+              ...(progress !== undefined ? { progress } : {}),
+              ...(replies !== undefined ? { replies } : {}),
             },
           },
         });

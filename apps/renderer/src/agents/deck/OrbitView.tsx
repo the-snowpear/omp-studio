@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Icon } from "../../icons";
-import { MOTION_MS } from "../../motion";
+import { MOTION_MS, motionReduced } from "../../motion";
 import { SigilArt, sigilStyle } from "./AgentSigil";
 import type { SwarmComms } from "./comms";
 import type { DeckAgent, DeckTone } from "./deckModel";
@@ -33,9 +33,10 @@ function quadPoint(x1: number, y1: number, qx: number, qy: number, x2: number, y
   return { x: u * u * x1 + 2 * u * t * qx + t * t * x2, y: u * u * y1 + 2 * u * t * qy + t * t * y2 };
 }
 
-export function OrbitView({ rows, lanes, replay, comms, selectedId, matched, ui, onOrbit, onSelect, onOpen, d }: {
+export function OrbitView({ rows, lanes, live = true, replay, comms, selectedId, matched, ui, onOrbit, onSelect, onOpen, d }: {
   rows: readonly DeckAgent[];
   lanes: readonly Lane[];
+  live?: boolean | undefined;
   replay: number | null;
   comms: SwarmComms;
   selectedId: string | null;
@@ -113,10 +114,16 @@ export function OrbitView({ rows, lanes, replay, comms, selectedId, matched, ui,
     return [...pairs.values()];
   }, [comms, cut]);
 
+  const canFly = live && replay === null && comms.status === "ready" && !motionReduced();
   const [clock, setClock] = useState(() => Date.now());
-  const flying = comms.status === "ready" && replay === null ? comms.messages.filter(message => clock - message.at < PACKET_MS && clock >= message.at - 50) : [];
-  const anyFlying = comms.status === "ready" && replay === null && comms.messages.some(message => Date.now() - message.at < PACKET_MS);
-  useFrameLoop(anyFlying, boxRef, () => { setClock(Date.now()); return comms.status === "ready" && comms.messages.some(message => Date.now() - message.at < PACKET_MS); });
+  const flying = canFly ? comms.messages.filter(message => clock - message.at < PACKET_MS && clock >= message.at - 50) : [];
+  const anyFlying = canFly && comms.messages.some(message => Date.now() - message.at < PACKET_MS);
+  useFrameLoop(anyFlying, boxRef, () => {
+    if (motionReduced()) return false;
+    const currentNow = Date.now();
+    setClock(currentNow);
+    return comms.status === "ready" && comms.messages.some(message => currentNow - message.at < PACKET_MS);
+  });
 
   const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
   useWheel(boxRef, event => {

@@ -11,6 +11,8 @@ export function useMicrophoneTest(zh: boolean, deviceId: string, visible: boolea
   const generation = useRef(0);
   const capture = useRef<PcmCapture | undefined>(undefined);
   const abort = useRef<AbortController | undefined>(undefined);
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   const stop = useCallback(() => {
     generation.current++;
     abort.current?.abort();
@@ -22,8 +24,8 @@ export function useMicrophoneTest(zh: boolean, deviceId: string, visible: boolea
   const refresh = useCallback(async () => {
     if (demo || !navigator.mediaDevices?.enumerateDevices) return;
     try { setDevices((await navigator.mediaDevices.enumerateDevices()).filter(row => row.kind === "audioinput")); }
-    catch (cause) { setError(hostErrorMessage(cause, zh ? "无法读取麦克风设备" : "Could not list microphones")); }
-  }, [demo, zh]);
+    catch (cause) { setError(hostErrorMessage(cause, zhRef.current ? "无法读取麦克风设备" : "Could not list microphones")); }
+  }, [demo]);
   useEffect(() => {
     if (!visible) stop();
     else void refresh();

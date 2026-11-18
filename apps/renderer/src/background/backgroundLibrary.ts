@@ -99,16 +99,42 @@ function openDatabase(): Promise<IDBDatabase> {
   });
 }
 
-async function withDatabase<T>(run: (database: IDBDatabase) => Promise<T>): Promise<T> {
-  const database = await openDatabase();
-  try {
-    return await run(database);
-  } finally {
-    database.close();
-  }
-}
-
 export function createIndexedDbBackgroundLibrary(): BackgroundLibrary {
+  let dbPromise: Promise<IDBDatabase> | undefined;
+  const reset = (expected?: Promise<IDBDatabase>) => {
+    if (expected === undefined || dbPromise === expected) dbPromise = undefined;
+  };
+  const getDatabase = (): Promise<IDBDatabase> => {
+    if (dbPromise !== undefined) return dbPromise;
+    const opening = openDatabase().then((database) => {
+      database.onversionchange = () => {
+        reset(opening);
+        database.close();
+      };
+      database.onclose = () => reset(opening);
+      return database;
+    }).catch((error) => {
+      reset(opening);
+      throw error;
+    });
+    dbPromise = opening;
+    return opening;
+  };
+  const withDatabase = async <T>(run: (database: IDBDatabase) => Promise<T>): Promise<T> => {
+    let current = getDatabase();
+    let database = await current;
+    try {
+      return await run(database);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "InvalidStateError") {
+        reset(current);
+        current = getDatabase();
+        database = await current;
+        return await run(database);
+      }
+      throw error;
+    }
+  };
   return {
     kind: "indexeddb",
     async list() {

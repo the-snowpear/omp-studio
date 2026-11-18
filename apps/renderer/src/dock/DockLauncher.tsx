@@ -57,7 +57,7 @@ export function DockFullscreenButton({ active, onToggle }: { active: boolean; on
 }
 
 const titlebarBottom = (document: Document) => Math.max(0, Math.round(document.querySelector(".app-titlebar")?.getBoundingClientRect().bottom ?? 0));
-const POPUPS = '.dock-menu-popover, .app-select-popup, [role="menu"], [role="listbox"], [data-dock-modal]';
+const POPUPS = '.dock-menu-popover, .app-select-popup, .menu[role="menu"], [data-dock-modal]';
 
 /**
  * 把一个标签组（或新标签页）铺满标题栏以下的整个窗口。用 portal 挂到 body，

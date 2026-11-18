@@ -139,11 +139,12 @@ export function GitCommitGraph({
         const synthetic = row.kind === "incoming-changes" || row.kind === "outgoing-changes";
         const selected = selectedOid === row.id;
         const pills = row.refs.filter((ref) => ref.kind !== "head");
+        const rowExpanded = (menuOid === row.id && Boolean(row.commit)) || branchOid === row.id || (selected && !synthetic && !wide);
         return (
           <div key={row.id} className={`git-graph-block${selected ? " selected" : ""}`}>
             <div className="git-graph-lane">
               <GitGraphSvg row={row} />
-              <GraphLaneExtend row={row} />
+              {rowExpanded ? <GraphLaneExtend row={row} /> : null}
             </div>
             <div className="git-graph-col">
             <div className={`git-graph-row${menuOid === row.id ? " is-menu" : ""}`} style={{ minHeight: SWIMLANE_HEIGHT }}>

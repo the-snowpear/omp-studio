@@ -1,7 +1,19 @@
-import { CONVERSATION_LIMITS, type ConversationRuntimeEvent, type StudioEventEnvelope } from "@omp-studio/studio-protocol";
+import { CONVERSATION_LIMITS, type ConversationRuntimeEvent, type ConversationToolProgress, type StudioEventEnvelope } from "@omp-studio/studio-protocol";
 
 type Envelope = StudioEventEnvelope<ConversationRuntimeEvent>;
-type Group = { last: Envelope; chunks: string[]; bytes: number; truncated: boolean; hasOutput: boolean; items: number; retainedBytes: number; ascii: boolean };
+type Group = {
+  last: Envelope;
+  chunks: string[];
+  bytes: number;
+  truncated: boolean;
+  hasOutput: boolean;
+  presentation?: "reply";
+  progress?: ConversationToolProgress;
+  replies?: readonly string[];
+  items: number;
+  retainedBytes: number;
+  ascii: boolean;
+};
 export interface ConversationCoalescerOptions {
   readonly emit: (envelope: Envelope) => void;
   readonly setTimer?: (callback: () => void, ms: number) => unknown;
@@ -131,10 +143,26 @@ export class ConversationCoalescer {
       last.bytes += textBytes;
       last.truncated ||= event.kind === "conversation.tool.updated" && event.truncated === true;
       last.hasOutput ||= "output" in event;
+      if (event.kind === "conversation.tool.updated") {
+        if (event.presentation !== undefined) last.presentation = event.presentation;
+        if (event.progress !== undefined) last.progress = event.progress;
+        if (event.replies !== undefined) last.replies = event.replies;
+      }
       last.items++; last.retainedBytes += bytes;
     } else {
-      const group = { last: envelope, chunks: [text], bytes: textBytes,
-        truncated: event.kind === "conversation.tool.updated" && event.truncated === true, hasOutput: "output" in event, items: 1, retainedBytes: bytes, ascii };
+      const group: Group = {
+        last: envelope,
+        chunks: [text],
+        bytes: textBytes,
+        truncated: event.kind === "conversation.tool.updated" && event.truncated === true,
+        hasOutput: "output" in event,
+        ...(event.kind === "conversation.tool.updated" && event.presentation !== undefined ? { presentation: event.presentation } : {}),
+        ...(event.kind === "conversation.tool.updated" && event.progress !== undefined ? { progress: event.progress } : {}),
+        ...(event.kind === "conversation.tool.updated" && event.replies !== undefined ? { replies: event.replies } : {}),
+        items: 1,
+        retainedBytes: bytes,
+        ascii,
+      };
       this.#groups.push(group); this.#tail = group;
     }
     this.#items++;
@@ -179,7 +207,14 @@ export class ConversationCoalescer {
       const event: ConversationRuntimeEvent = original.kind === "conversation.message.delta"
         ? { ...original, delta: group.chunks.join("") }
         : original.kind === "conversation.tool.updated"
-          ? { ...original, ...(group.hasOutput ? { output: group.chunks.join("") } : {}), ...(group.truncated ? { truncated: true } : {}) }
+          ? {
+              ...original,
+              ...(group.hasOutput ? { output: group.chunks.join("") } : {}),
+              ...(group.truncated ? { truncated: true } : {}),
+              ...(group.presentation !== undefined ? { presentation: group.presentation } : {}),
+              ...(group.progress !== undefined ? { progress: group.progress } : {}),
+              ...(group.replies !== undefined ? { replies: group.replies } : {}),
+            }
           : original;
       this.#outbox.push({ ...group.last, event });
     }

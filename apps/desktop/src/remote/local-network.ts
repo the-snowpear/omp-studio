@@ -12,6 +12,7 @@ import { desktopText } from "../desktop-language-shared.js";
 export type NetworkLookup = (hostname: string, options: { all: true; order: "ipv4first" }) => Promise<readonly LookupAddress[]>;
 
 export async function localNetworkConnect(destination: NetworkDestination, proxyUrl?: string, resolveProxy?: (url: string) => Promise<string>, resolveHost: NetworkLookup = lookup): Promise<Duplex> {
+  if (remotePrivateHost(destination.host)) throw Object.assign(new Error(desktopText("本机联网出口不连接远端请求的私有地址", "Local network egress does not connect to private addresses requested remotely")), { code: "PRIVATE_NETWORK_DESTINATION" });
   // Resolve once at the executing Desktop service. Every actual connection uses
   // only these public addresses, including tunnels through a configured proxy.
   const addresses = (await resolveHost(destination.host, { all: true, order: "ipv4first" }))

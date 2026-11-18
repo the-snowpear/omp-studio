@@ -182,6 +182,22 @@ export async function downloadOne(input: DownloadOneInput): Promise<void> {
     }
     const fileHandle = await open(partFile, resuming && startByte > 0 ? "a" : "w");
     let receivedBytes = startByte;
+    let lastMetaBytes = startByte;
+    let lastMetaTime = 0;
+    const writeCheckpoint = async (bytes: number): Promise<void> => {
+      lastMetaBytes = bytes;
+      lastMetaTime = Date.now();
+      const meta: PartMeta = {
+        url: input.url,
+        sourceUrl: attempt.url,
+        sha256: input.expectedSha256,
+        etag,
+        lastModified,
+        totalBytes,
+        receivedBytes: bytes,
+      };
+      await writeFile(metaFile, JSON.stringify(meta), "utf8").catch(() => {});
+    };
     input.onProgress(receivedBytes, totalBytes);
     const reader = response.body?.getReader();
     try {
@@ -201,9 +217,15 @@ export async function downloadOne(input: DownloadOneInput): Promise<void> {
           hash.update(value);
           receivedBytes += value.length;
           input.onProgress(receivedBytes, totalBytes);
-          const meta: PartMeta = { url: input.url, sourceUrl: attempt.url, sha256: input.expectedSha256,
-            etag, lastModified, totalBytes, receivedBytes };
-          await writeFile(metaFile, JSON.stringify(meta), "utf8").catch(() => {});
+          const now = Date.now();
+          if (
+            lastMetaTime === 0 ||
+            receivedBytes === totalBytes ||
+            receivedBytes - lastMetaBytes >= 1_048_576 ||
+            now - lastMetaTime >= 1_000
+          ) {
+            await writeCheckpoint(receivedBytes);
+          }
         }
       }
     } finally {
@@ -211,6 +233,9 @@ export async function downloadOne(input: DownloadOneInput): Promise<void> {
       if (!attempt.signal.aborted) await cancelled;
       reader?.releaseLock();
       await fileHandle.close();
+      if (receivedBytes > 0 && receivedBytes < totalBytes && receivedBytes !== lastMetaBytes) {
+        await writeCheckpoint(receivedBytes);
+      }
     }
     if (receivedBytes !== input.expectedSize) throw new UpdateTransportError("Download size mismatch: response ended before the signed size");
     attempt.signal.throwIfAborted();

@@ -594,7 +594,7 @@ textarea.input { height: auto; min-height: 72px; padding: var(--sp-8) var(--sp-1
   box-shadow: var(--shadow-menu);
   animation: var(--motion-pop);
 }
-.app-select-popup[data-side="top"] { transform-origin: bottom center; }
+.app-select-popup[data-side="top"] { --pop-from: 1; transform-origin: bottom center; }
 .app-select-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .app-select-search {
   display: flex;

@@ -2,7 +2,7 @@ import { isAgentViewSession } from "../../session/agent-session-handle";
 import type { AgentRegistryApi } from "../../registry/agent-registry";
 import { randomBytes } from "node:crypto";
 import type { AgentRef, AgentRegistry } from "../../registry/agent-registry";
-import type { FileEntry, SessionEntry } from "../../session/session-entries";
+import { type FileEntry, resolveSessionLeafId, type SessionEntry } from "../../session/session-entries";
 import { loadEntriesFromFile } from "../../session/session-loader";
 import type { ConversationTranscriptPage } from "../conversation-protocol";
 import {
@@ -60,7 +60,8 @@ export function reconstructSessionBranch(entries: readonly FileEntry[]): Reconst
 	for (const entry of sessionEntries) {
 		if (typeof entry.id === "string" && entry.id.length > 0) byId.set(entry.id, entry);
 	}
-	const leaf = (activeLeafId !== undefined ? byId.get(activeLeafId) : undefined) ?? sessionEntries.at(-1);
+	const resolvedLeafId = activeLeafId ?? resolveSessionLeafId(sessionEntries);
+	const leaf = resolvedLeafId !== null ? byId.get(resolvedLeafId) : undefined;
 	if (leaf === undefined || typeof leaf.id !== "string" || leaf.id.length === 0) {
 		return { sessionId: header.id, branchLeafId: "", branch: [] };
 	}

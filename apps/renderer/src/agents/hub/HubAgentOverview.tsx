@@ -38,6 +38,7 @@ function nowLine(agent: HubAgent, zh: boolean): { icon: IconName; text: ReactNod
   if (agent.status === "running" && agent.task !== "—") return { icon, text: agent.task };
   if (tone === "waiting") return { icon, text: zh ? "等待输入" : "Waiting for input" };
   if (agent.status === "parked") return { icon, text: zh ? "已停驻，发消息或恢复后继续" : "Parked; message or revive it to continue" };
+  if (agent.status === "released" || agent.rawStatus === "released") return { icon, text: zh ? "已释放" : "Released" };
   if (agent.status === "aborted") return { icon, text: zh ? "已结束" : "Ended" };
   return { icon, text: zh ? "无进行中的工具调用" : "No tool is running" };
 }

@@ -18,7 +18,7 @@ import {
   resolveSubagentHubTarget,
   subagentCardKey,
   isAskPending,
-  isPathKind,
+  toolHeaderFileMeta,
   saPill,
   statusLabel,
   toolDiffStats,
@@ -67,18 +67,43 @@ function SubagentCard({ source, onInspectSubagent }: {
   const target = resolveSubagentHubTarget(agent);
   const inspectable = onInspectSubagent !== undefined && target !== undefined;
   const card = (anchor: HTMLElement) => ({ anchor, id, agent, pill, inspectable, ...(target === undefined ? {} : { target }) });
+  const lastOpenedAnchorRef = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
     if (anchorRef.current) hover?.update(card(anchorRef.current));
   });
   useLayoutEffect(() => {
     const anchor = anchorRef.current;
-    return () => { if (anchor) hover?.close(anchor); };
-  }, [hover]);
-  const close = () => { if (anchorRef.current) hover?.close(anchorRef.current); };
+    return () => {
+      if (anchor) hover?.close(anchor);
+      if (lastOpenedAnchorRef.current && lastOpenedAnchorRef.current !== anchor) {
+        hover?.close(lastOpenedAnchorRef.current);
+      }
+      if (anchorRef.current && anchorRef.current !== anchor) {
+        hover?.close(anchorRef.current);
+      }
+    };
+  }, [hover, inspectable]);
+  const close = () => {
+    if (anchorRef.current) hover?.close(anchorRef.current);
+    if (lastOpenedAnchorRef.current && lastOpenedAnchorRef.current !== anchorRef.current) {
+      hover?.close(lastOpenedAnchorRef.current);
+    }
+    lastOpenedAnchorRef.current = null;
+  };
   const hoverProps = {
-    onPointerEnter: (event: ReactPointerEvent<HTMLElement>) => { if (event.pointerType !== "touch") hover?.open(card(event.currentTarget)); },
+    onPointerEnter: (event: ReactPointerEvent<HTMLElement>) => {
+      if (event.pointerType !== "touch") {
+        lastOpenedAnchorRef.current = event.currentTarget;
+        hover?.open(card(event.currentTarget));
+      }
+    },
     onPointerLeave: close,
-    onFocus: () => { if (anchorRef.current) hover?.open(card(anchorRef.current)); },
+    onFocus: () => {
+      if (anchorRef.current) {
+        lastOpenedAnchorRef.current = anchorRef.current;
+        hover?.open(card(anchorRef.current));
+      }
+    },
     onBlur: close,
     onClickCapture: close,
     ...(hover ? { "aria-describedby": id } : {}),
@@ -256,6 +281,7 @@ const ToolItem = memo(function ToolItem({ tool, open, onToggle, slot, showDetail
   }
   const label = toolLabel(tool);
   const detail = showDetail ? chainItemDetail(tool, zh) : undefined;
+  const fileMeta = showDetail ? toolHeaderFileMeta(tool) : undefined;
   const running = tool.status === "running";
   const queued = tool.status === "queued";
   const failed = tool.status === "failed";
@@ -272,6 +298,8 @@ const ToolItem = memo(function ToolItem({ tool, open, onToggle, slot, showDetail
       <button
         type="button"
         className={`tl-row${failed ? " is-error" : ""}${running ? " is-running" : ""}`}
+        data-ftype={fileMeta?.ftype ?? undefined}
+        data-secret={fileMeta?.secret || undefined}
         aria-expanded={open}
         aria-label={aria}
         onClick={() => onToggle(slot)}
@@ -283,7 +311,12 @@ const ToolItem = memo(function ToolItem({ tool, open, onToggle, slot, showDetail
         {detail ? (
           <>
             <span className="tl-sep">·</span>
-            <span className={`tl-detail${isPathKind(kind) ? " is-path" : ""}`}>{detail}</span>
+            {fileMeta ? (
+              <span className="tl-file-icon" aria-hidden="true">
+                <Icon name={fileMeta.icon} extra="sm" />
+              </span>
+            ) : null}
+            <span className={`tl-detail${fileMeta !== undefined || kind === "glob" ? " is-path" : ""}`}>{detail}</span>
           </>
         ) : null}
         {diff.add || diff.del ? (

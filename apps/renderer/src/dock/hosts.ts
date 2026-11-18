@@ -2,11 +2,30 @@ import { planScroll, readChain, scrollChain } from "./scrollChain";
 import type { PanelId, PanelVisibility } from "./types";
 import { panelBaseId } from "./types";
 
-type Host = { element: HTMLDivElement; surface: Document; surfaceSnapshot: () => Document; visibility: PanelVisibility; toolbar: HTMLElement | null; listeners: Set<() => void>; subscribe: (listener: () => void) => () => void; snapshot: () => PanelVisibility; toolbarSnapshot: () => HTMLElement | null; signature: string; pendingScroll?: { element: Element; top: number; left: number }[] };
+type PendingScrollEntry = { ref: WeakRef<Element>; top: number; left: number };
+type Host = { element: HTMLDivElement; surface: Document; surfaceSnapshot: () => Document; visibility: PanelVisibility; toolbar: HTMLElement | null; listeners: Set<() => void>; subscribe: (listener: () => void) => () => void; snapshot: () => PanelVisibility; toolbarSnapshot: () => HTMLElement | null; signature: string; pendingScroll?: PendingScrollEntry[] };
 type MoveTarget = HTMLElement & { moveBefore?: (node: Node, before: Node | null) => void };
 const EMPTY: PanelVisibility = { visible: false, width: 0, height: 0 };
 const BODY = "dock-panel-content";
 const BODY_SELECTOR = ".dock-panel-content";
+const NON_SCROLLABLE_TAGS = new Set(["SPAN", "CODE", "A", "I", "B", "EM", "STRONG", "SMALL", "MARK", "TIME", "KBD", "ABBR", "BR", "HR", "IMG", "SVG", "PATH", "CIRCLE", "RECT", "LINE", "POLYLINE", "POLYGON", "G", "DEFS", "USE"]);
+
+function capturePanelScroll(root: Element): PendingScrollEntry[] {
+  const saved: PendingScrollEntry[] = [];
+  const stack: Element[] = [root];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    const top = current.scrollTop;
+    const left = current.scrollLeft;
+    if (top !== 0 || left !== 0) saved.push({ ref: new WeakRef(current), top, left });
+    const children = current.children;
+    for (let i = children.length - 1; i >= 0; i--) {
+      const child = children[i]!;
+      if (!NON_SCROLLABLE_TAGS.has(child.tagName)) stack.push(child);
+    }
+  }
+  return saved;
+}
 /** Dock geometry only: streaming inside a panel body cannot move its slot. */
 const GEOMETRY = [
   "[data-dock-slot]", "[data-dock-cards]", "[data-dock-groups]", "[data-dock-region]", "[data-dock-group]", "[data-dock-float]", "[data-dock-entry]",
@@ -84,6 +103,7 @@ export class PanelHosts {
     this.autoHeightOwners.delete(id);
     this.previewAutoHeight.delete(id);
     this.previewToolbars.delete(id);
+    delete host.pendingScroll;
     host.element.remove();
     this.hosts.delete(id);
   }
@@ -123,8 +143,7 @@ export class PanelHosts {
   rememberScroll(id: PanelId): void {
     const host = this.hosts.get(id);
     if (!host || host.element.hidden || host.pendingScroll) return;
-    const positions = [host.element, ...host.element.querySelectorAll("*")].map(element => ({ element, top: element.scrollTop, left: element.scrollLeft }));
-    host.pendingScroll = positions.filter(position => position.top !== 0 || position.left !== 0);
+    host.pendingScroll = capturePanelScroll(host.element);
     this.schedule();
   }
   private placeHost(id: PanelId): void {
@@ -254,9 +273,17 @@ export class PanelHosts {
     return () => list.removeEventListener("wheel", wheel);
   }
   schedule = () => { if (!this.frame) this.frame = requestAnimationFrame(this.measure); };
+  private hasSlotInside(container: Element): boolean {
+    for (const slot of this.slots.values()) if (container.contains(slot)) return true;
+    for (const slot of this.previewSlots.values()) if (container.contains(slot)) return true;
+    return false;
+  }
   private scrolled = (event: Event) => {
     const target = event.target;
-    if (target instanceof Element && (target.closest(BODY_SELECTOR) || (target.matches('.dock-card-list[data-dock-cards="rail"]') && (target as MoveTarget).moveBefore && !this.previewSlots.size))) return;
+    if (target instanceof Element) {
+      if (target.closest(BODY_SELECTOR) || (target.matches('.dock-card-list[data-dock-cards="rail"]') && (target as MoveTarget).moveBefore && !this.previewSlots.size)) return;
+      if (target !== target.ownerDocument.documentElement && target !== target.ownerDocument.body && !this.hasSlotInside(target)) return;
+    }
     this.schedule();
   };
   /** Measure inside the caller's frame instead of the next one. A slot can move
@@ -270,7 +297,7 @@ export class PanelHosts {
   private changed = (records: MutationRecord[]) => {
     for (const record of records) {
       const target = record.target;
-      if (target.nodeType !== 1 || (target as Element).closest(BODY_SELECTOR)) continue;
+      if (target.nodeType !== 1 || (target as Element).closest(BODY_SELECTOR) || (target as Element).closest(".convo-scroll")) continue;
       if (record.type === "attributes") {
         if ((target as Element).matches(GEOMETRY)) { this.schedule(); return; }
         continue;
@@ -376,9 +403,12 @@ export class PanelHosts {
       // Moving a hidden scroll container resets its offsets even with moveBefore.
       // Restore them once its destination has its real size and is visible.
       if (shown && host.pendingScroll) {
-        for (const position of host.pendingScroll) if (element.contains(position.element)) {
-          position.element.scrollTop = position.top;
-          position.element.scrollLeft = position.left;
+        for (const position of host.pendingScroll) {
+          const node = position.ref.deref();
+          if (node && element.contains(node)) {
+            node.scrollTop = position.top;
+            node.scrollLeft = position.left;
+          }
         }
         delete host.pendingScroll;
       }

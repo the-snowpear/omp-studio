@@ -13,7 +13,7 @@ export function useDictation(options: DictationSessionOptions) {
   useEffect(() => {
     const hide = () => { if (document.hidden) void session.interrupt(); else void session.refreshRecovery(); };
     const blur = () => {
-      if (["recording", "transcribing"].includes(session.getSnapshot().phase)) void session.interrupt();
+      if (session.getSnapshot().phase === "recording") void session.interrupt();
     };
     document.addEventListener("visibilitychange", hide);
     window.addEventListener("blur", blur);

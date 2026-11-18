@@ -1,21 +1,21 @@
-import { useState } from "react";
-import type { AvailableModelRecord, StudioClient, WebSearchRouting } from "@omp-studio/client-contract";
+import type { AvailableModelRecord, WebSearchRouting } from "@omp-studio/client-contract";
 import { Icon } from "../icons";
 import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
-import { hostErrorMessage, waitReceipt } from "../hostError";
 import { useListReorder } from "./useListReorder";
 import { explicitSearchChain, searchChain } from "./webSearchChain";
 
-export function WebRoleChain({ client, preview, routing, models, onSaved, onPreviewSave, onChange }: {
-  client: StudioClient; preview: boolean; routing: WebSearchRouting; models: readonly AvailableModelRecord[];
+export function WebRoleChain({ preview, routing, models, busy = false, error = "", onSave, onChange }: {
+  preview: boolean;
+  routing: WebSearchRouting;
+  models: readonly AvailableModelRecord[];
+  busy?: boolean;
+  error?: string;
   onChange(next: WebSearchRouting): void;
-  onSaved(): void; onPreviewSave(next: WebSearchRouting): void;
+  onSave(): void | Promise<void>;
 }) {
   const { t } = useI18n();
   const { marks } = usePreviewMode();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
   const chain = searchChain(routing, models);
   const changeOrder = (next: string[]) => onChange(explicitSearchChain(routing, next));
   const reorder = (from: number, to: number) => {
@@ -26,15 +26,6 @@ export function WebRoleChain({ client, preview, routing, models, onSaved, onPrev
   const { listRef, draggingId, dragPhase, onPointerDown } = useListReorder({
     order: chain, selector: ".wsx-chain-row", gap: 2, sortingClass: "is-wsx-sorting", onReorder: reorder,
   });
-  const save = async () => {
-    if (preview) { onPreviewSave({ ...routing, migratedLegacy: false }); return; }
-    setBusy(true); setError("");
-    try {
-      const handle = await client.command("models.webSearch.set", { routing: { primary: routing.primary, fallbacks: routing.fallbacks } });
-      await waitReceipt(client, handle.requestId); onSaved();
-    } catch (cause) { setError(hostErrorMessage(cause, t("modelConfig.saveFailed"))); }
-    finally { setBusy(false); }
-  };
   return <section className="wsx-section">
     <div className="wsx-chain-heading">
       <div className="wsx-section-head">
@@ -67,6 +58,6 @@ export function WebRoleChain({ client, preview, routing, models, onSaved, onPrev
     </div>
     {chain.length === 0 ? <p className="wsx-sub">{t("modelConfig.webSearchChainEmptyHint")}</p> : null}
     {error ? <p role="alert">{error}</p> : null}
-    <div><button type="button" className="btn small primary" disabled={busy} onClick={() => void save()}>{t("modelConfig.webSearchSaveChain")}</button></div>
+    <div><button type="button" className="btn small primary" disabled={busy} onClick={() => void onSave()}>{t("modelConfig.webSearchSaveChain")}</button></div>
   </section>;
 }

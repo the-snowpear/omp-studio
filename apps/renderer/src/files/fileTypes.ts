@@ -54,13 +54,80 @@ export function formatBytes(size: number | undefined): string {
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }
 export interface FileReference { path: string; line?: number; column?: number }
-export function parseFileReference(value: string, explicitLink = false): FileReference | null {
+
+function decodeFileUrlPath(rawUrl: string): string | null {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol.toLowerCase() !== "file:") return null;
+    const decoded = decodeURIComponent(parsed.pathname);
+    if (parsed.hostname && parsed.hostname.toLowerCase() !== "localhost") {
+      return `//${parsed.hostname}${decoded}`;
+    }
+    return /^\/[A-Za-z]:\//.test(decoded) ? decoded.slice(1) : decoded;
+  } catch {
+    let fallback = rawUrl.replace(/^file:(?:\/\/(?:localhost)?)?/i, "");
+    try { fallback = decodeURIComponent(fallback); } catch { /* Keep literal percent if malformed. */ }
+    fallback = fallback.replace(/[?#].*$/, "");
+    return /^\/[A-Za-z]:[\\/]/.test(fallback) ? fallback.slice(1) : fallback || null;
+  }
+}
+
+export function isAbsoluteFileReference(path: string): boolean {
+  return /^(?:[A-Za-z]:[\\/]|[/\\]|file:)/i.test(path.trim());
+}
+
+function splitPathRoot(slashPath: string): { root: string; rest: string } {
+  const unc = /^\/\/[^/]+\/[^/]+(?:\/|$)/.exec(slashPath);
+  if (unc) return { root: unc[0].endsWith("/") ? unc[0] : `${unc[0]}/`, rest: slashPath.slice(unc[0].length) };
+  const winSlash = /^\/([A-Za-z]:\/)/.exec(slashPath);
+  if (winSlash) return { root: `/${winSlash[1]}`, rest: slashPath.slice(winSlash[0].length) };
+  const win = /^[A-Za-z]:\//.exec(slashPath);
+  if (win) return { root: win[0], rest: slashPath.slice(win[0].length) };
+  if (slashPath.startsWith("/")) return { root: "/", rest: slashPath.slice(1) };
+  return { root: "", rest: slashPath };
+}
+
+function reduceSegments(segments: readonly string[], rooted: boolean): string[] {
+  const stack: string[] = [];
+  for (const part of segments) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      if (stack.length > 0 && stack[stack.length - 1] !== "..") stack.pop();
+      else if (!rooted) stack.push("..");
+      continue;
+    }
+    stack.push(part);
+  }
+  return stack;
+}
+
+export function normalizeFileIdentityPath(value: string): string {
   let text = value.trim();
+  if (/^file:/i.test(text)) text = decodeFileUrlPath(text) ?? text;
+  const slash = text.replaceAll("\\", "/");
+  const { root, rest } = splitPathRoot(slash);
+  const canonicalRoot = /^\/[A-Za-z]:\/$/.test(root)
+    ? `${root[1]!.toUpperCase()}:/`
+    : /^[A-Za-z]:\/$/.test(root)
+      ? `${root[0]!.toUpperCase()}:/`
+      : root;
+  const reduced = reduceSegments(rest.split("/"), canonicalRoot.length > 0).join("/");
+  return canonicalRoot ? `${canonicalRoot}${reduced}` : reduced || ".";
+}
+
+export function parseFileReference(value: string, explicitLink = false): FileReference | null {
+  const text = value.trim();
   if (!text || /^[#?]/.test(text) || /^(?:https?:|mailto:|data:|javascript:|tel:)/i.test(text)) return null;
   if (/^[a-z][\w+.-]*:/i.test(text) && !/^(?:file:|[a-z]:[\\/])/i.test(text)) return null;
   const location = /(?::(\d+)(?::(\d+))?|#L(\d+)(?:C(\d+))?(?:-L?\d+)?)$/.exec(text);
   let path = location ? text.slice(0, location.index) : text;
-  try { if (!/^file:/i.test(path)) path = decodeURIComponent(path); } catch { /* A literal percent is also a valid filename. */ }
+  if (/^file:/i.test(path)) {
+    const decodedUrl = decodeFileUrlPath(path);
+    if (!decodedUrl) return null;
+    path = decodedUrl;
+  } else {
+    try { path = decodeURIComponent(path); } catch { /* A literal percent is also a valid filename. */ }
+  }
   if (!explicitLink && (/[\n\r<>{}=]/.test(path))) return null;
   if (!explicitLink && !/[/\\]/.test(path)) {
     const named = ["README", "LICENSE", "Dockerfile", "Makefile", ".gitignore", ".gitattributes", ".env"].includes(path);
@@ -70,7 +137,17 @@ export function parseFileReference(value: string, explicitLink = false): FileRef
   return { path, ...(location ? { line: Number(location[1] ?? location[3]), ...(location[2] || location[4] ? { column: Number(location[2] ?? location[4]) } : {}) } : {}) };
 }
 export function relativeFileReference(base: string, path: string): string {
-  if (/^(?:[A-Za-z]:[\\/]|[/\\]|file:)/.test(path)) return path;
-  const directory = base.replaceAll("\\", "/").split("/").slice(0, -1).join("/");
-  return directory ? `${directory}/${path}` : path;
+  if (/^file:/i.test(path)) {
+    const decoded = decodeFileUrlPath(path);
+    if (decoded) path = decoded;
+  }
+  if (/^(?:[A-Za-z]:[\\/]|[/\\]|file:)/i.test(path)) {
+    if (!/(?:^|[/\\])\.\.?(?:[/\\]|$)/.test(path)) return path;
+    const { root, rest } = splitPathRoot(path.replaceAll("\\", "/"));
+    return `${root}${reduceSegments(rest.split("/"), root.length > 0).join("/")}`;
+  }
+  const { root, rest: baseRest } = splitPathRoot(base.replaceAll("\\", "/"));
+  const baseDir = baseRest.split("/").slice(0, -1);
+  const combined = reduceSegments([...baseDir, ...path.replaceAll("\\", "/").split("/")], root.length > 0);
+  return `${root}${combined.join("/")}`;
 }

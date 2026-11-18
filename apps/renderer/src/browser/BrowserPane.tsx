@@ -56,13 +56,14 @@ function LegacyBrowserPane({ client, sessionId, available, visible, capabilities
   const shown = useBrowserVisible(visible);
   const nativeGeneration = useRef<string | undefined>(undefined);
   const latestState = useRef(state), latestFrame = useRef(frame); latestState.current = state; latestFrame.current = frame;
+  const zhRef = useRef(zh); zhRef.current = zh;
   const enabled = preview || (available && !!sessionId && capabilities?.capabilities.some(item => item.id === "browser.tabs.get" && item.grade !== "unavailable") === true);
   const canObserve = preview || (enabled && !!chrome?.attachBrowserObservation && capabilities?.capabilities.some(item => item.id === "browser.observe.prepare" && item.grade !== "unavailable") === true);
   const human = state?.control === "human";
   const detach = useCallback(() => { const id = observation.current; observation.current = undefined; if (id) void chrome?.detachBrowserObservation?.({ observationId: id }); setObserving(false); setFrame(undefined); setState(undefined); }, [chrome]);
   const send = useCallback(async (input: BrowserObservationInput) => {
     if (preview) {
-      const demoTab = getPreviewBrowserTab(zh);
+      const demoTab = getPreviewBrowserTab(zhRef.current);
       if (input.kind === "take" || input.kind === "release") setState(current => ({ kind: "state", observationId: "demo", tabId: demoTab.id, title: demoTab.title, url: demoTab.url, busy: false, frozen: false, ...current, control: input.kind === "take" ? "human" : "agent" }));
       return;
     }
@@ -73,13 +74,19 @@ function LegacyBrowserPane({ client, sessionId, available, visible, capabilities
       const fenced: BrowserObservationInput = input.kind === "take" || input.kind === "ack" ? { ...input, ...(generation ? { generation } : {}) }
         : input.kind === "navigate" || input.kind === "click" || input.kind === "wheel" || input.kind === "key" || input.kind === "text" ? { ...input, ...fence } : input;
       const value = await chrome?.controlBrowserObservation?.({ observationId: id, input: fenced });
-      if (!value?.ok && observation.current === id) setError(value?.message ?? (zh ? "浏览器控制不可用" : "Browser control unavailable"));
-    } catch (cause) { if (observation.current === id) setError(hostErrorMessage(cause, zh ? "浏览器连接中断" : "Browser connection interrupted")); }
-  }, [preview, zh, chrome]);
+      if (!value?.ok && observation.current === id) setError(value?.message ?? (zhRef.current ? "浏览器控制不可用" : "Browser control unavailable"));
+    } catch (cause) { if (observation.current === id) setError(hostErrorMessage(cause, zhRef.current ? "浏览器连接中断" : "Browser connection interrupted")); }
+  }, [preview, chrome]);
+  useEffect(() => {
+    if (!preview) return;
+    const demoTab = getPreviewBrowserTab(zh);
+    setTabs([demoTab]);
+    setState(current => current ? { ...current, title: demoTab.title, url: demoTab.url } : current);
+  }, [preview, zh]);
   useEffect(() => {
     epoch.current++; detach();
     const scopeKey = (sessionId ?? "") + ":" + preview;
-    const demoTab = preview ? getPreviewBrowserTab(zh) : undefined;
+    const demoTab = preview ? getPreviewBrowserTab(zhRef.current) : undefined;
     if (scope.current !== scopeKey) { scope.current = scopeKey; setTabs(demoTab ? [demoTab] : []); setSelected(demoTab ? demoTab.id : ""); urlDirty.current = false; }
     else if (demoTab) { setTabs([demoTab]); }
     setError(""); setBusy(false);
@@ -88,7 +95,7 @@ function LegacyBrowserPane({ client, sessionId, available, visible, capabilities
     const poll = async () => {
       try {
         if (!preview && !document.hidden && sessionId) { const handle = await client.command("browser.tabs.get", { sessionId }); const value = (await waitReceipt<{ result: BrowserObservationResultMap["browser.tabs.get"] }>(client, handle.requestId)).result; if (active) { setTabs(value.tabs); setSelected(current => value.tabs.some(tab => tab.id === current) ? current : value.tabs[0]?.id ?? ""); } }
-      } catch (cause) { if (active) setError(hostErrorMessage(cause, zh ? "浏览器目录读取失败" : "Cannot read browser targets")); }
+      } catch (cause) { if (active) setError(hostErrorMessage(cause, zhRef.current ? "浏览器目录读取失败" : "Cannot read browser targets")); }
       finally { if (active && !preview) timer = setTimeout(() => void poll(), 2000); }
     };
     const unsubscribe = chrome?.onBrowserObservation?.(event => {
@@ -102,7 +109,7 @@ function LegacyBrowserPane({ client, sessionId, available, visible, capabilities
     const hide = () => { if (document.hidden) { epoch.current++; detach(); } }; document.addEventListener("visibilitychange", hide);
     void poll();
     return () => { active = false; epoch.current++; clearTimeout(timer); clearInterval(heartbeat); unsubscribe?.(); document.removeEventListener("visibilitychange", hide); detach(); };
-  }, [client, sessionId, available, shown, enabled, preview, chrome, detach, send, zh, document]);
+  }, [client, sessionId, available, shown, enabled, preview, chrome, detach, send, document]);
   const observe = async () => {
     const target = tabs.find(tab => tab.id === selected); if (!target?.observable || !canObserve || busy || !visible) return;
     const generation = ++epoch.current; detach(); setBusy(true); setError(""); urlDirty.current = false; setUrl(target.url);

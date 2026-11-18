@@ -73,7 +73,7 @@ function FeatureRow({ definition: d, scope, row, disabled, zh, save, clear }: { 
   const [draft, setDraft] = useState("");
   useEffect(() => { setDraft(Array.isArray(row?.value) ? row.value.join("\n") : String(row?.value ?? "")); }, [row?.value]);
   const label = zh ? d.zh : d.en;
-  return <SettingRow wide={d.rules === true} label={label} desc={zh ? d.hint : d.hintEn} source={d.rules && row?.editableValues ? scope === "global" ? "user" : row.editableValues.session === null ? "default" : "runtime" : row ? row.source === "global" ? "user" : row.source === "project" ? "project" : row.source === "default" ? "default" : "runtime" : "unavailable"}>
+  return <SettingRow wide={d.rules === true} label={label} desc={zh ? d.hint : d.hintEn} source={row ? (row.source === "global" ? "user" : row.source === "project" ? "project" : row.source === "default" ? "default" : "runtime") : "unavailable"}>
     <div className={d.rules ? "feature-control is-wide" : "feature-control"}>
       {d.rules ? <>
         <p className="feature-status">{scope === "global"

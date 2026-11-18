@@ -112,7 +112,15 @@ export class ManagedBrowserStore {
   download(sessionId: string, value: ManagedBrowserDownload): void {
     const session = this.#session(sessionId);
     const existing = session.downloads.find(download => download.id === value.id);
-    if (existing) Object.assign(existing, value); else session.downloads.push({ ...value });
+    if (existing) {
+      Object.assign(existing, value);
+    } else {
+      session.downloads.push({ ...value });
+      if (session.downloads.length > 100) {
+        const pruneIndex = session.downloads.findIndex(item => item.state !== "progressing");
+        session.downloads.splice(pruneIndex >= 0 ? pruneIndex : 0, 1);
+      }
+    }
     this.options.changed?.(sessionId);
   }
   async flush(): Promise<void> {

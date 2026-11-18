@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import { useConversationView } from "../conversationWorkspace/Context";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { previewFile, previewFileBlob } from "../preview/filesPreview";
-import { parseFileReference, relativeFileReference, type FileReference } from "./fileTypes";
+import { isAbsoluteFileReference, parseFileReference, relativeFileReference, type FileReference } from "./fileTypes";
 
 export interface FileOpenIntent extends FileReference { source?: "system"; workspaceId?: string; ownerId?: string; targetId?: string | null }
 type Opener = (intent: FileOpenIntent) => void;
@@ -41,8 +41,9 @@ export function LocalFileImage({ src, alt }: { src: string; alt: string }) {
       return () => { active = false; if (blob) URL.revokeObjectURL(blob); };
     }
     const api = globalThis.ompStudioChrome?.files;
-    if (!api || !workspaceId && context?.source !== "system") return;
-    void api.open({ targetId, workspaceId: workspaceId ?? "", path, ...(context?.source ? { source: context.source } : {}) }).then(resource => { id = resource.id; if (active) setUrl(resource.url); else void api.release(id); }).catch(() => { if (active) setUrl(undefined); });
+    const isSystem = context?.source === "system" || Boolean(context && isAbsoluteFileReference(reference));
+    if (!api || !workspaceId && !isSystem) return;
+    void api.open({ targetId, workspaceId: isSystem ? "" : (workspaceId ?? ""), path, ...(isSystem ? { source: "system" } : {}) }).then(resource => { id = resource.id; if (active) setUrl(resource.url); else void api.release(id); }).catch(() => { if (active) setUrl(undefined); });
     return () => { active = false; if (id) void api.release(id); };
   }, [src, context?.basePath, context?.source, preview, targetId, workspaceId]);
   return url ? <img src={url} alt={alt} decoding="async" /> : <span className="file-muted">{alt || src}</span>;

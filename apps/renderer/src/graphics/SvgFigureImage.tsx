@@ -76,6 +76,35 @@ export function validateSvgFigure(source: string): void {
       throw new Error("SVG exceeds the 4,096 px image limit");
   }
 }
+const themeWatchers = new WeakMap<Document, { observer: MutationObserver; listeners: Set<() => void> }>();
+
+function subscribeSvgTheme(doc: Document, listener: () => void): () => void {
+  const ObserverCtor = doc.defaultView?.MutationObserver ?? globalThis.MutationObserver;
+  if (typeof ObserverCtor === "undefined" || !doc.documentElement) return () => {};
+  let entry = themeWatchers.get(doc);
+  if (!entry) {
+    const listeners = new Set<() => void>();
+    const observer = new ObserverCtor(() => {
+      for (const fn of [...listeners]) fn();
+    });
+    observer.observe(doc.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+    entry = { observer, listeners };
+    themeWatchers.set(doc, entry);
+  }
+  entry.listeners.add(listener);
+  const current = entry;
+  return () => {
+    current.listeners.delete(listener);
+    if (current.listeners.size === 0) {
+      current.observer.disconnect();
+      themeWatchers.delete(doc);
+    }
+  };
+}
+
 export function SvgFigureImage({
   source,
   alt,
@@ -92,17 +121,14 @@ export function SvgFigureImage({
   const [url, setUrl] = useState<string>(),
     [error, setError] = useState(""),
     [theme, setTheme] = useState(0);
-  const last = useRef<string | undefined>(undefined),
+  const hostRef = useRef<HTMLImageElement>(null),
+    last = useRef<string | undefined>(undefined),
     lastRender = useRef(0),
     failure = useRef(onFailure);
   failure.current = onFailure;
   useEffect(() => {
-    const observer = new MutationObserver(() => setTheme((value) => value + 1));
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["data-theme"],
-    });
-    return () => observer.disconnect();
+    const doc = hostRef.current?.ownerDocument ?? document;
+    return subscribeSvgTheme(doc, () => setTheme((value) => value + 1));
   }, []);
   useEffect(() => {
     const render = () => {
@@ -111,7 +137,9 @@ export function SvgFigureImage({
         const complete = streaming ? closePartialSvg(source) : source;
         if (!complete) return;
         validateSvgFigure(complete);
-        const style = getComputedStyle(document.documentElement),
+        const doc = hostRef.current?.ownerDocument ?? document;
+        const win = doc.defaultView ?? window;
+        const style = win.getComputedStyle(doc.documentElement),
           palette = Object.fromEntries(
             Object.entries(TOKENS).map(([key, value]) => [
               key,
@@ -128,6 +156,11 @@ export function SvgFigureImage({
         setError("");
       } catch (cause) {
         if (!streaming || source.length > 800000) {
+          if (last.current) {
+            URL.revokeObjectURL(last.current);
+            last.current = undefined;
+            setUrl(undefined);
+          }
           const message =
             cause instanceof Error ? cause.message : String(cause);
           setError(message);
@@ -156,6 +189,7 @@ export function SvgFigureImage({
     </p>
   ) : url ? (
     <img
+      ref={hostRef}
       className="graphic-svg"
       src={url}
       alt={alt}
@@ -163,6 +197,11 @@ export function SvgFigureImage({
       decoding="async"
       onError={() => {
         if (!streaming) {
+          if (last.current) {
+            URL.revokeObjectURL(last.current);
+            last.current = undefined;
+            setUrl(undefined);
+          }
           const message = zh ? "SVG 无法显示" : "SVG could not be displayed";
           setError(message);
           failure.current?.(message);

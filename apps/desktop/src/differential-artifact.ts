@@ -81,5 +81,12 @@ export async function downloadDifferentialArtifact(input: DifferentialInput): Pr
     }
   }
   input.progress("full", 0, input.release.file.size, fallbackReason);
-  return download(input.release.file, (r, t) => input.progress("full", r, t, fallbackReason));
+  const fullProgress = createProgressThrottle((r, t) => input.progress("full", r, t, fallbackReason));
+  try {
+    const downloaded = await download(input.release.file, (r, t) => fullProgress.report(r, t));
+    if (!input.signal.aborted) fullProgress.flush();
+    return downloaded;
+  } finally {
+    fullProgress.dispose();
+  }
 }

@@ -47,7 +47,7 @@ export interface ConversationLiveProjectorOptions {
 	sessionId: string;
 	runtimeEpoch: number;
 	reserveMessageId: (input: { role: Exclude<ConversationRole, "extension">; createdAt: string }) => string;
-	reserveCustomMessageId?: (input: { customType: string; timestamp: number }) => string;
+	reserveCustomMessageId?: (input: { customType: string; timestamp: number | undefined }) => string;
 	/** Non-message entries (compaction). Must not consume the message-id FIFO. */
 	allocateEntryId?: () => string;
 	reserveCompactionId?: () => string;
@@ -248,7 +248,11 @@ export class ConversationLiveProjector {
 	readonly #openMessages = new Map<string, OpenMessage>();
 	readonly #completedMessageIds = new Set<string>();
 	readonly #completedToolIds = new Set<string>();
-	readonly #retainedToolResults = new Map<string, Extract<ConversationContentBlock, { type: "toolResult" }>>();
+	readonly #retainedToolResults = new Map<
+		string,
+		{ readonly result: Extract<ConversationContentBlock, { type: "toolResult" }>; readonly bytes: number }
+	>();
+	#retainedToolResultBytes = 0;
 	readonly #backgroundTools = new Map<string, { turnId: string; toolName: string }>();
 	readonly #toolOutput = new Map<string, string>();
 	/** Full tool state the client has actually been sent. `append` is decided
@@ -329,10 +333,10 @@ export class ConversationLiveProjector {
 		toolCallId: string,
 	): Extract<ConversationContentBlock, { type: "toolResult" }> | undefined {
 		if (this.#disposed || sessionId !== this.#sessionId) return undefined;
-		const result = this.#retainedToolResults.get(toolCallId);
-		if (!result) return undefined;
-		const output = this.#toolOutput.get(toolCallId) ?? result.output;
-		return structuredClone({ ...result, ...(output === undefined ? {} : { output }) });
+		const retained = this.#retainedToolResults.get(toolCallId);
+		if (!retained) return undefined;
+		const output = this.#toolOutput.get(toolCallId) ?? retained.result.output;
+		return structuredClone({ ...retained.result, ...(output === undefined ? {} : { output }) });
 	}
 	dispose(): void {
 		this.#unsubscribe?.();
@@ -462,10 +466,14 @@ export class ConversationLiveProjector {
 		let messageId = entryId;
 		if (messageId === undefined) {
 			if (message.role === "custom" || message.role === "hookMessage") {
+				const rawTimestamp =
+					"timestamp" in message && typeof message.timestamp === "number" && Number.isFinite(message.timestamp)
+						? message.timestamp
+						: undefined;
 				messageId =
 					this.#options.reserveCustomMessageId?.({
 						customType: message.customType,
-						timestamp: Date.parse(createdAt),
+						timestamp: rawTimestamp,
 					}) ??
 					this.#options.allocateEntryId?.() ??
 					crypto.randomUUID();
@@ -733,13 +741,19 @@ export class ConversationLiveProjector {
 		if (extracted.data !== undefined) result.data = extracted.data;
 		if (extracted.truncated === true) result.truncated = true;
 		if (background || previousBackground) {
-			this.#rememberBoundedMap(this.#retainedToolResults, toolCallId, result);
-			let bytes = 0;
-			for (const item of this.#retainedToolResults.values()) bytes += utf8ByteLength(JSON.stringify(item));
-			while (this.#retainedToolResults.size > 32 || bytes > 4 * 1024 * 1024) {
+			const previousRetained = this.#retainedToolResults.get(toolCallId);
+			if (previousRetained !== undefined) {
+				this.#retainedToolResultBytes -= previousRetained.bytes;
+				this.#retainedToolResults.delete(toolCallId);
+			}
+			const entryBytes = utf8ByteLength(JSON.stringify(result));
+			this.#retainedToolResults.set(toolCallId, { result, bytes: entryBytes });
+			this.#retainedToolResultBytes += entryBytes;
+			while (this.#retainedToolResults.size > 32 || this.#retainedToolResultBytes > 4 * 1024 * 1024) {
 				const oldest = this.#retainedToolResults.keys().next().value;
 				if (!oldest) break;
-				bytes -= utf8ByteLength(JSON.stringify(this.#retainedToolResults.get(oldest)));
+				const evicted = this.#retainedToolResults.get(oldest);
+				if (evicted !== undefined) this.#retainedToolResultBytes -= evicted.bytes;
 				this.#retainedToolResults.delete(oldest);
 			}
 		}
@@ -1270,6 +1284,7 @@ export class ConversationLiveProjector {
 		this.#completedToolIds.clear();
 		this.#backgroundTools.clear();
 		this.#retainedToolResults.clear();
+		this.#retainedToolResultBytes = 0;
 		this.#toolOutput.clear();
 		this.#toolSent.clear();
 		this.#toolOwners.clear();

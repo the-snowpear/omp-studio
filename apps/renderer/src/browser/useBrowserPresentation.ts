@@ -28,19 +28,34 @@ export function useBrowserPresentation(options: { api?: ManagedBrowserApi | unde
     };
     const schedule = () => { if (!disposed && !frame) frame = view.requestAnimationFrame(measure); };
     const resize = new view.ResizeObserver(schedule);
-    const observer = new view.MutationObserver(records => {
+    const ancestorObserver = new view.MutationObserver(schedule);
+    const overlayObserver = new view.MutationObserver(records => {
       if (records.some(record => {
-        const target = record.target as Element;
-        if (record.type === "attributes") return ancestors.includes(target) || target.matches?.(`${GEOMETRY}, ${OVERLAY}`);
-        return [...record.addedNodes, ...record.removedNodes].some(node => node instanceof view.Element && (node.contains(element) || node.matches(`${GEOMETRY}, ${OVERLAY}`) || node.querySelector(OVERLAY)));
+        if (record.type === "attributes") {
+          const target = record.target as Element;
+          return target.matches?.(`${GEOMETRY}, ${OVERLAY}`) ?? false;
+        }
+        return [...record.addedNodes, ...record.removedNodes].some(node => node instanceof view.Element && (node.contains(element) || node.matches(`${GEOMETRY}, ${OVERLAY}`) || (node.childElementCount > 0 && node.querySelector(OVERLAY) !== null)));
       })) schedule();
     });
+    const onScroll = (event: Event) => {
+      const target = event.target;
+      if (target === document || (target instanceof view.Node && target.contains(element))) schedule();
+    };
     function measure() {
       frame = 0;
       if (disposed) return;
       const chain: Element[] = [];
       for (let parent: Element | null = element!; parent; parent = parent.parentElement) chain.push(parent);
-      if (chain.length !== ancestors.length || chain.some((parent, index) => parent !== ancestors[index])) { ancestors = chain; resize.disconnect(); ancestors.forEach(parent => resize.observe(parent)); }
+      if (chain.length !== ancestors.length || chain.some((parent, index) => parent !== ancestors[index])) {
+        ancestors = chain;
+        resize.disconnect();
+        ancestorObserver.disconnect();
+        for (const parent of ancestors) {
+          resize.observe(parent);
+          ancestorObserver.observe(parent, { attributes: true, attributeFilter: ["class", "style", "hidden", "inert"] });
+        }
+      }
       const bounds = element!.getBoundingClientRect();
       let clip = intersect(bounds, { x: 0, y: 0, width: view.innerWidth, height: view.innerHeight });
       let visible = current.current.visible && element!.isConnected && !document.hidden;
@@ -64,10 +79,10 @@ export function useBrowserPresentation(options: { api?: ManagedBrowserApi | unde
       if (signature !== next) { signature = next; last = payload; send(payload); }
       if (ancestors.some(parent => parent.getAnimations?.().some(animation => animation.playState === "running"))) schedule();
     }
-    observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "style", "hidden", "inert", "open", "data-dock-modal"] });
-    document.addEventListener("scroll", schedule, true); document.addEventListener("visibilitychange", schedule); document.addEventListener("transitionrun", schedule, true); view.addEventListener("resize", schedule);
+    overlayObserver.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["open", "data-dock-modal"] });
+    document.addEventListener("scroll", onScroll, true); document.addEventListener("visibilitychange", schedule); view.addEventListener("resize", schedule);
     refresh.current = schedule; measure();
-    return () => { disposed = true; resize.disconnect(); observer.disconnect(); view.cancelAnimationFrame(frame); document.removeEventListener("scroll", schedule, true); document.removeEventListener("visibilitychange", schedule); document.removeEventListener("transitionrun", schedule, true); view.removeEventListener("resize", schedule); refresh.current = () => {}; if (last) send({ ...last, visible: false }); };
+    return () => { disposed = true; resize.disconnect(); ancestorObserver.disconnect(); overlayObserver.disconnect(); view.cancelAnimationFrame(frame); document.removeEventListener("scroll", onScroll, true); document.removeEventListener("visibilitychange", schedule); view.removeEventListener("resize", schedule); refresh.current = () => {}; if (last) send({ ...last, visible: false }); };
   }, [options.api, options.document, options.sessionId, options.surfaceId, options.viewport, options.visible]);
   useLayoutEffect(() => refresh.current(), [options.pageId, options.visible]);
 }

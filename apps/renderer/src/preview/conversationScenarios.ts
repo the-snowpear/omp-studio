@@ -345,9 +345,61 @@ export function getPreviewThreadItems(zh = isZh()): Readonly<Record<string, read
       { user: "What breaks without the protocol fallback?", answer: "When an older server omits `preview.dom` from its capability list, the client still sends v2 arguments and fails the initial preview.\n\n> Keep using the legacy read path after fallback and surface the raw server error for diagnostics.\n\nPlease confirm whether legacy compatibility stays in scope for this sync." },
     ]),
     t3: conversation("plan", zh ? [
-      { user: "规划 Mermaid 全屏缩放与拖拽惯性的改动，先给计划。", answer: "## 待确认的实施计划\n\n1. 统一普通视图与全屏视图的缩放状态。\n2. 增加可关闭的拖拽惯性。\n3. 保留键盘重置与缩放按钮。\n4. 检查浅色、深色和窄窗口。\n\n**待定项**：惯性默认值与触控板手势优先级。下方计划卡包含实施细节，后续问题依次排队。" },
+      {
+        user: "规划 Mermaid 全屏缩放与拖拽惯性的改动，先给计划。",
+        answer: [
+          { type: "thinking", text: "先核对现有 MermaidBlock 的缩放状态与拖拽手势事件，再把分阶段实施计划写入本地计划文档并提交评审。" },
+          ...tool("plan-read-mermaid", "read", { path: "components/MermaidBlock.tsx", offset: 1, limit: 40 }, {
+            offset: 1, lines: 40, encoding: "UTF-8", size: "6.2 KB",
+            preview: ['export function MermaidBlock({ code }: { code: string }) {', '  const [zoom, setZoom] = useState(1);'],
+          }),
+          ...tool("plan-read-propose-doc", "read", { path: "xd://propose" }, { contentType: "text/plain", totalLines: 1 },
+            "Write your plan's <slug> (matching local://<slug>-plan.md) as plain text to xd://propose."),
+          ...tool("plan-write-doc", "write", { path: "local://mermaid-zoom-inertia-plan.md", content: "## 目标\n\n冻结 Preview **缩放协议**，补上拖拽惯性开关，再用类型检查确认 Mermaid 全屏路径。" }, {},
+            "[local://mermaid-zoom-inertia-plan.md] wrote 24 lines"),
+          ...tool("plan-submit-propose", "write", { path: "xd://propose", content: "Preview 缩放惯性" }, {
+            xdev: {
+              tool: "propose",
+              mode: "execute",
+              args: { title: "Preview 缩放惯性" },
+              inner: {
+                planFilePath: "local://mermaid-zoom-inertia-plan.md",
+                title: "Preview 缩放惯性",
+                planExists: true,
+              },
+            },
+          }, "Plan ready for review."),
+          text("## 待确认的实施计划\n\n1. 统一普通视图与全屏视图的缩放状态。\n2. 增加可关闭的拖拽惯性。\n3. 保留键盘重置与缩放按钮。\n4. 检查浅色、深色和窄窗口。\n\n**待定项**：惯性默认值与触控板手势优先级。上方计划卡包含实施细节，后续问题依次排队。"),
+        ],
+      },
     ] : [
-      { user: "Plan the changes for Mermaid fullscreen zoom and drag inertia before implementing.", answer: "## Proposed Implementation Plan\n\n1. Unify zoom state between inline and fullscreen views.\n2. Add configurable drag inertia with an opt-out.\n3. Keep keyboard reset shortcuts and toolbar zoom controls.\n4. Verify light, dark, and narrow-pane layouts.\n\n**Open items**: default inertia damping and trackpad gesture precedence. Detailed steps appear in the plan card below." },
+      {
+        user: "Plan the changes for Mermaid fullscreen zoom and drag inertia before implementing.",
+        answer: [
+          { type: "thinking", text: "Inspect MermaidBlock zoom state and pointer gesture handlers first, then write the implementation plan and submit it via xd://propose." },
+          ...tool("plan-read-mermaid", "read", { path: "components/MermaidBlock.tsx", offset: 1, limit: 40 }, {
+            offset: 1, lines: 40, encoding: "UTF-8", size: "6.2 KB",
+            preview: ['export function MermaidBlock({ code }: { code: string }) {', '  const [zoom, setZoom] = useState(1);'],
+          }),
+          ...tool("plan-read-propose-doc", "read", { path: "xd://propose" }, { contentType: "text/plain", totalLines: 1 },
+            "Write your plan's <slug> (matching local://<slug>-plan.md) as plain text to xd://propose."),
+          ...tool("plan-write-doc", "write", { path: "local://mermaid-zoom-inertia-plan.md", content: "## Goal\n\nFreeze the Preview **zoom contract**, add the drag-inertia toggle, and run type checks for fullscreen Mermaid." }, {},
+            "[local://mermaid-zoom-inertia-plan.md] wrote 24 lines"),
+          ...tool("plan-submit-propose", "write", { path: "xd://propose", content: "Preview zoom inertia" }, {
+            xdev: {
+              tool: "propose",
+              mode: "execute",
+              args: { title: "Preview zoom inertia" },
+              inner: {
+                planFilePath: "local://mermaid-zoom-inertia-plan.md",
+                title: "Preview zoom inertia",
+                planExists: true,
+              },
+            },
+          }, "Plan ready for review."),
+          text("## Proposed Implementation Plan\n\n1. Unify zoom state between inline and fullscreen views.\n2. Add configurable drag inertia with an opt-out.\n3. Keep keyboard reset shortcuts and toolbar zoom controls.\n4. Verify light, dark, and narrow-pane layouts.\n\n**Open items**: default inertia damping and trackpad gesture precedence. Detailed steps appear in the plan card above."),
+        ],
+      },
     ]),
     t4: conversation("shell-path", zh ? [
       { user: "Windows 上的 Bash 命令提示找不到 Shell，怎么检查？", answer: ["先查看当前命令解析到哪个程序，尤其注意路径中包含空格的情况。", fence("pwsh", 'Get-Command git, bash, pwsh -ErrorAction SilentlyContinue |\n  Select-Object Name, Source'), "在 Git Bash 中核对工作目录：", fence("bash", 'pwd\nprintf \'Shell: %s\\n\' "$BASH_VERSION"'), "找到解释器后，在当前工作区重试原命令；输出应进入底部独立终端。"].join("\n\n") },

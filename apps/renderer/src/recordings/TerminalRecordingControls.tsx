@@ -42,9 +42,13 @@ export function TerminalRecordingControls({
       clearTimeout(timer);
       if (reading.current) { queuedPoll.current = poll; return; }
       reading.current = true;
+      let keepPolling = false;
       try {
         const value = await api.recordingStatus?.(id);
-        if (active) setStatus(value);
+        if (active) {
+          setStatus(value);
+          keepPolling = value?.state === "recording" || value?.state === "saving";
+        }
       } catch (cause) {
         if (active)
           setError(cause instanceof Error ? cause.message : String(cause));
@@ -53,7 +57,7 @@ export function TerminalRecordingControls({
         const next = queuedPoll.current;
         queuedPoll.current = undefined;
         if (next) next();
-        else if (active && !document.hidden) timer = setTimeout(() => void poll(), 1000);
+        else if (active && keepPolling && !document.hidden) timer = setTimeout(() => void poll(), 1000);
       }
     };
     const visibilityChanged = () => {

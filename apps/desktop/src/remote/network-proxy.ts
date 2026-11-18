@@ -15,15 +15,33 @@ export function connectTcp(host: string, port: number, timeoutMs = 10_000, looku
   });
 }
 export function remotePrivateHost(host: string): boolean {
-  const name = host.replace(/^\[|\]$/gu, "").toLowerCase();
-  if (name === "localhost" || name.endsWith(".local") || /^(?:0\.|127\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.)/u.test(name)) return true;
-  if (isIP(name) !== 6) return false;
-  const address = new URL(`http://[${name}]`).hostname.slice(1, -1);
-  if (address.startsWith("::ffff:")) {
-    const [high, low] = address.slice(7).split(":").map(value => Number.parseInt(value, 16));
-    return remotePrivateHost(`${high! >>> 8}.${high! & 255}.${low! >>> 8}.${low! & 255}`);
+  const bracketless = host.trim().replace(/^\[|\]$/gu, "").toLowerCase();
+  const zone = bracketless.indexOf("%");
+  const name = (zone >= 0 ? bracketless.slice(0, zone) : bracketless).replace(/\.$/u, "");
+  if (
+    !name ||
+    name === "localhost" ||
+    name.endsWith(".localhost") ||
+    name.endsWith(".local") ||
+    /^(?:0\.|127\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|192\.0\.0\.|198\.1[89]\.|(?:22[4-9]|23\d|24\d|25[0-5])\.)/u.test(name)
+  ) {
+    return true;
   }
-  return address === "::" || address === "::1" || /^(?:fc|fd|fe[89ab])/u.test(address);
+  if (isIP(name) !== 6) return false;
+  let address: string;
+  try {
+    address = new URL(`http://[${name}]`).hostname.slice(1, -1);
+  } catch {
+    return true;
+  }
+  if (address === "::" || address === "::1" || /^(?:fc|fd|fe[89ab]|ff|64:ff9b:)/u.test(address)) return true;
+  const v4Tail = /^(?:::ffff:|::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u.exec(address);
+  if (v4Tail) {
+    const high = Number.parseInt(v4Tail[1]!, 16);
+    const low = Number.parseInt(v4Tail[2]!, 16);
+    return remotePrivateHost(`${high >>> 8}.${high & 255}.${low >>> 8}.${low & 255}`);
+  }
+  return false;
 }
 export class RemoteNetworkProxy {
   private channel: NetworkStreams | undefined;
@@ -43,13 +61,22 @@ export class RemoteNetworkProxy {
       void this.http(req, res);
     });
     this.server.on("connect", (req, socket, head) => {
-      if (!this.authorized(req)) { socket.end("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"OMP Studio\"\r\nConnection: close\r\n\r\n"); return; }
+      let socketClosed = false;
+      const onEarlyError = () => { socketClosed = true; socket.destroy(); };
+      socket.on("error", onEarlyError);
+      socket.once("close", () => { socketClosed = true; });
+      if (!this.authorized(req)) {
+        if (!socket.destroyed) socket.end("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"OMP Studio\"\r\nConnection: close\r\n\r\n");
+        return;
+      }
       void (async () => {
         const url = new URL(`http://${req.url}`);
         const upstream = await this.open({ host: url.hostname.replace(/^\[|\]$/gu, ""), port: Number(url.port || 443) });
+        if (socketClosed || socket.destroyed) { upstream.destroy(); return; }
+        socket.off("error", onEarlyError);
         socket.write("HTTP/1.1 200 Connection Established\r\n\r\n"); if (head.length) upstream.write(head);
         this.pipe(socket, upstream);
-      })().catch(() => { socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"); });
+      })().catch(() => { if (!socket.destroyed) socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"); });
     });
     this.broker = createServer((req, res) => { void this.http(req, res, true); });
   }
@@ -88,6 +115,8 @@ export class RemoteNetworkProxy {
   }
   private async http(req: IncomingMessage, res: ServerResponse, broker = false): Promise<void> {
     let stream: Duplex | undefined;
+    let upstream: ReturnType<typeof request> | undefined;
+    req.on("error", () => { upstream?.destroy(); stream?.destroy(); });
     try {
       const url = new URL(req.url!, broker ? "http://broker" : undefined);
       stream = await this.open({ host: url.hostname, port: Number(url.port || 80), ...(broker ? { service: "broker" as const } : {}) });
@@ -104,13 +133,13 @@ export class RemoteNetworkProxy {
         process.nextTick(() => callback?.(null, socket));
         return socket;
       };
-      const upstream = request({ host: url.hostname, port: Number(url.port || 80), method: req.method, path: url.pathname + url.search, headers, agent }, response => {
+      upstream = request({ host: url.hostname, port: Number(url.port || 80), method: req.method, path: url.pathname + url.search, headers, agent }, response => {
         res.writeHead(response.statusCode ?? 502, response.headers); response.pipe(res);
       });
       upstream.once("close", () => agent.destroy());
       upstream.on("error", () => { if (!res.headersSent) res.writeHead(502); res.end(desktopText("联网请求失败；未自动重放", "Network request failed; it was not automatically replayed")); });
-      res.on("close", () => { upstream.destroy(); stream?.destroy(); }); req.pipe(upstream);
-    } catch { stream?.destroy(); res.writeHead(502); res.end(desktopText("远端及本机网络出口均不可用", "Neither remote nor local network egress is available")); }
+      res.on("close", () => { upstream?.destroy(); stream?.destroy(); }); req.pipe(upstream);
+    } catch { stream?.destroy(); if (!res.headersSent) res.writeHead(502); res.end(desktopText("远端及本机网络出口均不可用", "Neither remote nor local network egress is available")); }
   }
   async close(): Promise<void> {
     this.channel?.close(); for (const socket of this.sockets) socket.destroy();

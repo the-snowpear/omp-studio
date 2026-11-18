@@ -26,6 +26,7 @@ export interface FileBrowserPanelProps {
   source: FileBrowserSource | null;
   /** 记忆与固定文件夹的作用域：预览 / 真实、本机 / 哪台 SSH 分开记。 */
   scope: string;
+  workspaceId?: string | undefined;
   /** 没有来源时显示的原因。 */
   unavailable?: { title: string; detail: string } | undefined;
   /** 打开文件：交给现有文件窗口。没有接上时菜单项置灰。 */
@@ -38,13 +39,13 @@ export interface FileBrowserPanelProps {
 
 type MenuState = { kind: "context"; entry: FsEntry | null; point: { x: number; y: number } } | { kind: "places" | "more"; anchor: HTMLElement };
 
-export function FileBrowserPanel({ panelId, source, scope, unavailable, visible = true, location, openers = [], availableSystemActions, onOpenFile, onAddContext, onSystemAction }: FileBrowserPanelProps) {
+export function FileBrowserPanel({ panelId, source, scope, workspaceId, unavailable, visible = true, location, openers = [], availableSystemActions, onOpenFile, onAddContext, onSystemAction }: FileBrowserPanelProps) {
   const { resolvedLanguage } = useI18n();
   const language = resolvedLanguage === "zh" ? "zh" : "en";
   const copy = useCallback((zh: string, en: string) => language === "zh" ? zh : en, [language]);
   const { preview, marks } = usePreviewMode();
   const demo = preview && marks;
-  const state = useFileBrowser(source, `${scope}:${panelId}`, scope);
+  const state = useFileBrowser(source, `${scope}:${panelId}`, scope, workspaceId);
   const [ref, tier] = useWidthTier<HTMLElement>(VIEW_STEPS);
   const view = effectiveView(tier, state.explicitView);
   const places = state.places;
@@ -100,7 +101,17 @@ export function FileBrowserPanel({ panelId, source, scope, unavailable, visible 
     if (!source?.trash) { state.notify("error", copy("远端暂不支持回收站", "No recycle bin on the remote")); return; }
     if (items.length) state.setConfirmTrash(items);
   };
-  const selectedEntries = () => state.selection.map(path => state.findEntry(path)).filter((entry): entry is FsEntry => !!entry);
+  const selectedEntries = () => {
+    const activeDir = state.current ?? COMPUTER;
+    return state.selection
+      .map(path => state.findEntry(path))
+      .filter((entry): entry is FsEntry => {
+        if (!entry) return false;
+        if (view === "tree") return true;
+        if (samePath(parentPath(entry.path, sep), activeDir, sep)) return true;
+        return view === "columns" && samePath(entry.path, activeDir, sep);
+      });
+  };
 
   const actions: RowActions = {
     select(entry, event, list) {

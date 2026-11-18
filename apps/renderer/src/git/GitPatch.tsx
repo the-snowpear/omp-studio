@@ -18,6 +18,18 @@ function patchRows(patch: string): PatchRow[] {
       return { kind: "header", text: line };
     }
     if (line.startsWith("diff --git ")) inHunk = false;
+    if (inHunk && line.startsWith("\\")) {
+      return { kind: "header", text: line };
+    }
+    if (inHunk && line === "") {
+      return {
+        kind: "row",
+        mark: " ",
+        oldLn: String(oldLine++),
+        newLn: String(newLine++),
+        text: "",
+      };
+    }
     const mark = line[0];
     if (inHunk && (mark === "+" || mark === "-" || mark === " ")) {
       return {

@@ -947,7 +947,7 @@ function pendingAfterSnapshot(
   ) {
     return current;
   }
-  return current;
+  return null;
 }
 
 function reduceSnapshot(state: ClientState, event: Extract<ClientEvent, { readonly kind: "snapshot" }>): ClientState {

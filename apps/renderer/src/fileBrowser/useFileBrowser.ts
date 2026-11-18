@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { hostErrorMessage } from "../hostError";
 import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
-import { COMPUTER, parentPath, samePath, sortEntries, visibleEntries, within, type BrowserView, type FileBrowserSource, type FsDirectory, type FsEntry, type FsPlaces, type SortState } from "./model";
+import { baseName, COMPUTER, driveDisplayName, nameProblem, parentPath, samePath, sortEntries, visibleEntries, within, type BrowserView, type FileBrowserSource, type FsDirectory, type FsEntry, type FsPlaces, type SortState } from "./model";
 
 export interface DirState { readonly status: "loading" | "ready" | "error"; readonly dir?: FsDirectory; readonly error?: string }
 export type EditState = { readonly kind: "rename"; readonly path: string; readonly draft: string; readonly error?: string; readonly busy?: boolean }
@@ -13,6 +13,8 @@ export interface Notice { readonly tone: "ok" | "error"; readonly text: string; 
 interface Memory { path?: string; view?: BrowserView | null; sort?: SortState; hidden?: boolean; places?: number }
 const MEMORY_KEY = "omp.fileBrowser.v1";
 const PINS_KEY = "omp.fileBrowser.pins.v1";
+const MAX_CACHED_DIRS = 128;
+
 function readStore<T>(key: string): Record<string, T> {
   try { const value = JSON.parse(localStorage.getItem(key) ?? "{}") as unknown; return value && typeof value === "object" ? value as Record<string, T> : {}; } catch { return {}; }
 }
@@ -28,11 +30,13 @@ function writeStore<T>(key: string, id: string, value: T | undefined) {
 
 const DEFAULT_SORT: SortState = { key: "name", dir: 1 };
 
-export function useFileBrowser(source: FileBrowserSource | null, memoryId: string, pinScope: string) {
+export function useFileBrowser(source: FileBrowserSource | null, memoryId: string, pinScope: string, workspaceId?: string) {
   const { resolvedLanguage } = useI18n();
   const { preview, marks } = usePreviewMode();
   const showWriteNotice = !preview || marks;
-  const copy = (zh: string, en: string) => resolvedLanguage === "zh" ? zh : en;
+  const langRef = useRef(resolvedLanguage);
+  langRef.current = resolvedLanguage;
+  const copy = (zh: string, en: string) => langRef.current === "zh" ? zh : en;
   const memory = useMemo(() => readStore<Memory>(MEMORY_KEY)[memoryId] ?? {}, [memoryId]);
   const [places, setPlaces] = useState<FsPlaces>();
   const [placesError, setPlacesError] = useState<string>();
@@ -47,11 +51,19 @@ export function useFileBrowser(source: FileBrowserSource | null, memoryId: strin
   const [placesWidth, setPlacesWidth] = useState(memory.places ?? 200);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [filter, setFilter] = useState("");
-  const [edit, setEdit] = useState<EditState>();
+  const [edit, setEditState] = useState<EditState>();
   const [confirmTrash, setConfirmTrash] = useState<readonly FsEntry[]>();
   const [notice, setNotice] = useState<Notice>();
   const [pins, setPins] = useState<readonly string[]>(() => readStore<string[]>(PINS_KEY)[pinScope] ?? []);
   const requested = useRef(new Map<string, symbol>());
+  const submittingEdit = useRef(false);
+  const trashing = useRef(false);
+  const editRef = useRef<EditState | undefined>(undefined);
+  editRef.current = edit;
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
+  const dirsRef = useRef(dirs);
+  dirsRef.current = dirs;
   const revealed = useRef(false);
   const [revision, setRevision] = useState(0);
   const [placesRevision, setPlacesRevision] = useState(0);
@@ -59,6 +71,27 @@ export function useFileBrowser(source: FileBrowserSource | null, memoryId: strin
   const currentRef = useRef(current); currentRef.current = current;
   const sep = places?.separator ?? "\\";
   const keyOf = useCallback((value: string) => sep === "\\" ? value.toLowerCase() : value, [sep]);
+
+  const setEdit = useCallback((next: EditState | undefined) => {
+    if (!next) submittingEdit.current = false;
+    editRef.current = next;
+    setEditState(next);
+  }, []);
+
+  const pruneDirs = useCallback((next: Map<string, DirState>): Map<string, DirState> => {
+    if (next.size <= MAX_CACHED_DIRS) return next;
+    const activeKey = currentRef.current !== undefined ? keyOf(currentRef.current) : undefined;
+    const rootKey = keyOf(COMPUTER);
+    const keep = expandedRef.current;
+    for (const candidate of next.keys()) {
+      if (next.size <= MAX_CACHED_DIRS) break;
+      if (candidate === rootKey || candidate === activeKey) continue;
+      if (keep.has(candidate) && next.size <= MAX_CACHED_DIRS * 2) continue;
+      next.delete(candidate);
+      requested.current.delete(candidate);
+    }
+    return next;
+  }, [keyOf]);
 
   useEffect(() => { setPins(readStore<string[]>(PINS_KEY)[pinScope] ?? []); }, [pinScope]);
   useEffect(() => {
@@ -68,6 +101,33 @@ export function useFileBrowser(source: FileBrowserSource | null, memoryId: strin
     source.places().then(value => { if (live) setPlaces(value); }, error => { if (live) setPlacesError(hostErrorMessage(error, copy("操作失败", "Operation failed"))); });
     return () => { live = false; };
   }, [source, placesRevision]);
+
+  const metaSnapshot = useRef({ language: resolvedLanguage, workspaceId });
+  useEffect(() => {
+    const previous = metaSnapshot.current;
+    metaSnapshot.current = { language: resolvedLanguage, workspaceId };
+    if (previous.language === resolvedLanguage && previous.workspaceId === workspaceId) return;
+    if (!source || !places) return;
+    let live = true;
+    void source.places().then(value => {
+      if (!live) return;
+      setPlaces(value);
+      const rootKey = keyOf(COMPUTER);
+      if (dirsRef.current.has(rootKey)) {
+        setDirs(prior => {
+          if (!prior.has(rootKey)) return prior;
+          const next = new Map(prior);
+          next.set(rootKey, {
+            status: "ready",
+            dir: { path: COMPUTER, entries: value.drives.map(drive => ({ name: driveDisplayName(drive, value.separator), path: drive.path, type: "dir" as const, denied: !drive.ready })) },
+          });
+          return next;
+        });
+      }
+    }, () => { /* Keep existing places on transient background refresh error. */ });
+    return () => { live = false; };
+  }, [resolvedLanguage, workspaceId, source, !!places, keyOf]);
+
   useEffect(() => { requested.current.clear(); setDirs(new Map()); }, [showHidden]);
 
   const load = useCallback((target: string, force = false) => {
@@ -76,19 +136,41 @@ export function useFileBrowser(source: FileBrowserSource | null, memoryId: strin
     if (!force && requested.current.has(key)) return;
     const ticket = Symbol();
     requested.current.set(key, ticket);
-    setDirs(previous => new Map(previous).set(key, { status: "loading", ...(previous.get(key)?.dir ? { dir: previous.get(key)!.dir! } : {}) }));
+    setDirs(previous => {
+      const existing = previous.get(key);
+      const next = new Map(previous);
+      next.delete(key);
+      next.set(key, { status: "loading", ...(existing?.dir ? { dir: existing.dir } : {}) });
+      return pruneDirs(next);
+    });
     source.list(target, showHidden).then(
       dir => {
         if (requested.current.get(key) !== ticket) return;
         const canonical = keyOf(dir.path);
         requested.current.set(canonical, ticket);
         if (canonical !== key) setExpanded(previous => { const next = new Set(previous); next.delete(key); return next; });
-        setDirs(previous => new Map(previous).set(key, { status: "ready", dir }).set(canonical, { status: "ready", dir }));
+        setDirs(previous => {
+          const next = new Map(previous);
+          next.delete(key);
+          next.set(key, { status: "ready", dir });
+          if (canonical !== key) next.delete(canonical);
+          next.set(canonical, { status: "ready", dir });
+          return pruneDirs(next);
+        });
         if (currentRef.current === target && dir.path !== target) { revealed.current = false; setPathState(dir.path); writeStore<Memory>(MEMORY_KEY, memoryId, { ...readStore<Memory>(MEMORY_KEY)[memoryId], path: dir.path }); }
       },
-      error => { if (requested.current.get(key) === ticket) setDirs(previous => new Map(previous).set(key, { status: "error", error: hostErrorMessage(error, copy("操作失败", "Operation failed")) })); },
+      error => {
+        if (requested.current.get(key) === ticket) {
+          setDirs(previous => {
+            const next = new Map(previous);
+            next.delete(key);
+            next.set(key, { status: "error", error: hostErrorMessage(error, copy("操作失败", "Operation failed")) });
+            return pruneDirs(next);
+          });
+        }
+      },
     );
-  }, [source, keyOf, showHidden, memoryId]);
+  }, [source, keyOf, showHidden, memoryId, pruneDirs]);
   const dirState = useCallback((target: string): DirState | undefined => dirs.get(keyOf(target)), [dirs, keyOf]);
 
   // 第一次拿到位置时落到记忆的位置，没有就去主目录。
@@ -123,7 +205,7 @@ export function useFileBrowser(source: FileBrowserSource | null, memoryId: strin
     persist({ path: target });
     load(target);
     if (options.reveal !== false) revealInTree(target);
-  }, [current, sep, persist, load, revealInTree, dirs, keyOf]);
+  }, [current, sep, persist, load, revealInTree, dirs, keyOf, setEdit]);
   const goBack = useCallback(() => {
     const target = back[back.length - 1];
     if (target === undefined || current === undefined) return;
@@ -173,42 +255,155 @@ export function useFileBrowser(source: FileBrowserSource | null, memoryId: strin
   /* ---------- 写操作（新建 / 重命名 / 回收站） ---------- */
   const reloadAround = useCallback((target: string) => { requested.current.delete(keyOf(target)); load(target, true); }, [keyOf, load]);
   const submitEdit = useCallback(async () => {
-    if (!edit || !source || edit.busy) return;
-    const name = edit.draft;
-    setEdit({ ...edit, busy: true });
+    const activeEdit = editRef.current;
+    if (!activeEdit || !source || activeEdit.busy || submittingEdit.current) return;
+    const name = activeEdit.draft.trim();
+    const language: "zh" | "en" = resolvedLanguage === "zh" ? "zh" : "en";
+    if (activeEdit.kind === "rename" && name === baseName(activeEdit.path, sep)) {
+      setEdit(undefined);
+      return;
+    }
+    const problem = nameProblem(name, places?.platform ?? "win32", language);
+    if (problem) {
+      setEdit({ ...activeEdit, error: problem });
+      return;
+    }
+    submittingEdit.current = true;
+    const { error: _clearedError, ...cleanEdit } = activeEdit;
+    setEdit({ ...cleanEdit, draft: name, busy: true });
     try {
-      if (edit.kind === "new") {
-        const created = await source.createFolder(edit.parent, name);
-        reloadAround(edit.parent); setSelection([created]);
+      if (activeEdit.kind === "new") {
+        const targetParent = activeEdit.parent;
+        const created = await source.createFolder(targetParent, name);
+        reloadAround(targetParent);
+        if (currentRef.current !== undefined && samePath(currentRef.current, targetParent, sep)) {
+          setSelection([created]);
+        }
         if (showWriteNotice) notify("ok", copy(`已新建文件夹「${name}」`, `Created folder "${name}"`));
       } else {
-        const parent = parentPath(edit.path, sep);
-        const renamed = await source.rename(edit.path, name);
-        reloadAround(parent); setSelection([renamed]);
-        setPins(previous => { const next = previous.map(item => within(item, edit.path, sep) ? renamed + item.slice(edit.path.length) : item); writeStore(PINS_KEY, pinScope, next); return next; });
-        if (current !== undefined && within(current, edit.path, sep)) { const path = renamed + current.slice(edit.path.length); setPathState(path); persist({ path }); }
-        setExpanded(previous => new Set([...previous].map(path => within(path, keyOf(edit.path), sep) ? keyOf(renamed) + path.slice(edit.path.length) : path)));
+        const oldPath = activeEdit.path;
+        const oldKey = keyOf(oldPath);
+        const parent = parentPath(oldPath, sep);
+        const renamed = await source.rename(oldPath, name);
+        const newKey = keyOf(renamed);
+        const expandedToReload: string[] = [];
+        for (const expKey of expandedRef.current) {
+          if (within(expKey, oldKey, sep)) {
+            const cachedDirPath = dirsRef.current.get(expKey)?.dir?.path;
+            const suffix = cachedDirPath ? cachedDirPath.slice(oldPath.length) : expKey.slice(oldKey.length);
+            expandedToReload.push(renamed + suffix);
+          }
+        }
+        for (const reqKey of [...requested.current.keys()]) {
+          if (within(reqKey, oldKey, sep)) requested.current.delete(reqKey);
+        }
+        setDirs(previous => {
+          let changed = false;
+          const next = new Map<string, DirState>();
+          for (const [k, state] of previous) {
+            if (within(k, oldKey, sep)) {
+              changed = true;
+              if (state.dir) {
+                const remappedPath = renamed + state.dir.path.slice(oldPath.length);
+                next.set(keyOf(remappedPath), {
+                  ...state,
+                  dir: {
+                    ...state.dir,
+                    path: remappedPath,
+                    entries: state.dir.entries.map(entry => within(entry.path, oldPath, sep) ? { ...entry, path: renamed + entry.path.slice(oldPath.length) } : entry),
+                  },
+                });
+              }
+            } else {
+              next.set(k, state);
+            }
+          }
+          return changed ? pruneDirs(next) : previous;
+        });
+        reloadAround(parent);
+        const latestCurrent = currentRef.current;
+        if (latestCurrent !== undefined && (samePath(latestCurrent, parent, sep) || within(latestCurrent, oldPath, sep))) {
+          setSelection([renamed]);
+        }
+        setPins(previous => { const next = previous.map(item => within(item, oldPath, sep) ? renamed + item.slice(oldPath.length) : item); writeStore(PINS_KEY, pinScope, next); return next; });
+        if (latestCurrent !== undefined && within(latestCurrent, oldPath, sep)) {
+          const nextPath = renamed + latestCurrent.slice(oldPath.length);
+          setPathState(nextPath);
+          persist({ path: nextPath });
+        }
+        setExpanded(previous => new Set([...previous].map(item => within(item, oldKey, sep) ? newKey + item.slice(oldKey.length) : item)));
+        for (const targetToReload of expandedToReload) reloadAround(targetToReload);
         if (showWriteNotice) notify("ok", copy(`已重命名为「${name}」`, `Renamed to "${name}"`));
       }
-      setEdit(undefined);
+      const currentEdit = editRef.current;
+      const stillSameEdit = activeEdit.kind === "new"
+        ? currentEdit?.kind === "new" && currentEdit.parent === activeEdit.parent
+        : currentEdit?.kind === "rename" && currentEdit.path === activeEdit.path;
+      if (stillSameEdit) {
+        setEdit(undefined);
+      }
     } catch (error) {
-      setEdit({ ...edit, busy: false, error: hostErrorMessage(error, copy("操作失败", "Operation failed")) });
+      const currentEdit = editRef.current;
+      const stillSameEdit = activeEdit.kind === "new"
+        ? currentEdit?.kind === "new" && currentEdit.parent === activeEdit.parent
+        : currentEdit?.kind === "rename" && currentEdit.path === activeEdit.path;
+      if (stillSameEdit) {
+        setEdit({ ...activeEdit, draft: name, busy: false, error: hostErrorMessage(error, copy("操作失败", "Operation failed")) });
+      }
+    } finally {
+      submittingEdit.current = false;
     }
-  }, [edit, source, sep, current, pinScope, reloadAround, notify, persist, keyOf, resolvedLanguage, showWriteNotice]);
+  }, [source, sep, places?.platform, pinScope, reloadAround, notify, persist, keyOf, resolvedLanguage, showWriteNotice, pruneDirs, setEdit]);
   const runTrash = useCallback(async () => {
-    if (!confirmTrash || !source) return;
+    if (!confirmTrash || !source || trashing.current) return;
+    trashing.current = true;
     const items = confirmTrash;
     setConfirmTrash(undefined);
     try {
       await source.trashItems(items.map(item => item.path));
+      const deletedKeys = items.map(item => keyOf(item.path));
+      for (const reqKey of [...requested.current.keys()]) {
+        if (deletedKeys.some(delKey => within(reqKey, delKey, sep))) requested.current.delete(reqKey);
+      }
+      setDirs(previous => {
+        let changed = false;
+        const next = new Map<string, DirState>();
+        for (const [k, state] of previous) {
+          if (deletedKeys.some(delKey => within(k, delKey, sep))) changed = true;
+          else next.set(k, state);
+        }
+        return changed ? next : previous;
+      });
+      setExpanded(previous => {
+        const next = new Set([...previous].filter(expKey => !deletedKeys.some(delKey => within(expKey, delKey, sep))));
+        return next.size === previous.size ? previous : next;
+      });
       setSelection([]);
-      if (current !== undefined && items.some(item => within(current, item.path, sep))) go(parentPath(items[0]!.path, sep), { record: false });
+      const latestCurrent = currentRef.current;
+      if (latestCurrent !== undefined) {
+        const deletedAncestors = items.filter(item => within(latestCurrent, item.path, sep)).sort((a, b) => a.path.length - b.path.length);
+        if (deletedAncestors.length > 0) go(parentPath(deletedAncestors[0]!.path, sep), { record: false });
+      }
       if (showWriteNotice) notify("ok", copy(items.length === 1 ? `已将「${items[0]!.name}」移到回收站` : `已将 ${items.length} 项移到回收站`, `Moved ${items.length} item(s) to the trash`));
     } catch (error) { notify("error", hostErrorMessage(error, copy("操作失败", "Operation failed"))); }
-    finally { for (const parent of new Set(items.map(item => parentPath(item.path, sep)))) reloadAround(parent); }
-  }, [confirmTrash, source, sep, current, reloadAround, go, notify, resolvedLanguage, showWriteNotice]);
+    finally {
+      trashing.current = false;
+      for (const parent of new Set(items.map(item => parentPath(item.path, sep)))) reloadAround(parent);
+    }
+  }, [confirmTrash, source, sep, reloadAround, go, notify, resolvedLanguage, showWriteNotice, keyOf]);
 
-  const findEntry = (target: string) => [...dirs.values()].flatMap(value => value.dir?.entries ?? []).find(entry => samePath(entry.path, target, sep));
+  const findEntry = useCallback((target: string): FsEntry | undefined => {
+    const inCurrent = currentState?.dir?.entries.find(entry => samePath(entry.path, target, sep));
+    if (inCurrent) return inCurrent;
+    const parentEntries = dirs.get(keyOf(parentPath(target, sep)))?.dir?.entries;
+    const inParent = parentEntries?.find(entry => samePath(entry.path, target, sep));
+    if (inParent) return inParent;
+    for (const value of dirs.values()) {
+      const hit = value.dir?.entries.find(entry => samePath(entry.path, target, sep));
+      if (hit) return hit;
+    }
+    return undefined;
+  }, [currentState, dirs, keyOf, sep]);
 
   return {
     revision, findEntry, places, placesError, current, currentState, entries, dirState, childrenOf, load,

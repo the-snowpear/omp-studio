@@ -9,6 +9,9 @@ import { setTimeout as delay } from "node:timers/promises";
 import { parse, stringify } from "yaml";
 import { MIRRORED_MODEL_SETTINGS, type RemoteProvisioning } from "./provisioning.js";
 import { desktopText } from "../desktop-language-shared.js";
+import { terminateProcessTree } from "../platform/process-tree.js";
+
+const MAX_BROKER_REQUEST_BYTES = 1_048_576;
 
 export interface LocalVaultOptions {
   agentDirectory: () => string;
@@ -20,23 +23,39 @@ export class LocalCredentialVault {
   private opening: Promise<{ url: string; token: string }> | undefined;
   private relay: Server | undefined;
   private relayEndpoint: Promise<{ url: string; token: string }> | undefined;
+  private closed = false;
   constructor(readonly options: LocalVaultOptions) {}
   async endpoint(): Promise<{ url: string; token: string }> {
+    if (this.closed) throw new Error(desktopText("本机凭证服务已关闭", "Local credential service is closed"));
     try {
       const value = JSON.parse(await readFile(await this.options.brokerFile(), "utf8")) as { url: string; token: string };
       if ((await fetch(`${value.url}/v1/healthz`, { signal: AbortSignal.timeout(1500) })).ok) return value;
     } catch { /* No local resident: start the native headless vault, with no model call. */ }
+    if (this.closed) throw new Error(desktopText("本机凭证服务已关闭", "Local credential service is closed"));
     return this.opening ??= this.start().catch(error => { this.opening = undefined; throw error; });
   }
   private async start(): Promise<{ url: string; token: string }> {
     const directory = this.options.agentDirectory();
     const config = parse(await readFile(join(directory, "config.yml"), "utf8").catch(error => { if (error.code === "ENOENT") return "{}"; throw error; })) as { auth?: { broker?: { url?: string; token?: string } } };
     if (config?.auth?.broker?.url && config.auth.broker.token) return { url: config.auth.broker.url, token: config.auth.broker.token };
-    const port = await new Promise<number>((resolve, reject) => { const server = createServer(); server.once("error", reject); server.listen(0, "127.0.0.1", () => { const port = (server.address() as import("node:net").AddressInfo).port; server.close(() => resolve(port)); }); });
+    const [port, executable] = await Promise.all([
+      new Promise<number>((resolve, reject) => { const server = createServer(); server.once("error", reject); server.listen(0, "127.0.0.1", () => { const port = (server.address() as import("node:net").AddressInfo).port; server.close(() => resolve(port)); }); }),
+      this.options.runtimeExecutable(),
+    ]);
+    if (this.closed) throw new Error(desktopText("本机凭证服务已关闭", "Local credential service is closed"));
     const url = `http://127.0.0.1:${port}`;
-    const child = this.owned = spawn(await this.options.runtimeExecutable(), ["auth-broker", "serve", `--bind=127.0.0.1:${port}`], { windowsHide: true, stdio: "ignore", env: { ...process.env, OMP_AGENT_DIR: directory, PI_CODING_AGENT_DIR: directory } });
+    const child = spawn(executable, ["auth-broker", "serve", `--bind=127.0.0.1:${port}`], { windowsHide: true, stdio: "ignore", env: { ...process.env, OMP_AGENT_DIR: directory, PI_CODING_AGENT_DIR: directory } });
+    if (this.closed) {
+      terminateProcessTree(child, "SIGKILL");
+      throw new Error(desktopText("本机凭证服务已关闭", "Local credential service is closed"));
+    }
+    this.owned = child;
     let failure: Error | undefined; child.once("error", error => { failure = error; });
     for (let attempt = 0; attempt < 100; attempt++) {
+      if (this.closed) {
+        terminateProcessTree(child, "SIGKILL");
+        throw new Error(desktopText("本机凭证服务已关闭", "Local credential service is closed"));
+      }
       if (failure) throw failure;
       if (child.exitCode !== null) throw new Error(desktopText("本机凭证服务启动失败，请检查 Runtime 的 Auth Broker 支持", "Failed to start local credential service; please check Runtime Auth Broker support"));
       try {
@@ -47,7 +66,8 @@ export class LocalCredentialVault {
       } catch { /* The native service is still opening its credential store. */ }
       await delay(100);
     }
-    child.kill(); throw new Error(desktopText("本机凭证服务启动超时", "Local credential service startup timed out"));
+    terminateProcessTree(child, "SIGKILL");
+    throw new Error(desktopText("本机凭证服务启动超时", "Local credential service startup timed out"));
   }
   async snapshot(): Promise<RemoteProvisioning> {
     const directory = this.options.agentDirectory();
@@ -91,7 +111,17 @@ export class LocalCredentialVault {
             const snapshot = await (await fetch(`${native.url}/v1/snapshot`, { headers })).json() as { credentials: { id: number; provider: string }[] };
             if (!snapshot.credentials.some(row => row.id === Number(refresh[1]) && !row.provider.startsWith("mcp:"))) { response.writeHead(403).end(); return; }
           }
-          const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
+          const chunks: Buffer[] = [];
+          let totalBytes = 0;
+          for await (const chunk of request) {
+            totalBytes += Buffer.byteLength(chunk);
+            if (totalBytes > MAX_BROKER_REQUEST_BYTES) {
+              response.writeHead(413).end("Request entity too large");
+              request.destroy();
+              return;
+            }
+            chunks.push(Buffer.from(chunk));
+          }
           const controller = new AbortController(); response.once("close", () => controller.abort());
           const result = await fetch(`${native.url}${route.pathname}${route.search}`, { method: request.method!, headers, signal: controller.signal, ...(chunks.length ? { body: Buffer.concat(chunks) } : {}) });
           const text = await result.text();
@@ -118,5 +148,14 @@ export class LocalCredentialVault {
     })().catch(() => {});
     return () => { controller.abort(); clearTimeout(timer); };
   }
-  close(): void { this.owned?.kill(); this.owned = undefined; this.opening = undefined; this.relay?.closeAllConnections(); this.relay?.close(); this.relay = undefined; this.relayEndpoint = undefined; }
+  close(): void {
+    this.closed = true;
+    if (this.owned) terminateProcessTree(this.owned, "SIGKILL");
+    this.owned = undefined;
+    this.opening = undefined;
+    this.relay?.closeAllConnections();
+    this.relay?.close();
+    this.relay = undefined;
+    this.relayEndpoint = undefined;
+  }
 }

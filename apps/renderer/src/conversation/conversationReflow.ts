@@ -267,10 +267,17 @@ export function observeConversationReflow({ scroller, host, beforeEvent, changeE
     scheduleSnapshot();
   };
   const reset = () => { intent(); width = host.getBoundingClientRect().width; measure(width); };
+  const ownerWin = host.ownerDocument?.defaultView ?? window;
   window.addEventListener(CONVERSATION_LAYOUT_BEFORE_CHANGE, before);
   window.addEventListener(CONVERSATION_LAYOUT_CHANGE, changed);
   window.addEventListener(beforeEvent, before);
   window.addEventListener(changeEvent, changed);
+  if (ownerWin !== window) {
+    ownerWin.addEventListener(CONVERSATION_LAYOUT_BEFORE_CHANGE, before);
+    ownerWin.addEventListener(CONVERSATION_LAYOUT_CHANGE, changed);
+    ownerWin.addEventListener(beforeEvent, before);
+    ownerWin.addEventListener(changeEvent, changed);
+  }
   scroller.addEventListener(SCROLL_RESET, reset);
   scroller.addEventListener(SCROLL_INTENT, intent);
   scroller.addEventListener("wheel", wheel, { passive: true });
@@ -278,7 +285,8 @@ export function observeConversationReflow({ scroller, host, beforeEvent, changeE
   scroller.addEventListener("pointerdown", intent, { passive: true });
   scroller.addEventListener("touchstart", intent, { passive: true });
   scroller.addEventListener("scroll", scroll, { passive: true });
-  const observer = typeof ResizeObserver === "function" ? new ResizeObserver(resized) : null;
+  const ResizeObserverCtor = (ownerWin as Window & { ResizeObserver?: typeof ResizeObserver }).ResizeObserver ?? globalThis.ResizeObserver;
+  const observer = typeof ResizeObserverCtor === "function" ? new ResizeObserverCtor(resized) : null;
   observer?.observe(host);
   observer?.observe(scroller);
   if (host.parentElement !== null) observer?.observe(host.parentElement);
@@ -296,6 +304,12 @@ export function observeConversationReflow({ scroller, host, beforeEvent, changeE
       window.removeEventListener(CONVERSATION_LAYOUT_CHANGE, changed);
       window.removeEventListener(beforeEvent, before);
       window.removeEventListener(changeEvent, changed);
+      if (ownerWin !== window) {
+        ownerWin.removeEventListener(CONVERSATION_LAYOUT_BEFORE_CHANGE, before);
+        ownerWin.removeEventListener(CONVERSATION_LAYOUT_CHANGE, changed);
+        ownerWin.removeEventListener(beforeEvent, before);
+        ownerWin.removeEventListener(changeEvent, changed);
+      }
       scroller.removeEventListener(SCROLL_RESET, reset);
       scroller.removeEventListener(SCROLL_INTENT, intent);
       scroller.removeEventListener("wheel", wheel);

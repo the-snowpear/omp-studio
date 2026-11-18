@@ -1,5 +1,20 @@
-import { describe, expect, it } from "vitest";
-import { readingColumnGeometry, type ReadingColumnPreference } from "./useReadingColumn";
+// @vitest-environment jsdom
+import { act, cleanup, renderHook } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  readingColumnGeometry,
+  readingColumnHeightTier,
+  SHORT_COLUMN_HYSTERESIS,
+  SHORT_COLUMN_MAX,
+  TIGHT_COLUMN_MAX,
+  useReadingColumn,
+  type ReadingColumnPreference,
+} from "./useReadingColumn";
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const standard: ReadingColumnPreference = { mode: "standard", customWidth: 1024 };
 
@@ -53,5 +68,67 @@ describe("main reading column geometry", () => {
 
   it("does not reserve a hidden native scrollbar while the minimap is on", () => {
     expect(readingColumnGeometry(900, standard, false, 1, 8)).toMatchObject({ width: 768, scrollbar: 0 });
+  });
+
+  it("classifies short reading column heights into compact and tight tiers with hysteresis", () => {
+    expect(readingColumnHeightTier(0)).toBeUndefined();
+    expect(readingColumnHeightTier(SHORT_COLUMN_MAX + 1)).toBeUndefined();
+    expect(readingColumnHeightTier(SHORT_COLUMN_MAX)).toBe("compact");
+    expect(readingColumnHeightTier(TIGHT_COLUMN_MAX + 1)).toBe("compact");
+    expect(readingColumnHeightTier(TIGHT_COLUMN_MAX)).toBe("tight");
+
+    // Hysteresis keeps the composer steady when dragging along a tier boundary.
+    expect(readingColumnHeightTier(TIGHT_COLUMN_MAX + SHORT_COLUMN_HYSTERESIS, "tight")).toBe("tight");
+    expect(readingColumnHeightTier(TIGHT_COLUMN_MAX + SHORT_COLUMN_HYSTERESIS + 1, "tight")).toBe("compact");
+    expect(readingColumnHeightTier(SHORT_COLUMN_MAX + SHORT_COLUMN_HYSTERESIS, "compact")).toBe("compact");
+    expect(readingColumnHeightTier(SHORT_COLUMN_MAX + SHORT_COLUMN_HYSTERESIS + 1, "compact")).toBeUndefined();
+    expect(readingColumnHeightTier(SHORT_COLUMN_MAX + SHORT_COLUMN_HYSTERESIS + 1, "tight")).toBeUndefined();
+  });
+
+  it("writes and clears data-reading-short as the conversation container height changes", () => {
+    let height = 720;
+    const element = document.createElement("div");
+    element.className = "convo-wrap";
+    document.body.appendChild(element);
+    vi.spyOn(element, "clientWidth", "get").mockReturnValue(960);
+    vi.spyOn(element, "clientHeight", "get").mockImplementation(() => height);
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb: FrameRequestCallback) => {
+      frames.push(cb);
+      return frames.length;
+    });
+    const flushFrames = () => {
+      while (frames.length > 0) frames.shift()?.(0);
+    };
+
+    const ref = { current: element };
+    const { unmount } = renderHook(() => useReadingColumn(ref, standard, false));
+    expect(element.dataset.readingShort).toBeUndefined();
+    expect(element.style.getPropertyValue("--reading-height")).toBe("720px");
+
+    height = 510;
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+      flushFrames();
+    });
+    expect(element.dataset.readingShort).toBe("compact");
+    expect(element.style.getPropertyValue("--reading-height")).toBe("510px");
+
+    height = 340;
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+      flushFrames();
+    });
+    expect(element.dataset.readingShort).toBe("tight");
+
+    height = 640;
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+      flushFrames();
+    });
+    expect(element.dataset.readingShort).toBeUndefined();
+
+    unmount();
+    element.remove();
   });
 });

@@ -117,16 +117,17 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const [agentIntent, setAgentIntent] = useState<string | undefined>(undefined);
   const [accountPoolsDirty, setAccountPoolsDirty] = useState(false);
   const [systemTemplatesDirty, setSystemTemplatesDirty] = useState(false);
+  const [webSearchDirty, setWebSearchDirty] = useState(false);
   const [agentCount, setAgentCount] = useState(preview ? createPreviewAgentDefinitions(undefined, zh).agents.length : 0);
   const [testResult, setTestResult] = useState<TestResultView | null>(null);
-  const [testing, setTesting] = useState(false);
+  const [testing, setTesting] = useState<Set<string>>(() => new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [cycleEdit, setCycleEdit] = useState(false);
   const [cycleDraft, setCycleDraft] = useState<string[]>([]);
   const [orderEdit, setOrderEdit] = useState(false);
   const [orderDraft, setOrderDraft] = useState<string[]>([]);
   const [probeResult, setProbeResult] = useState<ModelDiscoveryResult | null>(null);
-  const [probing, setProbing] = useState(false);
+  const [probing, setProbing] = useState<Set<string>>(() => new Set());
   const [catalogUpdating, setCatalogUpdating] = useState(false);
   const [availabilityRefreshing, setAvailabilityRefreshing] = useState(false);
   const [createRoleOpen, setCreateRoleOpen] = useState(false);
@@ -136,9 +137,19 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const [modelsTab, setModelsTab] = useState<ModelsTab>("custom");
   const [modelEdit, setModelEdit] = useState<ModelEditState | null>(null);
   const { shown: modelEditView, leaving: modelEditLeaving } = useOverlayPresence(modelEdit);
-  const [displayOrder, setDisplayOrder] = useState<string[]>(() => readProviderOrder());
+  const [realDisplayOrder, setRealDisplayOrder] = useState<string[]>(() => readProviderOrder());
+  const [previewDisplayOrder, setPreviewDisplayOrder] = useState<string[]>([]);
+  const displayOrder = preview ? previewDisplayOrder : realDisplayOrder;
   const { fetching, fetchDetail, setFetchDetail, candidates, setCandidates, onFetchModels, importCandidates } = useProviderDiscovery({ client, editorState, catalogVersion: data?.catalog?.version, setEditor, setModelsTab, toast: text => setFlash(text) });
   const loaded = useRef(false);
+  const refreshEpoch = useRef(0);
+  const testEpochRef = useRef(0);
+  const testSeqRef = useRef<Map<string, number>>(new Map());
+  const probeSeqRef = useRef<Map<string, number>>(new Map());
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
+  const editorIdRef = useRef<string | null>(null);
+  editorIdRef.current = editorState ? editorState.id : null;
   const orderRef = useRef(displayOrder);
   orderRef.current = displayOrder;
   const { listRef, draggingId, dragPhase, onPointerDown: onProviderDragPointerDown } = useListReorder({
@@ -151,15 +162,20 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       const nextOrder = permuteVisible(orderRef.current, visible, nextVisible);
       if (sameOrder(nextOrder, orderRef.current)) return;
       orderRef.current = nextOrder;
-      setDisplayOrder(nextOrder);
-      writeProviderOrder(nextOrder);
+      if (preview) {
+        setPreviewDisplayOrder(nextOrder);
+      } else {
+        setRealDisplayOrder(nextOrder);
+        writeProviderOrder(nextOrder, false);
+      }
     },
   });
 
   const refresh = useCallback(async () => {
+    const generation = ++refreshEpoch.current;
     if (preview) {
-      setData(createPreviewModelConfig(zh));
-      setAgentCount(createPreviewAgentDefinitions(undefined, zh).agents.length);
+      setData(createPreviewModelConfig(zhRef.current));
+      setAgentCount(createPreviewAgentDefinitions(undefined, zhRef.current).agents.length);
       setLoadError(null);
       return;
     }
@@ -168,18 +184,26 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         client.query("models.get", {}),
         client.query("agents.definitions.get", {}).catch(() => null),
       ]);
+      if (generation !== refreshEpoch.current) return;
       setData(next);
       setLoadError(next.unavailableReason ?? null);
       setAgentCount(defs?.agents.length ?? 0);
     } catch (error) {
+      if (generation !== refreshEpoch.current) return;
       setLoadError(hostErrorMessage(error, "models.get failed"));
       setData(null);
     }
-  }, [client, preview, zh]);
+  }, [client, preview, workspaceId]);
 
   useEffect(() => {
     void refresh();
+    return () => {
+      refreshEpoch.current += 1;
+    };
   }, [refresh]);
+  useEffect(() => () => {
+    testEpochRef.current += 1;
+  }, []);
   useEffect(() => {
     const generation = ++nativeLoad.current;
     setRuntimeModels([]);
@@ -192,9 +216,20 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
 
 
   const previewRef = useRef(preview);
+  const previewMutatedRef = useRef(false);
+  const previewZhRef = useRef(zh);
   useEffect(() => {
     if (previewRef.current === preview) return;
     previewRef.current = preview;
+    previewMutatedRef.current = false;
+    previewZhRef.current = zh;
+    testEpochRef.current += 1;
+    testSeqRef.current.clear();
+    probeSeqRef.current.clear();
+    setTesting(new Set());
+    setProbing(new Set());
+    setTestResult(null);
+    setWebSearchDirty(false);
     setEditor(null);
     setRoleDraft(null);
     setRoleId(null);
@@ -210,7 +245,62 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     setRevertPolicyDraft(null);
     setCreateRoleOpen(false);
     setOrderEdit(false);
-  }, [preview]);
+  }, [preview, zh]);
+
+  useEffect(() => {
+    if (!preview) {
+      previewZhRef.current = zh;
+      return;
+    }
+    if (previewZhRef.current === zh) return;
+    const prevLocalized = createPreviewModelConfig(previewZhRef.current);
+    previewZhRef.current = zh;
+    const localized = createPreviewModelConfig(zh);
+    setAgentCount(createPreviewAgentDefinitions(undefined, zh).agents.length);
+    setData((current) => {
+      if (!current || !previewMutatedRef.current) return localized;
+      const prevProviderById = new Map(prevLocalized.providers.map((item) => [item.id, item]));
+      const nextProviderById = new Map(localized.providers.map((item) => [item.id, item]));
+      const prevRoleById = new Map(prevLocalized.roles.map((item) => [item.id, item]));
+      const nextRoleById = new Map(localized.roles.map((item) => [item.id, item]));
+      const nextLoginById = new Map((localized.loginProviders ?? []).map((item) => [item.id, item]));
+      return {
+        ...current,
+        presets: localized.presets,
+        ...(localized.runtimeEffectHint !== undefined ? { runtimeEffectHint: localized.runtimeEffectHint } : {}),
+        ...(current.loginProviders ? {
+          loginProviders: current.loginProviders.map((lp) => {
+            const loc = nextLoginById.get(lp.id);
+            return loc ? { ...loc, authenticated: lp.authenticated } : lp;
+          }),
+        } : {}),
+        providers: current.providers.map((prov) => {
+          const prevLoc = prevProviderById.get(prov.id);
+          const nextLoc = nextProviderById.get(prov.id);
+          if (!prevLoc || !nextLoc) return prov;
+          return {
+            ...prov,
+            ...(prov.name === prevLoc.name ? { name: nextLoc.name } : {}),
+            ...(prov.statusDetail !== undefined && prov.statusDetail === prevLoc.statusDetail && nextLoc.statusDetail !== undefined
+              ? { statusDetail: nextLoc.statusDetail }
+              : {}),
+          };
+        }),
+        roles: current.roles.map((role) => {
+          const prevLoc = prevRoleById.get(role.id);
+          const nextLoc = nextRoleById.get(role.id);
+          if (!prevLoc || !nextLoc) return role;
+          return {
+            ...role,
+            ...(role.desc === prevLoc.desc ? { desc: nextLoc.desc } : {}),
+            ...(role.issue && prevLoc.issue && nextLoc.issue && role.issue.detail === prevLoc.issue.detail
+              ? { issue: { ...role.issue, detail: nextLoc.issue.detail } }
+              : {}),
+          };
+        }),
+      };
+    });
+  }, [preview, zh]);
 
   const hasProviderEditor = editorState !== null;
   const hasRoleEditor = roleDraftState !== null;
@@ -235,6 +325,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     setModelsYmlDraft(null);
     setFetchDetail(null);
     setCandidates(null);
+    setProbeResult(null);
+    setTestResult((prev) => (prev?.source === "editor" ? null : prev));
     const hasCatalog = editorState.models.some((m) => m.source === "catalog" || m.source === "extension");
     if (editorState.discoveryType) setModelsTab("discovery");
     else if (hasCatalog) setModelsTab("catalog");
@@ -307,13 +399,20 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   useEffect(() => {
     if (!data) return;
     const ids = data.providers.map((item) => item.id);
-    setDisplayOrder((prev) => {
+    if (preview) {
+      setPreviewDisplayOrder((prev) => {
+        const merged = mergeProviderOrder(ids, prev);
+        return sameOrder(merged, prev) ? prev : merged;
+      });
+      return;
+    }
+    setRealDisplayOrder((prev) => {
       const merged = mergeProviderOrder(ids, prev);
       if (sameOrder(merged, prev)) return prev;
-      writeProviderOrder(merged);
+      writeProviderOrder(merged, false);
       return merged;
     });
-  }, [data]);
+  }, [data, preview]);
 
 
   const orderedProviders = useMemo(() => sortProviders(providers, displayOrder), [providers, displayOrder]);
@@ -398,13 +497,14 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const ymlCardsDirty = providerFormDirty || roleFormDirty || modelsYmlEdited || configYmlEdited || fallbackDirty;
 
   useEffect(() => {
-    setModelConfigDirty(ymlCardsDirty || accountPoolsDirty || systemTemplatesDirty);
+    setModelConfigDirty(ymlCardsDirty || accountPoolsDirty || systemTemplatesDirty || webSearchDirty);
     return () => {
       setModelConfigDirty(false);
     };
-  }, [ymlCardsDirty, accountPoolsDirty, systemTemplatesDirty]);
+  }, [ymlCardsDirty, accountPoolsDirty, systemTemplatesDirty, webSearchDirty]);
 
   const mutateLocal = (recipe: (current: ModelConfigReadModel) => ModelConfigReadModel) => {
+    if (preview) previewMutatedRef.current = true;
     setData((current) => recipe(current ?? createPreviewModelConfig(zh)));
   };
 
@@ -472,7 +572,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     }
   };
 
-  const persistConfigYml = async (text: string, overlayForm: boolean, close: boolean): Promise<boolean> => {
+  const persistConfigYml = async (text: string, overlayForm: boolean, close: boolean, refreshAfter = true): Promise<boolean> => {
     if (!roleYamlId) {
       toast(t("modelConfig.roleIdRequired"));
       return false;
@@ -533,7 +633,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         setRoleDraft(null);
         setRoleId(null);
       }
-      await refresh();
+      if (refreshAfter) await refresh();
       return true;
     } catch (error) {
       toast(hostErrorMessage(error, t("modelConfig.saveFailed")));
@@ -739,7 +839,9 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     });
   };
 
-  const saveRole = async (role: ModelRoleRecord) => {
+  const saveRole = async (role: ModelRoleRecord, opts?: { close?: boolean; refreshAfter?: boolean }): Promise<boolean> => {
+    const close = opts?.close !== false;
+    const refreshAfter = opts?.refreshAfter !== false;
     const id = role.id.trim();
     const name = role.name.trim();
     const desc = role.desc.trim();
@@ -756,16 +858,16 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     if (!role.builtin) {
       if (!/^[a-z][a-z0-9_-]*$/.test(id)) {
         toast(t("modelConfig.roleIdInvalid"));
-        return;
+        return false;
       }
       if (!name) {
         toast(t("modelConfig.fillRoleName"));
-        return;
+        return false;
       }
       const taken = roles.some((item) => item.id === id && item.id !== (baseline?.id ?? role.id));
       if (taken) {
         toast(t("modelConfig.roleIdTaken"));
-        return;
+        return false;
       }
     }
     const renamed = Boolean(persistIdentity && baseline && baseline.id !== id);
@@ -779,10 +881,13 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
           : current.roles.map((item) => (item.id === (baseline?.id ?? role.id) ? record : item));
         return withRolePrimaryUpdates({ ...current, roles: nextRoles }, [{ role: record, selector: record.primary }]);
       });
+      setRoleBaseline(next);
       if (marks) toast((next.thinkingAdjustment ? `${next.thinkingAdjustment} · ` : "") + t("modelConfig.demoRoleUpdated"));
-      setRoleId(null);
-      setRoleDraft(null);
-      return;
+      if (close) {
+        setRoleId(null);
+        setRoleDraft(null);
+      }
+      return true;
     }
     setBusy(true);
     try {
@@ -799,12 +904,17 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       } else {
         await runWrite(client, "models.roles.set", { roleId: id, selector });
       }
+      setRoleBaseline(next);
       toast((next.thinkingAdjustment ? `${next.thinkingAdjustment} · ` : "") + t("modelConfig.savedToConfigToast"));
-      setRoleId(null);
-      setRoleDraft(null);
-      await refresh();
+      if (close) {
+        setRoleId(null);
+        setRoleDraft(null);
+      }
+      if (refreshAfter) await refresh();
+      return true;
     } catch (error) {
       toast(hostErrorMessage(error, t("modelConfig.saveFailed")));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -860,6 +970,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     }
   };
 
+  const EDITOR_PENDING_KEY = "__editor__";
+
   const onTest = async (source: "list" | "editor", providerId?: string, api?: string, endpointUrl?: string, apiKey?: string) => {
     if (preview) {
       // 演示：本地模拟结果，不调 Host、不写 reducer。
@@ -872,8 +984,17 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       });
       return;
     }
-    setTesting(true);
-    setTestResult(null);
+    const key = providerId || EDITOR_PENDING_KEY;
+    const targetEditorId = source === "editor" ? editorIdRef.current : null;
+    const epoch = testEpochRef.current;
+    const seq = (testSeqRef.current.get(key) ?? 0) + 1;
+    testSeqRef.current.set(key, seq);
+    setTesting((prev) => {
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+    setTestResult((prev) => (prev?.source === source && prev?.providerId === providerId ? null : prev));
     try {
       const result = await runTest(client, {
         ...(providerId ? { providerId } : {}),
@@ -881,11 +1002,22 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         ...(endpointUrl ? { endpointUrl } : {}),
         ...(apiKey ? { apiKey } : {}),
       });
+      if (epoch !== testEpochRef.current || testSeqRef.current.get(key) !== seq) return;
+      if (source === "editor" && editorIdRef.current !== targetEditorId) return;
       setTestResult({ source, providerId, ...result });
     } catch (error) {
+      if (epoch !== testEpochRef.current || testSeqRef.current.get(key) !== seq) return;
+      if (source === "editor" && editorIdRef.current !== targetEditorId) return;
       setTestResult({ source, providerId, ok: false, latencyMs: 0, detail: hostErrorMessage(error, t("modelConfig.detailTestFailed")) });
     } finally {
-      setTesting(false);
+      if (epoch === testEpochRef.current && testSeqRef.current.get(key) === seq) {
+        setTesting((prev) => {
+          if (!prev.has(key)) return prev;
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+      }
     }
   };
 
@@ -908,7 +1040,16 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       if (marks) toast(t("modelConfig.toastDemoDiscoveryNoHost"));
       return;
     }
-    setProbing(true);
+    const key = providerId || EDITOR_PENDING_KEY;
+    const targetEditorId = editorIdRef.current;
+    const epoch = testEpochRef.current;
+    const seq = (probeSeqRef.current.get(key) ?? 0) + 1;
+    probeSeqRef.current.set(key, seq);
+    setProbing((prev) => {
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
     setProbeResult(null);
     try {
       const result = await runProbe(client, {
@@ -918,8 +1059,10 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         ...(discoveryType ? { discoveryType } : {}),
         ...(timeoutMs === undefined ? {} : { timeoutMs }),
       });
+      if (epoch !== testEpochRef.current || probeSeqRef.current.get(key) !== seq || editorIdRef.current !== targetEditorId) return;
       setProbeResult(result);
     } catch (error) {
+      if (epoch !== testEpochRef.current || probeSeqRef.current.get(key) !== seq || editorIdRef.current !== targetEditorId) return;
       setProbeResult({
         ok: false,
         found: 0,
@@ -929,7 +1072,14 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         detail: hostErrorMessage(error, t("modelConfig.detailProbeFailed")),
       });
     } finally {
-      setProbing(false);
+      if (epoch === testEpochRef.current && probeSeqRef.current.get(key) === seq) {
+        setProbing((prev) => {
+          if (!prev.has(key)) return prev;
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+      }
     }
   };
 
@@ -1070,30 +1220,73 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     }
   };
 
-  const saveFallback = async (role: string, primary: string) => {
+  const saveFallback = async (role: string, primary: string, opts?: { refreshAfter?: boolean; announce?: boolean }): Promise<boolean> => {
+    const refreshAfter = opts?.refreshAfter !== false;
+    const announce = opts?.announce !== false;
     const chains = { ...(data?.fallbackChains ?? {}) };
-    const nextChain = [...(fallbackDraft ?? chains[role] ?? chains[primary] ?? [])];
-    chains[role] = nextChain;
+    const nextChain = fallbackDraft !== null
+      ? [...fallbackDraft]
+      : [...(chains[role] ?? chains[primary] ?? [])];
+    if (fallbackDraft !== null || role in chains || Boolean(primary)) {
+      chains[role] = nextChain;
+    }
     const revertPolicy = revertPolicyDraft ?? data?.fallbackRevertPolicy ?? "cooldown-expiry";
     if (preview) {
-      mutateLocal((current) => ({ ...current, fallbackChains: chains, fallbackRevertPolicy: revertPolicy }));
-      setFallbackDraft(nextChain);
+      mutateLocal((current) => {
+        const currentChains = { ...current.fallbackChains };
+        const updatedChain = fallbackDraft !== null
+          ? [...fallbackDraft]
+          : [...(currentChains[role] ?? currentChains[primary] ?? [])];
+        if (fallbackDraft !== null || role in currentChains || Boolean(primary)) {
+          currentChains[role] = updatedChain;
+        }
+        return { ...current, fallbackChains: currentChains, fallbackRevertPolicy: revertPolicy };
+      });
+      if (fallbackDraft !== null || Boolean(primary)) setFallbackDraft(nextChain);
       setRevertPolicyDraft(revertPolicy);
-      if (marks) toast(t("modelConfig.toastDemoFallbackUpdated"));
-      return;
+      if (announce && marks) toast(t("modelConfig.toastDemoFallbackUpdated"));
+      return true;
     }
     setBusy(true);
     try {
       const result = await runWrite(client, "models.fallback.set", { chains, revertPolicy });
-      toast(result.message ?? t("modelConfig.toastFallbackSaved"));
-      setFallbackDraft(nextChain);
+      if (announce) toast(result.message ?? t("modelConfig.toastFallbackSaved"));
+      if (fallbackDraft !== null || Boolean(primary)) setFallbackDraft(nextChain);
       setRevertPolicyDraft(revertPolicy);
-      await refresh();
+      if (refreshAfter) await refresh();
+      return true;
     } catch (error) {
       toast(hostErrorMessage(error, t("modelConfig.toastFallbackSaveFailed")));
+      return false;
     } finally {
       setBusy(false);
     }
+  };
+
+  const onSaveRoles = async () => {
+    if (!roleDraft) return;
+    const targetRoleId = roleDraft.id.trim();
+    const needRoleWrite = roleFormDirty || (!configYmlDirty && !fallbackDirty);
+    if (configYmlDirty) {
+      const ok = await persistConfigYml(configYmlValue, true, false, !needRoleWrite && !fallbackDirty);
+      if (!ok) return;
+    }
+    if (needRoleWrite) {
+      const ok = await saveRole(roleDraft, {
+        close: false,
+        refreshAfter: !fallbackDirty,
+      });
+      if (!ok) return;
+    }
+    if (fallbackDirty) {
+      const ok = await saveFallback(targetRoleId, roleDraft.primary, {
+        refreshAfter: true,
+        announce: !needRoleWrite && !configYmlDirty,
+      });
+      if (!ok) return;
+    }
+    setRoleId(null);
+    setRoleDraft(null);
   };
 
   const saveProviderOrder = async () => {
@@ -1558,8 +1751,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                     <div className="kv-row">
                       <span className="k">{t("modelConfig.probeScan")}</span>
                       <span className="v" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button type="button" className="btn small outline" disabled={busy || probing} onClick={() => void onProbe(editor.id, editor.endpointUrl || undefined, editorTestSecret(editor), editor.discoveryType || undefined, editor.discoveryTimeoutMs)}>
-                          {probing ? t("modelConfig.probing") : t("modelConfig.probe")}
+                        <button type="button" className="btn small outline" disabled={busy || probing.has(editor.id || EDITOR_PENDING_KEY)} onClick={() => void onProbe(editor.id, editor.endpointUrl || undefined, editorTestSecret(editor), editor.discoveryType || undefined, editor.discoveryTimeoutMs)}>
+                          {probing.has(editor.id || EDITOR_PENDING_KEY) ? t("modelConfig.probing") : t("modelConfig.probe")}
                         </button>
                         <button type="button" className="btn small outline" disabled={busy} onClick={() => void refreshDiscovery()}>{t("modelConfig.rescan")}</button>
                       </span>
@@ -1687,7 +1880,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                       </div>
                     </span>
                   ) : null}
-                  <button type="button" className="btn outline" disabled={busy || testing} onClick={() => void onTest("editor", editExisting ? editor.id : undefined, editor.api, editor.endpointUrl, editorTestSecret(editor))}>{testing ? t("modelConfig.testingConnection") : t("modelConfig.testConnection")}</button>
+                  <button type="button" className="btn outline" disabled={busy || testing.has(editExisting ? editor.id : EDITOR_PENDING_KEY)} onClick={() => void onTest("editor", editExisting ? editor.id : undefined, editor.api, editor.endpointUrl, editorTestSecret(editor))}>{testing.has(editExisting ? editor.id : EDITOR_PENDING_KEY) ? t("modelConfig.testingConnection") : t("modelConfig.testConnection")}</button>
                   <button type="submit" className="btn primary" disabled={busy}><Icon name="check" extra="sm" />{editExisting ? t("modelConfig.saveChanges") : t("modelConfig.addProvider")}</button>
                 </span>
               </div>
@@ -1746,7 +1939,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                         <div className="pv-sub"><span className="pv-url ellipsis">{provider.endpointUrl || formatProviderStatusDetail(provider.statusDetail, t, marks, resolvedLanguage === "zh")}</span></div>
                       </div>
                       <div className="pv-acts">
-                        <button type="button" className={`pv-act is-action${testing ? " is-testing" : ""}`} disabled={busy || testing} data-tip={t("common.test")} aria-label={t("modelConfig.testConnection")} onClick={() => void onTest("list", provider.id)}><Icon name="pulse" /></button>
+                        <button type="button" className={`pv-act is-action${testing.has(provider.id) ? " is-testing" : ""}`} disabled={busy || testing.has(provider.id)} data-tip={t("common.test")} aria-label={t("modelConfig.testConnection")} onClick={() => void onTest("list", provider.id)}><Icon name="pulse" /></button>
                         <button type="button" className="pv-act is-action" disabled={busy} data-tip={t("common.refresh")} aria-label={t("modelConfig.refreshModels")} onClick={() => void refreshDiscovery()}><Icon name="refresh" /></button>
                         <button type="button" className="pv-act is-action is-edit" data-tip={t("common.edit")} aria-label={t("modelConfig.editProvider")} onClick={() => { setModelEdit(null); setEditor(draftFromProvider(provider)); setEditExisting(true); setConfirmDelete(false); setTestResult(null); }}><Icon name="pencil" /></button>
                         <button type="button" className="pv-act is-action is-copy" data-tip={t("common.copy")} aria-label={t("modelConfig.copyProviderId")} onClick={() => { void navigator.clipboard.writeText(provider.id); toast(`${t("common.copied")} ${provider.id}`); }}><Icon name="copy" /></button>
@@ -1993,7 +2186,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
 
                 </div>
                 <div style={{ marginTop: 10 }}>
-                  <button type="button" className="btn small outline" disabled={busy || !roleDraft.primary} onClick={() => void saveFallback(roleDraft.id, roleDraft.primary)}>{t("modelConfig.saveFallback")}</button>
+                  <button type="button" className="btn small outline" disabled={busy || (!roleDraft.primary && revertPolicyDraft === null)} onClick={() => void saveFallback(roleDraft.id, roleDraft.primary)}>{t("modelConfig.saveFallback")}</button>
                 </div>
               </div>
               <StructuredEditor
@@ -2014,15 +2207,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
               />
               <div className="mp-foot">
                 <button type="button" className="btn outline" onClick={closeRoleEditor}>{t("common.back")}</button>
-                <span className="right"><button type="button" className="btn primary" disabled={busy} onClick={() => {
-                  void (async () => {
-                    if (configYmlDirty) {
-                      const ok = await persistConfigYml(configYmlValue, true, !roleFormDirty);
-                      if (!ok || !roleFormDirty) return;
-                    }
-                    await saveRole(roleDraft);
-                  })();
-                }}><Icon name="check" extra="sm" />{t("modelConfig.saveToStorage", { storage: data?.modelRoleStorage === "project" ? "Project" : "Global" })}</button></span>
+                <span className="right"><button type="button" className="btn primary" disabled={busy} onClick={() => void onSaveRoles()}><Icon name="check" extra="sm" />{t("modelConfig.saveToStorage", { storage: data?.modelRoleStorage === "project" ? "Project" : "Global" })}</button></span>
               </div>
             </>
           ) : (
@@ -2199,6 +2384,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
               sessionId={sessionId}
               visible={shownTab === "websearch"}
               onReadyCount={setWebSearchReadyCount}
+              onDirtyChange={setWebSearchDirty}
               client={client}
               preview={preview}
               webSearch={data.webSearch}

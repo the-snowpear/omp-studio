@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { join, resolve, basename, extname } from "node:path";
 import { createReadStream } from "node:fs";
+import { lstat, realpath } from "node:fs/promises";
+import { isInside } from "@omp-studio/runtime-installer";
 import {
   EvaluationCoordinator,
   type ArtifactLibrary,
@@ -75,11 +77,12 @@ export function evaluationsFor(owner: object, options: Options): EvaluationCoord
                     ...(item.images
                       ? {
                           images: await Promise.all(
-                            item.images.map(async (source) =>
-                              source.startsWith("artifact://")
-                                ? (await options.artifacts.resolve(source.slice(11))).path
-                                : source,
-                            ),
+                            item.images.map(async (source) => {
+                              if (!source.startsWith("artifact://")) {
+                                throw new Error("Judgment evaluation images must be registered workspace artifacts");
+                              }
+                              return (await options.artifacts.resolve(source.slice(11))).path;
+                            }),
                           ),
                         }
                       : {}),
@@ -131,6 +134,7 @@ export function evaluationsFor(owner: object, options: Options): EvaluationCoord
           async preserveInputs(spec) {
             if (spec.kind !== "judgment") return spec;
             const images = new Map<string, string>();
+            let workspaceRoot: string | undefined;
             const items = [];
             for (const item of spec.items) {
               const retained: string[] = [];
@@ -140,9 +144,15 @@ export function evaluationsFor(owner: object, options: Options): EvaluationCoord
                   retained.push(source);
                   continue;
                 }
+                if (!source || source.includes("\0")) {
+                  throw new Error("Invalid judgment image path");
+                }
                 let reference = images.get(source);
                 if (!reference) {
-                  const file = resolve(cwd, source);
+                  const candidate = resolve(cwd, source);
+                  if (!isInside(cwd, candidate)) {
+                    throw new Error("Judgment image path escapes the selected workspace");
+                  }
                   const mime = {
                     ".png": "image/png",
                     ".jpg": "image/jpeg",
@@ -150,11 +160,20 @@ export function evaluationsFor(owner: object, options: Options): EvaluationCoord
                     ".webp": "image/webp",
                     ".gif": "image/gif",
                     ".svg": "image/svg+xml",
-                  }[extname(file).toLowerCase()];
+                  }[extname(candidate).toLowerCase()];
                   if (!mime) throw new Error("Choose a supported judgment image");
+                  const info = await lstat(candidate);
+                  if (!info.isFile() || info.isSymbolicLink()) {
+                    throw new Error("Judgment image must be a regular file inside the workspace");
+                  }
+                  workspaceRoot ??= await realpath(cwd);
+                  const realFile = await realpath(candidate);
+                  if (!isInside(workspaceRoot, realFile)) {
+                    throw new Error("Judgment image path escapes the selected workspace");
+                  }
                   const artifact = await options.artifacts.register(
-                    { kind: "image", name: basename(file), mimeType: mime, workspaceId },
-                    createReadStream(file),
+                    { kind: "image", name: basename(realFile), mimeType: mime, workspaceId },
+                    createReadStream(realFile),
                   );
                   reference = `artifact://${artifact.artifactId}`;
                   images.set(source, reference);

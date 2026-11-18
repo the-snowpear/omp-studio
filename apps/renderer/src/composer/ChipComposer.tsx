@@ -23,7 +23,7 @@ import {
 } from "react";
 
 import { isZh, pickLocale, useI18n } from "../i18n";
-import type { ComposerChip, ComposerSnapshot, MentionCandidate, PromptImage } from "./types";
+import type { ComposerChip, ComposerNode, ComposerSnapshot, MentionCandidate, PromptImage } from "./types";
 import type { PredictionResult } from "@omp-studio/studio-protocol";
 import { emptySnapshot, newChipId } from "./types";
 import { defaultImageChipLabel, localizeImageChipLabel, snapshotFromDoc, snapshotIsEmpty, displayDocFromSerializedText } from "./serialize";
@@ -234,12 +234,16 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   const dictationEditorRef = useRef<DictationEditor | null>(null);
   const dictationKeyboardRef = useRef<DictationKeyboard | null>(null);
   const dictationBindingRef = useRef(dictation);
+  const [dictationBindingActive, setDictationBindingActive] = useState(() => Boolean(dictation?.active));
+  const [dictationSpanActive, setDictationSpanActive] = useState(false);
   const committingDictationRef = useRef(false);
   const emitRef = useRef<() => ComposerSnapshot>(() => emptySnapshot());
   const keyboardBlockedRef = useRef(false);
   useEffect(() => {
     if (dictation === undefined) return;
     dictationBindingRef.current = dictation;
+    const nextActive = Boolean(dictation.active);
+    setDictationBindingActive((prev) => (prev === nextActive ? prev : nextActive));
     dictationKeyboardRef.current?.bindingChanged();
   }, [dictation]);
   useEffect(() => {
@@ -263,7 +267,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     editor.ownerDocument.addEventListener("selectionchange", remember);
     editor.ownerDocument.addEventListener("keyup", keyboard.keyup, true);
     editor.ownerDocument.addEventListener("visibilitychange", keyboard.visibilityChange);
-    editor.ownerDocument.defaultView?.addEventListener("blur", keyboard.interrupt);
+    editor.ownerDocument.defaultView?.addEventListener("blur", keyboard.windowBlur);
     return () => {
       keyboard.dispose();
       transaction.invalidate();
@@ -273,7 +277,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       editor.ownerDocument.removeEventListener("selectionchange", remember);
       editor.ownerDocument.removeEventListener("keyup", keyboard.keyup, true);
       editor.ownerDocument.removeEventListener("visibilitychange", keyboard.visibilityChange);
-      editor.ownerDocument.defaultView?.removeEventListener("blur", keyboard.interrupt);
+      editor.ownerDocument.defaultView?.removeEventListener("blur", keyboard.windowBlur);
     };
   }, []);
   const chipSignatureRef = useRef("");
@@ -437,7 +441,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
           const svg = image.mimeType === "image/svg+xml";
           insertChip({
             kind: "image",
-            label: defaultImageChipLabel(),
+            label: meta && !svg ? meta.name : defaultImageChipLabel(undefined, zh),
             ...(meta && !svg ? { path: meta.path } : {}),
             image,
           });
@@ -446,7 +450,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         if (meta) {
           insertChip({
             kind: "image",
-            label: defaultImageChipLabel(),
+            label: meta.name,
             path: meta.path,
           });
           continue;
@@ -498,7 +502,11 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
 
   useEffect(() => {
     const editor = editorRef.current;
-    if (editor) renumberImageChips(editor, zh);
+    if (editor) {
+      renumberImageChips(editor, zh);
+      chipSignatureRef.current = chipSignature(editor);
+      imageChipKeyRef.current = imageChipKey(snapshotOf(editor, imagesRef.current));
+    }
     setThumbs(current => current.map(thumb => ({ ...thumb, label: localizeImageChipLabel(thumb.label, zh) })));
   }, [zh]);
 
@@ -523,12 +531,16 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   useImperativeHandle(ref, () => ({
     setDictationBinding(binding) {
       dictationBindingRef.current = binding;
+      const nextActive = Boolean(binding?.active);
+      setDictationBindingActive((prev) => (prev === nextActive ? prev : nextActive));
       dictationKeyboardRef.current?.bindingChanged();
     },
     beginDictation(id) {
       if (disabled) return false;
       invalidatePrediction();
-      return dictationEditorRef.current?.begin(id) ?? false;
+      const ok = dictationEditorRef.current?.begin(id) ?? false;
+      if (ok) setDictationSpanActive(true);
+      return ok;
     },
     updateDictation(id, committedText, partialText) {
       dictationEditorRef.current?.update(id, committedText, partialText);
@@ -537,6 +549,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       committingDictationRef.current = true;
       try {
         const result = dictationEditorRef.current?.commit(id, text) ?? { applied: false, unchanged: false };
+        setDictationSpanActive(false);
         if (result.applied) emit();
         return result;
       } finally {
@@ -545,6 +558,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     },
     cancelDictation(id) {
       dictationEditorRef.current?.cancel(id);
+      setDictationSpanActive(false);
     },
     focus(options) {
       editorRef.current?.focus(options);
@@ -554,6 +568,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       const editor = editorRef.current;
       if (!editor) return;
       dictationEditorRef.current?.invalidate();
+      setDictationSpanActive(false);
       imagesRef.current.clear();
       editor.replaceChildren();
       emit();
@@ -568,6 +583,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       const editor = editorRef.current;
       if (!editor) return;
       dictationEditorRef.current?.invalidate();
+      setDictationSpanActive(false);
       imagesRef.current.clear();
       writeDoc(editor, snapshot.doc, imagesRef.current);
       emit();
@@ -682,13 +698,77 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     insertChip({ kind: "mode", label: name, name });
   };
 
-  const writeCommandText = (text: string): void => {
+  const clearCommandDraft = (): void => {
     const editor = editorRef.current;
     if (!editor) return;
     dictationEditorRef.current?.invalidate();
+    setDictationSpanActive(false);
     imagesRef.current.clear();
-    writeDoc(editor, { nodes: [{ type: "text", value: text }] }, imagesRef.current);
+    editor.replaceChildren();
     emit();
+    placeCaretAtEnd(editor);
+  };
+
+  const replaceSlashCommand = (
+    replacement: string,
+    mode: "prefix" | "bare-slash" | "overlay" = "prefix",
+  ): void => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    dictationEditorRef.current?.invalidate();
+    setDictationSpanActive(false);
+    const currentDoc = readDoc(editor, imagesRef.current);
+    const nextNodes: ComposerNode[] = [];
+    if (mode === "overlay") {
+      for (const node of currentDoc.nodes) {
+        if (node.type === "chip" && node.chip.kind === "mode") nextNodes.push(node);
+      }
+      if (replacement.length > 0) nextNodes.push({ type: "text", value: replacement });
+      for (const node of currentDoc.nodes) {
+        if (node.type === "chip" && node.chip.kind !== "mode") nextNodes.push(node);
+      }
+    } else {
+      let replaced = false;
+      for (const node of currentDoc.nodes) {
+        if (!replaced && node.type === "chip" && node.chip.kind === "mode") {
+          nextNodes.push(node);
+          continue;
+        }
+        if (!replaced && node.type === "text") {
+          replaced = true;
+          const stripped = mode === "bare-slash"
+            ? (node.value.startsWith("/") ? node.value.slice(1) : node.value)
+            : node.value.replace(/^\/[^\s:\r\n]*[ \t:]*/u, "");
+          const combined = `${replacement}${stripped}`;
+          if (combined.length > 0) nextNodes.push({ type: "text", value: combined });
+          continue;
+        }
+        nextNodes.push(node);
+      }
+      if (!replaced && replacement.length > 0) {
+        nextNodes.unshift({ type: "text", value: replacement });
+      }
+    }
+    writeDoc(editor, { nodes: nextNodes }, imagesRef.current);
+    emit();
+    if (replacement.length > 0) {
+      for (const child of Array.from(editor.childNodes)) {
+        if (child.nodeType === Node.ELEMENT_NODE && (child as Element).classList.contains("cm-chip-mode")) continue;
+        if (child.nodeType === Node.TEXT_NODE) {
+          const textNode = child as Text;
+          const selection = window.getSelection();
+          if (selection) {
+            const range = document.createRange();
+            range.setStart(textNode, Math.min(replacement.length, textNode.data.length));
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+            return;
+          }
+        }
+        break;
+      }
+    }
     placeCaretAtEnd(editor);
   };
 
@@ -744,13 +824,13 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     const overlay = detachedCommand;
     if (item.select === "chip") {
       setDetachedCommand(false);
-      if (!overlay) writeCommandText(args);
+      if (!overlay) replaceSlashCommand("", "prefix");
       insertModeChip(item.name);
       return;
     }
     if (slashNeedsArgs(item, args) || (item.select === "complete-args" && args.length === 0)) {
       setDetachedCommand(false);
-      writeCommandText(`/${item.name} `);
+      replaceSlashCommand(`/${item.name} `, overlay ? "overlay" : "prefix");
       setCommandIndex(0);
       return;
     }
@@ -758,7 +838,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       onRunCommand?.(item, args, snapshotOf(editorRef.current, imagesRef.current).images);
     } else onRunCommand?.(item, args);
     setDetachedCommand(false);
-    if (!overlay) writeCommandText("");
+    if (!overlay) clearCommandDraft();
   };
 
   const refreshMention = (): void => {
@@ -768,7 +848,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     setMention(at ? { trigger: at.trigger, query: at.query } : null);
   };
 
-  const predictionState=useWordPrediction(editorRef,prediction,!!disabled || !!mention || commandOpen);
+  const dictationActive = Boolean(dictation?.active) || dictationBindingActive || dictationSpanActive;
+  const predictionState = useWordPrediction(editorRef, prediction, !!disabled || !!mention || commandOpen || dictationActive);
 
   const onInput = (_event: FormEvent<HTMLDivElement>): void => {
     if (committingDictationRef.current) return;
@@ -778,10 +859,48 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
 
   /** Serialized `<github-reference>`-style text keeps its capsules; everything else is plain text. */
   const insertSerializedText = (editor: HTMLDivElement, text: string): void => {
-    if (text.includes("<github-reference ") || text.includes("<git-commit-reference ") || text.includes("<browser-reference ")) {
-      const doc = displayDocFromSerializedText(text);
-      insertNodesAtCaret(editor, doc.nodes.map(node => node.type === "text" ? document.createTextNode(node.value) : createChipElement(node.chip, document)));
-    } else insertPlainText(editor, text);
+    const normalized = text.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
+    if (normalized.includes("<github-reference ") || normalized.includes("<git-commit-reference ") || normalized.includes("<browser-reference ")) {
+      const doc = displayDocFromSerializedText(normalized, undefined, zh);
+      const seenReferences = new Map<string, HTMLElement>();
+      for (const element of editor.querySelectorAll<HTMLElement>(".cm-chip")) {
+        const prior = parseChipPayload(element.dataset.chip ?? "");
+        if (prior?.reference?.key) seenReferences.set(prior.reference.key, element);
+      }
+      const nodes: Node[] = [];
+      doc.nodes.forEach((node, index) => {
+        if (node.type === "text") {
+          const lines = node.value.split("\n");
+          lines.forEach((line, at) => {
+            if (line.length > 0) nodes.push(document.createTextNode(line));
+            if (at < lines.length - 1) nodes.push(document.createElement("br"));
+          });
+          return;
+        }
+        const chip = node.chip;
+        if ((chip.kind === "github" || chip.kind === "git-commit" || chip.kind === "browser") && chip.reference) {
+          const existing = seenReferences.get(chip.reference.key);
+          if (existing) {
+            const prior = parseChipPayload(existing.dataset.chip ?? "");
+            const replacement = createChipElement({ ...chip, id: prior?.id ?? chip.id }, document);
+            existing.replaceWith(replacement);
+            seenReferences.set(chip.reference.key, replacement);
+            return;
+          }
+          const created = createChipElement(chip, document);
+          seenReferences.set(chip.reference.key, created);
+          nodes.push(created);
+          return;
+        }
+        if (chip.image) imagesRef.current.set(chip.id, chip.image);
+        nodes.push(createChipElement(chip, document));
+        const nextNode = doc.nodes[index + 1];
+        if (chip.kind !== "mode" && !(nextNode?.type === "text" && /^\s/u.test(nextNode.value))) {
+          nodes.push(document.createTextNode(" "));
+        }
+      });
+      if (nodes.length > 0) insertNodesAtCaret(editor, nodes);
+    } else insertPlainText(editor, normalized);
   };
 
   /* Rich paste keeps the source order: text runs as Markdown, images as capsules.
@@ -832,7 +951,15 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     plainPasteRef.current = false;
     const editor = editorRef.current;
     const text = data.getData("text/plain");
-    const html = plainOnly ? "" : data.getData("text/html");
+    if (plainOnly) {
+      if (!editor || text.length === 0) return;
+      dictationEditorRef.current?.beforeEdit();
+      insertPlainText(editor, text);
+      emit();
+      refreshMention();
+      return;
+    }
+    const html = data.getData("text/html");
     const files = Array.from(data.files);
     const rich = editor && html ? richPasteFromHtml(html, text) : null;
     if (files.length > 0 && !(rich && richPasteHasText(rich) && files.every(isImageFile))) {
@@ -918,7 +1045,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       if (event.key === "Escape") {
         event.preventDefault();
         closeCommandMenu();
-        if (slashDraft && slashDraft.name.length === 0) writeCommandText("");
+        if (slashDraft && slashDraft.name.length === 0) replaceSlashCommand("", "bare-slash");
         return;
       }
       if (event.key === "Tab" && commandItems[commandIndex]) {
@@ -929,7 +1056,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
           acceptCommand(item);
           return;
         }
-        writeCommandText(item.allowArgs ? `/${item.name} ` : `/${item.name}`);
+        replaceSlashCommand(item.allowArgs ? `/${item.name} ` : `/${item.name}`, "prefix");
         return;
       }
     }
@@ -963,7 +1090,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       if (commandOpen) {
         event.preventDefault();
         closeCommandMenu();
-        if (slashDraft && slashDraft.name.length === 0) writeCommandText("");
+        if (slashDraft && slashDraft.name.length === 0) replaceSlashCommand("", "bare-slash");
         return;
       }
       if (mention) {

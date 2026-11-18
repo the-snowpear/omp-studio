@@ -34,6 +34,8 @@ export function ModelCompactionPane(props: FeatureSettingsProps & {
 }) {
   const state = useFeatureSettings(props);
   const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   const { marks } = usePreviewMode();
   const uid = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -69,11 +71,11 @@ export function ModelCompactionPane(props: FeatureSettingsProps & {
     const timer = setTimeout(() => {
       void state.invoke("models.compaction.preview", { sessionId: props.context!.sessionId!, selector: selected.selector, input })
         .then(result => { if (active) setPlan(result); })
-        .catch(cause => { if (active) setError(hostErrorMessage(cause, zh ? "无法读取压缩预览" : "Cannot preview compaction")); })
+        .catch(cause => { if (active) setError(hostErrorMessage(cause, zhRef.current ? "无法读取压缩预览" : "Cannot preview compaction")); })
         .finally(() => { if (active) setPlanning(false); });
     }, MOTION_MS.slow);
     return () => { active = false; clearTimeout(timer); };
-  }, [input, selected?.selector, selected?.contextWindow, selected?.maxContextWindow, props.visible, props.context?.sessionId, enabled, state.loading, state.preview, state.invoke, zh]);
+  }, [input, selected?.selector, selected?.contextWindow, selected?.maxContextWindow, props.visible, props.context?.sessionId, enabled, state.loading, state.preview, state.invoke]);
 
   async function save(confirmed = false) {
     if (busy || !selected || !plan?.valid || !enabled) return;

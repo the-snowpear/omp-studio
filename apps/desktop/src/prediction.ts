@@ -5,6 +5,7 @@ import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { desktopText } from "./desktop-language-shared.js";
 import type { TerminalSender, TerminalIpcMain } from "./terminal-ipc.js";
 import {
   PREDICTION_CHANNELS,
@@ -25,11 +26,11 @@ function object(value: unknown): Record<string, unknown> {
     throw new Error("Invalid prediction fields");
   return value as Record<string, unknown>;
 }
+class PredictionChannelLost extends Error {}
+
 interface Entry {
-  id: string;
-  sessionId: string;
   sender: TerminalSender;
-  socket: Socket;
+  socket?: Socket;
   attached: boolean;
   importing?:
     | {
@@ -41,8 +42,7 @@ interface Entry {
 }
 export class DesktopPrediction {
   readonly #activeImports = new Set<number>();
-  readonly #connections = new Map<number, Entry>();
-  readonly #generation = new Map<number, number>();
+  readonly #connections = new Map<string, Entry>();
   constructor(
     readonly options: {
       directory(): string;
@@ -63,8 +63,20 @@ export class DesktopPrediction {
       input.sessionId.length > 128
     )
       throw new Error("Invalid prediction session");
-    this.disposeWindow(sender.id);
-    const generation = this.#generation.get(sender.id);
+    if (this.#connections.has(channelId))
+      throw new Error(desktopText("预测通道已被占用", "Prediction channel is already in use"));
+    const entry: Entry = { sender, attached: false };
+    this.#connections.set(channelId, entry);
+    try {
+      await this.#connect(channelId, input.sessionId, entry);
+    } catch (error) {
+      this.#disconnect(channelId, entry);
+      throw error;
+    }
+  }
+
+  async #connect(channelId: string, sessionId: string, entry: Entry): Promise<void> {
+    const { sender } = entry;
     const file = join(
         this.options.directory(),
         "prediction",
@@ -89,51 +101,46 @@ export class DesktopPrediction {
     if (
       descriptor.version !== 1 ||
       descriptor.channelId !== channelId ||
-      descriptor.sessionId !== input.sessionId ||
+      descriptor.sessionId !== sessionId ||
       descriptor.endpoint !== endpoint ||
       typeof descriptor.token !== "string" ||
       !/^[a-f0-9]{64}$/.test(descriptor.token) ||
       typeof descriptor.expiresAt !== "number" ||
-      descriptor.expiresAt < Date.now() ||
-      descriptor.expiresAt > Date.now() + 30000 ||
-      generation !== this.#generation.get(sender.id) ||
-      sender.isDestroyed()
+      descriptor.expiresAt > Date.now() + 30000
     )
       throw new Error("Prediction descriptor expired or changed");
-    const socket = connect(endpoint),
-      entry: Entry = {
-        id: channelId,
-        sessionId: input.sessionId,
-        sender,
-        socket,
-        attached: false,
-      };
+    if (
+      descriptor.expiresAt < Date.now() ||
+      this.#connections.get(channelId) !== entry ||
+      sender.isDestroyed()
+    )
+      throw new PredictionChannelLost("Prediction descriptor expired or changed");
+    const socket = entry.socket = connect(endpoint);
     socket.setEncoding("utf8");
-    this.#connections.set(sender.id, entry);
     let accept!: () => void, reject!: (error: Error) => void;
     const ready = new Promise<void>((resolve, fail) => {
         accept = resolve;
         reject = fail;
       }),
       timer = setTimeout(() => {
-        reject(new Error("Prediction attach timed out"));
+        reject(new PredictionChannelLost("Prediction attach timed out"));
         socket.destroy();
       }, 5000);
     let pending = "";
-    socket.on("error", () => reject(new Error("Prediction connection failed")));
+    socket.on("error", () => reject(new PredictionChannelLost("Prediction connection failed")));
     socket.once("connect", () => socket.write(descriptor.token + "\n"));
     socket.once("close", () => {
       clearTimeout(timer);
-      reject(new Error("Prediction detached"));
+      reject(new PredictionChannelLost("Prediction detached"));
       entry.importing?.resolve({
         ok: false,
         message:
           "Prediction import interrupted and may have partially completed; it was not retried",
       });
       if (entry.importing) clearTimeout(entry.importing.timer);
-      if (this.#connections.get(sender.id) === entry)
-        this.#connections.delete(sender.id);
-      if (!sender.isDestroyed())
+      if (this.#connections.get(channelId) === entry)
+        this.#connections.delete(channelId);
+      if (entry.attached && !sender.isDestroyed() && !this.#connections.has(channelId))
         sender.send(PREDICTION_CHANNELS.event, { kind: "closed", channelId });
     });
     socket.on("data", (part: string) => {
@@ -161,7 +168,7 @@ export class DesktopPrediction {
         }
         try {
           const event = JSON.parse(line) as PredictionEvent;
-          if (event.channelId !== entry.id)
+          if (event.channelId !== channelId)
             throw new Error("Prediction target changed");
           if (
             event.kind === "imported" &&
@@ -186,7 +193,7 @@ export class DesktopPrediction {
           }
           if (
             !sender.isDestroyed() &&
-            this.#connections.get(sender.id) === entry
+            this.#connections.get(channelId) === entry
           )
             sender.send(PREDICTION_CHANNELS.event, event);
         } catch {
@@ -195,48 +202,50 @@ export class DesktopPrediction {
         }
       }
     });
-    try {
-      await ready;
-      if (generation !== this.#generation.get(sender.id) || socket.destroyed)
-        throw new Error("Prediction owner changed");
-    } catch (error) {
-      socket.destroy();
-      throw error;
-    }
+    await ready;
+    if (this.#connections.get(channelId) !== entry || socket.destroyed)
+      throw new PredictionChannelLost("Prediction detached");
   }
   input(sender: TerminalSender, value: unknown): void {
     const raw = object(value);
     if ((raw.input as PredictionInput).kind === "import")
       throw new Error("History imports require the file picker");
-    const entry = this.#entry(sender, raw.channelId);
+    const entry = this.#entry(sender, id(raw.channelId));
     if (entry.socket.writableLength > 32768)
       throw new Error("Prediction input buffer is full");
     entry.socket.write(JSON.stringify(raw.input) + "\n");
   }
-  #entry(sender: TerminalSender, channelId: unknown): Entry {
-    const entry = this.#connections.get(sender.id);
+  #entry(sender: TerminalSender, channelId: string): Entry & { socket: Socket } {
+    const entry = this.#connections.get(channelId);
     if (
       !entry?.attached ||
-      entry.id !== id(channelId) ||
+      entry.sender.id !== sender.id ||
+      !entry.socket ||
       entry.socket.destroyed
     )
-      throw new Error("Prediction channel is not owned by this window");
-    return entry;
+      throw new PredictionChannelLost("Prediction channel is not owned by this window");
+    return entry as Entry & { socket: Socket };
+  }
+  #disconnect(channelId: string, entry: Entry): void {
+    if (this.#connections.get(channelId) === entry)
+      this.#connections.delete(channelId);
+    entry.socket?.destroy();
   }
   detach(sender: TerminalSender, value: unknown): void {
-    const input = object(value);
-    if (this.#connections.get(sender.id)?.id === id(input.channelId))
-      this.disposeWindow(sender.id);
+    const channelId = id(object(value).channelId);
+    const entry = this.#connections.get(channelId);
+    if (entry?.sender.id === sender.id) this.#disconnect(channelId, entry);
   }
   async importHistory(
     sender: TerminalSender,
     value: unknown,
+    isVisible?: (sender: TerminalSender) => boolean,
   ): Promise<PredictionResult> {
     if (this.#activeImports.has(sender.id))
       throw new Error("A history import is already running");
     this.#activeImports.add(sender.id);
     try {
-      return await this.#importHistory(sender, value);
+      return await this.#importHistory(sender, value, isVisible);
     } finally {
       this.#activeImports.delete(sender.id);
     }
@@ -244,14 +253,19 @@ export class DesktopPrediction {
   async #importHistory(
     sender: TerminalSender,
     value: unknown,
+    isVisible?: (sender: TerminalSender) => boolean,
   ): Promise<PredictionResult> {
-    const raw = object(value),
-      entry = this.#entry(sender, raw.channelId);
+    const channelId = id(object(value).channelId),
+      entry = this.#entry(sender, channelId);
     if (entry.importing) throw new Error("A history import is already running");
     const selected = await this.options.chooseHistory(sender);
     if (!selected) return { ok: true, cancelled: true };
-    if (this.#connections.get(sender.id) !== entry || sender.isDestroyed())
-      throw new Error("Prediction session changed");
+    if (isVisible && !isVisible(sender)) {
+      this.disposeWindow(sender.id);
+      throw new PredictionChannelLost("Prediction requires a visible window");
+    }
+    if (this.#connections.get(channelId) !== entry || sender.isDestroyed())
+      throw new PredictionChannelLost("Prediction session changed");
     const stat = await lstat(selected);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 8 * 1024 * 1024)
       throw new Error("Select a JSONL history file no larger than 8 MiB");
@@ -278,8 +292,12 @@ export class DesktopPrediction {
         bounded,
         createWriteStream(target, { flags: "wx", mode: 0o600 }),
       );
-      if (this.#connections.get(sender.id) !== entry)
-        throw new Error("Prediction session changed");
+      if (isVisible && !isVisible(sender)) {
+        this.disposeWindow(sender.id);
+        throw new PredictionChannelLost("Prediction requires a visible window");
+      }
+      if (this.#connections.get(channelId) !== entry || sender.isDestroyed())
+        throw new PredictionChannelLost("Prediction session changed");
       const result = new Promise<PredictionResult>((resolve) => {
         const timer = setTimeout(() => {
           if (entry.importing?.id === requestId) {
@@ -301,12 +319,12 @@ export class DesktopPrediction {
     }
   }
   disposeWindow(owner: number): void {
-    this.#generation.set(owner, (this.#generation.get(owner) ?? 0) + 1);
-    this.#connections.get(owner)?.socket.destroy();
-    this.#connections.delete(owner);
+    for (const [channelId, entry] of this.#connections)
+      if (entry.sender.id === owner) this.#disconnect(channelId, entry);
   }
   dispose(): void {
-    for (const owner of this.#connections.keys()) this.disposeWindow(owner);
+    for (const [channelId, entry] of this.#connections)
+      this.#disconnect(channelId, entry);
   }
 }
 export function registerPredictionIpc(options: {
@@ -315,7 +333,7 @@ export function registerPredictionIpc(options: {
   isTrustedSender(sender: TerminalSender): boolean;
   isVisible(sender: TerminalSender): boolean;
 }): { dispose(): void } {
-  const owners = new Set<number>();
+  const owners = new Map<number, () => void>();
   for (const kind of ["attach", "input", "detach", "import"] as const)
     options.ipcMain.handle(
       PREDICTION_CHANNELS[kind],
@@ -324,24 +342,39 @@ export function registerPredictionIpc(options: {
           throw new Error("Untrusted prediction request");
         if (kind !== "detach" && !options.isVisible(sender)) {
           options.manager.disposeWindow(sender.id);
-          return { ok: false, message: "Prediction requires a visible window" };
+          return { ok: false, channelLost: true, message: "Prediction requires a visible window" };
         }
         if (!owners.has(sender.id)) {
-          owners.add(sender.id);
-          sender.once("destroyed", () => {
+          const dispose = () => {
             owners.delete(sender.id);
             options.manager.disposeWindow(sender.id);
-          });
+            sender.off("destroyed", dispose);
+            sender.off("did-navigate", dispose);
+            sender.off("render-process-gone", dispose);
+          };
+          owners.set(sender.id, dispose);
+          sender.once("destroyed", dispose);
+          sender.once("did-navigate", dispose);
+          sender.once("render-process-gone", dispose);
         }
         try {
-          if (kind === "attach") await options.manager.attach(sender, input);
-          else if (kind === "input") options.manager.input(sender, input);
+          if (kind === "attach") {
+            await options.manager.attach(sender, input);
+            if (!options.isVisible(sender)) {
+              options.manager.disposeWindow(sender.id);
+              return { ok: false, channelLost: true, message: "Prediction requires a visible window" };
+            }
+          } else if (kind === "input") options.manager.input(sender, input);
           else if (kind === "detach") options.manager.detach(sender, input);
-          else return await options.manager.importHistory(sender, input);
+          else return await options.manager.importHistory(sender, input, options.isVisible);
           return { ok: true };
         } catch (error) {
           return {
             ok: false,
+            ...(error instanceof PredictionChannelLost ||
+            (kind === "attach" && error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT")
+              ? { channelLost: true }
+              : {}),
             message: error instanceof Error ? error.message : String(error),
           };
         }
@@ -351,8 +384,7 @@ export function registerPredictionIpc(options: {
     dispose() {
       for (const kind of ["attach", "input", "detach", "import"] as const)
         options.ipcMain.removeHandler(PREDICTION_CHANNELS[kind]);
-      for (const owner of owners) options.manager.disposeWindow(owner);
-      owners.clear();
+      for (const dispose of owners.values()) dispose();
     },
   };
 }

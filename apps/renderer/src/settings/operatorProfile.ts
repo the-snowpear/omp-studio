@@ -370,18 +370,23 @@ export async function encodeAvatarCrop(
   crop: { readonly sx: number; readonly sy: number; readonly size: number },
 ): Promise<ProcessedAvatar> {
   const canvas = document.createElement("canvas");
-  canvas.width = AVATAR_PIXEL_SIZE;
-  canvas.height = AVATAR_PIXEL_SIZE;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error(profileMsg("无法处理图片。", "Unable to process image."));
-  ctx.fillStyle = "#111318";
-  ctx.fillRect(0, 0, AVATAR_PIXEL_SIZE, AVATAR_PIXEL_SIZE);
-  ctx.drawImage(source, crop.sx, crop.sy, crop.size, crop.size, 0, 0, AVATAR_PIXEL_SIZE, AVATAR_PIXEL_SIZE);
-  const webp = await encodeCanvas(canvas, "image/webp", 0.86);
-  if (webp && webp.type === "image/webp" && webp.size <= AVATAR_FILE_MAX_BYTES) return blobToAvatar(webp);
-  const jpeg = await encodeCanvas(canvas, "image/jpeg", 0.86);
-  if (jpeg && jpeg.type === "image/jpeg" && jpeg.size <= AVATAR_FILE_MAX_BYTES) return blobToAvatar(jpeg);
-  throw new Error(profileMsg("处理后的头像仍然过大，请换一张更小的图片。", "Processed avatar is still too large; please choose a smaller image."));
+  try {
+    canvas.width = AVATAR_PIXEL_SIZE;
+    canvas.height = AVATAR_PIXEL_SIZE;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error(profileMsg("无法处理图片。", "Unable to process image."));
+    ctx.fillStyle = "#111318";
+    ctx.fillRect(0, 0, AVATAR_PIXEL_SIZE, AVATAR_PIXEL_SIZE);
+    ctx.drawImage(source, crop.sx, crop.sy, crop.size, crop.size, 0, 0, AVATAR_PIXEL_SIZE, AVATAR_PIXEL_SIZE);
+    const webp = await encodeCanvas(canvas, "image/webp", 0.86);
+    if (webp && webp.type === "image/webp" && webp.size <= AVATAR_FILE_MAX_BYTES) return blobToAvatar(webp);
+    const jpeg = await encodeCanvas(canvas, "image/jpeg", 0.86);
+    if (jpeg && jpeg.type === "image/jpeg" && jpeg.size <= AVATAR_FILE_MAX_BYTES) return blobToAvatar(jpeg);
+    throw new Error(profileMsg("处理后的头像仍然过大，请换一张更小的图片。", "Processed avatar is still too large; please choose a smaller image."));
+  } finally {
+    canvas.width = 0;
+    canvas.height = 0;
+  }
 }
 
 /** 把用户选择的图片按居中覆盖裁成方形并压缩（无交互裁切时的路径）。 */

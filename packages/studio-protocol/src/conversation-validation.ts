@@ -66,7 +66,7 @@ function boundedId(value: unknown, path: string): string {
 
 function boundedUtf8(value: unknown, path: string, maxBytes: number): string {
   if (typeof value !== "string") throw new ContractValidationError("expected a string", path);
-  if (utf8Bytes(value) > maxBytes) {
+  if (value.length * 3 > maxBytes && utf8Bytes(value) > maxBytes) {
     throw new ContractValidationError(`exceeds ${maxBytes} UTF-8 bytes`, path);
   }
   return value;

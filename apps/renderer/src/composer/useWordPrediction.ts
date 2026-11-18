@@ -6,7 +6,7 @@ import type {
   PredictionInput,
 } from "@omp-studio/studio-protocol";
 import { usePreviewMode } from "../preview/PreviewContext";
-import { waitReceipt } from "../hostError";
+import { HostReceiptTimeout, hostErrorMessage, waitReceipt } from "../hostError";
 import { insertPlainText } from "./editorDom";
 import { isZh, useI18n } from "../i18n";
 import { getPreviewNextMessages } from "../preview/nextMessagePreview";
@@ -17,25 +17,108 @@ export interface ComposerPrediction {
   available: boolean;
   nextMessageAvailable?: boolean;
 }
+type ScannedDraft = {
+  readonly text: string;
+  readonly caret: number;
+  readonly hasAfter: boolean;
+  readonly hasChip: boolean;
+};
+
 /** Plain prose only: chips, hidden attachment names and image bytes never reach prediction. */
-function plain(node: Node): string {
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
-  if (
-    node instanceof Element &&
-    node.matches(".cm-chip,[contenteditable=false]")
-  )
-    return "\n";
-  if (node instanceof Element && node.tagName === "BR") return "\n";
-  let text = Array.from(node.childNodes).map(plain).join("");
-  if (
-    node instanceof Element &&
-    ["DIV", "P"].includes(node.tagName) &&
-    text &&
-    !text.endsWith("\n")
-  )
-    text += "\n";
-  return text;
+function scanEditorDraft(
+  editor: HTMLElement,
+  caretNode: Node | null,
+  caretOffset: number,
+): ScannedDraft | undefined {
+  let text = "";
+  let caret = 0;
+  let passedCaret = caretNode === null;
+  let hasAfter = false;
+  let hasChip = false;
+  let overflow = false;
+
+  const markContent = (chunk: string, isChip = false) => {
+    if (isChip) hasChip = true;
+    if (passedCaret && (chunk.length > 0 || isChip)) hasAfter = true;
+    text += chunk;
+    if (text.length > 4096) overflow = true;
+  };
+
+  const walk = (node: Node): void => {
+    if (overflow) return;
+    if (node.nodeType === Node.TEXT_NODE) {
+      const value = node.textContent ?? "";
+      if (node === caretNode) {
+        const clamped = Math.max(0, Math.min(caretOffset, value.length));
+        caret = text.length + clamped;
+        passedCaret = true;
+        if (clamped < value.length) hasAfter = true;
+        text += value;
+        if (text.length > 4096) overflow = true;
+        return;
+      }
+      markContent(value);
+      return;
+    }
+    if (!(node instanceof Element)) return;
+    if (node.hasAttribute("data-composer-dictation")) {
+      if (node === caretNode) {
+        caret = text.length;
+        passedCaret = true;
+      }
+      return;
+    }
+    if (node.matches(".cm-chip,[contenteditable=false]")) {
+      if (node === caretNode) {
+        caret = text.length;
+        passedCaret = true;
+      }
+      markContent("\n", true);
+      return;
+    }
+    if (node.tagName === "BR") {
+      if (node === caretNode) {
+        caret = text.length;
+        passedCaret = true;
+      }
+      markContent("\n");
+      return;
+    }
+    const startLen = text.length;
+    const children = node.childNodes;
+    for (let i = 0; i < children.length; i++) {
+      if (node === caretNode && i === caretOffset) {
+        caret = text.length;
+        passedCaret = true;
+      }
+      walk(children[i]!);
+      if (overflow) return;
+    }
+    if (node === caretNode && caretOffset >= children.length && !passedCaret) {
+      caret = text.length;
+      passedCaret = true;
+    }
+    if ((node.tagName === "DIV" || node.tagName === "P") && text.length > startLen && !text.endsWith("\n")) {
+      markContent("\n");
+    }
+  };
+
+  const rootChildren = editor.childNodes;
+  for (let i = 0; i < rootChildren.length; i++) {
+    if (editor === caretNode && i === caretOffset) {
+      caret = text.length;
+      passedCaret = true;
+    }
+    walk(rootChildren[i]!);
+    if (overflow) return undefined;
+  }
+  if (editor === caretNode && caretOffset >= rootChildren.length && !passedCaret) {
+    caret = text.length;
+    passedCaret = true;
+  }
+  return { text, caret: Math.min(caret, text.length), hasAfter, hasChip };
 }
+
 export function predictionDraft(
   editor: HTMLElement,
 ): { text: string; caret: number } | undefined {
@@ -47,31 +130,31 @@ export function predictionDraft(
     range.startContainer instanceof Element
       ? range.startContainer
       : range.startContainer.parentElement;
-  if (parent?.closest(".cm-chip,[contenteditable=false]")) return;
-  if ((editor.textContent?.length ?? 0) > 4096) return;
-  const before = range.cloneRange();
-  before.selectNodeContents(editor);
-  before.setEnd(range.startContainer, range.startOffset);
-  const text = plain(editor),
-    head = plain(before.cloneContents());
-  if (text.length > 4096) return;
-  return { text, caret: Math.min(head.length, text.length) };
+  if (parent?.closest(".cm-chip,[contenteditable=false],[data-composer-dictation]")) return;
+  const scanned = scanEditorDraft(editor, range.startContainer, range.startOffset);
+  if (!scanned) return;
+  return { text: scanned.text, caret: scanned.caret };
 }
 function currentDraft(editor: HTMLElement, allowEmpty: boolean): { text: string; caret: number } | undefined {
-  if (allowEmpty && !editor.textContent && !editor.querySelector(".cm-chip,[contenteditable=false]")) {
-    const text = plain(editor);
-    if (text === "" || text === "\n") return { text: "", caret: 0 };
+  if (allowEmpty) {
+    const emptyCheck = scanEditorDraft(editor, null, 0);
+    if (emptyCheck && !emptyCheck.hasChip && (emptyCheck.text === "" || emptyCheck.text === "\n")) {
+      return { text: "", caret: 0 };
+    }
   }
   if (editor.ownerDocument.activeElement !== editor) return;
-  const draft = predictionDraft(editor);
   const selection = editor.ownerDocument.defaultView!.getSelection();
-  if (!draft || !selection?.rangeCount) return;
-  const after = selection.getRangeAt(0).cloneRange();
-  after.selectNodeContents(editor);
-  after.setStart(selection.focusNode!, selection.focusOffset);
-  const remaining = after.cloneContents();
-  if (remaining.textContent || remaining.querySelector("br,.cm-chip,[contenteditable=false]")) return;
-  return draft;
+  if (!selection?.isCollapsed || !selection.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  if (!editor.contains(range.startContainer)) return;
+  const parent =
+    range.startContainer instanceof Element
+      ? range.startContainer
+      : range.startContainer.parentElement;
+  if (parent?.closest(".cm-chip,[contenteditable=false],[data-composer-dictation]")) return;
+  const scanned = scanEditorDraft(editor, range.startContainer, range.startOffset);
+  if (!scanned || scanned.hasAfter) return;
+  return { text: scanned.text, caret: scanned.caret };
 }
 function previewSuffix(text: string, caret: number, zh = isZh()): string | null {
   const before = text.slice(0, caret),
@@ -145,37 +228,63 @@ export function useWordPrediction(
         !chrome.onPrediction)
     )
       return;
-    let channel: PredictionChannel | undefined,
+    let attachment: { channel: PredictionChannel; ready: boolean } | undefined,
       connecting: Promise<void> | undefined,
       composing = false,
+      recoverOnLoss = true,
       timer: number | undefined,
+      frameId: number | undefined,
+      syncedInTurn = false,
+      queuedDraft: { text: string; caret: number } | undefined,
       lastDraft: { text: string; caret: number; revision: number } | undefined;
+    const eligible = () =>
+      generation.current === current && !composing && !document.hidden &&
+      currentDraft(editor, !!options.nextMessageAvailable) !== undefined;
+    const clearPrediction = () => {
+      offers.current = undefined;
+      shown.current = undefined;
+      setAlternatives(undefined);
+      setMenuOpen(false);
+      setGhost(undefined);
+    };
+    const release = ({ sessionId, channelId }: PredictionChannel) => {
+      void options.client.command("prediction.release", { sessionId, channelId }).catch(() => {});
+    };
+    const close = () => {
+      const previous = attachment;
+      attachment = undefined;
+      if (!previous) return;
+      void chrome?.detachPrediction?.({ channelId: previous.channel.channelId }).catch(() => {});
+      if (!previous.ready) release(previous.channel);
+    };
+    const lost = () => {
+      const wasReady = attachment?.ready;
+      close();
+      if (wasReady) lastDraft = undefined;
+      clearPrediction();
+      setError("");
+      if (wasReady && recoverOnLoss && eligible()) {
+        recoverOnLoss = false;
+        update();
+      }
+    };
     const send = (input: Exclude<PredictionInput, { kind: "import" }>) => {
-      if (channel && !preview)
-        void chrome!.predictionInput!({ channelId: channel.channelId, input })
-          .then((result) => {
-            if (!result.ok && generation.current === current) {
-              setError(result.message ?? "Prediction unavailable");
-              offers.current = undefined; setAlternatives(undefined);
-              setGhost(undefined);
-            }
-          })
-          .catch(() => {
-            if (generation.current === current) {
-              offers.current = undefined; setAlternatives(undefined);
-              setGhost(undefined);
-            }
-          });
+      const active = attachment;
+      if (!active?.ready || preview) return;
+      void chrome!.predictionInput!({ channelId: active.channel.channelId, input })
+        .then((result) => {
+          if (result.ok || attachment !== active) return;
+          if (result.channelLost) lost();
+          else {
+            clearPrediction();
+            setError(result.message ?? (zhRef.current ? "输入预测不可用" : "Prediction unavailable"));
+          }
+        })
+        .catch(() => {
+          if (attachment === active) lost();
+        });
     };
     inputPort.current = send;
-    const close = () => {
-      const previous = channel;
-      channel = undefined;
-      if (previous && !preview)
-        void chrome
-          ?.detachPrediction?.({ channelId: previous.channelId })
-          .catch(() => {});
-    };
     const show = (suffix: string | null, version: number, next = false, rank?: number) => {
       const draft = lastDraft;
       if (
@@ -246,7 +355,7 @@ export function useWordPrediction(
       ? undefined
       : chrome!.onPrediction!((event) => {
           if (
-            event.channelId !== channel?.channelId ||
+            event.channelId !== attachment?.channel.channelId ||
             generation.current !== current
           )
             return;
@@ -266,67 +375,46 @@ export function useWordPrediction(
           }
           if (event.kind === "error" && !event.requestId) {
             setError(event.message);
-            offers.current = undefined; setAlternatives(undefined);
-            setGhost(undefined);
+            clearPrediction();
           }
-          if (event.kind === "closed") {
-            channel = undefined;
-            offers.current = undefined; setAlternatives(undefined);
-            setGhost(undefined);
-          }
+          if (event.kind === "closed") lost();
         });
     const ensure = async () => {
-      if (preview || channel) return;
+      if (preview || attachment?.ready) return;
       if (connecting) return connecting;
       connecting = (async () => {
-        const handle = await options.client.command("prediction.prepare", {
-          sessionId: options.sessionId!,
-          protocolVersion: 2,
-        });
-        const prepared = (
-          await waitReceipt<{ result: PredictionChannel }>(
+        for (let attempt = 0; attempt < 2 && eligible(); attempt++) {
+          const handle = await options.client.command("prediction.prepare", {
+            sessionId: options.sessionId!,
+            protocolVersion: 2,
+          });
+          const { result: prepared } = await waitReceipt<{ result: PredictionChannel }>(
             options.client,
             handle.requestId,
-          )
-        ).result;
-        if (
-          generation.current !== current ||
-          !currentDraft(editor, !!options.nextMessageAvailable) ||
-          document.hidden
-        ) {
-          void options.client
-            .command("prediction.release", {
-              sessionId: prepared.sessionId,
-              channelId: prepared.channelId,
-            })
-            .catch(() => {});
-          return;
+          );
+          if (!eligible()) {
+            release(prepared);
+            return;
+          }
+          const pending = { channel: prepared, ready: false };
+          attachment = pending;
+          try {
+            const result = await chrome!.attachPrediction!(prepared);
+            if (attachment !== pending || !eligible()) continue;
+            if (result.ok) {
+              pending.ready = true;
+              setError("");
+              return;
+            }
+            if (!result.channelLost) throw result;
+          } finally {
+            if (attachment === pending && !pending.ready) close();
+          }
         }
-        const attached = await chrome!.attachPrediction!(prepared);
-        if (
-          !attached.ok ||
-          generation.current !== current ||
-          !currentDraft(editor, !!options.nextMessageAvailable) ||
-          document.hidden
-        ) {
-          void chrome!.detachPrediction!({
-            channelId: prepared.channelId,
-          }).catch(() => {});
-          void options.client
-            .command("prediction.release", {
-              sessionId: prepared.sessionId,
-              channelId: prepared.channelId,
-            })
-            .catch(() => {});
-          if (!attached.ok)
-            throw new Error(attached.message ?? "Prediction unavailable");
-          return;
-        }
-        channel = prepared;
       })()
         .catch((cause) => {
-          if (generation.current === current)
-            setError(cause instanceof Error ? cause.message : String(cause));
+          if (cause instanceof HostReceiptTimeout || !eligible()) return;
+          setError(hostErrorMessage(cause, zhRef.current ? "输入预测不可用" : "Prediction unavailable"));
         })
         .finally(() => {
           connecting = undefined;
@@ -334,15 +422,35 @@ export function useWordPrediction(
       return connecting;
     };
     const update = () => {
-      clearTimeout(timer);
+      if (frameId !== undefined) {
+        window.cancelAnimationFrame(frameId);
+        frameId = undefined;
+      }
+      if (!syncedInTurn) {
+        syncedInTurn = true;
+        queueMicrotask(() => { syncedInTurn = false; });
+      }
       const previous = shown.current;
       const draft = currentDraft(editor, !!options.nextMessageAvailable);
+      if (
+        timer !== undefined &&
+        !previous &&
+        draft &&
+        queuedDraft &&
+        draft.text === queuedDraft.text &&
+        draft.caret === queuedDraft.caret
+      ) {
+        return;
+      }
+      clearTimeout(timer);
+      timer = undefined;
+      queuedDraft = undefined;
       if (!composing && previous?.next && !previous.draft && lastDraft?.revision === previous.revision && draft?.text === "") {
         show(previous.suffix, previous.revision, true, previous.rank);
         return;
       }
       const offer = offers.current;
-      if (!composing && !document.hidden && options.nextMessageAvailable && draft?.text === "" && offer?.values.length && (preview || channel)) {
+      if (!composing && !document.hidden && options.nextMessageAvailable && draft?.text === "" && offer?.values.length && (preview || attachment?.ready)) {
         const version = ++revision.current;
         lastDraft = { ...draft, revision: version };
         const next = { values: offer.values, revision: version };
@@ -355,8 +463,11 @@ export function useWordPrediction(
       setGhost(undefined);
       if (composing || document.hidden)
         return;
+      queuedDraft = draft;
       timer = window.setTimeout(
-        () =>
+        () => {
+          timer = undefined;
+          queuedDraft = undefined;
           void (async () => {
             const draft = currentDraft(editor, !!options.nextMessageAvailable);
             if (!draft || (!draft.text.trim() && !options.nextMessageAvailable)) return;
@@ -384,7 +495,7 @@ export function useWordPrediction(
             const latest = currentDraft(editor, !!options.nextMessageAvailable);
             if (latest?.text !== draft.text || latest.caret !== draft.caret)
               return;
-            if (!draft.text && options.nextMessageAvailable && !editor.querySelector(".cm-chip,[contenteditable=false]")) {
+            if (!draft.text && options.nextMessageAvailable && !editor.querySelector(".cm-chip,[contenteditable=false]:not([data-composer-dictation])")) {
               send({ kind: "next", revision: version, empty: true });
             } else {
               if (offers.current && !offers.current.values.some(value => value.startsWith(draft.text.trimEnd()))) {
@@ -392,9 +503,21 @@ export function useWordPrediction(
               }
               send({ kind: "update", revision: version, ...draft });
             }
-          })(),
+          })();
+        },
         140,
       );
+    };
+    const scheduleUpdate = () => {
+      if (frameId !== undefined) return;
+      frameId = window.requestAnimationFrame(() => {
+        frameId = undefined;
+        if (generation.current === current) update();
+      });
+    };
+    const input = () => {
+      recoverOnLoss = true;
+      update();
     };
     const blur = () => {
       setMenuOpen(false);
@@ -402,7 +525,10 @@ export function useWordPrediction(
         update();
         return;
       }
+      if (frameId !== undefined) { window.cancelAnimationFrame(frameId); frameId = undefined; }
       clearTimeout(timer);
+      timer = undefined;
+      queuedDraft = undefined;
       lastDraft = undefined;
       setGhost(undefined);
       setAlternatives(undefined); offers.current = undefined;
@@ -411,10 +537,13 @@ export function useWordPrediction(
     const start = () => {
       if (options.nextMessageAvailable) {
         send({ kind: "next", revision: ++revision.current, empty: false });
-        if (!preview && channel) { offers.current = undefined; setAlternatives(undefined); }
+        if (!preview && attachment?.ready) { offers.current = undefined; setAlternatives(undefined); }
       }
       composing = true;
+      if (frameId !== undefined) { window.cancelAnimationFrame(frameId); frameId = undefined; }
       clearTimeout(timer);
+      timer = undefined;
+      queuedDraft = undefined;
       lastDraft = undefined;
       setGhost(undefined);
     };
@@ -424,14 +553,28 @@ export function useWordPrediction(
     };
     const visibility = () => {
       if (document.hidden) {
+        if (frameId !== undefined) { window.cancelAnimationFrame(frameId); frameId = undefined; }
         clearTimeout(timer);
+        timer = undefined;
+        queuedDraft = undefined;
         setMenuOpen(false);
-      } else update();
+      } else input();
     };
     const selectionChange = () => {
-      if (document.activeElement === editor) update();
+      if (document.activeElement === editor && !syncedInTurn) scheduleUpdate();
     };
-    const observer = new MutationObserver(update);
+    const isDictationNode = (node: Node | null): boolean =>
+      node !== null && ((node instanceof Element ? node : node.parentElement)?.closest("[data-composer-dictation]") !== null);
+    const isDictationOnlyMutation = (mutation: MutationRecord): boolean => {
+      if (isDictationNode(mutation.target)) return true;
+      if (mutation.type !== "childList") return false;
+      const touched = [...mutation.addedNodes, ...mutation.removedNodes];
+      return touched.length > 0 && touched.every(isDictationNode);
+    };
+    const observer = new MutationObserver((mutations) => {
+      if (syncedInTurn || mutations.every(isDictationOnlyMutation)) return;
+      scheduleUpdate();
+    });
     observer.observe(editor, {
       childList: true,
       characterData: true,
@@ -439,22 +582,23 @@ export function useWordPrediction(
     });
     const sizeObserver = window.ResizeObserver ? new window.ResizeObserver(update) : undefined;
     sizeObserver?.observe(editor);
-    editor.addEventListener("input", update);
-    editor.addEventListener("focus", update);
+    editor.addEventListener("input", input);
+    editor.addEventListener("focus", input);
     editor.addEventListener("blur", blur);
-    editor.addEventListener("scroll", update);
+    editor.addEventListener("scroll", scheduleUpdate);
     editor.addEventListener("compositionstart", start);
     editor.addEventListener("compositionend", end);
     document.addEventListener("selectionchange", selectionChange);
     document.addEventListener("visibilitychange", visibility);
-    window.addEventListener("resize", update);
+    window.addEventListener("resize", scheduleUpdate);
     const ping = window.setInterval(() => {
-      if (channel && !document.hidden)
+      if (attachment?.ready && !document.hidden)
         send({ kind: "ping" });
     }, 15000);
     update();
     return () => {
       generation.current++;
+      if (frameId !== undefined) window.cancelAnimationFrame(frameId);
       clearTimeout(timer);
       clearInterval(ping);
       close();
@@ -462,15 +606,15 @@ export function useWordPrediction(
       inputPort.current = undefined;
       observer.disconnect();
       sizeObserver?.disconnect();
-      editor.removeEventListener("input", update);
-      editor.removeEventListener("focus", update);
+      editor.removeEventListener("input", input);
+      editor.removeEventListener("focus", input);
       editor.removeEventListener("blur", blur);
-      editor.removeEventListener("scroll", update);
+      editor.removeEventListener("scroll", scheduleUpdate);
       editor.removeEventListener("compositionstart", start);
       editor.removeEventListener("compositionend", end);
       document.removeEventListener("selectionchange", selectionChange);
       document.removeEventListener("visibilitychange", visibility);
-      window.removeEventListener("resize", update);
+      window.removeEventListener("resize", scheduleUpdate);
     };
   }, [
     editorRef,
@@ -480,7 +624,7 @@ export function useWordPrediction(
     options?.nextMessageAvailable,
     blocked,
     preview,
-    zh,
+    preview ? zh : false,
     document,
     window,
   ]);
@@ -496,7 +640,7 @@ export function useWordPrediction(
   }, [ghost, alternatives, document, editorRef, window]);
   function choose(index: number): boolean {
     const editor = editorRef.current, offer = offers.current, value = offer?.values[index];
-    if (!editor || !offer || !value || editor.querySelector(".cm-chip,[contenteditable=false]")) return false;
+    if (!editor || !offer || !value || editor.querySelector(".cm-chip,[contenteditable=false]:not([data-composer-dictation])")) return false;
     const draft = currentDraft(editor, !!options?.nextMessageAvailable);
     if (!draft || (!value.startsWith(draft.text.trimEnd()) && draft.text.trimEnd() !== installed.current)) return false;
     inputPort.current?.({ kind: "next.accepted", revision: offer.revision, rank: index });

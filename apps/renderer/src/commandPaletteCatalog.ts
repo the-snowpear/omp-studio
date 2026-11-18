@@ -1,5 +1,6 @@
 import type { SessionHistoryEntry } from "@omp-studio/client-contract";
 import type { IconName } from "./icons";
+import { translate } from "./i18n";
 import { SHORTCUTS, formatShortcut, shortcutSearchText } from "./keyboard/shortcuts";
 import type { CapTab } from "./CapabilitiesPage";
 import type { PageRoute } from "./HomePage";
@@ -55,6 +56,7 @@ export type PaletteGroup = {
 export type PaletteCatalogInput = {
   preview: boolean;
   zh?: boolean;
+  t?: (key: string) => string;
   untitledTitle: string;
   historyEntries: ReadonlyArray<SessionHistoryEntry>;
   workspaces: ReadonlyArray<{ workspaceId: string; name: string }>;
@@ -71,9 +73,10 @@ function findPreviewThreadByTitle(title: string, zh?: boolean): { projectId: str
   return undefined;
 }
 
-function matches(item: PaletteItem, query: string): boolean {
+function matches(item: PaletteItem, query: string, resolveLabel: (key: string) => string): boolean {
   if (!query) return true;
-  const haystack = `${item.label} ${item.meta ?? ""} ${item.keywords ?? ""} ${item.hint ?? ""}`;
+  const labelText = resolveLabel(item.label);
+  const haystack = `${labelText} ${item.label} ${item.meta ?? ""} ${item.keywords ?? ""} ${item.hint ?? ""}`;
   return haystack.toLowerCase().includes(query);
 }
 
@@ -248,17 +251,19 @@ function inventoryItems(input: PaletteCatalogInput): PaletteItem[] {
 
 export function buildPaletteGroups(input: PaletteCatalogInput): PaletteGroup[] {
   const query = input.query.trim().toLowerCase();
+  const locale = input.zh ? "zh" : "en";
+  const resolveLabel = input.t ?? ((key: string) => translate(locale, key));
   const groups: PaletteGroup[] = [];
-  const chat = recents(input).filter((item) => matches(item, query));
+  const chat = recents(input).filter((item) => matches(item, query, resolveLabel));
   if (chat.length) groups.push({ id: "chat", label: "palette.groupChat", items: chat });
   for (const group of staticGroups(input.preview)) {
-    const items = group.items.filter((item) => matches(item, query));
+    const items = group.items.filter((item) => matches(item, query, resolveLabel));
     if (items.length) groups.push({ ...group, items });
   }
-  const projects = projectItems(input).filter((item) => matches(item, query));
+  const projects = projectItems(input).filter((item) => matches(item, query, resolveLabel));
   if (projects.length) groups.push({ id: "projects", label: "palette.groupProjects", items: projects });
   if (query) {
-    const inventory = inventoryItems(input).filter((item) => matches(item, query));
+    const inventory = inventoryItems(input).filter((item) => matches(item, query, resolveLabel));
     if (inventory.length) groups.push({ id: "inventory", label: "palette.groupInventory", items: inventory });
   }
   return groups;

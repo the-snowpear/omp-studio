@@ -1,5 +1,5 @@
 import { RenderCache, renderBytes } from "../conversation/renderCache";
-import { HIGHLIGHT_MAX_UNITS, validHighlightRequest, validateTokens, type HighlightRequest, type HighlightToken } from "./protocol";
+import { HIGHLIGHT_MAX_UNITS, measureTokens, validHighlightRequest, type HighlightRequest, type HighlightToken } from "./protocol";
 
 export type HighlightResult = { ok: true; tokens: HighlightToken[] } | { ok: false; reason: string };
 export interface HighlightWorkerPort {
@@ -33,11 +33,12 @@ export class HighlightPool {
     this.#size = cores !== undefined && Number.isFinite(cores) && cores > 0 ? Math.max(1, Math.min(2, Math.floor(cores / 2))) : 1;
   }
   onSlot(callback: () => void): () => void { this.#slotListeners.add(callback); return () => { this.#slotListeners.delete(callback); }; }
-  request(language: string, code: string, subscriber: Subscriber): { status: "accepted" | "full" | "rejected"; cancel: () => void } {
+  request(language: string, code: string, subscriber: Subscriber, batch = false): { status: "accepted" | "full" | "rejected"; cancel: () => void } {
     const empty = () => {};
+    const probe: HighlightRequest = batch ? { version: 1, jobId: 1, language, code, batch: true } : { version: 1, jobId: 1, language, code };
     if (this.#disposed || this.#disabled || code.length > HIGHLIGHT_MAX_UNITS || subscriber.priority() === "none"
-      || !validHighlightRequest({ version: 1, jobId: 1, language, code })) return { status: "rejected", cancel: empty };
-    const key = language + "\u0000" + code;
+      || !validHighlightRequest(probe)) return { status: "rejected", cancel: empty };
+    const key = (batch ? "batch:" : "") + language + "\u0000" + code;
     const cached = this.#cache.get(key);
     if (cached !== undefined) {
       let active = true;
@@ -48,7 +49,10 @@ export class HighlightPool {
     if (job === undefined) {
       const bytes = renderBytes(code);
       if (this.#queue.length >= 32 || this.#queueBytes + bytes > 2 * 1024 * 1024) return { status: "full", cancel: empty };
-      job = { key, request: { version: 1, jobId: ++this.#nextId, language, code }, bytes, subscribers: new Set(), retries: 0 };
+      const req: HighlightRequest = batch
+        ? { version: 1, jobId: ++this.#nextId, language, code, batch: true }
+        : { version: 1, jobId: ++this.#nextId, language, code };
+      job = { key, request: req, bytes, subscribers: new Set(), retries: 0 };
       this.#jobs.set(key, job); this.#queue.push(job); this.#queueBytes += bytes;
     }
     job.subscribers.add(subscriber);
@@ -122,9 +126,13 @@ export class HighlightPool {
     if (response.jobId !== job.request.jobId) return; // late, duplicate or out of order
     clearTimeout(slot.timeout); delete slot.timeout; delete slot.job;
     let result: HighlightResult;
-    if (response.version === 1 && response.ok === true && Object.keys(response).length === 4 && validateTokens(response.tokens, job.request.code)) {
-      result = { ok: true, tokens: response.tokens };
-      if (job.subscribers.size > 0) this.#cache.put(job.key, result.tokens, renderBytes(JSON.stringify(result.tokens)));
+    const tokenBytes = response.version === 1 && response.ok === true && Object.keys(response).length === 4
+      ? measureTokens(response.tokens, job.request.code)
+      : -1;
+    if (tokenBytes >= 0) {
+      const tokens = response.tokens as HighlightToken[];
+      result = { ok: true, tokens };
+      this.#cache.put(job.key, tokens, tokenBytes);
     } else result = { ok: false, reason: "worker-result-rejected" };
     this.#finish(job, result); this.#pump();
   }

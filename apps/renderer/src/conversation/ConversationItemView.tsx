@@ -208,6 +208,13 @@ function MessageUserActions({
   );
 }
 
+export type RowPlanBind = {
+  /** Inline plan cards keyed by the `write xd://propose` `toolCallId` in this row. */
+  readonly byToolCallId?: Readonly<Record<string, PlanCreatedLink>>;
+  /** Row-tail fallback used only when `attachEvenWithoutPropose` has no `xd://propose` call. */
+  readonly fallback?: PlanCreatedLink;
+};
+
 function renderAssistantSegments(
   segments: readonly AssistantSegment[],
   options: {
@@ -226,6 +233,8 @@ function renderAssistantSegments(
     onInspectSubagent?: (target: SubagentHubTarget) => void;
     liveAgents?: readonly StudioAgentSnapshot[];
     allowCopy?: boolean;
+    inlinePlans?: Readonly<Record<string, PlanCreatedLink>>;
+    demo?: boolean;
   } = {},
 ): ReactNode[] {
   const showThinking = options.showThinking !== false;
@@ -239,6 +248,7 @@ function renderAssistantSegments(
   // key 会让正文和整条工具链在落盘那一刻卸载重挂载。
   let bodyCount = 0;
   let chainCount = 0;
+  let planCount = 0;
   while (index < segments.length) {
     const segment = segments[index]!;
     if (segment.type === "text") {
@@ -257,12 +267,38 @@ function renderAssistantSegments(
     }
     // 一条链里的思考与工具保持模型产出顺序：只有中间没被工具打断的连续思考才合成
     // 一张卡，否则工具跑完之后的思考会被并进工具之前的思考里。
-    const items: ChainItem[] = [];
+    // 遇到 `write xd://propose` 时先把规划阶段链收束输出，在提交处内联插入计划卡，
+    // 批准后的执行阶段思考与工具链继续排在计划卡下方。
+    let items: ChainItem[] = [];
     let pendingThink: ThinkView | undefined;
     const flushThink = () => {
       if (pendingThink === undefined) return;
       items.push({ kind: "think", think: pendingThink });
       pendingThink = undefined;
+    };
+    const flushChain = (isEndOfSegments: boolean) => {
+      flushThink();
+      if (items.length === 0) return;
+      const batchKey = `chain-${chainCount}`;
+      chainCount += 1;
+      // 该组之后没有别的段落或内联计划卡（即 AI 尚未开始输出其后的段落），且该行是
+      // transcript 尾行、仍在流式输出时，才视为流式尾部链。
+      const liveTail = options.liveTail === true && isEndOfSegments;
+      const chainExpandAll = options.expandAll === true || toolActivity === "full";
+      nodes.push(
+        <BatchChain
+          key={batchKey}
+          batchKey={batchKey}
+          items={items}
+          {...(chainExpandAll ? { expandAll: true } : {})}
+          {...(options.standalone === true ? { standalone: true } : {})}
+          {...(liveTail ? { liveTail: true } : {})}
+          {...(options.showToolIntent === false ? { showDetail: false } : {})}
+          {...(options.liveAgents === undefined ? {} : { liveAgents: options.liveAgents })}
+          {...(options.onInspectSubagent === undefined ? {} : { onInspectSubagent: options.onInspectSubagent })}
+        />,
+      );
+      items = [];
     };
     while (index < segments.length && segments[index]?.type !== "text") {
       const process = segments[index]!;
@@ -278,33 +314,32 @@ function renderAssistantSegments(
                   ...(pendingThink.truncated === true || process.truncated === true ? { truncated: true } : {}),
                 };
         }
-      } else if (process.type === "batch" && toolActivity !== "hidden" && process.tools.length > 0) {
-        flushThink();
-        for (const tool of process.tools) items.push({ kind: "tool", tool });
+      } else if (process.type === "batch" && process.tools.length > 0) {
+        for (const tool of process.tools) {
+          const inlinePlan = options.inlinePlans?.[tool.toolCallId];
+          if (inlinePlan !== undefined) {
+            flushChain(false);
+            nodes.push(
+              <PlanCreatedCard
+                key={`plan-${planCount}`}
+                toolCallId={tool.toolCallId}
+                title={inlinePlan.title ?? "Plan"}
+                onOpen={inlinePlan.onOpen}
+                {...(inlinePlan.demo === true || options.demo === true ? { demo: true } : {})}
+              />,
+            );
+            planCount += 1;
+            continue;
+          }
+          if (toolActivity !== "hidden") {
+            flushThink();
+            items.push({ kind: "tool", tool });
+          }
+        }
       }
       index += 1;
     }
-    flushThink();
-    if (items.length === 0) continue;
-    const batchKey = `chain-${chainCount}`;
-    chainCount += 1;
-    // 该组之后没有别的段落（即 AI 尚未开始输出其后的文本段），且该行是 transcript
-    // 尾行、仍在流式输出时，才视为流式尾部链。
-    const liveTail = options.liveTail === true && index >= segments.length;
-    const chainExpandAll = options.expandAll === true || toolActivity === "full";
-    nodes.push(
-      <BatchChain
-        key={batchKey}
-        batchKey={batchKey}
-        items={items}
-        {...(chainExpandAll ? { expandAll: true } : {})}
-        {...(options.standalone === true ? { standalone: true } : {})}
-        {...(liveTail ? { liveTail: true } : {})}
-        {...(options.showToolIntent === false ? { showDetail: false } : {})}
-        {...(options.liveAgents === undefined ? {} : { liveAgents: options.liveAgents })}
-        {...(options.onInspectSubagent === undefined ? {} : { onInspectSubagent: options.onInspectSubagent })}
-      />,
-    );
+    flushChain(index >= segments.length);
   }
   return nodes;
 }
@@ -314,6 +349,7 @@ export type AssistantRunEntry = {
   readonly fileChanges?: readonly TurnFileChange[];
   readonly changesDefaultOpen?: boolean;
   readonly turnId?: string;
+  readonly planBind?: RowPlanBind;
   readonly planLink?: PlanCreatedLink;
 };
 
@@ -348,6 +384,14 @@ function AssistantRunViewInner({
   const last = entries.at(-1);
   if (first === undefined || last === undefined) return null;
   const segments = entries.flatMap((entry) => entry.row.segments);
+  let inlinePlans: Record<string, PlanCreatedLink> | undefined;
+  for (const entry of entries) {
+    if (entry.planBind?.byToolCallId !== undefined) {
+      inlinePlans = inlinePlans === undefined
+        ? { ...entry.planBind.byToolCallId }
+        : { ...inlinePlans, ...entry.planBind.byToolCallId };
+    }
+  }
   const displayOptions = {
     showThinking: appSettings.showThinkingSummary,
     toolActivity: appSettings.toolActivity,
@@ -355,6 +399,8 @@ function AssistantRunViewInner({
     showStreaming: appSettings.streaming,
     ...(onInspectSubagent === undefined ? {} : { onInspectSubagent }),
     ...(liveAgents === undefined ? {} : { liveAgents }),
+    ...(inlinePlans === undefined ? {} : { inlinePlans }),
+    ...(demo === true ? { demo: true } : {}),
   } as const;
   const process = entries.every((entry) => entry.row.presentation === "process");
   const gallery = entries.length === 1 && expandAll && !hasAssistantText(segments);
@@ -367,14 +413,17 @@ function AssistantRunViewInner({
       {...(onReviewChanges === undefined || entry.turnId === undefined ? {} : { onReview: () => onReviewChanges(entry.turnId as string) })}
     />
   ));
-  const plans = entries.map((entry) => entry.planLink === undefined ? null : (
-    <PlanCreatedCard
-      key={`plan-${entry.row.itemId}`}
-      title={entry.planLink.title ?? "Plan"}
-      onOpen={entry.planLink.onOpen}
-      {...(entry.planLink.demo === true || demo === true ? { demo: true } : {})}
-    />
-  ));
+  const plans = entries.map((entry) => {
+    const fallbackPlan = entry.planBind?.fallback ?? entry.planLink;
+    return fallbackPlan === undefined ? null : (
+      <PlanCreatedCard
+        key={`plan-${entry.row.itemId}`}
+        title={fallbackPlan.title ?? "Plan"}
+        onOpen={fallbackPlan.onOpen}
+        {...(fallbackPlan.demo === true || demo === true ? { demo: true } : {})}
+      />
+    );
+  });
   const errors = entries.map((entry) => entry.row.error === undefined ? null : <ProviderErrorDetail key={`error-${entry.row.itemId}`} error={entry.row.error} />);
   if (gallery) {
     return <div data-item-id={first.row.itemId}>{renderAssistantSegments(segments, { expandAll: true, standalone: true, ...displayOptions })}{errors}{plans}{changes}{retryTurn === undefined ? null : (
@@ -448,7 +497,7 @@ export const AssistantRunView = memo(AssistantRunViewInner, (previous, next) => 
   for (let index = 0; index < previous.entries.length; index += 1) {
     const left = previous.entries[index]!;
     const right = next.entries[index]!;
-    if (left.row !== right.row || left.fileChanges !== right.fileChanges || left.changesDefaultOpen !== right.changesDefaultOpen || left.turnId !== right.turnId || left.planLink !== right.planLink) return false;
+    if (left.row !== right.row || left.fileChanges !== right.fileChanges || left.changesDefaultOpen !== right.changesDefaultOpen || left.turnId !== right.turnId || left.planBind !== right.planBind || left.planLink !== right.planLink) return false;
   }
   return true;
 });
@@ -528,6 +577,7 @@ export const ConversationItemView = memo(function ConversationItemView({
   onReviewChanges,
   onInspectSubagent,
   liveAgents,
+  planBind,
   planLink,
 }: {
   row: TimelineRow;
@@ -545,6 +595,7 @@ export const ConversationItemView = memo(function ConversationItemView({
   onReviewChanges?: () => void;
   onInspectSubagent?: (target: SubagentHubTarget) => void;
   liveAgents?: readonly StudioAgentSnapshot[];
+  planBind?: RowPlanBind;
   planLink?: PlanCreatedLink;
 }) {
   const { settings: appSettings } = useAppSettings();
@@ -621,11 +672,12 @@ export const ConversationItemView = memo(function ConversationItemView({
         {...(onReviewChanges === undefined ? {} : { onReview: onReviewChanges })}
       />
     );
-    const createdPlan = planLink === undefined ? null : (
+    const fallbackPlan = planBind?.fallback ?? planLink;
+    const createdPlan = fallbackPlan === undefined ? null : (
       <PlanCreatedCard
-        title={planLink.title ?? "Plan"}
-        onOpen={planLink.onOpen}
-        {...(planLink.demo === true || demo === true ? { demo: true } : {})}
+        title={fallbackPlan.title ?? "Plan"}
+        onOpen={fallbackPlan.onOpen}
+        {...(fallbackPlan.demo === true || demo === true ? { demo: true } : {})}
       />
     );
     const gallery = expandAll && !hasAssistantText(row.segments);
@@ -636,6 +688,8 @@ export const ConversationItemView = memo(function ConversationItemView({
       showStreaming: appSettings.streaming,
       ...(onInspectSubagent === undefined ? {} : { onInspectSubagent }),
       ...(liveAgents === undefined ? {} : { liveAgents }),
+      ...(planBind?.byToolCallId === undefined ? {} : { inlinePlans: planBind.byToolCallId }),
+      ...(demo === true ? { demo: true } : {}),
     } as const;
     if (gallery) {
       return (
@@ -648,7 +702,7 @@ export const ConversationItemView = memo(function ConversationItemView({
       );
     }
     const process = row.presentation === "process";
-    if (process && row.segments.length === 0 && row.error === undefined && (fileChanges === undefined || fileChanges.length === 0) && planLink === undefined) {
+    if (process && row.segments.length === 0 && row.error === undefined && (fileChanges === undefined || fileChanges.length === 0) && fallbackPlan === undefined) {
       return null;
     }
     // 每来一个 assistant item，同一轮里上一行就从 reply 降级成 process，身份头随之

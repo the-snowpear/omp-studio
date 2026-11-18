@@ -91,6 +91,7 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
   const zh = resolvedLanguage === "zh";
   const zhRef = useRef(zh);
   zhRef.current = zh;
+  const prevZhRef = useRef(zh);
   const { marks } = usePreviewMode();
   const [question, setQuestion] = useState("");
   const [composerDraft, setComposerDraft] = useState<ComposerSnapshot>(emptySnapshot);
@@ -132,7 +133,7 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
   const seenRoundRef = useRef<string | null>(null);
   const expectedRoundRef = useRef<string | null>(null);
   const refreshHistory = useCallback(async (activate = true) => {
-    if (input.preview) { setTopics(rows => rows.length ? rows : getPreviewBtwTopics(zh)); return; }
+    if (input.preview) { setTopics(rows => rows.length ? rows : getPreviewBtwTopics(zhRef.current)); return; }
     if (!input.client || !historyAvailable) return;
     if (!activate && input.targetActive === false) return;
     const generation = selectionGeneration.current;
@@ -142,7 +143,7 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
       const result = await invokeUpgrade(input.client, "btw.history.list", {});
       if (generation === selectionGeneration.current && (!input.sessionId || result.sessionId === input.sessionId)) setTopics(result.topics);
     } catch (cause) { if (generation === selectionGeneration.current) setError(hostErrorMessage(cause, tRef.current("runtimeUpgrade.btwHistoryUnavailable"))); }
-  }, [input.client, input.preview, input.sessionId, input.targetActive, input.prepareTarget, historyAvailable, zh]);
+  }, [input.client, input.preview, input.sessionId, input.targetActive, input.prepareTarget, historyAvailable]);
   const selectTopic = useCallback(async (topicId: string) => {
     const generation = ++selectionGeneration.current;
     setSelectedTopicId(topicId); setNewTopicDraft(false); setDraft(""); setTurns([]); setHistorySnapshot(null); setHistoryLoading(true); setQuestionImages([]); setError(undefined);
@@ -171,9 +172,78 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
     setStartedAt(null); setBranchedId(null); setError(undefined); setNotice(undefined);
   }, []);
   useEffect(() => {
-    newTopic(); setTopics([]); setInjectionStates({}); setBranchToken(null); setTokenEphemeralId(null); setDemoSnapshot(undefined); demoHistory.current = createBtwPreviewHistory(zh); setNewTopicDraft(false); void refreshHistory(false);
+    newTopic(); setTopics([]); setInjectionStates({}); setBranchToken(null); setTokenEphemeralId(null); setDemoSnapshot(undefined); demoHistory.current = createBtwPreviewHistory(zhRef.current); setNewTopicDraft(false); void refreshHistory(false);
     return () => { selectionGeneration.current++; };
-  }, [input.client, input.sessionId, input.preview, zh]);
+  }, [input.client, input.sessionId, input.preview]);
+  useEffect(() => {
+    if (prevZhRef.current === zh) return;
+    const oldZh = prevZhRef.current;
+    prevZhRef.current = zh;
+    if (!input.preview) return;
+    const prevTopicsById = new Map(getPreviewBtwTopics(oldZh).map(item => [item.topicId, item]));
+    const nextTopicsById = new Map(getPreviewBtwTopics(zh).map(item => [item.topicId, item]));
+    const prevHist = createBtwPreviewHistory(oldZh);
+    const nextHist = createBtwPreviewHistory(zh);
+    const prevDefaultAnswer = getPreviewBtwTurns(oldZh)[1]?.answer;
+    const nextDefaultAnswer = getPreviewBtwTurns(zh)[1]?.answer;
+    for (const [topicId, rows] of demoHistory.current.entries()) {
+      const prevRows = prevHist.get(topicId);
+      const nextRows = nextHist.get(topicId);
+      demoHistory.current.set(topicId, rows.map((row, index) => {
+        const prevTurn = prevRows?.[index];
+        const nextTurn = nextRows?.[index];
+        if (prevTurn && nextTurn && row.question === prevTurn.question && row.answer === prevTurn.answer) {
+          return {
+            ...row,
+            question: nextTurn.question,
+            answer: nextTurn.answer,
+            ...(nextTurn.injection ? {
+              injection: {
+                ...nextTurn.injection,
+                state: row.injection?.state ?? nextTurn.injection.state,
+              },
+            } : {}),
+          };
+        }
+        if (prevDefaultAnswer && nextDefaultAnswer && row.answer === prevDefaultAnswer) {
+          return { ...row, answer: nextDefaultAnswer };
+        }
+        return row;
+      }));
+    }
+    setTopics(current => current.length === 0
+      ? getPreviewBtwTopics(zh)
+      : current.map(topic => {
+          const prevTopic = prevTopicsById.get(topic.topicId);
+          const nextTopic = nextTopicsById.get(topic.topicId);
+          return prevTopic && nextTopic && topic.question === prevTopic.question
+            ? { ...topic, question: nextTopic.question }
+            : topic;
+        }));
+    if (selectedTopicId) {
+      const updatedRows = demoHistory.current.get(selectedTopicId);
+      if (updatedRows) {
+        setTurns(updatedRows);
+        const last = updatedRows.at(-1);
+        if (last) {
+          setQuestion(prev => prev ? last.question : prev);
+          setHistorySnapshot(prev => prev?.ephemeralId === `history:${selectedTopicId}`
+            ? {
+                ...prev,
+                question: last.question,
+                text: last.answer,
+                ...(last.injection ? { injection: last.injection } : {}),
+              }
+            : prev);
+        }
+      }
+    }
+    setDemoSnapshot(prev => (
+      prev && prevDefaultAnswer && nextDefaultAnswer && prev.text === prevDefaultAnswer
+        ? { ...prev, text: nextDefaultAnswer }
+        : prev
+    ));
+  }, [input.preview, zh, selectedTopicId]);
   useEffect(() => { void refreshHistory(false); }, [refreshHistory, input.snapshot?.status]);
   useEffect(() => {
     setDemoSnapshot(undefined);

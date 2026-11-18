@@ -5,6 +5,7 @@ import { flushSync } from "react-dom";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { toolWindowMinimum, type DockStore } from "./store";
 import type { DockLayout, DockRect, DockTarget, PanelDefinition, PanelId } from "./types";
+import { isConversationPanelId } from "./types";
 import { WORKBENCH_PANELS } from "../panels/registry";
 import { beginPointerDrag } from "./pointerDrag";
 import { workbenchBounds } from "./workbenchGeometry";
@@ -243,7 +244,7 @@ export function beginDockDrag(event: ReactPointerEvent<HTMLElement>, store: Dock
     if (cardPlacement) { contentChanged = true; gesture.schedule(); }
   });
   // Reused content can be mounted but hidden before the preview borrows it.
-  for (const id of possiblePanels) contentObserver.observe(hosts.get(id).element, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["hidden"] });
+  for (const id of possiblePanels) if (!isConversationPanelId(id)) contentObserver.observe(hosts.get(id).element, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["hidden"] });
   let finished = false;
   let synchronous = true;
   let unsubscribe = () => {}, detach = () => {};

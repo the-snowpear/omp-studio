@@ -288,6 +288,7 @@ describe("desktop lifecycle", () => {
   test("without --omp-restarted, lock failure quits immediately without retrying", async () => {
     let lockAttempts = 0;
     let quitCalls = 0;
+    let lockAcquiredHook = 0;
     const deps: DesktopApplicationDeps = {
       hostFactory: { create: async () => ({} as any) },
       createWindow: async () => ({} as any),
@@ -295,6 +296,7 @@ describe("desktop lifecycle", () => {
         lockAttempts += 1;
         return false;
       },
+      onSingleInstanceAcquired: () => { lockAcquiredHook += 1; },
       onSecondInstance: () => {},
       onBeforeQuit: () => {},
       onAllWindowsClosed: () => {},
@@ -305,6 +307,8 @@ describe("desktop lifecycle", () => {
     await app.start();
     assert.equal(lockAttempts, 1);
     assert.equal(quitCalls, 1);
+    assert.equal(lockAcquiredHook, 0);
+    assert.equal(app.acquiredLock, false);
   });
 
   test("with --omp-restarted, lock failure retries and succeeds when lock is freed", async () => {

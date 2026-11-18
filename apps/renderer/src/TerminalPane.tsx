@@ -135,29 +135,31 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
                 </span>
               )}
             </div>
-            {executionTarget.id ? <p className="muted small">{zh ? "SSH 终端暂不支持本机录制；关闭标签会结束该终端。" : "Local recording is not supported on SSH terminals; closing this tab ends the session."}</p> : <TerminalRecordingControls key={active.id} api={api!} id={active.id} visible={visible} ended={active.status === "ended"} workspaceId={active.workspaceId} sessionId={active.sessionId} />}
+            {active.targetId ? <p className="muted small">{zh ? "SSH 终端暂不支持本机录制；关闭标签会结束该终端。" : "Local recording is not supported on SSH terminals; closing this tab ends the session."}</p> : api ? <TerminalRecordingControls key={active.id} api={api} id={active.id} visible={visible} ended={active.status === "ended"} workspaceId={active.workspaceId} sessionId={active.sessionId} /> : null}
             {error ? <p role="alert" className="muted small">{error}</p> : null}
             {notices[active.id] ? <p role="status" className="muted small">{notices[active.id]}</p> : null}
-            {controlMode[active.id] ? <div role="status" className="muted small">
+            {controlMode[active.id] && api ? <div role="status" className="muted small">
               <p>{t("terminal.tmux.controlNotice")}</p>
-              <button type="button" className="btn" onClick={() => void api!.write(active.id, "\n").catch(cause => setError(String(cause)))}>{t("terminal.tmux.exitControl")}</button>
+              <button type="button" className="btn" onClick={() => void api.write(active.id, "\n").catch(cause => setError(String(cause)))}>{t("terminal.tmux.exitControl")}</button>
             </div> : null}
             {(graphics[active.id]?.length || graphicsErrors[active.id]) ? <div style={{ maxHeight: 240, overflow: "auto" }} aria-label={zh ? "终端图片" : "Terminal images"}>
               {graphics[active.id]?.map((image, index) => <TerminalGraphicView key={index} image={image} />)}
               {graphicsErrors[active.id] ? <p role="status">{graphicsErrors[active.id]}</p> : null}
             </div> : null}
-            <div className="term-screens">
-              {sessions.map((session) => (
-                <XtermScreen
-                  key={session.id}
-                  session={session}
-                  api={api!}
-                  hosts={store.hosts}
-                  store={store}
-                  active={visible && session.id === active.id}
-                />
-              ))}
-            </div>
+            {api ? (
+              <div className="term-screens">
+                {sessions.map((session) => (
+                  <XtermScreen
+                    key={session.id}
+                    session={session}
+                    api={api}
+                    hosts={store.hosts}
+                    store={store}
+                    active={visible && session.id === active.id}
+                  />
+                ))}
+              </div>
+            ) : null}
           </>
         ) : (
           <div className="empty">
@@ -218,9 +220,9 @@ function XtermScreen({
       host = { term, fit };
     } else if (termParentMissing(host.term, node)) {
       node.appendChild(host.term.element ?? node);
+      // xterm's public open() updates its browser-window services after adoption.
+      host.term.open(node);
     }
-    // xterm's public open() updates its browser-window services after adoption.
-    host.term.open(node);
     // Register the host and hand over the backlog that arrived while it was
     // missing: the store writes it in order and credits Main per written batch
     // (it deliberately does not acknowledge queued-but-unwritten output).

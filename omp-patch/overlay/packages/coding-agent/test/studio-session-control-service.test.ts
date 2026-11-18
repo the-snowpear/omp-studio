@@ -33,7 +33,7 @@ class FakeSessionControlSession implements SessionControlSession {
 	newSessionCalls = 0;
 	newSessionResult = true;
 
-	prompt(text: string, options?: { images?: unknown[]; prependMessages?: unknown[] }): Promise<boolean> {
+	prompt(text: string, options?: Parameters<SessionControlSession["prompt"]>[1]): Promise<boolean> {
 		this.promptCalls.push(text);
 		this.promptOptions.push(options);
 		if (this.promptError !== undefined) return Promise.reject(this.promptError);
@@ -124,6 +124,32 @@ test("an input still preparing when fork starts cannot be admitted to the forked
 });
 
 describe("WP-021/022/023/024/025 SessionControlService", () => {
+	test("continue acknowledges the new run while the answer is still streaming", async () => {
+		const session = new FakeSessionControlSession();
+		const turn = Promise.withResolvers<boolean>();
+		session.prompt = (_text, options) => {
+			options?.onPromptStarted?.();
+			return turn.promise;
+		};
+		const service = new SessionControlService(session);
+		try {
+			const outcome = await Promise.race([
+				service.continueTurn({ interrupted: true }),
+				Bun.sleep(50).then(() => "still waiting for the answer"),
+			]);
+			expect(outcome).toEqual({ started: true, mode: "continue" });
+		} finally {
+			turn.resolve(true);
+		}
+	});
+
+	test("continue reports a preflight failure before a run starts", async () => {
+		const session = new FakeSessionControlSession();
+		session.promptError = new Error("No model selected");
+		const service = new SessionControlService(session);
+		await expect(service.continueTurn({ interrupted: true })).rejects.toThrow("No model selected");
+	});
+
 	test("queue.enqueue reuses followUp and reports the pending queue length", async () => {
 		const session = new FakeSessionControlSession();
 		const service = new SessionControlService(session);

@@ -34,7 +34,10 @@ export function FormCard({ session, title, summary, meta, demo, queue, disabled,
   }, [view.expanded, active]);
   useLayoutEffect(() => {
     if (!active || !view.focusField || view.collapsed) return;
-    root.current?.querySelector<HTMLElement>(`[data-form-field-id="${view.focusField}"] [data-form-control]:not([disabled])`)?.focus();
+    const escaped = typeof CSS !== "undefined" && typeof CSS.escape === "function"
+      ? CSS.escape(view.focusField)
+      : view.focusField.replace(/["\\]/g, "\\$&");
+    root.current?.querySelector<HTMLElement>(`[data-form-field-id="${escaped}"] [data-form-control]:not([disabled])`)?.focus();
   }, [view.focusVersion, view.collapsed, active]);
   useEffect(() => {
     if (!active || disabled) return;
@@ -59,7 +62,7 @@ export function FormCard({ session, title, summary, meta, demo, queue, disabled,
   };
   return <div ref={root} className="ask-card form-card" onKeyDownCapture={() => session.touch()} onPointerDownCapture={() => session.touch()} onKeyDown={event => {
     if (disabled || !active || event.nativeEvent.isComposing) return;
-    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); void session.cancel(); }
+    if (event.key === "Escape") { if (view.collapsed) return; event.preventDefault(); event.stopPropagation(); void session.cancel(); }
     else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); event.stopPropagation(); void session.submit(); }
   }}>
     <div className="ask-collapsed-bar form-compact" hidden={!view.collapsed}>

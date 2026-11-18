@@ -908,14 +908,14 @@
 .ev-body .md-table-wrap tbody tr:last-child td { border-bottom: none; }
 
 /* 代码块：语言标签 + 复制按钮 + 语法高亮 */
-.ev-body .md-code {
+:is(.ev-body, .tc-body) .md-code {
   margin: var(--sp-8) 0;
   border: 1px solid var(--border);
   border-radius: var(--r-6);
   background: var(--code-bg);
   overflow: hidden;
 }
-.ev-body .md-code-head {
+:is(.ev-body, .tc-body) .md-code-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -924,16 +924,16 @@
   border-bottom: 1px solid var(--border);
   background: var(--surface-2);
 }
-.ev-body .md-code-lang {
+:is(.ev-body, .tc-body) .md-code-lang {
   font-family: var(--font-mono);
   font-size: var(--fs-11);
   color: var(--text-faint);
   text-transform: lowercase;
 }
-.ev-body .md-code-hint, .ev-body .md-code-err { font-size: var(--fs-11); }
-.ev-body .md-code-hint { color: var(--text-faint); }
-.ev-body .md-code-err { color: var(--red); }
-.ev-body .md-code-copy {
+:is(.ev-body, .tc-body) .md-code-hint, :is(.ev-body, .tc-body) .md-code-err { font-size: var(--fs-11); }
+:is(.ev-body, .tc-body) .md-code-hint { color: var(--text-faint); }
+:is(.ev-body, .tc-body) .md-code-err { color: var(--red); }
+:is(.ev-body, .tc-body) .md-code-copy {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -947,8 +947,8 @@
   color: var(--text-faint);
   cursor: pointer;
 }
-.ev-body .md-code-copy:hover { background: var(--surface-hover); color: var(--text-2); }
-.ev-body .md-code-pre {
+:is(.ev-body, .tc-body) .md-code-copy:hover { background: var(--surface-hover); color: var(--text-2); }
+:is(.ev-body, .tc-body) .md-code-pre {
   margin: 0;
   padding: var(--sp-8) var(--sp-10);
   overflow: auto;
@@ -958,8 +958,8 @@
   color: var(--text);
   white-space: pre;
 }
-.ev-body .md-code-pre code,
-.ev-body .md-code-pre code.chip-code {
+:is(.ev-body, .tc-body) .md-code-pre code,
+:is(.ev-body, .tc-body) .md-code-pre code.chip-code {
   background: none;
   padding: 0;
   border-radius: 0;
@@ -968,19 +968,38 @@
   color: inherit;
 }
 
-/* highlight.js 令牌配色（跟随主题 token，浅/深色自适应） */
-.ev-body .hljs-comment, .ev-body .hljs-quote { color: var(--text-faint); font-style: italic; }
-.ev-body .hljs-keyword, .ev-body .hljs-selector-tag, .ev-body .hljs-literal, .ev-body .hljs-doctag,
-.ev-body .hljs-template-tag, .ev-body .hljs-tag, .ev-body .hljs-name { color: var(--purple); }
-.ev-body .hljs-string, .ev-body .hljs-regexp, .ev-body .hljs-addition { color: var(--green); }
-.ev-body .hljs-number, .ev-body .hljs-symbol, .ev-body .hljs-bullet, .ev-body .hljs-meta { color: var(--blue); }
-.ev-body .hljs-title, .ev-body .hljs-title.class_, .ev-body .hljs-title.function_, .ev-body .hljs-section { color: var(--purple); }
-.ev-body .hljs-attr, .ev-body .hljs-attribute, .ev-body .hljs-variable, .ev-body .hljs-template-variable,
-.ev-body .hljs-selector-attr, .ev-body .hljs-selector-class, .ev-body .hljs-selector-id,
-.ev-body .hljs-built_in, .ev-body .hljs-type { color: var(--red); }
-.ev-body .hljs-deletion { color: var(--red); }
-.ev-body .hljs-emphasis { font-style: italic; }
-.ev-body .hljs-strong { font-weight: var(--fw-semibold); }
+/* highlight.js 令牌配色（跟随主题 token，浅/深色自适应；正文与工具卡共用） */
+:is(.ev-body, .tc-body) .hljs-comment, :is(.ev-body, .tc-body) .hljs-quote { color: var(--text-faint); font-style: italic; }
+:is(.ev-body, .tc-body) .hljs-keyword, :is(.ev-body, .tc-body) .hljs-selector-tag, :is(.ev-body, .tc-body) .hljs-literal, :is(.ev-body, .tc-body) .hljs-doctag,
+:is(.ev-body, .tc-body) .hljs-template-tag, :is(.ev-body, .tc-body) .hljs-tag, :is(.ev-body, .tc-body) .hljs-name { color: var(--purple); }
+:is(.ev-body, .tc-body) .hljs-string, :is(.ev-body, .tc-body) .hljs-regexp, :is(.ev-body, .tc-body) .hljs-addition { color: var(--green); }
+:is(.ev-body, .tc-body) .hljs-number, :is(.ev-body, .tc-body) .hljs-symbol, :is(.ev-body, .tc-body) .hljs-bullet, :is(.ev-body, .tc-body) .hljs-meta { color: var(--blue); }
+:is(.ev-body, .tc-body) .hljs-title, :is(.ev-body, .tc-body) .hljs-title.class_, :is(.ev-body, .tc-body) .hljs-title.function_, :is(.ev-body, .tc-body) .hljs-section { color: var(--purple); }
+:is(.ev-body, .tc-body) .hljs-attr, :is(.ev-body, .tc-body) .hljs-attribute, :is(.ev-body, .tc-body) .hljs-variable, :is(.ev-body, .tc-body) .hljs-template-variable,
+:is(.ev-body, .tc-body) .hljs-selector-attr, :is(.ev-body, .tc-body) .hljs-selector-class, :is(.ev-body, .tc-body) .hljs-selector-id,
+:is(.ev-body, .tc-body) .hljs-built_in, :is(.ev-body, .tc-body) .hljs-type { color: var(--red); }
+:is(.ev-body, .tc-body) .hljs-deletion { color: var(--red); }
+:is(.ev-body, .tc-body) .hljs-emphasis { font-style: italic; }
+:is(.ev-body, .tc-body) .hljs-strong { font-weight: var(--fw-semibold); }
+
+.tc-body .codeblock .c-cmd .c-prompt { color: var(--text-faint); user-select: none; }
+.tc-body .codeblock .c-cmd .hljs-built_in { color: var(--blue); }
+.tc-body .codeblock .c-cmd .hljs-attr,
+.tc-body .codeblock .c-cmd .hljs-literal,
+.tc-body .codeblock .c-cmd .hljs-keyword { color: var(--purple); }
+.tc-body .codeblock .c-cmd .hljs-variable { color: var(--amber); }
+.tc-body .codeblock .c-cmd .hljs-string { color: var(--green); }
+.tc-body .codeblock .c-cmd .hljs-operator { color: var(--text-2); }
+.tc-body .codeblock .c-cmd .hljs-comment { color: var(--text-faint); }
+
+.json-tree > summary { cursor: pointer; color: var(--text-2); }
+.json-tree-children { padding-left: var(--sp-12); }
+.json-tree-leaf { white-space: pre-wrap; word-break: break-word; }
+.json-tree-key { color: var(--red); }
+.json-val-string { color: var(--green); }
+.json-val-number { color: var(--blue); }
+.json-val-boolean,
+.json-val-null { color: var(--purple); }
 
 /* Mermaid 框图 */
 .ev-body .mermaid-box {
@@ -1361,6 +1380,15 @@
 .tl-icon .icon { width: 12px; height: 12px; }
 .tl-name { flex: none; }
 .tl-sep { color: var(--text-faint); flex: none; }
+.tl-file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--glyph-faint);
+  margin-right: -2px;
+}
+.tl-file-icon .icon { width: 12px; height: 12px; }
 .tl-detail {
   min-width: 0;
   overflow: hidden;
@@ -1589,17 +1617,73 @@
   font-family: var(--font-mono);
   font-size: var(--fs-11);
 }
-.tt-file { padding: 5px var(--sp-10) 2px; color: var(--accent); font-weight: var(--fw-medium); }
+.tt-file {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: 5px var(--sp-10) 2px;
+  color: var(--accent);
+  font-weight: var(--fw-medium);
+  min-width: 0;
+}
+.tt-file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--glyph-faint);
+}
+.tt-file-icon .icon { width: 12px; height: 12px; }
+.tt-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-file-meta { flex: none; color: var(--text-3); font-weight: var(--fw-regular); }
 .tt-hit {
   display: flex;
   gap: var(--sp-8);
   padding: 1px var(--sp-10) 3px 22px;
   color: var(--text-2);
 }
-.tt-hit.del { color: var(--red); }
-.tt-hit.add { color: var(--green); }
+.tt-hit.del { background: var(--diff-del-bg); }
+.tt-hit.add { background: var(--diff-add-bg); }
+.tt-hit .m-mark { flex: none; user-select: none; font-weight: var(--fw-medium); }
+.tt-hit.del .m-mark { color: var(--git-deleted); }
+.tt-hit.add .m-mark { color: var(--git-added); }
 .tt-hit .m-line { color: var(--text-faint); min-width: 24px; text-align: right; font-variant-numeric: tabular-nums; }
 .tt-hit .m-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tc-edit-multi .tc-diff { border-left: none; border-right: none; border-bottom: none; border-radius: 0; }
+.tc-edit-file + .tc-edit-file { border-top: 1px solid var(--border); }
+.tc-find-hit {
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  background: var(--code-bg);
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+.tc-find-sum {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: 5px var(--sp-10);
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: var(--fw-medium);
+  list-style: none;
+}
+.tc-find-sum::-webkit-details-marker { display: none; }
+.tc-find-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-find-score { margin-left: auto; flex: none; color: var(--text-faint); font-weight: var(--fw-regular); }
+.tc-find-snippet {
+  margin: 0;
+  padding: var(--sp-6) var(--sp-10);
+  border-top: 1px solid var(--border);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  line-height: 1.6;
+  color: var(--text-2);
+  white-space: pre;
+}
+.tc-find-snippet .m-line { margin-right: var(--sp-8); color: var(--text-faint); user-select: none; }
 .tc-task { display: flex; flex-direction: column; gap: var(--sp-10); }
 .task-h { font-size: var(--fs-12); font-weight: var(--fw-semibold); color: var(--text); margin-bottom: 4px; }
 .task-p { font-size: var(--fs-12); line-height: 1.55; color: var(--text-2); }
@@ -1749,7 +1833,7 @@
 }
 .tc-lsp { border: 1px solid var(--border); border-radius: var(--r-6); overflow: hidden; }
 .lsp-row {
-  display: flex; align-items: baseline; gap: var(--sp-8);
+  display: flex; align-items: center; gap: var(--sp-8);
   padding: 4px var(--sp-10);
   font-family: var(--font-mono); font-size: var(--fs-11);
 }
@@ -2294,12 +2378,26 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   flex: none;
 }
 .al-detail {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}
+.al-file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--glyph-faint);
+}
+.al-file-icon .icon { width: 12px; height: 12px; position: relative; top: 1px; }
+.al-detail-text {
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-size: var(--fs-11);
-  color: var(--text-3);
 }
 .al-elapsed {
   flex: none;
@@ -2419,7 +2517,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
     0 3px 12px rgba(15, 17, 26, 0.08);
 }
 .task-dock.open.both .task-dock-shell { width: 100%; }
-.task-dock.open.single .task-dock-shell { width: 50%; }
+.task-dock.open.single .task-dock-shell { width: min(100%, max(50%, 440px)); }
 .task-dock-collapse {
   display: grid;
   grid-template-rows: 0fr;
@@ -2458,23 +2556,26 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
     border-color var(--dur-slow) var(--ease-out);
   border-top: 1px solid transparent;
 }
+.task-dock-bar > * {
+  grid-area: 1 / 1;
+}
 .task-dock.open .task-dock-bar {
   height: 34px;
   min-height: 34px;
   border-top-color: var(--border);
 }
-.task-dock.open .task-dock-bar.has-review {
-  grid-template-columns: minmax(0, 1fr) auto;
-}
 .task-dock-review {
   justify-self: end;
   align-self: center;
   margin: 0 8px 0 0;
+  z-index: var(--z-base);
+  animation: var(--motion-fade);
+  animation-delay: var(--stagger);
 }
 .task-dock-pill {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: safe center;
   gap: 8px;
   width: 100%;
   min-height: var(--tap-min);
@@ -3225,6 +3326,10 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   font-weight: var(--fw-semibold);
   color: var(--text);
 }
+.plan-review-dialog-ic {
+  flex: none;
+  color: var(--accent);
+}
 .plan-review-dialog-title {
   flex: 1;
   min-width: 0;
@@ -3242,8 +3347,42 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--sp-16) var(--sp-20);
+  padding: var(--sp-20) var(--sp-24);
 }
+.plan-review-dialog-body .ev-body {
+  font-size: var(--fs-14);
+  line-height: 1.75;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.plan-view-doc {
+  max-width: 880px;
+  margin: 0 auto;
+}
+.plan-view-doc .ev-body h1 {
+  font-size: var(--fs-18);
+  font-weight: var(--fw-semibold);
+  line-height: 1.4;
+  margin: 0 0 var(--sp-12);
+  padding-bottom: var(--sp-10);
+  border-bottom: 1px solid var(--border);
+}
+.plan-view-doc .ev-body h2 {
+  font-size: var(--fs-16);
+  font-weight: var(--fw-semibold);
+  line-height: 1.45;
+  margin: var(--sp-20) 0 var(--sp-8);
+  padding-bottom: var(--sp-6);
+  border-bottom: 1px solid var(--border);
+}
+.plan-view-doc .ev-body h2:first-child { margin-top: 0; }
+.plan-view-doc .ev-body h3 {
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+  line-height: 1.5;
+  margin: var(--sp-14) 0 var(--sp-6);
+}
+.plan-view-doc .ev-body h3:first-child { margin-top: 0; }
 .plan-annotate {
   display: flex;
   flex-direction: column;
@@ -3328,7 +3467,10 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   resize: vertical;
   font-size: var(--fs-13);
 }
-.plan-review-dialog .dk-actions { flex: none; }
+.plan-review-dialog .dk-actions {
+  flex: none;
+  padding: var(--sp-10) var(--sp-20);
+}
 /* Deck 激活时被覆盖的 composer：变暗并禁止交互（参照 ver1） */
 .composer-region:has(.deck.active) .composer {
   opacity: 0.35;
@@ -5879,21 +6021,21 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
    只染图标、不染文件名：这里 +/− 与 diff 才是主角，整行转色会和「删除」混淆；
    敏感文件靠 data-secret 抢同一档红，形状（key / shield-key）仍独立可辨。
    tri 与系统高对比无需另写规则：--ftype-* 在根元素被覆盖，这里自动跟随。 */
-:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="code"] { --file-ink: var(--ftype-code); }
-:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="markup"] { --file-ink: var(--ftype-markup); }
-:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="style"] { --file-ink: var(--ftype-style); }
-:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="data"] { --file-ink: var(--ftype-data); }
-:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="doc"] { --file-ink: var(--ftype-doc); }
-:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="config"] { --file-ink: var(--ftype-config); }
-:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="script"] { --file-ink: var(--ftype-script); }
-:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="test"] { --file-ink: var(--ftype-test); }
-:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="package"] { --file-ink: var(--ftype-package); }
-:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="lock"] { --file-ink: var(--ftype-lock); }
-:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="image"] { --file-ink: var(--ftype-image); }
-:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-ftype="secret"] { --file-ink: var(--ftype-secret); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line, .tl-row, .tt-file, .lsp-row, .tc-find-sum, .al-detail)[data-ftype="code"] { --file-ink: var(--ftype-code); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line, .tl-row, .tt-file, .lsp-row, .tc-find-sum, .al-detail)[data-ftype="markup"] { --file-ink: var(--ftype-markup); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line, .tl-row, .tt-file, .lsp-row, .tc-find-sum, .al-detail)[data-ftype="style"] { --file-ink: var(--ftype-style); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line, .tl-row, .tt-file, .lsp-row, .tc-find-sum, .al-detail)[data-ftype="data"] { --file-ink: var(--ftype-data); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line, .tl-row, .tt-file, .lsp-row, .tc-find-sum, .al-detail)[data-ftype="doc"] { --file-ink: var(--ftype-doc); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line, .tl-row, .tt-file, .lsp-row, .tc-find-sum, .al-detail)[data-ftype="config"] { --file-ink: var(--ftype-config); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line, .tl-row, .tt-file, .lsp-row, .tc-find-sum, .al-detail)[data-ftype="script"] { --file-ink: var(--ftype-script); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line, .tl-row, .tt-file, .lsp-row, .tc-find-sum, .al-detail)[data-ftype="test"] { --file-ink: var(--ftype-test); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line, .tl-row, .tt-file, .lsp-row, .tc-find-sum, .al-detail)[data-ftype="package"] { --file-ink: var(--ftype-package); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line, .tl-row, .tt-file, .lsp-row, .tc-find-sum, .al-detail)[data-ftype="lock"] { --file-ink: var(--ftype-lock); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line, .tl-row, .tt-file, .lsp-row, .tc-find-sum, .al-detail)[data-ftype="image"] { --file-ink: var(--ftype-image); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line, .tl-row, .tt-file, .lsp-row, .tc-find-sum, .al-detail)[data-ftype="secret"] { --file-ink: var(--ftype-secret); }
 /* 敏感文件优先于类型色：.npmrc 这类即便归到别的类，图标也必须红。 */
-:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line)[data-secret] { --file-ink: var(--ftype-secret); }
-:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line):is([data-ftype], [data-secret]) :is(.ch-row-icon, .turn-diff-icon, .task-dock-file-icon) {
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line, .tl-row, .tt-file, .lsp-row, .tc-find-sum, .al-detail)[data-secret] { --file-ink: var(--ftype-secret); }
+:where(.ch-item, .ch-browser-row, .ch-browser-detail, .git-commit-file, .turn-diff-row, .task-dock-file, .git-change-line, .tl-row, .tt-file, .lsp-row, .tc-find-sum, .al-detail):is([data-ftype], [data-secret]) :is(.ch-row-icon, .turn-diff-icon, .task-dock-file-icon, .tl-file-icon, .tt-file-icon, .al-file-icon) {
   color: var(--file-ink);
 }
 .ch-file-meta {
@@ -7052,6 +7194,16 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   border-left: 0;
   border-top: 1px solid var(--border);
 }
+.convo-wrap[data-reading-column][data-reading-narrow] > .composer-region > .task-dock.open .task-dock-bar.has-review {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.convo-wrap[data-reading-column][data-reading-narrow] > .composer-region > .task-dock.open .task-dock-bar.has-review > * {
+  grid-area: auto;
+}
+.convo-wrap[data-reading-column][data-reading-narrow] > .composer-region > .task-dock.open .task-dock-bar.has-review .task-dock-pill {
+  min-width: 0;
+  overflow: hidden;
+}
 .convo-wrap[data-reading-column][data-reading-narrow] > .composer-region > .deck .dk-head-end {
   max-width: 100%;
   flex-wrap: wrap;
@@ -7077,3 +7229,162 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .convo-wrap[data-reading-column][data-reading-narrow].is-empty > .convo-scroll .ce-heat-days { display: none; }
 .convo-wrap[data-reading-column][data-reading-narrow].is-empty > .convo-scroll :is(.ce-heat-months, .ce-heat-cells, .ce-heat-legend) { grid-column: 1; }
 .convo-wrap[data-reading-column][data-reading-narrow].is-empty > .convo-scroll .ce-meta-proj { display: none; }
+
+/* 矮视口输入区自适应（useReadingColumn 实测 .convo-wrap 高度写入 data-reading-short，
+   覆盖矮桌面窗、底部终端展开与多窗分屏；同样避免 @container 破坏 fixed 弹层包含块）：
+   - compact (<= 580px)：收掉空 .composer-ctx 与默认双行空白，单行起高、按视口比例限高、缩紧工具栏与缩略图；
+   - tight (<= 380px)：进一步收紧内边距、行数上限与按钮盒高，同时保留 24px 触控下限。 */
+.convo-wrap[data-reading-column][data-reading-short] {
+  --composer-overlap: calc(var(--composer-queues-height, 0px) + var(--sp-6));
+}
+.convo-wrap[data-reading-column][data-reading-short]:not(.is-empty) > .convo-scroll {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--sp-20)), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--sp-20)), transparent);
+}
+.convo-wrap[data-reading-column][data-reading-short]:not(.is-empty) > .convo-scroll > .convo-doc {
+  padding-bottom: calc(var(--sp-20) + var(--composer-overlap));
+}
+.convo-wrap[data-reading-column][data-reading-short] > .composer-region {
+  padding-block: var(--sp-6);
+}
+.convo-wrap[data-reading-column][data-reading-short] > .composer-region > .task-dock {
+  --task-dock-rows: 4;
+  bottom: 100%;
+}
+.convo-wrap[data-reading-column][data-reading-short] > .composer-region > .deck {
+  bottom: var(--sp-6);
+  border-radius: var(--r-8);
+}
+.convo-wrap[data-reading-column][data-reading-short] > .composer-region > .ctx-strip {
+  padding-block: var(--sp-4);
+}
+.convo-wrap[data-reading-column][data-reading-short] > .composer-region > .composer-queues .composer-tray:has(> .queue-strip) {
+  margin-bottom: var(--sp-6);
+  max-height: min(24vh, 132px);
+}
+.convo-wrap[data-reading-column][data-reading-short] > .composer-region > .composer {
+  border-radius: var(--r-8);
+}
+.convo-wrap[data-reading-column][data-reading-short] > .composer-region > .composer > .composer-ctx:empty {
+  display: none;
+}
+.convo-wrap[data-reading-column][data-reading-short] > .composer-region > .composer > .composer-ctx {
+  padding: var(--sp-4) var(--sp-12) 0;
+}
+.convo-wrap[data-reading-column][data-reading-short] > .composer-region > .composer .cm-thumbs {
+  padding: 6px var(--sp-12) var(--sp-2);
+  max-height: 60px;
+}
+.convo-wrap[data-reading-column][data-reading-short] > .composer-region > .composer .cm-thumb,
+.convo-wrap[data-reading-column][data-reading-short] > .composer-region > .composer .cm-thumb img {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--r-6);
+}
+.convo-wrap[data-reading-column][data-reading-short] > .composer-region > .composer .chip-composer-editor {
+  min-height: 28px;
+  max-height: clamp(68px, calc(var(--reading-height, 480px) * 0.24), 108px);
+  padding: var(--sp-6) var(--sp-12) var(--sp-2);
+}
+.convo-wrap[data-reading-column][data-reading-short] > .composer-region > .composer .chip-composer-editor[data-empty="true"]:before {
+  left: var(--sp-12);
+  right: var(--sp-12);
+  top: var(--sp-6);
+}
+.convo-wrap[data-reading-column][data-reading-short] > .composer-region > .composer.running.compact .chip-composer.is-compact .chip-composer-editor {
+  min-height: 24px;
+  max-height: 24px;
+  padding-top: var(--sp-4);
+  padding-bottom: 0;
+  overflow: hidden;
+}
+.convo-wrap[data-reading-column][data-reading-short] > .composer-region > .composer.running.compact .chip-composer.is-compact .chip-composer-editor[data-empty="true"]:before {
+  top: var(--sp-4);
+}
+.convo-wrap[data-reading-column][data-reading-short] > .composer-region > .composer .cm-prediction-error {
+  padding: var(--sp-2) var(--sp-12);
+}
+.convo-wrap[data-reading-column][data-reading-short] > .composer-region > .composer :is(.composer-error, .composer-hint) {
+  margin: 0 var(--sp-12) var(--sp-2);
+}
+.convo-wrap[data-reading-column][data-reading-short] > .composer-region > .composer .composer-bar {
+  padding-block: var(--sp-2) var(--sp-4);
+}
+.convo-wrap[data-reading-column][data-reading-short] > .composer-region > .composer .send-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-6);
+}
+
+.convo-wrap[data-reading-column][data-reading-short="tight"] {
+  --composer-overlap: calc(var(--composer-queues-height, 0px) + var(--sp-4));
+}
+.convo-wrap[data-reading-column][data-reading-short="tight"]:not(.is-empty) > .convo-scroll {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--sp-16)), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--sp-16)), transparent);
+}
+.convo-wrap[data-reading-column][data-reading-short="tight"]:not(.is-empty) > .convo-scroll > .convo-doc {
+  padding-bottom: calc(var(--sp-12) + var(--composer-overlap));
+}
+.convo-wrap[data-reading-column][data-reading-short="tight"] > .composer-region {
+  padding-block: var(--sp-4);
+}
+.convo-wrap[data-reading-column][data-reading-short="tight"] > .composer-region > .task-dock {
+  --task-dock-rows: 3;
+}
+.convo-wrap[data-reading-column][data-reading-short="tight"] > .composer-region > .deck {
+  bottom: var(--sp-4);
+}
+.convo-wrap[data-reading-column][data-reading-short="tight"] > .composer-region > .ctx-strip {
+  padding-block: var(--sp-2);
+}
+.convo-wrap[data-reading-column][data-reading-short="tight"] > .composer-region > .composer-queues .composer-tray:has(> .queue-strip) {
+  margin-bottom: var(--sp-4);
+  max-height: min(22vh, 92px);
+}
+.convo-wrap[data-reading-column][data-reading-short="tight"] > .composer-region > .composer > .composer-ctx {
+  padding: var(--sp-2) var(--sp-10) 0;
+}
+.convo-wrap[data-reading-column][data-reading-short="tight"] > .composer-region > .composer .cm-thumbs {
+  padding: 6px var(--sp-10) var(--sp-2);
+  max-height: 48px;
+}
+.convo-wrap[data-reading-column][data-reading-short="tight"] > .composer-region > .composer .cm-thumb,
+.convo-wrap[data-reading-column][data-reading-short="tight"] > .composer-region > .composer .cm-thumb img {
+  width: 38px;
+  height: 38px;
+}
+.convo-wrap[data-reading-column][data-reading-short="tight"] > .composer-region > .composer .chip-composer-editor {
+  min-height: 24px;
+  max-height: clamp(48px, calc(var(--reading-height, 320px) * 0.22), 76px);
+  padding: var(--sp-4) var(--sp-10) 0;
+}
+.convo-wrap[data-reading-column][data-reading-short="tight"] > .composer-region > .composer .chip-composer-editor[data-empty="true"]:before {
+  left: var(--sp-10);
+  right: var(--sp-10);
+  top: var(--sp-4);
+}
+.convo-wrap[data-reading-column][data-reading-short="tight"] > .composer-region > .composer.running.compact .chip-composer.is-compact .chip-composer-editor {
+  min-height: 22px;
+  max-height: 22px;
+  padding-top: var(--sp-2);
+}
+.convo-wrap[data-reading-column][data-reading-short="tight"] > .composer-region > .composer.running.compact .chip-composer.is-compact .chip-composer-editor[data-empty="true"]:before {
+  top: var(--sp-2);
+}
+.convo-wrap[data-reading-column][data-reading-short="tight"] > .composer-region > .composer .cm-prediction-error {
+  padding: var(--sp-2) var(--sp-10);
+}
+.convo-wrap[data-reading-column][data-reading-short="tight"] > .composer-region > .composer :is(.composer-error, .composer-hint) {
+  margin: 0 var(--sp-10) var(--sp-2);
+}
+.convo-wrap[data-reading-column][data-reading-short="tight"] > .composer-region > .composer .composer-bar {
+  padding-block: 1px 3px;
+}
+.convo-wrap[data-reading-column][data-reading-short="tight"]:not([data-reading-narrow]) > .composer-region > .composer .composer-bar {
+  padding-inline: var(--sp-6);
+}
+.convo-wrap[data-reading-column][data-reading-short="tight"] > .composer-region > .composer .send-btn {
+  width: 24px;
+  height: 24px;
+}

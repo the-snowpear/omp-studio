@@ -143,6 +143,7 @@ export class SessionArchiveIndex {
   paths: readonly string[] | undefined;
   sessions = new Map<string, string[]>();
   versions = new Map<string, string>();
+  headers = new Map<string, IndexedHeader>();
   building: Promise<void> | undefined;
 }
 
@@ -346,7 +347,7 @@ export class StudioSessionArchiveReader {
         endExclusive = boundaryIndex;
       }
     }
-    const start = Math.max(0, endExclusive - limit);
+    const start = selectArchivePageStart(items, endExclusive, limit);
     let pageItems = items.slice(start, endExclusive);
     let hasMoreBefore = start > 0;
     const cursorBase = {
@@ -411,8 +412,11 @@ export class StudioSessionArchiveReader {
     }
     const start = Math.max(0, end - 120);
     const page = branch.slice(start, end);
-    const parents = new Set(snapshot.entries.filter(entry => entry.type !== "active_leaf").map(entry => entry.parentId));
-    const leaves = snapshot.entries.filter(entry => entry.type !== "active_leaf" && !parents.has(entry.id));
+    const branchEntries = snapshot.entries.filter(
+      entry => entry.type !== "active_leaf" && entry.type !== "model_usage" && archiveEntryLeafId(entry) === entry.id,
+    );
+    const parents = new Set(branchEntries.map(entry => entry.parentId));
+    const leaves = branchEntries.filter(entry => !parents.has(entry.id));
     if (snapshot.branchLeafId && !leaves.some(entry => entry.id === snapshot.branchLeafId)) {
       const active = snapshot.byId.get(snapshot.branchLeafId);
       if (active) leaves.push(active);
@@ -429,6 +433,7 @@ export class StudioSessionArchiveReader {
       if (!projected) return [];
       if (projected.kind === "compaction") return [{ ...base, kind: "compaction" as const, title: "Compaction", detail: projected.summary.slice(0, 500) }];
       if (projected.kind !== "message") return [{ ...base, kind: "system" as const, title: "Context reset", detail: "" }];
+      if (projected.content.length === 0) return [];
       const text = projected.content.filter(block => block.type === "text").map(block => block.text).join("\n").slice(0, 500);
       const calls = projected.content.filter(block => block.type === "toolCall").map(block => block.toolName).join(", ");
       const kind = projected.role === "user" ? "user" as const : projected.role === "assistant" ? "assistant" as const : "system" as const;
@@ -803,7 +808,7 @@ export class StudioSessionArchiveReader {
         snapshot: {
           sessionId: cached.snapshot.sessionId,
           transcriptRevision: revisionOf(hash, consumed.dev, consumed.ino, nextConsumed.bytes),
-          branchLeafId: resolveBranchLeaf(entries),
+          branchLeafId: resolveBranchLeaf(entries, byId),
           entries,
           byId,
         },
@@ -967,7 +972,7 @@ export class StudioSessionArchiveReader {
       snapshot: {
         sessionId: header.id,
         transcriptRevision: revisionOf(hash, identity.dev, identity.ino, complete.byteLength),
-        branchLeafId: resolveBranchLeaf(entries),
+        branchLeafId: resolveBranchLeaf(entries, byId),
         entries,
         byId,
       },
@@ -1035,18 +1040,44 @@ export class StudioSessionArchiveReader {
       if (!force && this.#index.paths !== undefined && samePaths(this.#index.paths, paths)) return;
     }
     const build = (async () => {
+      const byteLimit = Math.min(this.#maxSessionBytes, 64 * 1024);
+      const resolved = new Array<IndexedHeader | undefined>(paths.length);
+      let nextIndex = 0;
+      await Promise.all(
+        Array.from({ length: Math.min(16, paths.length) }, async () => {
+          for (let index = nextIndex++; index < paths.length; index = nextIndex++) {
+            const candidate = paths[index]!;
+            if (!force) {
+              const previous = this.#index.headers.get(candidate);
+              if (previous !== undefined) {
+                const currentVersion = await readFileVersion(candidate, this.#maxSessionBytes);
+                if (currentVersion === undefined) continue;
+                if (currentVersion === previous.version) {
+                  resolved[index] = previous;
+                  continue;
+                }
+              }
+            }
+            resolved[index] = await readHeader(candidate, byteLimit, this.#maxSessionBytes);
+          }
+        }),
+      );
       const index = new Map<string, string[]>();
       const versions = new Map<string, FileVersion>();
-      for (const candidate of paths) {
-        const header = await readHeader(candidate, Math.min(this.#maxSessionBytes, 64 * 1024), this.#maxSessionBytes);
+      const headers = new Map<string, IndexedHeader>();
+      for (let i = 0; i < paths.length; i += 1) {
+        const header = resolved[i];
         if (header === undefined) continue;
+        const candidate = paths[i]!;
         const list = index.get(header.id);
         if (list === undefined) index.set(header.id, [candidate]);
         else list.push(candidate);
         versions.set(candidate, header.version);
+        headers.set(candidate, header);
       }
       this.#index.sessions = index;
       this.#index.versions = versions;
+      this.#index.headers = headers;
       this.#index.paths = paths.slice();
     })().finally(() => {
       this.#index.building = undefined;
@@ -1365,19 +1396,62 @@ function activeBranch(byId: ReadonlyMap<string, ArchiveEntry>, leafId: string | 
   return branch;
 }
 
-function resolveBranchLeaf(entries: readonly ArchiveEntry[]): string | null {
-  // Future/runtime-patched sessions can persist the active pointer explicitly.
-  // Older OMP sessions fall back to the same physical-tail rule used by the
-  // current SessionEntryIndex. Keeping this compatibility path is deliberate;
-  // durable active_leaf entries are required before the Broker claims strict
-  // crash-consistent branch selection.
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
+function isArchiveTurnBoundaryItem(item: ConversationItem): boolean {
+  return item.kind === "compaction" || item.kind === "resetBoundary" || item.role === "user";
+}
+
+function selectArchivePageStart(items: readonly ConversationItem[], endExclusive: number, limit: number): number {
+  const rawStart = Math.max(0, endExclusive - limit);
+  if (rawStart === 0 || rawStart >= endExclusive || isArchiveTurnBoundaryItem(items[rawStart]!)) return rawStart;
+  const maxCount = limit >= CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT ? CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MAX : limit;
+  const minStart = Math.max(0, endExclusive - maxCount);
+  for (let index = rawStart - 1; index >= minStart; index -= 1) {
+    if (isArchiveTurnBoundaryItem(items[index]!)) return index;
+  }
+  for (let index = rawStart + 1; index < endExclusive; index += 1) {
+    if (isArchiveTurnBoundaryItem(items[index]!)) return index;
+  }
+  return rawStart;
+}
+
+function archiveEntryLeafId(entry: ArchiveEntry): string | null {
+  if (entry.activeLeafId === null) return null;
+  if (typeof entry.activeLeafId === "string") return entry.activeLeafId;
+  return entry.id;
+}
+
+function resolveBranchLeaf(
+  entries: readonly ArchiveEntry[],
+  byId?: ReadonlyMap<string, ArchiveEntry>,
+): string | null {
+  // Replay active pointer updates and off-branch `activeLeafId` overrides in
+  // append order so session entries appended after an `active_leaf` marker
+  // advance the active branch normally.
+  const hasSessionEntry = byId
+    ? (id: string) => {
+        const found = byId.get(id);
+        return found !== undefined && found.type !== "active_leaf";
+      }
+    : (id: string) => entries.some((entry) => entry.type !== "active_leaf" && entry.id === id);
+  let leaf: string | null = null;
+  for (let index = 0; index < entries.length; index += 1) {
     const entry = entries[index]!;
-    if (entry.type === "active_leaf" && typeof entry.targetId === "string" && entry.targetId.length > 0) {
-      return entry.targetId;
+    if (entry.type === "active_leaf") {
+      if (entry.targetId === null) {
+        leaf = null;
+      } else if (typeof entry.targetId === "string" && entry.targetId.length > 0 && hasSessionEntry(entry.targetId)) {
+        leaf = entry.targetId;
+      }
+      continue;
+    }
+    const candidate = archiveEntryLeafId(entry);
+    if (candidate === null) {
+      leaf = null;
+    } else if (candidate === entry.id || hasSessionEntry(candidate)) {
+      leaf = candidate;
     }
   }
-  return entries.at(-1)?.id ?? null;
+  return leaf;
 }
 
 function unpairedToolCall(
@@ -1494,16 +1568,53 @@ async function foldBranch(state: ProjectionState, branch: readonly ArchiveEntry[
   }
 }
 
+function publicArchiveConversationRole(
+  role: unknown,
+  message: Record<string, unknown>,
+): Extract<ConversationItem, { kind: "message" }>["role"] | undefined {
+  if (
+    message.role === "custom" &&
+    message.customType === "studio-computer-continue" &&
+    message.attribution === "user" &&
+    message.display === true
+  ) {
+    return "user";
+  }
+  if (role === "user" || role === "assistant" || role === "system") return role;
+  if (
+    (role === "custom" || role === "hookMessage") &&
+    message.display === true &&
+    typeof message.customType === "string" &&
+    message.customType !== "advisor" &&
+    message.customType !== "async-result" &&
+    !message.customType.startsWith("irc:")
+  ) {
+    return "extension";
+  }
+  return undefined;
+}
+
 function projectEntry(entry: ArchiveEntry): ConversationItem | undefined {
   const createdAt = typeof entry.timestamp === "string" ? entry.timestamp : new Date(0).toISOString();
+  if (entry.type === "custom_message") {
+    const role = publicArchiveConversationRole("custom", { ...entry, role: "custom" });
+    if (role === undefined) return undefined;
+    return {
+      kind: "message",
+      itemId: entry.id,
+      parentId: entry.parentId,
+      createdAt,
+      role,
+      content: projectContent(entry.content, `extension:${entry.id}`),
+    };
+  }
   if (entry.type === "message") {
     const message = isRecord(entry.message) ? entry.message : {};
     if (message.role === "toolResult") {
       return undefined;
     }
     if (isHarnessInjectedUserMessage(message)) return undefined;
-    const role =
-      message.role === "user" ? "user" : message.role === "assistant" ? "assistant" : message.role === "system" ? "system" : undefined;
+    const role = publicArchiveConversationRole(message.role, message);
     if (role === undefined) return undefined;
     return {
       kind: "message",
@@ -1551,10 +1662,15 @@ function projectContent(value: unknown, fallbackPrefix: string): ConversationCon
       const toolName = sanitizeText(item.name, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS);
       const args = projectBoundedJson(item.arguments);
       const truncated = publicId.truncated || toolName.truncated || args.truncated;
+      const rawTarget = isRecord(item.arguments)
+        ? (typeof item.arguments.path === "string" ? item.arguments.path : item.arguments.file_path)
+        : undefined;
+      const isReplyWrite = toolName.text === "write" && typeof rawTarget === "string" && /^out:\/\//iu.test(rawTarget.trim());
       blocks.push({
         type: "toolCall",
         toolCallId: publicId.id.length > 0 ? publicId.id : `${fallbackPrefix}:${blocks.length}`,
         toolName: toolName.text.length > 0 ? toolName.text : "tool",
+        ...(isReplyWrite ? { presentation: "reply" } : {}),
         ...(args.value === undefined ? {} : { arguments: args.value }),
         ...(truncated ? { truncated: true } : {}),
       });

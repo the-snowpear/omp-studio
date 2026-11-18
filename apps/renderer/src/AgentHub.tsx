@@ -23,6 +23,7 @@ import { usePreviewMode } from "./preview/PreviewContext";
 import { hostErrorMessage, waitReceipt } from "./hostError";
 import { SubagentConversationPane } from "./conversation/SubagentConversationPane";
 import { tabPaneRole, useOverlappingTabs } from "./pageTransition";
+import { motionReduced } from "./motion";
 import { type HubTab } from "./pageIntents";
 import { clearHubIntent, loadPersisted, persist, readHubIntent } from "./agents/hub/navigation";
 import { type HubAgent, type HubJob, type HubStatus, type HubView, type Modal, type Notice } from "./agents/hub/types";
@@ -107,8 +108,11 @@ export function AgentHubPage({
   const [narrow, setNarrow] = useState(
     () => typeof window !== "undefined" && window.innerWidth <= 900,
   );
-  const [commandBusy, setCommandBusy] = useState(false);
-  const [draft, setDraft] = useState("");
+  const [busyCount, setBusyCount] = useState(0);
+  const busyCountRef = useRef(0);
+  const commandBusy = busyCount > 0;
+  const [draftsByAgent, setDraftsByAgent] = useState<Record<string, string>>({});
+  const [transcriptRefresh, setTranscriptRefresh] = useState(0);
   const [spawnTask, setSpawnTask] = useState("");
   const [spawnEffort, setSpawnEffort] = useState("");
   const [spawnModel, setSpawnModel] = useState("");
@@ -192,11 +196,6 @@ export function AgentHubPage({
   }, [sessionKey]);
 
   useEffect(() => {
-    const tick = window.setInterval(() => setNow(Date.now()), 5000);
-    return () => window.clearInterval(tick);
-  }, []);
-
-  useEffect(() => {
     const onResize = () => setNarrow(window.innerWidth <= 900);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
@@ -216,6 +215,38 @@ export function AgentHubPage({
   const connOnline = runtimeStatus === "connected" && !resyncRequired;
   const viewingLive =
     parentSessionId === undefined || snapshot?.sessionId === parentSessionId;
+  const liveClock = preview || (connOnline && viewingLive);
+  useEffect(() => {
+    if (!liveClock) return;
+    let timer: number | undefined;
+    const isVisible = () => !document.hidden && document.visibilityState !== "hidden";
+    const start = () => {
+      if (timer !== undefined || !isVisible()) return;
+      timer = window.setInterval(() => {
+        if (isVisible()) setNow(Date.now());
+      }, 5000);
+    };
+    const stop = () => {
+      if (timer !== undefined) {
+        window.clearInterval(timer);
+        timer = undefined;
+      }
+    };
+    const onVisibility = () => {
+      if (!isVisible()) {
+        stop();
+      } else {
+        setNow(Date.now());
+        start();
+      }
+    };
+    start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [liveClock]);
   const spawnAvailable =
     preview ||
     (viewingLive &&
@@ -228,14 +259,27 @@ export function AgentHubPage({
   useEffect(() => {
     spawnEpoch.current++;
     spawnLock.current = false;
-    const previewDefs = getPreviewAgentDefinitions(zh);
-    setSpawnDefinitions(preview ? previewDefs : null);
-    setSpawnDefinition(preview ? previewDefs[0]!.name : "");
+    if (preview) {
+      const previewDefs = getPreviewAgentDefinitions(zhRef.current);
+      setSpawnDefinitions(previewDefs);
+      setSpawnDefinition(previewDefs[0]?.name ?? "");
+    } else {
+      setSpawnDefinitions(null);
+      setSpawnDefinition("");
+    }
     setSpawnEffort("");
     return () => {
       spawnEpoch.current++;
     };
-  }, [client, preview, parentSessionId, snapshot?.sessionId, zh]);
+  }, [client, preview, parentSessionId, snapshot?.sessionId]);
+  useEffect(() => {
+    if (!preview) return;
+    const previewDefs = getPreviewAgentDefinitions(zh);
+    setSpawnDefinitions(previewDefs);
+    setSpawnDefinition((current) =>
+      previewDefs.some((item) => item.name === current) ? current : (previewDefs[0]?.name ?? ""),
+    );
+  }, [preview, zh]);
   useEffect(() => {
     let alive = true;
     setSpawnOptions(undefined); setSpawnOptionsError(""); setSpawnModel(""); setSpawnEffort("");
@@ -378,6 +422,7 @@ export function AgentHubPage({
     preview,
     viewingLive,
     zh,
+    marks,
   );
   const killTarget =
     modal?.kind === "kill"
@@ -391,6 +436,7 @@ export function AgentHubPage({
     preview,
     viewingLive,
     zh,
+    marks,
   );
 
   const runCommand = useCallback(
@@ -401,7 +447,7 @@ export function AgentHubPage({
     ): Promise<boolean> => {
       const c = contractFor(zhRef.current);
       if (preview) {
-        setNotice({ kind: "warn", text: c.previewWrite });
+        if (marks) setNotice({ kind: "warn", text: c.previewWrite });
         return false;
       }
       if (!viewingLive) {
@@ -412,7 +458,8 @@ export function AgentHubPage({
         setNotice({ kind: "warn", text: zhRef.current ? "无 Studio client（桌面桥未注入）" : "No Studio client (desktop bridge not injected)" });
         return false;
       }
-      setCommandBusy(true);
+      busyCountRef.current += 1;
+      setBusyCount(busyCountRef.current);
       try {
         const handle = await client.command(name, input);
         await waitReceipt(client, handle.requestId);
@@ -422,10 +469,11 @@ export function AgentHubPage({
         setNotice({ kind: "err", text: hostErrorMessage(error, zhRef.current ? "操作失败" : "Action failed") });
         return false;
       } finally {
-        setCommandBusy(false);
+        busyCountRef.current = Math.max(0, busyCountRef.current - 1);
+        setBusyCount(busyCountRef.current);
       }
     },
-    [client, preview, viewingLive],
+    [client, marks, preview, viewingLive],
   );
 
   const cancelJob = useCallback(
@@ -472,9 +520,15 @@ export function AgentHubPage({
     [runCommand],
   );
 
+  const draftSlot = useCallback(
+    (id: string) => `${sessionKey}:${id}`,
+    [sessionKey],
+  );
+
   const sendDraft = useCallback(
     (agent: HubAgent) => {
-      const text = draft.trim();
+      const slot = draftSlot(agent.id);
+      const text = (draftsByAgent[slot] ?? "").trim();
       if (!text) return;
       void runCommand(
         "agent.send",
@@ -486,10 +540,18 @@ export function AgentHubPage({
         },
         zhRef.current ? `消息已发送给 ${agent.name}` : `Message sent to ${agent.name}`,
       ).then((ok) => {
-        if (ok) setDraft("");
+        if (ok) {
+          setDraftsByAgent((prev) => {
+            if (!(slot in prev)) return prev;
+            const next = { ...prev };
+            delete next[slot];
+            return next;
+          });
+          setTranscriptRefresh((n) => n + 1);
+        }
       });
     },
-    [draft, runCommand],
+    [draftSlot, draftsByAgent, runCommand],
   );
 
   const select = useCallback(
@@ -506,7 +568,10 @@ export function AgentHubPage({
             `[data-hub-id="${hubSelectorId(id)}"]`,
           );
           if (row && typeof row.scrollIntoView === "function") {
-            row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+            row.scrollIntoView({
+              block: "nearest",
+              behavior: motionReduced() ? "instant" : "smooth",
+            });
           }
         });
       }
@@ -636,7 +701,7 @@ export function AgentHubPage({
     onOpen: (row: DeckAgent) => {
       const agent = mapped.roster.find((item) => item.id === row.id);
       if (!agent) return;
-      const rowCaps = capsFor(agent, connOnline, capabilities, client !== undefined, preview, viewingLive, zhRef.current);
+      const rowCaps = capsFor(agent, connOnline, capabilities, client !== undefined, preview, viewingLive, zhRef.current, marks);
       if (rowCaps.open) openChat(agent.id);
       else { select(agent.id); warn(rowCaps.openWhy ?? (zhRef.current ? "已结束" : "Ended")); }
     },
@@ -707,7 +772,7 @@ export function AgentHubPage({
     return () => {
       cancelled = true;
     };
-  }, [preview, viewingLive, tab, agentId, agentGeneration, client]);
+  }, [preview, viewingLive, tab, agentId, agentGeneration, client, transcriptRefresh]);
 
   const loadMoreTranscript = useCallback(() => {
     if (
@@ -787,7 +852,25 @@ export function AgentHubPage({
     };
   }, [modal, preview, viewingLive, client, spawnDefinitions]);
   useEffect(() => {
+    if (workspaceTab !== "agents" && !modal) return;
     const onKey = (event: KeyboardEvent) => {
+      const root = rootRef.current;
+      if (!root || !root.isConnected || root.closest("[hidden], [inert], [aria-hidden='true']")) return;
+      if (document.hidden || document.visibilityState === "hidden") return;
+      if (modal) {
+        if (
+          event.key === "Escape" &&
+          !event.defaultPrevented &&
+          !commandBusy &&
+          busyCountRef.current === 0 &&
+          !spawnLock.current
+        ) {
+          event.preventDefault();
+          setModal(null);
+        }
+        return;
+      }
+      if (workspaceTab !== "agents") return;
       const target = event.target as HTMLElement | null;
       const inField = Boolean(
         target?.closest(
@@ -803,6 +886,7 @@ export function AgentHubPage({
         }
         return;
       }
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
       // The deck moves through its own crew, views and cards; the Hub keeps the shortcuts that act on the pick.
       const deck = view === "deck";
       if (deck && event.key === "Enter" && target?.closest(".ad")) return;
@@ -849,6 +933,7 @@ export function AgentHubPage({
         case "r":
           if (selectedAgent) {
             event.preventDefault();
+            if (commandBusy || busyCountRef.current > 0) break;
             if (caps.revive) reviveAgent(selectedAgent);
             else warn(caps.reviveWhy ?? contractFor(zhRef.current).revive);
           }
@@ -856,6 +941,7 @@ export function AgentHubPage({
         case "x":
           if (selectedAgent) {
             event.preventDefault();
+            if (commandBusy || busyCountRef.current > 0) break;
             if (caps.kill)
               setModal({ kind: "kill", agentId: selectedAgent.id });
             else warn(caps.killWhy ?? contractFor(zhRef.current).kill);
@@ -879,14 +965,17 @@ export function AgentHubPage({
     caps.revive,
     caps.reviveWhy,
     chatOpen,
+    commandBusy,
     drawerOpen,
     filtered,
+    modal,
     openChat,
     reviveAgent,
     select,
     selected,
     selectedAgent,
     view,
+    workspaceTab,
   ]);
 
   const counts = useMemo(() => {
@@ -986,6 +1075,7 @@ export function AgentHubPage({
               key={group.head.id}
               head={group.head}
               kids={group.kids}
+              nodes={group.nodes}
               selected={selected}
               now={now}
               onSelect={select}
@@ -1091,15 +1181,19 @@ export function AgentHubPage({
                 icon="message"
                 detail={
                   agent.hasTranscript
-                    ? (zh ? "预览模式不读取真实 transcript" : "Preview mode does not read real transcripts")
-                    : "No messages yet."
+                    ? marks
+                      ? (zh ? "预览模式不读取真实 transcript" : "Preview mode does not read real transcripts")
+                      : (zh ? "点击「打开对话」查看完整对话记录。" : "Click Open conversation to view the full transcript.")
+                    : (zh ? "暂无消息。" : "No messages yet.")
                 }
               />
             </div>
-            <div className="hub-ro-banner">
-              <Icon name="lock" extra="sm" />
-              <span>{zh ? "预览模式不调用 Host 写操作" : "Preview mode does not invoke Host write operations"}</span>
-            </div>
+            {marks ? (
+              <div className="hub-ro-banner">
+                <Icon name="lock" extra="sm" />
+                <span>{zh ? "预览模式不调用 Host 写操作" : "Preview mode does not invoke Host write operations"}</span>
+              </div>
+            ) : null}
           </>
         );
       }
@@ -1120,6 +1214,7 @@ export function AgentHubPage({
         );
       }
       const page = transcriptPage?.agentId === agent.id ? transcriptPage : null;
+      const currentDraft = draftsByAgent[draftSlot(agent.id)] ?? "";
       return (
         <>
           <div className="hub-transcript" id="hubTranscript">
@@ -1133,7 +1228,7 @@ export function AgentHubPage({
               <EmptyBlock
                 icon="message"
                 detail={
-                  agent.hasTranscript ? contract.transcript : "No messages yet."
+                  agent.hasTranscript ? contract.transcript : (zh ? "暂无消息。" : "No messages yet.")
                 }
               />
             ) : null}
@@ -1175,15 +1270,19 @@ export function AgentHubPage({
                   : (caps.chatWhy ?? contract.chat)
               }
               aria-label={zh ? "发送消息" : "Send message"}
-              value={draft}
+              value={currentDraft}
               disabled={!caps.chat || commandBusy}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={(event) => {
+                const value = event.target.value;
+                const slot = draftSlot(agent.id);
+                setDraftsByAgent((prev) => ({ ...prev, [slot]: value }));
+              }}
               onKeyDown={(event) => {
                 if (event.key === "Escape") event.currentTarget.blur();
                 if (
                   event.key === "Enter" &&
                   !event.nativeEvent.isComposing &&
-                  draft.trim()
+                  currentDraft.trim()
                 ) {
                   event.preventDefault();
                   sendDraft(agent);
@@ -1193,7 +1292,7 @@ export function AgentHubPage({
             <button
               className="btn small primary"
               type="button"
-              disabled={!caps.chat || commandBusy || !draft.trim()}
+              disabled={!caps.chat || commandBusy || !currentDraft.trim()}
               data-tip={caps.chatWhy ?? undefined}
               onClick={() => sendDraft(agent)}
             >
@@ -1403,7 +1502,7 @@ export function AgentHubPage({
           </div>
           {deckView ? null : <>
           <div className="hub-status-counts">
-            {(["running", "idle", "parked", "aborted"] as const)
+            {(["running", "idle", "parked", "aborted", "released"] as const)
               .filter((key) => counts[key])
               .map((key) => (
                 <span className="sc-item" key={key}>
@@ -1466,7 +1565,7 @@ export function AgentHubPage({
                 region="hub"
                 openedIds={[]}
                 links={deckLinks}
-                commandContext={{ client, capabilities, preview, viewingLive, online: connOnline }}
+                commandContext={{ client, capabilities, preview, marks, viewingLive, online: connOnline }}
                 comms={comms}
                 embedded={deckEmbedding}
               />
@@ -1639,7 +1738,9 @@ export function AgentHubPage({
         <div
           className="modal-backdrop"
           role="presentation"
-          onMouseDown={() => setModal(null)}
+          onMouseDown={() => {
+            if (!commandBusy && !spawnLock.current) setModal(null);
+          }}
         >
           <div
             className={`modal hub-modal${modal.kind === "spawn" ? " is-spawn" : ""}`}

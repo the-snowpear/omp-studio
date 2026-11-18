@@ -618,3 +618,40 @@ describe("projectConversationBranch", () => {
 		expect(ids.every(id => id.length <= CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS)).toBe(true);
 	});
 });
+
+describe("StudioSessionTranscriptService turn-boundary pagination", () => {
+	test("snaps mid-turn pagination cuts to turn boundaries without gaps or duplicates", () => {
+		using tempDir = TempDir.createSync("@omp-studio-transcript-turn-snap-");
+		const manager = SessionManager.create(tempDir.path(), tempDir.path());
+		const expectedIds: string[] = [manager.appendMessage(userMessage("first prompt"))];
+		for (let index = 1; index <= 44; index++) {
+			const callId = `call-${index}`;
+			expectedIds.push(
+				manager.appendMessage(
+					assistantMessage([{ type: "toolCall", id: callId, name: "Read", arguments: { path: "a.ts" } }]),
+				),
+			);
+			manager.appendMessage(toolResult(callId, "Read", "ok"));
+		}
+		const secondUserId = manager.appendMessage(userMessage("second prompt"));
+		expectedIds.push(secondUserId);
+		for (let index = 45; index <= 108; index++) {
+			const callId = `call-${index}`;
+			expectedIds.push(
+				manager.appendMessage(
+					assistantMessage([{ type: "toolCall", id: callId, name: "Read", arguments: { path: "b.ts" } }]),
+				),
+			);
+			manager.appendMessage(toolResult(callId, "Read", "ok"));
+		}
+		const service = serviceFor(manager);
+		const latest = service.read({ limit: 50 });
+		expect(latest.items[0]?.itemId).toBe(secondUserId);
+		expect(latest.hasMoreBefore).toBe(true);
+		expect(latest.olderCursor).toBeDefined();
+		const older = service.read({ cursor: latest.olderCursor, limit: 50 });
+		expect(older.items[0]?.itemId).toBe(expectedIds[0]);
+		expect(older.hasMoreBefore).toBe(false);
+		expect([...older.items, ...latest.items].map(item => item.itemId)).toEqual(expectedIds);
+	});
+});

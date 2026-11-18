@@ -40,6 +40,7 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
   let quitConfirmInFlight = false;
   let closeCheck: Promise<boolean> | undefined;
   let started = false;
+  let acquiredLock = false;
   let systemShutdown = false;
   let shuttingDown: Promise<void> | null = null;
   let exited = false;
@@ -180,6 +181,10 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
       return runtimeStatus;
     },
 
+    get acquiredLock(): boolean {
+      return acquiredLock;
+    },
+
     async start(): Promise<void> {
       if (started || quitting) return;
       started = true;
@@ -203,6 +208,8 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
         deps.quit();
         return;
       }
+      acquiredLock = true;
+      deps.onSingleInstanceAcquired?.();
 
       if (quitting) return;
       try {

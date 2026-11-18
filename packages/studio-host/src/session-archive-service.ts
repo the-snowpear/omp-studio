@@ -161,9 +161,9 @@ export class StudioSessionArchiveService {
         await this.#gunzipMove(destSession, source.path);
       });
       if (await pathExists(sourceArtifacts)) {
-        await movePath(sourceArtifacts, destArtifacts);
+        await this.#movePath(sourceArtifacts, destArtifacts);
         undo.push(async () => {
-          await movePath(destArtifacts, sourceArtifacts);
+          await this.#movePath(destArtifacts, sourceArtifacts);
         });
       }
     } catch (error) {
@@ -206,12 +206,12 @@ export class StudioSessionArchiveService {
     try {
       await this.#gunzipMove(source.path, destSession);
       undo.push(async () => {
-        await rm(destSession, { force: true });
+        await this.#gzipMove(destSession, source.path);
       });
       if (await pathExists(sourceArtifacts)) {
-        await movePath(sourceArtifacts, destArtifacts);
+        await this.#movePath(sourceArtifacts, destArtifacts);
         undo.push(async () => {
-          await movePath(destArtifacts, sourceArtifacts);
+          await this.#movePath(destArtifacts, sourceArtifacts);
         });
       }
     } catch (error) {
@@ -379,6 +379,18 @@ export class StudioSessionArchiveService {
       // Best-effort only; the grace check still guards unknown writers.
     }
   }
+
+  async #movePath(source: string, destination: string): Promise<void> {
+    await mkdir(dirname(destination), { recursive: true });
+    try {
+      await this.#renameWithRetry(source, destination);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== "EXDEV") throw error;
+    }
+    await cp(source, destination, { recursive: true });
+    await this.#removeFile(source, { recursive: true, force: true });
+  }
 }
 
 function artifactsPathFor(sessionPath: string): string {
@@ -542,18 +554,6 @@ async function pathExists(target: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-async function movePath(source: string, destination: string): Promise<void> {
-  await mkdir(dirname(destination), { recursive: true });
-  try {
-    await rename(source, destination);
-    return;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
-  }
-  await cp(source, destination, { recursive: true });
-  await rm(source, { recursive: true, force: true });
 }
 
 /**

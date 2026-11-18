@@ -51,12 +51,16 @@ it("retains the playback position when hiding a playing media preview", async ()
   view.unmount(); source.session.dispose();
 });
 
-it("also releases a visible file panel when its native document becomes hidden", async () => {
+it("pauses background polling when the native document is minimized without destroying an open PDF lease", async () => {
   const source = setup(), view = render(source.pane(true));
   await waitFor(() => expect(screen.getByTestId("pdf-view")).toBeTruthy());
   act(source.hideDocument);
-  expect(source.release).toHaveBeenCalledWith("lease"); expect(viewer.stop).toHaveBeenCalledTimes(1);
   expect(source.setVisible).toHaveBeenLastCalledWith("file-view:pdf", false);
+  expect(source.release).not.toHaveBeenCalled();
+  expect(viewer.stop).not.toHaveBeenCalled();
+  view.rerender(source.pane(false));
+  expect(source.release).toHaveBeenCalledWith("lease");
+  expect(viewer.stop).toHaveBeenCalledTimes(1);
   view.unmount(); source.session.dispose();
 });
 

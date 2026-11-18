@@ -3,6 +3,7 @@ import type { ClientBootstrap, StudioClient } from "@omp-studio/client-contract"
 import type { BrowserElementReference } from "@omp-studio/studio-protocol";
 import { useConversationDom } from "../conversationWorkspace/Context";
 import { DockPanel, useBrowserPagesLayout, useDockEngine } from "../dock/DockContext";
+import { useSurfaceChrome } from "../dock/SurfaceContext";
 import { browserPagePanelId, type BrowserPagePanelId, type PanelDefinition, type PanelId } from "../dock/types";
 import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
@@ -42,8 +43,9 @@ export function BrowserDockInstances({ client, sessionId, available, capabilitie
   const { window: conversationWindow } = useConversationDom();
   const pages = useBrowserPagesLayout();
   const scope = useSyncExternalStore(store.subscribe, () => store.getSnapshot().scope);
+  const surfaceChrome = useSurfaceChrome();
   const nativeClient = supportsNativeBrowser(available, capabilities) ? client : undefined;
-  const hub = native ? browserHub(preview, globalThis.ompStudioChrome?.managedBrowser, nativeClient) : null;
+  const hub = native ? browserHub(preview, surfaceChrome?.managedBrowser ?? globalThis.ompStudioChrome?.managedBrowser, nativeClient) : null;
   const session = useMemo(() => hub && sessionId ? hub.session(sessionId) : null, [hub, sessionId]);
   // Only sync once the dock shows this chat's layout; a half-switched chat must not trade pages.
   const bound = !!session && scope.session === sessionId && !scope.draft;
@@ -89,11 +91,21 @@ export function BrowserDockInstances({ client, sessionId, available, capabilitie
           const state = session.getSnapshot().state;
           if (!state) return;
           const plan = planBrowserDockSync({ layout: store.getSnapshot().layout, sessionId: session.id, state, memory: memories.current.get(session.id), selecting: selecting.current });
+          memories.current.delete(session.id);
           memories.current.set(session.id, plan.memory);
+          if (memories.current.size > 32) {
+            const oldest = memories.current.keys().next().value;
+            if (oldest !== undefined && oldest !== session.id) memories.current.delete(oldest);
+          }
           if (plan.select) {
             const pageId = plan.select;
             selecting.current = pageId;
-            void session.select(pageId).finally(() => { if (selecting.current === pageId) selecting.current = undefined; });
+            void session.select(pageId).finally(() => {
+              if (selecting.current === pageId) {
+                selecting.current = undefined;
+                run();
+              }
+            });
           }
           if (!plan.actions.length) break;
           for (const action of plan.actions) store.dispatch(action);

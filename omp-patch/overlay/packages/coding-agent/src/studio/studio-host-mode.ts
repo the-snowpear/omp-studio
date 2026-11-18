@@ -953,30 +953,37 @@ export function createStudioHostRuntime(
 		toolResult: toolCallId => mainConversation.toolResult(session.sessionManager.getSessionId(), toolCallId),
 	}));
 	const createConversationProjector = (target: AgentViewSession, runtimeEpoch: number): ConversationLiveProjector => {
-		const manager = target.sessionManager;
-		const localManager = isLocalAgentSession(target) ? target.sessionManager : undefined;
+		const currentTarget = (): AgentViewSession => {
+			if ("current" in target && typeof target.current === "function") {
+				return target.current();
+			}
+			return target;
+		};
+		const localManager = (): SessionManager | undefined => {
+			const resolved = currentTarget();
+			return isLocalAgentSession(resolved) ? resolved.sessionManager : undefined;
+		};
 		const projector = new ConversationLiveProjector({
 			restoreModelMentions: text =>
-				expandModelMentionTags(
-					text,
-					agent => readModelMentions(manager.getBranch()).find(mention => mention.agent === agent)?.selector,
-				),
-			sessionId: manager.getSessionId(),
+				text.includes("<model ")
+					? expandModelMentionTags(
+							text,
+							agent =>
+								readModelMentions(target.sessionManager.getBranch()).find(mention => mention.agent === agent)
+									?.selector,
+						)
+					: text,
+			sessionId: target.sessionManager.getSessionId(),
 			runtimeEpoch,
-			reserveMessageId: input => {
-				if (localManager) return localManager.reserveMessageId(input.role);
-				return crypto.randomUUID().slice(-8);
-			},
+			reserveMessageId: input => localManager()?.reserveMessageId(input.role) ?? crypto.randomUUID().slice(-8),
 			reserveCustomMessageId: input =>
-				localManager?.reserveCustomMessageId(input.customType, input.timestamp) ?? crypto.randomUUID().slice(-8),
-			reserveCompactionId: () => {
-				if (localManager) return localManager.reserveCompactionId();
-				return crypto.randomUUID().slice(-8);
-			},
+				localManager()?.reserveCustomMessageId(input.customType, input.timestamp) ?? crypto.randomUUID().slice(-8),
+			reserveCompactionId: () => localManager()?.reserveCompactionId() ?? crypto.randomUUID().slice(-8),
 			releaseCompactionId: id => {
-				localManager?.releaseCompactionId(id);
+				localManager()?.releaseCompactionId(id);
 			},
 			lookupPersistedCompactionId: ({ summary }) => {
+				const manager = target.sessionManager;
 				if (typeof manager.getBranch !== "function") return undefined;
 				const branch = manager.getBranch();
 				for (let index = branch.length - 1; index >= 0; index--) {
@@ -1053,6 +1060,21 @@ export function createStudioHostRuntime(
 					void hydratePersistedStudioAgents(registry, sessionFileOf(session), () => !disposed);
 				})
 			: () => {};
+	let boundWorkerGeneration = workerLifecycle.generation();
+	const unsubscribeWorkerRevive = workerLifecycle.onChange(() => {
+		if (workerLifecycle.residency() !== "active") return;
+		const nextGeneration = workerLifecycle.generation();
+		if (nextGeneration === boundWorkerGeneration) return;
+		boundWorkerGeneration = nextGeneration;
+		attachQueueCapture();
+		if (typeof session.sessionManager.clearReservedMessageIds === "function") {
+			session.sessionManager.clearReservedMessageIds();
+		}
+		mainConversation.rebind(session, {
+			sessionId: session.sessionManager.getSessionId(),
+			runtimeEpoch: bridgeConfig.runtimeEpoch as number,
+		});
+	});
 	const unsubscribe = session.subscribe(event => {
 		if (event.type === "agent_end") {
 			loop.scheduleNext();
@@ -1157,6 +1179,7 @@ export function createStudioHostRuntime(
 			cfg.dispose();
 			unsubscribe();
 			unsubscribeSessionChange();
+			unsubscribeWorkerRevive();
 			unsubscribeLoopPause();
 			conversation.dispose();
 			if (typeof session.sessionManager.clearReservedMessageIds === "function") {
@@ -1197,7 +1220,10 @@ async function initializeStudioExtensions(session: AgentSession, runtime: Studio
 function createStudioMainWorkerSupervisor(
 	slot: StudioSessionSlot,
 	runtime: StudioHostRuntime,
-	options: Pick<StudioHostModeDependencies, "recreateSession" | "workerIdleSleepMs" | "workerIdleRecycleMs" | "nowMs">,
+	options: Pick<
+		StudioHostModeDependencies,
+		"recreateSession" | "workerIdleSleepMs" | "workerIdleRecycleMs" | "nowMs" | "setToolUIContext"
+	>,
 ): StudioMainWorkerSupervisor {
 	const sleepMs = options.workerIdleSleepMs ?? 3 * 60_000;
 	const recycleMs = options.workerIdleRecycleMs ?? 5 * 60_000;
@@ -1356,9 +1382,14 @@ function createStudioMainWorkerSupervisor(
 		}
 		revival = serialized(async () => {
 			emit("reviving");
+			let next: AgentSession | undefined;
+			let replaced = false;
 			try {
-				const next = await recreateSession(sessionFile);
+				next = await recreateSession(sessionFile);
 				slot.replace(next);
+				replaced = true;
+				options.setToolUIContext?.(createStudioRemoteUiFactory(runtime.services.interaction), true);
+				setStudioThreadInteraction(runtime.services.interaction);
 				if (!(process.stdin.isTTY && process.stdout.isTTY)) await initializeStudioExtensions(next, runtime);
 				runtime.services.modes.rebindSettings();
 				runtime.services.extensionModes.rebind();
@@ -1370,6 +1401,11 @@ function createStudioMainWorkerSupervisor(
 				emit("active");
 				arm();
 			} catch (error) {
+				if (replaced) {
+					await slot.disposeCurrent().catch(() => undefined);
+				} else if (next !== undefined) {
+					await next.dispose?.().catch(() => undefined);
+				}
 				emit("failed");
 				throw error;
 			} finally {

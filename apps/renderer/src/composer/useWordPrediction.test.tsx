@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { StudioClient } from "@omp-studio/client-contract";
+import type { PredictionChannel, PredictionEvent, PredictionInput } from "@omp-studio/studio-protocol";
 import { I18nProvider } from "../i18n";
 import { PreviewModeProvider } from "../preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
@@ -220,6 +221,89 @@ it("does not reuse a suggestion from a different session", async () => {
   mounted.rerender(view("second"));
   expect(mounted.container.querySelector(".cm-prediction")).toBeNull();
   await waitFor(() => expect(mounted.container.querySelector(".cm-prediction")).not.toBeNull());
+});
+
+it("replaces an expired channel and recovers after the replacement closes", async () => {
+  localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 400, 200));
+  let receive!: (event: PredictionEvent) => void;
+  let sequence = 0;
+  const receipts: Record<string, { status: "completed"; result: { result: PredictionChannel } }> = {};
+  const client = {
+    command: vi.fn(async (name: string) => {
+      if (name !== "prediction.prepare") return { requestId: "release" };
+      const channelId = `channel-${++sequence}`;
+      const channel = { channelId, sessionId: "s", expiresAt: Date.now() + 15000 };
+      receipts[channelId] = { status: "completed", result: { result: channel } };
+      return { requestId: channelId };
+    }),
+    getState: () => ({ commands: receipts }),
+  } as unknown as StudioClient;
+  const staleInput = Promise.withResolvers<{ ok: false; channelLost: true; message: string }>();
+  const attachPrediction = vi.fn(async ({ channelId }: PredictionChannel) => channelId === "channel-1"
+    ? { ok: false, channelLost: true, message: "Prediction descriptor expired or changed" }
+    : { ok: true });
+  const predictionInput = vi.fn(({ channelId, input }: { channelId: string; input: PredictionInput }) =>
+    channelId === "channel-2" && input.kind === "next" ? staleInput.promise : Promise.resolve({ ok: true }));
+  vi.stubGlobal("ompStudioChrome", {
+    attachPrediction,
+    predictionInput,
+    detachPrediction: vi.fn(async () => ({ ok: true })),
+    onPrediction: (listener: typeof receive) => { receive = listener; return () => {}; },
+  });
+  const mounted = render(
+    <PreviewModeProvider switchEnabled>
+      <ChipComposer prediction={{ client, sessionId: "s", available: true, nextMessageAvailable: true }} />
+    </PreviewModeProvider>,
+  );
+  const nextRequest = (channelId: string) => predictionInput.mock.calls.find(([request]) =>
+    request.channelId === channelId && request.input.kind === "next")?.[0].input;
+  await waitFor(() => expect(nextRequest("channel-2")).toBeDefined());
+  expect(attachPrediction).toHaveBeenCalledTimes(2);
+  expect(client.command).toHaveBeenCalledWith("prediction.release", { sessionId: "s", channelId: "channel-1" });
+  expect(screen.queryByText("Prediction descriptor expired or changed")).toBeNull();
+
+  act(() => receive({ kind: "closed", channelId: "channel-2" }));
+  await waitFor(() => expect(nextRequest("channel-3")).toBeDefined());
+  const latest = nextRequest("channel-3");
+  if (latest?.kind !== "next") throw new Error("Expected a new prediction request");
+  act(() => receive({
+    kind: "next", channelId: "channel-3", revision: latest.revision, suffix: "Recovered suggestion",
+    choices: ["Recovered suggestion"], rank: 0,
+  }));
+  await act(async () => staleInput.resolve({
+    ok: false, channelLost: true, message: "Prediction channel is not owned by this window",
+  }));
+  expect(screen.queryByText("Prediction channel is not owned by this window")).toBeNull();
+  expect(mounted.container.querySelector(".cm-prediction")?.textContent).toContain("Recovered suggestion");
+  expect(screen.getByRole("textbox").textContent).toBe("");
+});
+
+it("keeps a missing prediction receipt from showing a composer error", async () => {
+  vi.useFakeTimers();
+  try {
+    const client = {
+      command: vi.fn(async () => ({ requestId: "prepare" })),
+      subscribe: () => () => {},
+    } as unknown as StudioClient;
+    const attachPrediction = vi.fn();
+    vi.stubGlobal("ompStudioChrome", {
+      attachPrediction,
+      predictionInput: vi.fn(),
+      onPrediction: () => () => {},
+    });
+    const mounted = render(
+      <PreviewModeProvider switchEnabled>
+        <ChipComposer prediction={{ client, sessionId: "s", available: true, nextMessageAvailable: true }} />
+      </PreviewModeProvider>,
+    );
+    await act(() => vi.advanceTimersByTimeAsync(120_140));
+    expect(client.command).toHaveBeenCalledWith("prediction.prepare", { sessionId: "s", protocolVersion: 2 });
+    expect(attachPrediction).not.toHaveBeenCalled();
+    expect(mounted.container.querySelector(".cm-prediction-error")).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("shows a suggestion when a hidden composer becomes visible", async () => {

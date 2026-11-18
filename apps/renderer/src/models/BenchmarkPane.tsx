@@ -58,6 +58,8 @@ export function BenchmarkPane({
   const [account, setAccount] = useState<BenchmarkAccountSelection>();
   const [serviceTier, setServiceTier] = useState("");
   const [review, setReview] = useState<BenchmarkSpec>();
+  const [reviewJsonOpen, setReviewJsonOpen] = useState(false);
+  const [openRawSelectors, setOpenRawSelectors] = useState<Set<string>>(() => new Set());
   const [closeReview, setCloseReview] = useState(false);
   const [metric, setMetric] = useState<Metric>("ttftMs");
   const [busy, setBusy] = useState(false);
@@ -66,6 +68,8 @@ export function BenchmarkPane({
   const [refresh, setRefresh] = useState(0);
   const epoch = useRef(0);
   const busyRef = useRef(false);
+  const selectedRef = useRef<string | undefined>(selected);
+  selectedRef.current = selected;
   const confirmRef = useRef<HTMLButtonElement>(null);
   const enabled = preview || (available && !!sessionId);
   const invoke = useCallback(
@@ -90,9 +94,13 @@ export function BenchmarkPane({
     setError("");
     setNotice("");
     setReview(undefined);
+    setReviewJsonOpen(false);
+    setOpenRawSelectors(new Set());
     setCloseReview(false);
+    const initialSelected = preview ? PREVIEW_BENCHMARK.run.id : undefined;
+    selectedRef.current = initialSelected;
     setRuns(preview ? [PREVIEW_BENCHMARK.run] : []);
-    setSelected(preview ? PREVIEW_BENCHMARK.run.id : undefined);
+    setSelected(initialSelected);
     setSnapshot(preview ? PREVIEW_BENCHMARK : undefined);
     setPicked([]);
     setAccount(undefined);
@@ -101,40 +109,83 @@ export function BenchmarkPane({
     };
   }, [preview, sessionId, available]);
   useEffect(() => {
+    setReviewJsonOpen(false);
     if (review) confirmRef.current?.focus();
   }, [review]);
   useEffect(() => {
     if (!visible || preview || !enabled || !sessionId) return;
     let active = true;
-    let timer: ReturnType<typeof setTimeout>;
+    let inFlight = false;
+    let hasActiveRun = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const clearTimer = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    };
+
+    const isHidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
+
+    const schedule = () => {
+      clearTimer();
+      if (!active || !hasActiveRun || isHidden()) return;
+      timer = setTimeout(() => {
+        timer = undefined;
+        void poll();
+      }, 1500);
+    };
+
     const poll = async () => {
+      if (!active || inFlight || isHidden()) return;
+      inFlight = true;
+      clearTimer();
       try {
-        if (!document.hidden) {
-          const list = await invoke("benchmarks.list", { sessionId });
+        const list = await invoke("benchmarks.list", { sessionId });
+        if (!active) return;
+        setRuns(list.runs);
+        let snapshotRunning = false;
+        const id = selectedRef.current ?? list.runs.at(-1)?.id;
+        if (id) {
+          const result = await invoke("benchmarks.read", { sessionId, id });
           if (!active) return;
-          setRuns(list.runs);
-          const id = selected ?? list.runs.at(-1)?.id;
-          if (id) {
-            const result = await invoke("benchmarks.read", { sessionId, id });
-            if (active) {
-              setSnapshot(result);
-              if (!selected) setSelected(id);
-            }
+          setSnapshot(result);
+          snapshotRunning = running(result.run);
+          if (!selectedRef.current) {
+            selectedRef.current = id;
+            setSelected(id);
           }
+        } else {
+          setSnapshot(undefined);
         }
+        hasActiveRun = snapshotRunning || list.runs.some(running);
       } catch (cause) {
         if (active)
           setError(hostErrorMessage(cause, "Benchmark status unavailable"));
       } finally {
-        if (active) timer = setTimeout(() => void poll(), 1500);
+        inFlight = false;
+        if (active) schedule();
       }
     };
-    void poll();
+
+    const onVisibilityChange = () => {
+      if (!active) return;
+      if (isHidden()) {
+        clearTimer();
+      } else {
+        void poll();
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    if (!isHidden()) void poll();
     return () => {
       active = false;
-      clearTimeout(timer);
+      clearTimer();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [visible, preview, enabled, sessionId, selected, invoke, refresh]);
+  }, [visible, preview, enabled, sessionId, invoke, refresh]);
   const runAction = async (action: (generation: number) => Promise<void>) => {
     if (busyRef.current) return;
     const generation = epoch.current;
@@ -195,6 +246,7 @@ export function BenchmarkPane({
     return provider ? [provider] : [];
   });
   const prepare = () => {
+    if (picked.length === 0) return;
     const spec: BenchmarkSpec = {
       models: picked,
       profile,
@@ -241,7 +293,9 @@ export function BenchmarkPane({
         spec: review,
       });
       if (generation === epoch.current) {
+        selectedRef.current = value.run.id;
         setSelected(value.run.id);
+        setOpenRawSelectors(new Set());
         setSnapshot({ run: value.run, models: [] });
         setReview(undefined);
         setRefresh((value) => value + 1);
@@ -469,7 +523,7 @@ export function BenchmarkPane({
         </div>
         <button
           className="btn small primary"
-          disabled={!enabled || busy || runs.some(running)}
+          disabled={!enabled || busy || picked.length === 0 || runs.some(running)}
           onClick={prepare}
         >
           {t("检查测试请求", "Review benchmark requests")}
@@ -496,16 +550,16 @@ export function BenchmarkPane({
               "This starts paid model requests. Actual costs depend on input, output, service tier and retries. Zero reported cost may mean missing pricing.",
             )}
           </p>
-          <details>
+          <details open={reviewJsonOpen} onToggle={(event) => setReviewJsonOpen(event.currentTarget.open)}>
             <summary>
               {t("查看冻结配置", "Inspect reviewed configuration")}
             </summary>
-            <pre>{JSON.stringify(review, null, 2)}</pre>
+            {reviewJsonOpen ? <pre>{JSON.stringify(review, null, 2)}</pre> : null}
           </details>
           <button
             ref={confirmRef}
             className="btn small primary"
-            disabled={busy || !enabled}
+            disabled={busy || !enabled || review.models.length === 0}
             onClick={start}
           >
             {t("确认并开始基准", "Confirm and start benchmark")}
@@ -522,14 +576,20 @@ export function BenchmarkPane({
             className="select"
             value={selected ?? ""}
             onChange={(event) => {
-              setSelected(event.target.value);
+              const nextId = event.target.value;
+              selectedRef.current = nextId;
+              setSelected(nextId);
+              setOpenRawSelectors(new Set());
               setCloseReview(false);
               if (preview)
                 setSnapshot({
                   ...PREVIEW_BENCHMARK,
-                  run: runs.find((run) => run.id === event.target.value)!,
+                  run: runs.find((run) => run.id === nextId)!,
                 });
-              else setSnapshot(undefined);
+              else {
+                setSnapshot(undefined);
+                setRefresh((value) => value + 1);
+              }
             }}
           >
             <option value="" disabled>
@@ -635,7 +695,9 @@ export function BenchmarkPane({
                       setRuns((rows) =>
                         rows.filter((row) => row.id !== snapshot.run.id),
                       );
+                      selectedRef.current = undefined;
                       setSelected(undefined);
+                      setOpenRawSelectors(new Set());
                       setSnapshot(undefined);
                       setCloseReview(false);
                       setRefresh((value) => value + 1);
@@ -683,19 +745,33 @@ export function BenchmarkPane({
                     <tr key={row.selector}>
                       <td>{stats ? index + 1 : "—"}</td>
                       <td>
-                        <details>
+                        <details
+                          open={openRawSelectors.has(row.selector)}
+                          onToggle={(event) => {
+                            const isOpen = event.currentTarget.open;
+                            setOpenRawSelectors((prev) => {
+                              if (prev.has(row.selector) === isOpen) return prev;
+                              const next = new Set(prev);
+                              if (isOpen) next.add(row.selector);
+                              else next.delete(row.selector);
+                              return next;
+                            });
+                          }}
+                        >
                           <summary>{row.model}</summary>
-                          <pre>
-                            {JSON.stringify(
-                              {
-                                phases: row.phases,
-                              byChallenge: row.byChallenge,
-                                measurements: row.measurements,
-                              },
-                              null,
-                              2,
-                            )}
-                          </pre>
+                          {openRawSelectors.has(row.selector) ? (
+                            <pre>
+                              {JSON.stringify(
+                                {
+                                  phases: row.phases,
+                                  byChallenge: row.byChallenge,
+                                  measurements: row.measurements,
+                                },
+                                null,
+                                2,
+                              )}
+                            </pre>
+                          ) : null}
                         </details>
                       </td>
                       <td>

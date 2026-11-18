@@ -155,6 +155,12 @@ export function useOverlayPresence<T>(value: T | null): {
   return { shown: present ? held.current : null, leaving };
 }
 
+function escapeAttrValue(value: string): string {
+  return typeof CSS !== "undefined" && typeof CSS.escape === "function"
+    ? CSS.escape(value)
+    : value.replace(/["\\]/g, "\\$&");
+}
+
 /**
  * Overlapping tab switch: the new pane mounts immediately while the previous
  * pane stays until {@link TAB_PANE_MS}, so CSS can crossfade them in one motion.
@@ -182,7 +188,7 @@ export function useOverlappingTabs<T>(key: T, index: number): {
       indexRef.current = index;
       return;
     }
-    const pane = stageRef.current?.querySelector(`[data-tab-pane="${String(incoming)}"]`);
+    const pane = stageRef.current?.querySelector(`[data-tab-pane="${escapeAttrValue(String(incoming))}"]`);
     if (pane instanceof HTMLElement) scrollMap.current.set(String(incoming), pane.scrollTop);
     setDir(index >= indexRef.current ? "fwd" : "back");
     indexRef.current = index;
@@ -197,7 +203,7 @@ export function useOverlappingTabs<T>(key: T, index: number): {
   }, [key, incoming, index]);
 
   useLayoutEffect(() => {
-    const pane = stageRef.current?.querySelector(`[data-tab-pane="${String(incoming)}"]`);
+    const pane = stageRef.current?.querySelector(`[data-tab-pane="${escapeAttrValue(String(incoming))}"]`);
     if (!(pane instanceof HTMLElement)) return;
     const y = scrollMap.current.get(String(incoming));
     if (y != null) pane.scrollTop = y;

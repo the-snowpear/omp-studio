@@ -134,7 +134,9 @@ export function RuntimeBooleanRow({
   const [scope] = useSettingsScope();
   const available = runtimeHasValue(runtime, demo, keyName);
   const preview = runtime?.preview === true && demo !== undefined;
-  const snapshotValue = runtime?.activation?.configured[keyName] ?? runtime?.snapshot?.[keyName];
+  const snapshotValue = scope === "session"
+    ? runtime?.snapshot?.[keyName]
+    : (runtime?.activation?.configured[keyName] ?? runtime?.snapshot?.[keyName]);
   const checked = preview ? demo.flag(keyName) : (snapshotValue ?? RUNTIME_DEFAULTS[keyName]) === true;
   const disabled = !available || runtime?.set === undefined || runtime.pendingKey !== undefined || (keyName === "compaction.experimentalContextManagement" && scope === "session");
   return (
@@ -166,8 +168,12 @@ export function RuntimeBooleanRow({
 
 export function RuntimePlanDirectoryRow({ runtime, demo }: { runtime?: RuntimeSettingsCtl | undefined; demo?: RuntimeDemoApi | undefined }) {
   const { t } = useI18n();
+  const [scope] = useSettingsScope();
   const available = runtimeHasValue(runtime, demo, "plan.autosaveDir");
-  const value = runtime?.preview ? demo?.value("plan.autosaveDir") ?? "" : runtime?.snapshot?.["plan.autosaveDir"] ?? "";
+  const rawValue = scope === "session"
+    ? runtime?.snapshot?.["plan.autosaveDir"]
+    : (runtime?.activation?.configured["plan.autosaveDir"] ?? runtime?.snapshot?.["plan.autosaveDir"]);
+  const value = runtime?.preview ? demo?.value("plan.autosaveDir") ?? "" : (typeof rawValue === "string" ? rawValue : "");
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   const disabled = !available || runtime?.set === undefined || runtime.pendingKey !== undefined;
@@ -182,10 +188,14 @@ export function RuntimePlanDirectoryRow({ runtime, demo }: { runtime?: RuntimeSe
 
 export function RuntimeJudgeModelRow({ runtime, demo }: { runtime?: RuntimeSettingsCtl | undefined; demo?: RuntimeDemoApi | undefined }) {
   const { t } = useI18n();
+  const [scope] = useSettingsScope();
   const key = "modelRoles.judge";
   const preview = runtime?.preview === true && demo !== undefined;
   const available = runtimeHasValue(runtime, demo, key);
-  const value = preview ? demo.value(key) : runtime?.snapshot?.[key] ?? "";
+  const rawValue = scope === "session"
+    ? runtime?.snapshot?.[key]
+    : (runtime?.activation?.configured[key] ?? runtime?.snapshot?.[key]);
+  const value = preview ? demo.value(key) : (typeof rawValue === "string" ? rawValue : "");
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   const disabled = !available || (!preview && runtime?.set === undefined) || runtime?.pendingKey !== undefined;
@@ -217,9 +227,12 @@ export function RuntimeScalarRow({
   options: ReadonlyArray<readonly [string, string]>;
 }) {
   const { t } = useI18n();
+  const [scope] = useSettingsScope();
   const available = runtimeHasValue(runtime, demo, keyName);
   const preview = runtime?.preview === true && demo !== undefined;
-  const snapshotValue = runtime?.snapshot?.[keyName];
+  const snapshotValue = scope === "session"
+    ? runtime?.snapshot?.[keyName]
+    : (runtime?.activation?.configured[keyName] ?? runtime?.snapshot?.[keyName]);
   const demoValue = preview ? demo.value(keyName) : "";
   const defaultValue = RUNTIME_DEFAULTS[keyName];
   const schemaFallback = typeof defaultValue === "string" ? defaultValue : fallback;
@@ -252,8 +265,12 @@ export function RuntimeNumberRow({ runtime, demo, keyName, label, desc, fallback
   label: string; desc: string; fallback: number;
 }) {
   const { t } = useI18n();
+  const [scope] = useSettingsScope();
   const available = runtimeHasValue(runtime, demo, keyName);
-  const value = runtime?.preview ? demo?.value(keyName) || String(fallback) : String(runtime?.snapshot?.[keyName] ?? fallback);
+  const snapshotValue = scope === "session"
+    ? runtime?.snapshot?.[keyName]
+    : (runtime?.activation?.configured[keyName] ?? runtime?.snapshot?.[keyName]);
+  const value = runtime?.preview ? demo?.value(keyName) || String(fallback) : String(snapshotValue ?? fallback);
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   const disabled = !available || runtime?.set === undefined || runtime.pendingKey !== undefined;
@@ -272,10 +289,13 @@ export function RuntimeMethodOrderRow({ runtime, demo, label, desc }: {
   desc: string;
 }) {
   const { t } = useI18n();
+  const [scope] = useSettingsScope();
   const keyName = "compaction.methodOrder" as const;
   const available = runtimeHasValue(runtime, demo, keyName);
   const preview = runtime?.preview === true && demo !== undefined;
-  const snapshotValue = runtime?.snapshot?.[keyName];
+  const snapshotValue = scope === "session"
+    ? runtime?.snapshot?.[keyName]
+    : (runtime?.activation?.configured[keyName] ?? runtime?.snapshot?.[keyName]);
   const defaultOrder: readonly StudioRuntimeCompactionMethod[] = RUNTIME_DEFAULTS["compaction.methodOrder"];
   const snapshotOrder = Array.isArray(snapshotValue) ? snapshotValue : undefined;
   const demoOrder = preview ? demo.value(keyName).split(",").filter(Boolean) as StudioRuntimeCompactionMethod[] : undefined;

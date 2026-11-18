@@ -45,16 +45,25 @@ export function ExecutionTargetScope({ id, memoryKey, onSelect, children }: { id
 }
 export function useTargetMemory<T>(key: string, initial: () => T) {
   const { memory } = useExecutionTarget();
-  const [value, setValue] = useState<T>(() => memory.has(key) ? memory.get(key) as T : initial());
-  const current = useRef(value);
-  current.current = value;
+  const [slot, setSlot] = useState<{ memory: Map<string, unknown>; key: string; value: T }>(() => ({
+    memory,
+    key,
+    value: memory.has(key) ? (memory.get(key) as T) : initial(),
+  }));
+  const aligned = slot.memory === memory && slot.key === key;
+  const resolved = aligned ? slot.value : memory.has(key) ? (memory.get(key) as T) : initial();
+  const current = useRef(resolved);
+  current.current = resolved;
+  useEffect(() => {
+    if (!aligned) setSlot({ memory, key, value: current.current });
+  }, [aligned, memory, key]);
   const update = useCallback<Dispatch<SetStateAction<T>>>(action => {
     const next = typeof action === "function" ? (action as (previous: T) => T)(current.current) : action;
     current.current = next;
     memory.set(key, next);
-    setValue(next);
+    setSlot({ memory, key, value: next });
   }, [memory, key]);
-  return [value, update] as const;
+  return [resolved, update] as const;
 }
 
 export function ExecutionTargets({ client, children }: { client: StudioClient; children(client: StudioClient, key: string): ReactNode }) {
@@ -72,8 +81,7 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
   const [directoryRequest, setDirectoryRequest] = useState(0);
   const [passwordProfile, setPasswordProfile] = useState<RemoteConnectionProfile>();
   const passwordRequest = useRef<{ id: string; resolve(password: string | null): void } | undefined>(undefined);
-  const connectionLock = useRef<string | undefined>(undefined);
-  const cancelledConnection = useRef<string | undefined>(undefined);
+  const connectionLock = useRef<{ id: string; token: symbol } | undefined>(undefined);
   const clients = useRef(new Map<string, StudioClientImpl>());
   const transports = useRef(new Map<string, RemoteTransportState>());
   const synchronizing = useRef(new Map<string, { revision: number; promise: Promise<void> }>());
@@ -163,7 +171,7 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
     adoptInventory(next);
     await Promise.allSettled(next.statuses.filter(status => {
       const state = stateFor(status.id);
-      return status.state === "connected" && clients.current.has(status.id) && !state.synchronized && !state.error;
+      return status.state === "connected" && clients.current.has(status.id) && !state.synchronized;
     }).map(status => synchronize(status.id)));
   }, [api, adoptInventory, stateFor, synchronize]);
 
@@ -193,10 +201,10 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
       mounted.current = false;
       refreshSequence.current++;
       passwordRequest.current?.resolve(null);
-      const targetId = connectionLock.current;
-      if (targetId) {
-        cancelledConnection.current = targetId;
-        void api?.disconnect(targetId).catch(() => {});
+      const activeLock = connectionLock.current;
+      connectionLock.current = undefined;
+      if (activeLock) {
+        void api?.disconnect(activeLock.id).catch(() => {});
       }
       for (const state of transports.current.values()) { state.available = false; state.revision++; state.synchronized = false; }
       for (const value of clients.current.values()) void value.close();
@@ -213,12 +221,13 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
   const connect = useCallback(async (targetId: string) => {
     if (!api) throw new Error(text("SSH 连接需要桌面客户端", "SSH connections require the desktop app"));
     if (connectionLock.current) throw new Error(text("另一个 SSH 连接正在准备中", "Another SSH connection is already being prepared"));
-    connectionLock.current = targetId;
-    cancelledConnection.current = undefined;
+    const token = Symbol();
+    connectionLock.current = { id: targetId, token };
     let credentials: RemoteCredentials | undefined;
     try {
       let inventory = rawInventory;
       if (!inventory.profiles.some(value => value.id === targetId)) inventory = await api.list();
+      if (connectionLock.current?.token !== token) throw new Error(text("连接已取消", "Connection cancelled"));
       const profile = inventory.profiles.find(value => value.id === targetId);
       if (!profile) throw new Error(text("SSH 连接不存在", "SSH connection does not exist"));
       const status = inventory.statuses.find(value => value.id === targetId);
@@ -233,20 +242,22 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
         credentials = { password };
         password = null;
       }
-      if (cancelledConnection.current === targetId) throw new Error(text("连接已取消", "Connection cancelled"));
+      if (connectionLock.current?.token !== token) throw new Error(text("连接已取消", "Connection cancelled"));
       const pending = api.connect(targetId, credentials);
       if (credentials) credentials.password = "";
       await pending;
-      if (cancelledConnection.current === targetId) throw new Error(text("连接已取消", "Connection cancelled"));
+      if (connectionLock.current?.token !== token) throw new Error(text("连接已取消", "Connection cancelled"));
       await refresh();
     } finally {
       if (credentials) credentials.password = "";
-      connectionLock.current = undefined;
-      finishPassword(null);
+      if (connectionLock.current?.token === token) {
+        connectionLock.current = undefined;
+        finishPassword(null);
+      }
     }
   }, [api, rawInventory, refresh, finishPassword, synchronize]);
   const cancelConnection = useCallback(async (targetId: string) => {
-    cancelledConnection.current = targetId;
+    if (connectionLock.current?.id === targetId) connectionLock.current = undefined;
     if (passwordRequest.current?.id === targetId) { finishPassword(null); return; }
     const state = stateFor(targetId);
     state.available = false; state.synchronized = false; state.revision++;
@@ -279,7 +290,7 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
   const syncRevision = id === null ? 0 : transports.current.get(id)?.syncRevision ?? 0;
   const syncError = id === null ? "" : transports.current.get(id)?.error ?? "";
   const value = useMemo(() => ({ localClient: client, id, name: id === null ? (zh ? "此计算机" : "This computer") : profile?.name ?? "SSH", inventory, api, inventoryError, syncRevision, syncError, refresh, connect, cancelConnection, select, openDirectory: () => setDirectoryRequest(value => value + 1), directoryRequest, memory }), [client, id, profile?.name, inventory, api, inventoryError, syncRevision, syncError, refresh, connect, cancelConnection, select, directoryRequest, memory, zh]);
-  const preparing = rawInventory.statuses.find(status => ["connecting", "awaiting-approval", "synchronizing"].includes(status.state) && connectionLock.current === status.id);
+  const preparing = rawInventory.statuses.find(status => ["connecting", "awaiting-approval", "synchronizing"].includes(status.state) && connectionLock.current?.id === status.id);
   const preparingProfile = preparing && rawInventory.profiles.find(profile => profile.id === preparing.id);
   const activeClient = id === null ? client : clientFor(id);
   const registry: TargetRegistry = {

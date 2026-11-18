@@ -5,6 +5,14 @@ import { isExternalWebLink, isTrustedRendererUrl, secureWebPreferences } from ".
 
 type Entry = { key: string; url: string; input: FloatWindowPrepare; window?: BrowserWindow; closing: boolean };
 export function visibleWindowBounds(rect: Rectangle, areas: readonly Rectangle[]): Rectangle {
+  if (areas.length === 0) {
+    return {
+      x: Math.round(rect.x),
+      y: Math.round(rect.y),
+      width: Math.max(320, Math.round(rect.width)),
+      height: Math.max(200, Math.round(rect.height)),
+    };
+  }
   const area = areas.find(a => rect.x < a.x + a.width && rect.x + rect.width > a.x && rect.y < a.y + a.height && rect.y + rect.height > a.y) ?? areas[0]!;
   const width = Math.min(Math.max(320, Math.round(rect.width)), area.width);
   const height = Math.min(Math.max(200, Math.round(rect.height)), area.height);
@@ -58,18 +66,26 @@ export function registerFloatingWindows(options: {
     const contents = child.webContents;
     child.webContents.setWindowOpenHandler(({ url }) => { if (isExternalWebLink(url)) options.openExternal(url); return { action: "deny" }; });
     child.webContents.on("will-navigate", (event, url) => { if (url !== entry.url) event.preventDefault(); });
+    let boundsTimer: ReturnType<typeof setTimeout> | undefined;
     const publish = () => {
+      if (boundsTimer !== undefined) { clearTimeout(boundsTimer); boundsTimer = undefined; }
       if (child.isDestroyed() || entry.closing) return;
       refreshThrottle(); options.onVisibility?.(child);
       send({ key: entry.key, id: entry.input.id, kind: "state", rect: child.getNormalBounds(), minimized: child.isMinimized(), maximized: child.isMaximized(), visible: child.isVisible() && !child.isMinimized() });
     };
-    child.on("move", publish); child.on("resize", publish); child.on("maximize", publish); child.on("unmaximize", publish);
+    const scheduleBoundsPublish = () => {
+      if (boundsTimer !== undefined || child.isDestroyed() || entry.closing) return;
+      boundsTimer = setTimeout(() => { boundsTimer = undefined; publish(); }, 32);
+      boundsTimer.unref?.();
+    };
+    child.on("move", scheduleBoundsPublish); child.on("resize", scheduleBoundsPublish); child.on("maximize", publish); child.on("unmaximize", publish);
     child.on("minimize", publish); child.on("restore", publish); child.on("show", publish); child.on("hide", publish);
     child.on("close", event => {
       if (options.isQuitting() || entry.closing) { options.onWillClose?.(child); return; }
       event.preventDefault(); send({ key: entry.key, id: entry.input.id, kind: "close-request" });
     });
     child.on("closed", () => {
+      if (boundsTimer !== undefined) { clearTimeout(boundsTimer); boundsTimer = undefined; }
       entries.delete(entry.key); options.onClosed?.(contents); refreshThrottle(); send({ key: entry.key, id: entry.input.id, kind: "closed" });
       if (options.restoreMainOnLastClose && !options.isQuitting() && !hasWindows() && !parent.isDestroyed() && !parent.isVisible()) showMain();
     });
@@ -80,6 +96,7 @@ export function registerFloatingWindows(options: {
     for (const entry of entries.values()) { entry.closing = true; if (entry.window && !entry.window.isDestroyed()) destroy(entry.window); }
     entries.clear();
   };
+  parent.webContents.on("did-navigate", closeWindows);
   parent.webContents.once("destroyed", closeWindows);
 
   ipcMain.handle(CHANNELS.control, (event, input: FloatWindowControl) => {
@@ -102,6 +119,7 @@ export function registerFloatingWindows(options: {
     owns, hasWindows,
     dispose() {
       parent.webContents.removeListener("did-create-window", didCreate);
+      parent.webContents.removeListener("did-navigate", closeWindows);
       parent.webContents.removeListener("destroyed", closeWindows);
       closeWindows();
       ipcMain.removeHandler(CHANNELS.prepare); ipcMain.removeHandler(CHANNELS.control);

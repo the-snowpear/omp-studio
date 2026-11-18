@@ -204,6 +204,8 @@ function insertIncomingOutgoing(rows: GraphRow[], model: GitLogListReadModel): G
 
 export function buildGitGraphRows(model: GitLogListReadModel): GraphRow[] {
   const colorMap = buildColorMap(model);
+  const commitByOid = new Map<string, GitLogCommitRecord>();
+  for (const commit of model.commits) commitByOid.set(commit.oid, commit);
   const rows: GraphRow[] = [];
   let colorIndex = -1;
   for (const commit of model.commits) {
@@ -229,7 +231,7 @@ export function buildGitGraphRows(model: GitLogListReadModel): GraphRow[] {
     for (let index = firstParentAdded ? 1 : 0; index < commit.parents.length; index += 1) {
       let color = index === 0 ? labelColor(commit, colorMap) : undefined;
       if (color === undefined && index > 0) {
-        const parent = model.commits.find((item) => item.oid === commit.parents[index]);
+        const parent = commitByOid.get(commit.parents[index]!);
         color = parent ? labelColor(parent, colorMap) : undefined;
       }
       if (color === undefined) {

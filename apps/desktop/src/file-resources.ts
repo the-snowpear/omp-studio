@@ -54,7 +54,8 @@ export class FileResources {
     await pipeline(Readable.from(this.bytes(id, 0, undefined, signal)), createWriteStream(destination), { signal: signal ?? this.get(id).controller.signal });
   }
   async response(request: Request, origin: string): Promise<Response> {
-    const url = new URL(request.url);
+    let url: URL;
+    try { url = new URL(request.url); } catch { return new Response(null, { status: 400 }); }
     if (url.hostname !== "viewer" || !["GET", "HEAD"].includes(request.method)) return new Response(null, { status: 400 });
     const requestOrigin = request.headers.get("origin");
     if (requestOrigin && requestOrigin !== origin) return new Response(null, { status: 403 });
@@ -63,7 +64,10 @@ export class FileResources {
     try { lease = this.get(id!); } catch { return new Response(null, { status: 404 }); }
     const pdf = variant === "preview.pdf" ? lease.pdf : undefined;
     if (variant && !pdf) return new Response(null, { status: 404 });
-    const size = pdf ? (await stat(pdf)).size : lease.file.size;
+    let size = lease.file.size;
+    if (pdf) {
+      try { size = (await stat(pdf)).size; } catch { return new Response(null, { status: 404 }); }
+    }
     const range = request.headers.get("range");
     const match = range ? /^bytes=(\d*)-(\d*)$/.exec(range) : null;
     let start = 0, end = size - 1;

@@ -39,6 +39,7 @@ import {
 import { importBackgroundFile, type BackgroundImportErrorCode } from "./backgroundImport";
 import { autoScrim, gradeBackgroundColor, type BackgroundTheme } from "./backgroundTint";
 import { createPreviewBackgroundLibrary, readPreviewBackgroundSettings } from "../preview/backgroundPreview";
+import { motionReduced } from "../motion";
 import "./background.css";
 
 export interface BackgroundImportErrorEntry {
@@ -174,6 +175,36 @@ function useMediaPreference(query: string): boolean {
   return matches;
 }
 
+function hasPerfTier(tier: string): boolean {
+  if (typeof document === "undefined") return false;
+  const raw = document.documentElement.getAttribute("data-perf-tier") ?? "";
+  return raw.split(/\s+/u).includes(tier);
+}
+
+function usePerfTierFlags(): { readonly reducedMotion: boolean; readonly suppressedByTier: boolean } {
+  const [flags, setFlags] = useState(() => ({
+    reducedMotion: motionReduced(),
+    suppressedByTier: hasPerfTier("L3"),
+  }));
+  useEffect(() => {
+    const sync = (): void => {
+      const nextReduced = motionReduced();
+      const nextSuppressed = hasPerfTier("L3");
+      setFlags((prev) => (
+        prev.reducedMotion === nextReduced && prev.suppressedByTier === nextSuppressed
+          ? prev
+          : { reducedMotion: nextReduced, suppressedByTier: nextSuppressed }
+      ));
+    };
+    sync();
+    if (typeof document === "undefined" || typeof MutationObserver === "undefined") return undefined;
+    const observer = new MutationObserver(sync);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-perf-tier"] });
+    return () => observer.disconnect();
+  }, []);
+  return flags;
+}
+
 export interface BackgroundActions {
   readonly set: (patch: Partial<BackgroundSettings>) => void;
   readonly toggleEnabled: () => void;
@@ -199,6 +230,7 @@ export interface BackgroundContextValue {
   readonly effectiveScrim: number;
   readonly reducedMotion: boolean;
   readonly reducedTransparency: boolean;
+  readonly suppressedByTier: boolean;
   readonly loading: boolean;
   readonly storageAvailable: boolean | null;
   readonly importing: readonly BackgroundImportingEntry[];
@@ -237,7 +269,13 @@ function initialState(props: BackgroundProviderProps): ProviderState {
 
 export function BackgroundProvider(props: BackgroundProviderProps) {
   const [state, dispatch] = useReducer(reducer, props, initialState);
+  const prevPreviewRef = useRef(props.preview);
   const libraryRef = useRef<BackgroundLibrary | undefined>(undefined);
+  if (prevPreviewRef.current !== props.preview) {
+    prevPreviewRef.current = props.preview;
+    libraryRef.current = props.library
+      ?? (props.preview ? createPreviewBackgroundLibrary() : getDefaultBackgroundLibrary());
+  }
   const library = libraryRef.current ?? (libraryRef.current = props.library
     ?? (props.preview ? createPreviewBackgroundLibrary() : getDefaultBackgroundLibrary()));
 
@@ -262,6 +300,25 @@ export function BackgroundProvider(props: BackgroundProviderProps) {
     if (mountedRef.current) dispatch({ type: "url", url: next });
   }, []);
 
+  const firstPreviewRenderRef = useRef(true);
+  useEffect(() => {
+    if (firstPreviewRenderRef.current) {
+      firstPreviewRenderRef.current = false;
+      return;
+    }
+    const nextSettings = props.initialSettings
+      ?? (props.preview ? readPreviewBackgroundSettings() : readBackgroundSettings());
+    settingsRef.current = nextSettings;
+    setActiveUrl(null);
+    dispatch({ type: "settings", settings: nextSettings });
+    dispatch({ type: "dismiss-notice" });
+    if (!props.library) {
+      uploadsRef.current = props.initialUploads ?? [];
+      dispatch({ type: "uploads", uploads: uploadsRef.current });
+      dispatch({ type: "loading", loading: true });
+    }
+  }, [props.preview, props.initialSettings, props.initialUploads, props.library, setActiveUrl]);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -277,7 +334,7 @@ export function BackgroundProvider(props: BackgroundProviderProps) {
     };
   }, []);
 
-  const reducedMotion = useMediaPreference("(prefers-reduced-motion: reduce)");
+  const { reducedMotion, suppressedByTier } = usePerfTierFlags();
   const reducedTransparency = useMediaPreference("(prefers-reduced-transparency: reduce)");
 
   const uploads = useMemo(
@@ -442,7 +499,7 @@ export function BackgroundProvider(props: BackgroundProviderProps) {
   }, [library]);
 
   useEffect(() => {
-    if (!state.settings.enabled || activeAsset === undefined || activeAsset.source === "preset") {
+    if (!state.settings.enabled || suppressedByTier || activeAsset === undefined || activeAsset.source === "preset") {
       setActiveUrl(null);
       return undefined;
     }
@@ -471,7 +528,7 @@ export function BackgroundProvider(props: BackgroundProviderProps) {
     return () => {
       cancelled = true;
     };
-  }, [activeAsset, applySettings, library, setActiveUrl, state.settings.enabled]);
+  }, [activeAsset, applySettings, library, setActiveUrl, state.settings.enabled, suppressedByTier]);
 
   useEffect(() => {
     if (state.loading) return;
@@ -495,6 +552,7 @@ export function BackgroundProvider(props: BackgroundProviderProps) {
     effectiveScrim,
     reducedMotion,
     reducedTransparency,
+    suppressedByTier,
     loading: state.loading,
     storageAvailable: state.storageAvailable,
     importing: state.importing,
@@ -512,6 +570,7 @@ export function BackgroundProvider(props: BackgroundProviderProps) {
     props.theme,
     reducedMotion,
     reducedTransparency,
+    suppressedByTier,
     state.activeUrl,
     state.errors,
     state.importing,

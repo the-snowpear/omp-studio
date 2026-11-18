@@ -5,6 +5,7 @@ import type {
   StudioClient,
   WorkspaceId,
 } from "@omp-studio/client-contract";
+import { invalidateProjectHistoryReads } from "../conversationWorkspace/projectReads";
 
 export const PROJECT_HISTORY_INITIAL_LIMIT = 6;
 export const PROJECT_HISTORY_PAGE_SIZE = 10;
@@ -53,12 +54,39 @@ type HistoryClient = Pick<StudioClient, "query">;
 export class ProjectHistoryStore {
   cache: ProjectHistoryCache = {};
   requests: Record<string, number> = {};
+  epoch = 0;
   private listeners = new Set<() => void>();
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   getSnapshot = () => this.cache;
   setCache = (action: ProjectHistoryCache | ((previous: ProjectHistoryCache) => ProjectHistoryCache)) => {
-    this.cache = typeof action === "function" ? action(this.cache) : action;
+    const next = typeof action === "function" ? action(this.cache) : action;
+    if (next === this.cache) return;
+    this.cache = next;
     for (const listener of this.listeners) listener();
+  };
+  applySessionTitle = (sessionId: SessionId, title: string): void => {
+    const trimmed = title.trim();
+    if (trimmed.length === 0) return;
+    this.setCache((previous) => {
+      let next: Record<string, ProjectHistoryState> | undefined;
+      for (const [workspaceKey, state] of Object.entries(previous)) {
+        const entries = state.model?.entries;
+        if (!entries) continue;
+        let changed = false;
+        const nextEntries = entries.map((entry) => {
+          if (entry.sessionId !== sessionId || entry.title === trimmed) return entry;
+          changed = true;
+          return { ...entry, title: trimmed };
+        });
+        if (!changed) continue;
+        next ??= { ...previous };
+        next[workspaceKey] = {
+          ...state,
+          model: { ...state.model!, entries: nextEntries },
+        };
+      }
+      return next ?? previous;
+    });
   };
 }
 
@@ -83,6 +111,7 @@ export function useProjectHistories({
   readonly load: (workspaceId: WorkspaceId, limit?: number) => Promise<SessionHistoryReadModel | undefined>;
   readonly refresh: (workspaceId: WorkspaceId) => Promise<SessionHistoryReadModel | undefined>;
   readonly loadMore: (workspaceId: WorkspaceId) => Promise<SessionHistoryReadModel | undefined>;
+  readonly applySessionTitle: (sessionId: SessionId, title: string) => void;
   readonly clear: (workspaceId?: WorkspaceId) => void;
 } {
   const [own] = useState(() => new ProjectHistoryStore());
@@ -96,10 +125,11 @@ export function useProjectHistories({
   useEffect(() => {
     if (previousPreviewRef.current === preview) return;
     previousPreviewRef.current = preview;
+    store.epoch += 1;
     cacheRef.current = {};
     requestRef.current = {};
     setCache({});
-  }, [preview]);
+  }, [preview, store]);
 
   const load = useCallback(async (
     workspaceId: WorkspaceId,
@@ -113,6 +143,10 @@ export function useProjectHistories({
     if (!force && current?.status === "ready" && current.requestedLimit >= limit && current.model !== undefined) {
       return current.model;
     }
+    if (force) {
+      invalidateProjectHistoryReads(client as Pick<StudioClient, "query" | "subscribe">, workspaceId);
+    }
+    const requestEpoch = store.epoch;
     const requestId = (requestRef.current[key] ?? 0) + 1;
     requestRef.current = { ...requestRef.current, [key]: requestId };
     setCache((previous) => ({
@@ -129,14 +163,14 @@ export function useProjectHistories({
         limit,
         status: "active",
       });
-      if (requestRef.current[key] !== requestId) return undefined;
+      if (store.epoch !== requestEpoch || requestRef.current[key] !== requestId) return undefined;
       setCache((previous) => ({
         ...previous,
         [key]: { status: "ready", requestedLimit: limit, model },
       }));
       return model;
     } catch (cause) {
-      if (requestRef.current[key] !== requestId) return undefined;
+      if (store.epoch !== requestEpoch || requestRef.current[key] !== requestId) return undefined;
       const error = cause instanceof Error && cause.message ? cause.message : "history.list failed";
       setCache((previous) => ({
         ...previous,
@@ -149,7 +183,7 @@ export function useProjectHistories({
       }));
       return undefined;
     }
-  }, [client, preview]);
+  }, [client, preview, store]);
 
   const refresh = useCallback(async (workspaceId: WorkspaceId) => {
     if (preview) return undefined;
@@ -166,17 +200,19 @@ export function useProjectHistories({
 
   const clear = useCallback((workspaceId?: WorkspaceId) => {
     if (workspaceId === undefined) {
+      store.epoch += 1;
       cacheRef.current = {};
       requestRef.current = {};
       setCache({});
       return;
     }
     const key = String(workspaceId);
+    requestRef.current = { ...requestRef.current, [key]: (requestRef.current[key] ?? 0) + 1 };
     const next = { ...cacheRef.current };
     delete next[key];
     cacheRef.current = next;
     setCache(next);
-  }, []);
+  }, [store]);
 
-  return { cache, load, refresh, loadMore, clear };
+  return { cache, load, refresh, loadMore, applySessionTitle: store.applySessionTitle, clear };
 }

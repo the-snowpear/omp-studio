@@ -34,6 +34,25 @@ export function useTmuxPanel({ targetId, workspaceId, ownerKey, connected, cwd, 
   const window = shownWindows.find(window => activeId === selection(group!.connectionId, window.id)) ?? shownWindows.find(window => window.id === group?.activeWindowId) ?? shownWindows[0];
   const activePane = group && window ? Object.entries(group.panes).find(([, pane]) => pane.windowId === window.id && pane.active)?.[0] : undefined;
   const alive = group?.state === "attached";
+  const [mountedWindows, setMountedWindows] = useState<ReadonlySet<string>>(() => new Set());
+  const activeWindowKey = visible && group && window ? `${group.connectionId}:${window.id}` : undefined;
+  useEffect(() => {
+    if (!activeWindowKey) return;
+    setMountedWindows(previous => previous.has(activeWindowKey) ? previous : new Set([...previous, activeWindowKey]));
+  }, [activeWindowKey]);
+  useEffect(() => {
+    const liveConnections = new Set(groups.map(item => item.connectionId));
+    setMountedWindows(previous => {
+      let pruned = false;
+      const next = new Set<string>();
+      for (const key of previous) {
+        const connectionId = key.slice(0, key.indexOf(":"));
+        if (liveConnections.has(connectionId)) next.add(key);
+        else pruned = true;
+      }
+      return pruned ? next : previous;
+    });
+  }, [groups.map(item => item.connectionId).join("|")]);
   useEffect(() => {
     if (group?.activeWindowId && !hidden[group.connectionId]?.includes(group.activeWindowId)) select(selection(group.connectionId, group.activeWindowId));
   }, [group?.connectionId, group?.activeWindowId]);
@@ -110,7 +129,17 @@ export function useTmuxPanel({ targetId, workspaceId, ownerKey, connected, cwd, 
   return {
     selected: !!group, list, toolbar,
     entry: <button type="button" className="term-new tmux-attach" disabled={!canAttach} title={canAttach ? t("terminal.tmux.attach") : reason} onClick={() => setPicker(true)}><Icon name="attach" extra="sm" />{t("terminal.tmux.attach")}</button>,
-    screens: <div className="tmux-screen-stack" hidden={!group}>{groups.flatMap(item => item.windows.map(win => <TmuxWindowView key={`${item.connectionId}:${win.id}`} topology={item} window={win} store={store} active={visible && item === group && win.id === window?.id} demo={preview} command={action => command(item, action)} />))}</div>,
+    screens: <div className="tmux-screen-stack" hidden={!group}>{groups.flatMap(item => {
+      const itemShown = item.windows.filter(win => !hidden[item.connectionId]?.includes(win.id));
+      const itemDefaultWin = (item === group ? window : undefined) ?? itemShown.find(win => win.id === item.activeWindowId) ?? itemShown[0];
+      return item.windows.map(win => {
+        const key = `${item.connectionId}:${win.id}`;
+        const isWindowActive = visible && item === group && win.id === window?.id;
+        const shouldMount = isWindowActive || (visible && win.id === itemDefaultWin?.id) || mountedWindows.has(key);
+        if (!shouldMount) return null;
+        return <TmuxWindowView key={key} topology={item} window={win} store={store} active={isWindowActive} demo={preview} command={action => command(item, action)} />;
+      });
+    })}</div>,
     dialogs: <>
       {picker ? <TmuxSessionPicker store={store} targetId={targetId} workspaceId={workspaceId} defaultName={`studio-${cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? "work"}`.replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 64)} onAttach={attach} onClose={() => setPicker(false)} /> : null}
       {closing ? <TmuxCloseDialog name={closing.name} onClose={() => setClosing(undefined)} onChoose={(action, remember) => { if (remember) { if (preview) setDemoClose(action); else update({ terminalTmuxCloseAction: action }); } if (action === "hide") void hide(closing.group, closing.windowId, true); else void command(closing.group, { kind: "killWindow", windowId: closing.windowId }); setClosing(undefined); }} /> : null}

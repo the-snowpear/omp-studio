@@ -33,8 +33,14 @@ const UNAVAILABLE: SwarmComms = { status: "unavailable" };
 const LOADING: SwarmComms = { status: "loading" };
 /** Fallback refresh while a view is open; roster changes refresh sooner. */
 const POLL_MS = 4000;
+/** Minimum gap between roster-change refreshes so bursty transitions coalesce. */
+const ROSTER_THROTTLE_MS = 300;
 /** Legs of one broadcast are delivered one by one; they land within this window. */
 const BROADCAST_WINDOW_MS = 10_000;
+
+function isDocumentVisible(): boolean {
+  return typeof document === "undefined" || (!document.hidden && document.visibilityState === "visible");
+}
 
 /**
  * One post per message: broadcast legs (one record per recipient) fold into a
@@ -99,28 +105,133 @@ export function useSwarmComms({ preview, zh, live, client, sessionId, rosterKey,
   const real = !preview && enabled && client !== undefined && sessionId !== undefined;
   const [read, setRead] = useState<{ key: string; comms: SwarmComms } | null>(null);
   const readKey = real ? sessionId : "";
-  const latest = useRef(0);
+  const liveRef = useRef(live);
+  liveRef.current = live;
+  const controllerRef = useRef<{
+    trigger: (throttled: boolean) => void;
+    stopTimer: () => void;
+  } | null>(null);
+
   useEffect(() => {
-    if (!real || !client || !sessionId) return;
-    // A closed view keeps what it last read; an open one refreshes on roster changes and on a slow tick.
-    if (!live && read?.key === sessionId) return;
+    if (!real || !client || !sessionId) {
+      controllerRef.current = null;
+      return;
+    }
     let alive = true;
-    const load = () => {
-      const ticket = ++latest.current;
+    let running = false;
+    let pending = false;
+    let loadedOnce = false;
+    let lastStartAt = 0;
+    let timer: number | undefined;
+
+    const stopTimer = () => {
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+        timer = undefined;
+      }
+    };
+
+    const schedule = (delayMs: number) => {
+      stopTimer();
+      if (!alive || !liveRef.current || !isDocumentVisible()) return;
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        trigger(false);
+      }, delayMs);
+    };
+
+    const run = () => {
+      if (!alive || running || !liveRef.current) return;
+      if (!isDocumentVisible()) {
+        pending = true;
+        stopTimer();
+        return;
+      }
+      stopTimer();
+      running = true;
+      pending = false;
+      lastStartAt = Date.now();
       void client.query("agent.messages.list", { sessionId }).then(result => {
-        if (!alive || ticket !== latest.current) return;
+        if (!alive) return;
+        loadedOnce = true;
         setRead({ key: sessionId, comms: { status: "ready", messages: swarmMessages(result.messages), truncated: result.truncated } });
       }).catch(() => {
-        if (!alive || ticket !== latest.current) return;
+        if (!alive) return;
+        loadedOnce = true;
         // A transient failure keeps the last read; a Runtime that cannot answer at all is unavailable.
         setRead(current => current?.key === sessionId && current.comms.status === "ready" ? current : { key: sessionId, comms: UNAVAILABLE });
+      }).finally(() => {
+        running = false;
+        if (!alive || !liveRef.current || !isDocumentVisible()) return;
+        if (pending) {
+          const elapsed = Date.now() - lastStartAt;
+          schedule(Math.max(0, ROSTER_THROTTLE_MS - elapsed));
+        } else {
+          schedule(POLL_MS);
+        }
       });
     };
-    load();
-    const timer = live ? window.setInterval(load, POLL_MS) : undefined;
-    return () => { alive = false; if (timer !== undefined) window.clearInterval(timer); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [real, client, sessionId, live, rosterKey]);
+
+    const trigger = (throttled: boolean) => {
+      if (!alive || !liveRef.current) return;
+      if (!isDocumentVisible()) {
+        pending = true;
+        stopTimer();
+        return;
+      }
+      if (running) {
+        pending = true;
+        return;
+      }
+      if (throttled && loadedOnce) {
+        const elapsed = Date.now() - lastStartAt;
+        if (elapsed < ROSTER_THROTTLE_MS) {
+          schedule(ROSTER_THROTTLE_MS - elapsed);
+          return;
+        }
+      }
+      run();
+    };
+
+    const onVisibility = () => {
+      if (!isDocumentVisible()) {
+        stopTimer();
+      } else if (liveRef.current) {
+        trigger(false);
+      }
+    };
+
+    controllerRef.current = { trigger, stopTimer };
+    document.addEventListener("visibilitychange", onVisibility);
+    if (liveRef.current) trigger(false);
+
+    return () => {
+      alive = false;
+      stopTimer();
+      controllerRef.current = null;
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [real, client, sessionId]);
+
+  const prevLiveRef = useRef(live);
+  const prevRosterKeyRef = useRef(rosterKey);
+  useEffect(() => {
+    const controller = controllerRef.current;
+    const wasLive = prevLiveRef.current;
+    const rosterChanged = prevRosterKeyRef.current !== rosterKey;
+    prevLiveRef.current = live;
+    prevRosterKeyRef.current = rosterKey;
+    if (!controller) return;
+    if (!live) {
+      controller.stopTimer();
+      return;
+    }
+    if (!wasLive) {
+      controller.trigger(false);
+    } else if (rosterChanged) {
+      controller.trigger(true);
+    }
+  }, [live, rosterKey]);
 
   return useMemo(() => {
     if (preview && enabled) return { status: "ready", messages: script.filter(message => message.at <= now) };
@@ -129,7 +240,7 @@ export function useSwarmComms({ preview, zh, live, client, sessionId, rosterKey,
   }, [preview, enabled, script, now, real, read, readKey]);
 }
 
-/** Roster signature for `rosterKey`: who is there, in what state, last touched when. */
-export function rosterKeyOf(agents: readonly { readonly agentId: string; readonly status: string; readonly updatedAt: string }[]): string {
-  return agents.map(agent => `${agent.agentId}:${agent.status}:${agent.updatedAt}`).join("|");
+/** Roster signature for `rosterKey`: who is there and in what lifecycle state (excluding high-frequency `updatedAt`). */
+export function rosterKeyOf(agents: readonly { readonly agentId: string; readonly status: string; readonly unreadCount?: number }[]): string {
+  return agents.map(agent => `${agent.agentId}:${agent.status}${agent.unreadCount ? `:${agent.unreadCount}` : ""}`).join("|");
 }

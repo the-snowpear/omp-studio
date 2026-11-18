@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type CSSProperties } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import type { McpRuntimeStatus, McpAuthResult } from "@omp-studio/studio-protocol";
 import { useI18n } from "../i18n";
 import { Icon } from "../icons";
@@ -94,9 +94,14 @@ export function McpRuntimePane(props: RuntimeCatalogProps & { authAvailable?: bo
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const invoke = useRuntimeCatalog(client, sessionId);
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
+  const hasLoadedRef = useRef(false);
+  const lastRevisionRef = useRef(refreshRevision);
 
   useEffect(() => {
-    setStatus(preview ? getPreviewMcpRuntime(zh) : undefined);
+    hasLoadedRef.current = false;
+    setStatus(preview ? getPreviewMcpRuntime(zhRef.current) : undefined);
     setError("");
     setRefreshing(false);
     setFilter("all");
@@ -110,23 +115,53 @@ export function McpRuntimePane(props: RuntimeCatalogProps & { authAvailable?: bo
   useEffect(() => {
     if (preview || !available || !sessionId || !visible) return;
     let active = true;
-    let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      try {
-        if (!document.hidden) {
-          setRefreshing(true);
-          const value = await invoke("mcp.runtime.status", { sessionId });
-          if (active) { setStatus(value); setError(""); }
-        }
-      } catch (cause) {
-        if (active) setError(hostErrorMessage(cause, zh ? "读取会话连接失败" : "Could not read session connections"));
-      } finally {
-        if (active) { setRefreshing(false); timer = setTimeout(() => void poll(), 4000); }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const clearTimer = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
       }
     };
+    const manualRefresh = lastRevisionRef.current !== refreshRevision;
+    lastRevisionRef.current = refreshRevision;
+    let showSpinner = !hasLoadedRef.current || manualRefresh;
+    const poll = async () => {
+      clearTimer();
+      if (!active || document.hidden) return;
+      let keepPolling = true;
+      try {
+        if (showSpinner) setRefreshing(true);
+        const value = await invoke("mcp.runtime.status", { sessionId });
+        if (active) {
+          hasLoadedRef.current = true;
+          setStatus(value);
+          setError("");
+          keepPolling = !value.available || !value.settled || value.servers.some((server) => server.state === "pending");
+        }
+      } catch (cause) {
+        if (active) setError(hostErrorMessage(cause, zhRef.current ? "读取会话连接失败" : "Could not read session connections"));
+      } finally {
+        showSpinner = false;
+        if (active) {
+          setRefreshing(false);
+          if (keepPolling && !document.hidden) {
+            timer = setTimeout(() => void poll(), 4000);
+          }
+        }
+      }
+    };
+    const onVisibility = () => {
+      if (document.hidden) clearTimer();
+      else void poll();
+    };
     void poll();
-    return () => { active = false; clearTimeout(timer); };
-  }, [invoke, preview, sessionId, available, visible, refreshRevision, zh]);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      active = false;
+      clearTimer();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [invoke, preview, sessionId, available, visible, refreshRevision]);
 
   const onComplete = (result: McpAuthResult) => {
     if (preview) setStatus((current) => current ? applyPreviewMcpAction(current, result, zh) : current);

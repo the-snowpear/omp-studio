@@ -8,11 +8,13 @@ export interface WebRtcCapture {
   stop(): void;
 }
 
+const DISCONNECT_GRACE_MS = 6000;
+
 function waitForPeer(peer: RTCPeerConnection, event: "icegatheringstatechange" | "connectionstatechange", ready: () => boolean, signal: AbortSignal): Promise<void> {
   if (ready()) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const finish = (error?: unknown) => { clearTimeout(timer); peer.removeEventListener(event, changed); signal.removeEventListener("abort", aborted); error ? reject(error) : resolve(); };
-    const changed = () => { if (ready()) finish(); else if (["failed", "closed", "disconnected"].includes(peer.connectionState)) finish(new Error("Live audio connection failed")); };
+    const changed = () => { if (ready()) finish(); else if (["failed", "closed"].includes(peer.connectionState)) finish(new Error("Live audio connection failed")); };
     const aborted = () => finish(signal.reason);
     const timer = setTimeout(() => finish(new Error("Live audio connection timed out")), 30000);
     peer.addEventListener(event, changed); signal.addEventListener("abort", aborted, { once: true });
@@ -33,9 +35,17 @@ export async function openWebRtcCapture(options: {
   const peer = new RTCPeerConnection();
   const speaker = new Audio(); speaker.autoplay = true;
   let input: MediaStream | undefined, closed = false, signaled = false;
+  let disconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  const clearDisconnectTimer = () => {
+    if (disconnectTimer !== undefined) {
+      clearTimeout(disconnectTimer);
+      disconnectTimer = undefined;
+    }
+  };
   const stop = () => {
     if (closed) return;
     closed = true;
+    clearDisconnectTimer();
     input?.getTracks().forEach(track => track.stop());
     peer.close(); speaker.pause(); speaker.srcObject = null;
     options.signal.removeEventListener("abort", stop);
@@ -48,8 +58,26 @@ export async function openWebRtcCapture(options: {
     void speaker.play().catch(() => { options.onFault("Audio playback could not start"); stop(); });
   };
   peer.onconnectionstatechange = () => {
-    if (!closed && ["failed", "disconnected", "closed"].includes(peer.connectionState)) {
-      options.onFault("Live audio disconnected"); stop();
+    if (closed) return;
+    const state = peer.connectionState;
+    if (state === "connected" || state === "connecting") {
+      clearDisconnectTimer();
+      return;
+    }
+    if (state === "failed" || state === "closed") {
+      clearDisconnectTimer();
+      options.onFault("Live audio disconnected");
+      stop();
+      return;
+    }
+    if (state === "disconnected" && disconnectTimer === undefined) {
+      disconnectTimer = setTimeout(() => {
+        disconnectTimer = undefined;
+        if (!closed && peer.connectionState === "disconnected") {
+          options.onFault("Live audio disconnected");
+          stop();
+        }
+      }, DISCONNECT_GRACE_MS);
     }
   };
   try {

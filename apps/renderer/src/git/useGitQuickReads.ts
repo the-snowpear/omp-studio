@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { GitHubItem, GitHubRepository, GitLogListReadModel, StudioClient, WorkspaceId } from "@omp-studio/client-contract";
 import { hostErrorMessage } from "../hostError";
 import { PREVIEW_GIT_LOG } from "../preview/fixtures";
@@ -19,44 +19,51 @@ type QuickRead = {
 /** Only the visible quick view reads data; cleanup discards old remote/workspace requests. */
 export function useGitQuickReads(client: StudioClient, workspaceId: WorkspaceId | undefined, preview: boolean, visible: boolean, view: GitQuickView, zh: boolean) {
   const { repository, remote, setRemote, revision, githubRevision } = useGitWorkspace();
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   const source = useMemo(() => preview ? previewGithubSource : githubSource(client), [preview, client]);
   const target = preview ? "preview-git" as WorkspaceId : workspaceId;
-  const [directory, setDirectory] = useState<{ repositories?: readonly GitHubRepository[]; error?: string }>({});
-  const [read, setRead] = useState<QuickRead>({ loading: true });
+  const [directoryState, setDirectoryState] = useState<{ target: WorkspaceId; repositories?: readonly GitHubRepository[]; error?: string }>();
+  const directory = target !== undefined && directoryState !== undefined && directoryState.target === target ? directoryState : undefined;
+  const [readState, setReadState] = useState<{ target?: WorkspaceId | undefined; view: GitQuickView; remote: string; value: QuickRead }>({ target, view, remote, value: { loading: true } });
+  const read = readState.target === target && readState.view === view && (view === "history" || readState.remote === remote) ? readState.value : { loading: true };
   const githubVisible = visible && view !== "history";
 
   useEffect(() => {
     if (!githubVisible || !target) return;
+    const requestedTarget = target;
     let current = true;
-    setDirectory({});
-    void source.query("github.repositories.list", { workspaceId: target }).then(value => {
+    setDirectoryState(undefined);
+    void source.query("github.repositories.list", { workspaceId: requestedTarget }).then(value => {
       if (!current) return;
-      setDirectory({ repositories: value.repositories });
+      setDirectoryState({ target: requestedTarget, repositories: value.repositories });
       setRemote(previous => value.repositories.some(repo => repo.remote === previous) ? previous : (value.repositories.find(repo => repo.remote === "origin") ?? value.repositories[0])?.remote ?? "");
-    }, cause => { if (current) setDirectory({ error: hostErrorMessage(cause, zh ? "无法读取 GitHub 仓库" : "Cannot read GitHub remotes") }); });
+    }, cause => { if (current) setDirectoryState({ target: requestedTarget, error: hostErrorMessage(cause, zhRef.current ? "无法读取 GitHub 仓库" : "Cannot read GitHub remotes") }); });
     return () => { current = false; };
-  }, [source, target, githubVisible, githubRevision, setRemote, zh]);
+  }, [source, target, githubVisible, githubRevision, setRemote]);
 
-  const selectedRepository = directory.repositories?.find(value => value.remote === remote);
+  const selectedRepository = directory?.repositories?.find(value => value.remote === remote);
   // Local staging should not reload GitHub, but a completed commit refreshes history.
   const localRevision = view === "history" ? revision : 0;
   useEffect(() => {
     if (!visible || !target) return;
+    const requestedTarget = target;
+    const requestedRemote = remote;
     let current = true;
-    setRead({ loading: true });
+    setReadState({ target: requestedTarget, view, remote: requestedRemote, value: { loading: true } });
     async function load(): Promise<QuickRead> {
       if (view === "history") {
         const log: GitLogListReadModel = preview
-          ? { ...PREVIEW_GIT_LOG, workspaceId: target!, truncated: false }
-          : await client.query("git.log.list", { workspaceId: target!, limit: 5 });
+          ? { ...PREVIEW_GIT_LOG, workspaceId: requestedTarget, truncated: false }
+          : await client.query("git.log.list", { workspaceId: requestedTarget, limit: 5 });
         return { loading: false, log: { ...log, commits: log.commits.slice(0, 5) } };
       }
-      if (directory.error) return { loading: false, error: directory.error };
-      if (!directory.repositories) return { loading: true };
-      if (!selectedRepository) return { loading: false, error: zh ? "没有 GitHub 远端" : "No GitHub remote" };
-      const input = { workspaceId: target!, remote: selectedRepository.remote };
+      if (directory?.error) return { loading: false, error: directory.error };
+      if (!directory?.repositories) return { loading: true };
+      if (!selectedRepository) return { loading: false, error: zhRef.current ? "没有 GitHub 远端" : "No GitHub remote" };
+      const input = { workspaceId: requestedTarget, remote: selectedRepository.remote };
       const auth = await source.query("github.auth.get", input);
-      if (!auth.available || !auth.authenticated) throw new Error(auth.unavailableReason || (auth.available ? zh ? "尚未登录 GitHub" : "GitHub sign-in required" : zh ? "未找到 GitHub CLI" : "GitHub CLI unavailable"));
+      if (!auth.available || !auth.authenticated) throw new Error(auth.unavailableReason || (auth.available ? zhRef.current ? "尚未登录 GitHub" : "GitHub sign-in required" : zhRef.current ? "未找到 GitHub CLI" : "GitHub CLI unavailable"));
       if (!current) return { loading: false };
       if (view === "issue") {
         const page = await source.query("github.items.list", { ...input, kind: "issue", state: "open" });
@@ -70,11 +77,11 @@ export function useGitQuickReads(client: StudioClient, workspaceId: WorkspaceId 
       const others = newest(all?.items ?? []).filter(item => !matches.some(match => match.number === item.number));
       return { loading: false, repository: selectedRepository, items: [...matches, ...others].slice(0, view === "pr" ? 3 : 1), branchCount: branch?.totalCount ?? 0 };
     }
-    void load().then(value => { if (current) setRead(value); }, cause => {
-      if (current) setRead({ loading: false, error: hostErrorMessage(cause, zh ? "读取失败" : "Could not load Git data") });
+    void load().then(value => { if (current) setReadState({ target: requestedTarget, view, remote: requestedRemote, value }); }, cause => {
+      if (current) setReadState({ target: requestedTarget, view, remote: requestedRemote, value: { loading: false, error: hostErrorMessage(cause, zhRef.current ? "读取失败" : "Could not load Git data") } });
     });
     return () => { current = false; };
-  }, [client, source, target, preview, visible, view, directory, selectedRepository, repository?.branch, repository?.headOid, localRevision, githubRevision, zh]);
+  }, [client, source, target, remote, preview, visible, view, directory, selectedRepository, repository?.branch, repository?.headOid, localRevision, githubRevision, preview ? zh : false]);
   return { read, source, target };
 }
 

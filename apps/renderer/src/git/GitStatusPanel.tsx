@@ -6,7 +6,6 @@ import type {
   GitDiffReadModel,
   GitDiffTarget,
   GitHubAuthReadModel,
-  GitHubPullRequestListReadModel,
   GitLogListReadModel,
   GitRemoteListReadModel,
   GitWorktreeListReadModel,
@@ -85,11 +84,12 @@ function statusLabel(index: string, worktree: string, t: (k: string) => string):
   return worktree === "untracked" ? t("git.untracked") : t("git.workingTree");
 }
 
-export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, focusKey, view }: { readonly client: StudioClient; readonly workspaceId?: WorkspaceId; readonly focusPath?: string; readonly focusTarget?: GitDiffTarget; readonly focusKey?: number; readonly view?: "changes" | "history" }) {
+export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, focusKey, view, visible = true }: { readonly client: StudioClient; readonly workspaceId?: WorkspaceId; readonly focusPath?: string; readonly focusTarget?: GitDiffTarget; readonly focusKey?: number; readonly view?: "changes" | "history"; readonly visible?: boolean }) {
   const { t, resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const zhRef = useRef(zh);
   zhRef.current = zh;
+  const active = visible !== false;
   const { syncRevision } = useExecutionTarget();
   const repositoryHook = useGitWorkspace();
   const repository = repositoryHook.repository;
@@ -97,12 +97,12 @@ export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, fo
   const [worktrees, setWorktrees] = useState<GitWorktreeListReadModel>();
   const [remotes, setRemotes] = useState<GitRemoteListReadModel>();
   const [githubAuth, setGithubAuth] = useState<GitHubAuthReadModel>();
-  const [pullRequests, setPullRequests] = useState<GitHubPullRequestListReadModel>();
   const [selected, setSelected] = useState<{ path: string; target: GitDiffTarget }>();
   const [diff, setDiff] = useState<GitDiffReadModel>();
   const { draft: commitMessage, setDraft: setCommitMessage, busy, notice, setNotice, activeRequest, execute, executeGithub, cancel: cancelActive } = repositoryHook;
   const [graphLayout, setGraphLayout] = useState(readGitGraphLayout);
   const graphVisible = view ? view === "history" : graphLayout.open;
+  const historyActive = active && graphVisible;
   const [diffHeight, setDiffHeight] = useGitDiffHeight();
   const [splitDiff, setSplitDiff] = useState(false);
   const [log, setLog] = useState<GitLogListReadModel>();
@@ -116,6 +116,8 @@ export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, fo
   const [commitDiff, setCommitDiff] = useState<GitCommitDiffReadModel>();
   const detailsGeneration = useRef(0);
   const logGeneration = useRef(0);
+  const detailsDirty = useRef(true);
+  const logDirty = useRef(true);
 
   const refreshDetails = useCallback(async () => {
     const requestGeneration = ++detailsGeneration.current;
@@ -124,7 +126,6 @@ export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, fo
       setWorktrees(undefined);
       setRemotes(undefined);
       setGithubAuth(undefined);
-      setPullRequests(undefined);
       return;
     }
     const results = await Promise.allSettled([
@@ -151,7 +152,7 @@ export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, fo
 
   const refreshLog = useCallback(async () => {
     const requestGeneration = ++logGeneration.current;
-    if (!graphVisible || workspaceId === undefined) {
+    if (workspaceId === undefined) {
       setLog(undefined);
       setLogError(undefined);
       setLogLoading(false);
@@ -165,35 +166,72 @@ export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, fo
       setLogError(undefined);
     } catch (cause) {
       if (requestGeneration !== logGeneration.current) return;
-      setLog(undefined);
       setLogError(hostErrorMessage(cause, zhRef.current ? "无法读取提交历史" : "Cannot read commit history"));
     } finally {
       if (requestGeneration === logGeneration.current) setLogLoading(false);
     }
-  }, [client, graphVisible, logLimit, workspaceId]);
+  }, [client, logLimit, workspaceId]);
 
   const refreshAll = repositoryHook.refresh;
 
   useEffect(() => {
-    void refreshDetails();
-    return () => { detailsGeneration.current += 1; };
-  }, [refreshDetails, syncRevision, repositoryHook.revision]);
+    detailsGeneration.current += 1;
+    logGeneration.current += 1;
+    detailsDirty.current = true;
+    logDirty.current = true;
+    setBranches(undefined);
+    setWorktrees(undefined);
+    setRemotes(undefined);
+    setGithubAuth(undefined);
+    setLog(undefined);
+    setLogError(undefined);
+    setLogLoading(false);
+    setSelected(undefined);
+    setDiff(undefined);
+    setSelectedCommit(undefined);
+    setCommitChanges(undefined);
+    setSelectedCommitPath(undefined);
+    setCommitDiff(undefined);
+  }, [workspaceId]);
 
   useEffect(() => {
-    void refreshLog();
-    if (!graphVisible || workspaceId === undefined) return;
+    detailsDirty.current = true;
+    logDirty.current = true;
+  }, [syncRevision, repositoryHook.revision, repository?.revision, repository?.headOid]);
+
+  useEffect(() => {
+    logDirty.current = true;
+  }, [logLimit]);
+
+  useEffect(() => {
+    if (!active) return;
+    if (!detailsDirty.current) return;
+    detailsDirty.current = false;
+    void refreshDetails();
+    return () => { detailsGeneration.current += 1; };
+  }, [active, refreshDetails, syncRevision, repositoryHook.revision, repository?.revision]);
+
+  useEffect(() => {
+    if (!historyActive || workspaceId === undefined) return;
+    if (logDirty.current || log === undefined) {
+      logDirty.current = false;
+      void refreshLog();
+    }
     const unsubscribe = client.subscribe({ scope: "all" }, (event) => {
-      if (event.kind === "git.repository.changed" && event.repository.workspaceId === workspaceId) void refreshLog();
+      if (event.kind === "git.repository.changed" && event.repository.workspaceId === workspaceId) {
+        logDirty.current = false;
+        void refreshLog();
+      }
     });
     return () => {
       logGeneration.current += 1;
       unsubscribe();
     };
-  }, [client, graphVisible, refreshLog, workspaceId, syncRevision, repositoryHook.revision]);
+  }, [client, historyActive, log === undefined, refreshLog, workspaceId, syncRevision, repositoryHook.revision, repository?.revision, repository?.headOid, logLimit]);
 
   useEffect(() => {
-    if (workspaceId === undefined || selectedCommit === undefined) {
-      setCommitChanges(undefined);
+    if (!active || workspaceId === undefined || selectedCommit === undefined) {
+      if (selectedCommit === undefined || workspaceId === undefined) setCommitChanges(undefined);
       return;
     }
     let cancelled = false;
@@ -203,11 +241,11 @@ export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, fo
       (cause) => { if (!cancelled) { setCommitChanges(undefined); setChangesLoading(false); setNotice(hostErrorMessage(cause, zhRef.current ? "无法读取提交文件" : "Cannot read commit files")); } },
     );
     return () => { cancelled = true; };
-  }, [client, selectedCommit, workspaceId]);
+  }, [active, client, selectedCommit, workspaceId]);
 
   useEffect(() => {
-    if (workspaceId === undefined || selectedCommit === undefined || selectedCommitPath === undefined) {
-      setCommitDiff(undefined);
+    if (!active || workspaceId === undefined || selectedCommit === undefined || selectedCommitPath === undefined) {
+      if (selectedCommit === undefined || selectedCommitPath === undefined || workspaceId === undefined) setCommitDiff(undefined);
       return;
     }
     let cancelled = false;
@@ -217,13 +255,25 @@ export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, fo
       (cause) => { if (!cancelled) { setCommitDiff(undefined); setNotice(hostErrorMessage(cause, zhRef.current ? "无法读取提交 Diff" : "Cannot read commit diff")); } },
     );
     return () => { cancelled = true; };
-  }, [client, selectedCommit, selectedCommitPath, workspaceId]);
+  }, [active, client, selectedCommit, selectedCommitPath, workspaceId]);
+
+  useEffect(() => {
+    if (!selected || !repository) return;
+    const inWorking = repository.changes.some((change) => change.path === selected.path && change.worktree !== "unmodified");
+    const inStaged = repository.changes.some((change) => change.path === selected.path && change.index !== "unmodified");
+    if (selected.target === "working" && !inWorking) {
+      setSelected(inStaged ? { path: selected.path, target: "staged" } : undefined);
+    } else if (selected.target === "staged" && !inStaged) {
+      setSelected(inWorking ? { path: selected.path, target: "working" } : undefined);
+    }
+  }, [repository, selected]);
 
   useEffect(() => {
     if (workspaceId === undefined || selected === undefined) {
       setDiff(undefined);
       return;
     }
+    if (!active) return;
     let cancelled = false;
     setDiff(undefined);
     void client.query("git.diff.get", { workspaceId, path: selected.path, target: selected.target }).then(
@@ -231,7 +281,7 @@ export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, fo
       (cause) => { if (!cancelled) { setDiff(undefined); setNotice(hostErrorMessage(cause, zhRef.current ? "无法读取 Diff" : "Cannot read diff")); } },
     );
     return () => { cancelled = true; };
-  }, [client, selected, workspaceId, syncRevision]);
+  }, [active, client, selected, workspaceId, syncRevision, repositoryHook.revision, repository?.revision]);
 
   const runAdvanced = (value: string) => {
     if (!repository) return;
@@ -272,7 +322,6 @@ export function GitStatusPanel({ client, workspaceId, focusPath, focusTarget, fo
       case "pr.edit": { const number = Number(ask(zh ? "PR 编号" : "PR number")); const title = Number.isSafeInteger(number) && number > 0 ? ask(zh ? "新标题" : "New title") : undefined; if (title) void executeGithub({ kind: "pr.edit", number, title }); break; }
       case "pr.comment": { const number = Number(ask(zh ? "PR 编号" : "PR number")); const body = Number.isSafeInteger(number) && number > 0 ? ask(zh ? "评论内容" : "Comment") : undefined; if (body) void executeGithub({ kind: "pr.comment", number, body }); break; }
       case "pr.review": { const number = Number(ask(zh ? "PR 编号" : "PR number")); const decision = Number.isSafeInteger(number) && number > 0 ? ask(zh ? "Review 决定：approve / comment / request-changes" : "Review decision: approve / comment / request-changes", "comment") : undefined; const body = decision ? window.prompt(zh ? "Review 意见（可留空）" : "Review comment (optional)", "") : null; if ((decision === "approve" || decision === "comment" || decision === "request-changes") && body !== null) void executeGithub({ kind: "pr.review", number, decision, ...(body.trim() ? { body: body.trim() } : {}) }); break; }
-      case "pr.merge": { const number = Number(ask(zh ? "PR 编号" : "PR number")); const pr = pullRequests?.pullRequests.find((item) => item.number === number); const method = pr ? ask(zh ? "合并方式：merge / squash / rebase" : "Merge method: merge / squash / rebase", "squash") : undefined; if (!pr?.headOid) { if (Number.isSafeInteger(number)) setNotice(zh ? "找不到该 Open PR 或缺少 head OID" : "Open PR not found or missing head OID"); break; } if ((method === "merge" || method === "squash" || method === "rebase") && window.confirm(zh ? `确认 ${method} merge PR #${number}？` : `Merge PR #${number} with ${method}?`)) void executeGithub({ kind: "pr.merge", number, method, expectedHeadOid: pr.headOid }); break; }
       case "pr.update": { const number = Number(ask(zh ? "PR 编号" : "PR number")); if (Number.isSafeInteger(number) && number > 0) void executeGithub({ kind: "pr.updateBranch", number }); break; }
       case "pr.close": { const number = Number(ask(zh ? "PR 编号" : "PR number")); if (Number.isSafeInteger(number) && number > 0 && window.confirm(zh ? `确认关闭 PR #${number}？` : `Close PR #${number}?`)) void executeGithub({ kind: "pr.close", number }); break; }
       case "pr.reopen": { const number = Number(ask(zh ? "PR 编号" : "PR number")); if (Number.isSafeInteger(number) && number > 0) void executeGithub({ kind: "pr.reopen", number }); break; }

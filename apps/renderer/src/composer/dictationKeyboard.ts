@@ -162,6 +162,12 @@ export class DictationKeyboard {
     else this.clearPending(); // Click/toggle survives a toolbar focus transfer.
   }
 
+  windowBlur = (): void => {
+    this.heldKey = null;
+    if (this.hold) this.interrupt();
+    else if (this.pendingHold) this.clearPending();
+  };
+
   interrupt = (): void => {
     const binding = this.context.binding();
     const active = this.hold || binding?.active;

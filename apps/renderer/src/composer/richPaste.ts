@@ -10,7 +10,7 @@ import { isImageMimeType, type PromptImage } from "./types";
  * (spans and divs with no semantic markup) are left to the plain-text path.
  */
 export type RichPastePart =
-  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "text"; readonly text: string; readonly remoteImage?: boolean }
   | { readonly kind: "image"; readonly image?: PromptImage; readonly slot?: number; readonly alt: string };
 
 export interface RichPaste {
@@ -40,9 +40,23 @@ function fence(code: string): string {
 }
 
 function inlineCode(text: string): string {
-  const ticks = text.includes("`") ? "``" : "`";
+  if (!text) return "";
+  let maxRun = 0;
+  for (const match of text.matchAll(/`+/gu)) {
+    if (match[0].length > maxRun) maxRun = match[0].length;
+  }
+  const ticks = "`".repeat(maxRun + 1);
   const pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
   return `${ticks}${pad}${text}${pad}${ticks}`;
+}
+
+function codeText(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+  if (node.nodeType !== Node.ELEMENT_NODE) return "";
+  const element = node as Element;
+  if (SKIP.has(element.tagName)) return "";
+  if (element.tagName === "BR") return "\n";
+  return Array.from(element.childNodes, codeText).join("");
 }
 
 function wrap(mark: string, text: string): string {
@@ -73,7 +87,10 @@ class Converter {
       return `\u0000${this.images.length - 1}\u0000`;
     }
     const remote = safeHref(src);
-    if (remote) return `![${alt}](${remote})`;
+    if (remote) {
+      this.images.push({ kind: "text", text: `![${alt}](${remote})`, remoteImage: true });
+      return `\u0000${this.images.length - 1}\u0000`;
+    }
     /* Local or opaque source: a clipboard image file may stand in for it. */
     this.images.push({ kind: "image", slot: this.slots++, alt });
     return `\u0000${this.images.length - 1}\u0000`;
@@ -89,7 +106,7 @@ class Converter {
     switch (tag) {
       case "BR": return "\n";
       case "IMG": return this.image(element);
-      case "CODE": case "KBD": case "SAMP": return inlineCode(element.textContent ?? "");
+      case "CODE": case "KBD": case "SAMP": return inlineCode(codeText(element));
       /* Google Docs wraps whole selections in <b style="font-weight:normal">. */
       case "STRONG": case "B": return /font-weight\s*:\s*(?:normal|[1-4]00)\b/iu.test(element.getAttribute("style") ?? "") ? inner() : wrap("**", inner());
       case "EM": case "I": return wrap("_", inner());
@@ -174,7 +191,7 @@ class Converter {
       case "UL": case "OL": return this.list(element, 0);
       case "TABLE": return this.table(element as HTMLTableElement);
       case "PRE": {
-        const code = (element.textContent ?? "").replace(/\n$/u, "");
+        const code = codeText(element).replace(/\n$/u, "");
         const marks = fence(code);
         return `${marks}${languageOf(element)}\n${code}\n${marks}`;
       }
@@ -204,7 +221,7 @@ export function richPasteFromHtml(html: string, plain: string): RichPaste | null
   }
   const tail = markdown.slice(cursor);
   if (tail) parts.push({ kind: "text", text: tail });
-  const hasImage = parts.some(part => part.kind === "image");
+  const hasImage = parts.some(part => part.kind === "image" || part.remoteImage === true);
   const normalize = (text: string) => text.replace(/\s+/gu, " ").trim();
   /* One emphasis wrapping the whole selection (a copied bold label) is source styling, not structure. */
   let bare = normalize(markdown);
@@ -216,5 +233,5 @@ export function richPasteFromHtml(html: string, plain: string): RichPaste | null
 
 /** True when the HTML carries readable text beyond image alt attributes. */
 export function richPasteHasText(paste: RichPaste): boolean {
-  return paste.parts.some(part => part.kind === "text" && part.text.trim().length > 0);
+  return paste.parts.some(part => part.kind === "text" && !part.remoteImage && part.text.trim().length > 0);
 }

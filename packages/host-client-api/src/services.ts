@@ -394,6 +394,7 @@ export interface HostTimeTravelService {
   settings(): Promise<import("@omp-studio/client-contract").TimeTravelSettings>;
   storage(): Promise<{ readonly snapshots: number; readonly bytes: number }>;
   cleanup(scope: "expired" | "all"): Promise<{ readonly removed: number }>;
+  removeSession?(sessionId: string): Promise<{ readonly removed: number }>;
   updateSettings(input: Partial<import("@omp-studio/client-contract").TimeTravelSettings>): Promise<import("@omp-studio/client-contract").TimeTravelSettings>;
   timeline(input: { readonly sessionId: import("@omp-studio/client-contract").SessionId; readonly branchLeafId?: string; readonly cursor?: string }): Promise<import("@omp-studio/client-contract").TimeTravelTimeline>;
   preview(input: { readonly sessionId: import("@omp-studio/client-contract").SessionId; readonly snapshotId: string }): Promise<import("@omp-studio/client-contract").TimeTravelRestorePreview>;

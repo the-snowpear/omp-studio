@@ -3,7 +3,7 @@ import type { StudioClient } from "@omp-studio/client-contract";
 import { openWebRtcCapture } from "./webrtcCapture";
 
 const originalMedia = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); if (originalMedia) Object.defineProperty(navigator, "mediaDevices", originalMedia); else Reflect.deleteProperty(navigator, "mediaDevices"); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); if (originalMedia) Object.defineProperty(navigator, "mediaDevices", originalMedia); else Reflect.deleteProperty(navigator, "mediaDevices"); });
 
 function fixture() {
   let peer!: Peer;
@@ -30,13 +30,25 @@ function fixture() {
   return { options, controller, fault, query, getUserMedia, track, stream, peer: () => peer };
 }
 
-it("owns microphone tracks in the browser and disables them on mute before releasing a disconnected peer", async () => {
+it("owns microphone tracks in the browser, tolerates brief ICE disconnects, and releases after sustained disconnect", async () => {
+  vi.useFakeTimers();
   const f = fixture(); const capture = await openWebRtcCapture(f.options);
   expect(f.query).toHaveBeenCalledWith("live.webrtc.connect", { sessionId: "session", audioId: "call", voice: "sol", sdpOffer: "browser-offer" });
   expect(f.peer().setRemoteDescription).toHaveBeenCalledWith({ type: "answer", sdp: "runtime-answer" });
   capture.setMuted(true); expect(f.track.enabled).toBe(false);
   capture.setMuted(false); expect(f.track.enabled).toBe(true);
-  f.peer().connectionState = "disconnected"; f.peer().onconnectionstatechange?.(); capture.stop();
+  // Transient disconnect that recovers within the 6s grace period does not tear down the call.
+  f.peer().connectionState = "disconnected"; f.peer().onconnectionstatechange?.();
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(f.fault).not.toHaveBeenCalled();
+  expect(f.track.stop).not.toHaveBeenCalled();
+  f.peer().connectionState = "connected"; f.peer().onconnectionstatechange?.();
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(f.fault).not.toHaveBeenCalled();
+  // Sustained disconnect past the 6s grace period faults and releases idempotently.
+  f.peer().connectionState = "disconnected"; f.peer().onconnectionstatechange?.();
+  await vi.advanceTimersByTimeAsync(6000);
+  capture.stop();
   expect(f.track.stop).toHaveBeenCalledOnce(); expect(f.peer().close).toHaveBeenCalledOnce();
   expect(f.query.mock.calls.filter(([kind]) => kind === "live.webrtc.release")).toHaveLength(1);
   expect(f.fault).toHaveBeenCalledWith("Live audio disconnected");

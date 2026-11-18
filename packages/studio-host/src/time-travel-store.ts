@@ -209,20 +209,30 @@ async function enumerateWorkspace(
   const custom = ignore().add(exclusions);
   const names = stdout.toString("utf8").split("\0").filter(Boolean);
   const paths = new Set<string>();
-  for (const name of names) {
-    if (name.split("/").includes(".git") || custom.ignores(name)) continue;
+  const candidates = names.filter((name) => !name.split("/").includes(".git") && !custom.ignores(name));
+  const nestedDirs: string[] = [];
+  let nextCandidate = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(32, candidates.length) }, async () => {
+      for (let index = nextCandidate++; index < candidates.length; index = nextCandidate++) {
+        const name = candidates[index]!;
+        const file = safePath(workspace, name);
+        const stat = await lstat(file).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT" || error.code === "ENOTDIR") return undefined;
+          throw error;
+        });
+        if (stat?.isFile() || stat?.isSymbolicLink()) paths.add(name);
+        else if (stat?.isDirectory()) nestedDirs.push(name);
+      }
+    }),
+  );
+  for (const name of nestedDirs) {
     const file = safePath(workspace, name);
-    const stat = await lstat(file).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT" || error.code === "ENOTDIR") return undefined;
-      throw error;
-    });
-    if (stat?.isFile() || stat?.isSymbolicLink()) paths.add(name);
-    else if (
-      stat?.isDirectory() &&
-      (await lstat(join(file, ".git")).then(
+    if (
+      await lstat(join(file, ".git")).then(
         () => true,
         () => false,
-      ))
+      )
     ) {
       for (const child of await enumerateWorkspace(file, [])) {
         const nested = `${name}/${child}`;
@@ -231,6 +241,18 @@ async function enumerateWorkspace(
     }
   }
   return [...paths].sort();
+}
+
+const MAX_STAT_CACHE_ENTRIES = 20_000;
+const RACY_STAT_WINDOW_MS = 2_000;
+
+interface CachedFileStat {
+  readonly dev: number;
+  readonly ino: number;
+  readonly size: number;
+  readonly mtimeMs: number;
+  readonly ctimeMs: number;
+  readonly hash: string;
 }
 
 async function hashFile(file: string): Promise<string> {
@@ -243,10 +265,20 @@ async function hashFile(file: string): Promise<string> {
 /** Host-owned, compressed content-addressed snapshots for one execution environment. */
 export class TimeTravelStore {
   readonly #root: string;
+  readonly #statCache = new Map<string, CachedFileStat>();
   #queue: Promise<unknown> = Promise.resolve();
 
   constructor(profileDirectory: string) {
     this.#root = join(profileDirectory, "time-travel", "v1");
+  }
+
+  #rememberStat(file: string, entry: CachedFileStat): void {
+    this.#statCache.delete(file);
+    this.#statCache.set(file, entry);
+    if (this.#statCache.size > MAX_STAT_CACHE_ENTRIES) {
+      const oldest = this.#statCache.keys().next().value;
+      if (oldest !== undefined) this.#statCache.delete(oldest);
+    }
   }
 
   #serial<T>(action: () => Promise<T>): Promise<T> {
@@ -354,6 +386,38 @@ export class TimeTravelStore {
       return { path: name, kind: "symlink", target: await readlink(file) };
     if (!before.isFile())
       throw new Error(`Cannot capture a non-file path: ${name}`);
+    const nonRacy = Date.now() - Math.max(before.mtimeMs, before.ctimeMs) >= RACY_STAT_WINDOW_MS;
+    if (nonRacy) {
+      const cached = this.#statCache.get(file);
+      if (
+        cached !== undefined &&
+        cached.dev === before.dev &&
+        cached.ino === before.ino &&
+        cached.size === before.size &&
+        cached.mtimeMs === before.mtimeMs &&
+        cached.ctimeMs === before.ctimeMs
+      ) {
+        const blobPresent = await lstat(this.#blob(cached.hash)).then(
+          () => true,
+          (error: NodeJS.ErrnoException) => {
+            if (error.code === "ENOENT") return false;
+            throw error;
+          },
+        );
+        if (blobPresent) {
+          this.#rememberStat(file, cached);
+          return {
+            path: name,
+            kind: "file",
+            hash: cached.hash,
+            mode: before.mode & 0o777,
+          };
+        }
+        this.#statCache.delete(file);
+      }
+    } else {
+      this.#statCache.delete(file);
+    }
     // Hashing is cheap compared with recompressing unchanged files every turn.
     const existingHash = await hashFile(file);
     const hashed = await lstat(file);
@@ -373,6 +437,16 @@ export class TimeTravelStore {
         },
       )
     ) {
+      if (nonRacy) {
+        this.#rememberStat(file, {
+          dev: before.dev,
+          ino: before.ino,
+          size: before.size,
+          mtimeMs: before.mtimeMs,
+          ctimeMs: before.ctimeMs,
+          hash: existingHash,
+        });
+      }
       return {
         path: name,
         kind: "file",
@@ -417,6 +491,16 @@ export class TimeTravelStore {
         )
       )
         await rename(temporary, blob);
+      if (nonRacy) {
+        this.#rememberStat(file, {
+          dev: before.dev,
+          ino: before.ino,
+          size: before.size,
+          mtimeMs: before.mtimeMs,
+          ctimeMs: before.ctimeMs,
+          hash: value,
+        });
+      }
       return {
         path: name,
         kind: "file",
@@ -450,11 +534,17 @@ export class TimeTravelStore {
       );
       if (stat?.isFile() || stat?.isSymbolicLink()) names.add(name);
     }
-    const entries: TimeTravelEntry[] = [];
-    for (const name of [...names].sort()) {
-      const entry = await this.#entry(workspace, name);
-      if (entry) entries.push(entry);
-    }
+    const sortedNames = [...names].sort();
+    const capturedEntries = new Array<TimeTravelEntry | undefined>(sortedNames.length);
+    let nextNameIndex = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(16, sortedNames.length) }, async () => {
+        for (let index = nextNameIndex++; index < sortedNames.length; index = nextNameIndex++) {
+          capturedEntries[index] = await this.#entry(workspace, sortedNames[index]!);
+        }
+      }),
+    );
+    const entries = capturedEntries.filter((entry): entry is TimeTravelEntry => entry !== undefined);
     const directory = this.#manifestDirectory(workspace, input.sessionId);
     const previous = await this.#latestSnapshot(directory);
     const oldEntries = new Map(
@@ -856,24 +946,72 @@ export class TimeTravelStore {
           if (name.endsWith(".json") && !retainedIds.has(this.#metadataId(name))) await rm(join(metadataDirectory, name));
         }
       }
-      const blobs = join(this.#root, "blobs");
-      for (const prefix of await readdir(blobs, { withFileTypes: true }).catch(
+      await this.#sweepUnreferencedBlobs(retained);
+      return { removed };
+    });
+  }
+
+  removeSession(sessionId: string): Promise<{ removed: number }> {
+    if (sessionId.length === 0) return Promise.resolve({ removed: 0 });
+    return this.#serial(async () => {
+      const target = digest(sessionId);
+      const sessionsRoot = join(this.#root, "sessions");
+      let removed = 0;
+      let touched = false;
+      for (const workspace of await readdir(sessionsRoot, { withFileTypes: true }).catch(
         missingDirectory,
       )) {
-        if (!prefix.isDirectory()) continue;
-        for (const file of await readdir(join(blobs, prefix.name), {
-          withFileTypes: true,
-        })) {
-          if (
-            file.isFile() &&
-            file.name.endsWith(".gz") &&
-            !retained.has(file.name.slice(0, -3))
-          )
-            await rm(join(blobs, prefix.name, file.name));
+        if (!workspace.isDirectory()) continue;
+        const workspaceDir = join(sessionsRoot, workspace.name);
+        const sessionDir = join(workspaceDir, target);
+        const files = await readdir(sessionDir, { withFileTypes: true }).catch(missingDirectory);
+        if (files.length === 0) {
+          await rm(sessionDir, { recursive: true, force: true }).catch(() => {});
+          continue;
         }
+        touched = true;
+        for (const file of files) {
+          if (file.isFile() && file.name.endsWith(".json")) removed += 1;
+        }
+        await rm(sessionDir, { recursive: true, force: true });
+        const remaining = await readdir(workspaceDir).catch(() => ["keep"]);
+        if (remaining.length === 0) await rmdir(workspaceDir).catch(() => {});
+      }
+      if (touched) {
+        const retained = new Set<string>();
+        for await (const directory of this.#sessionDirectories()) {
+          for (const file of await readdir(directory, { withFileTypes: true }).catch(missingDirectory)) {
+            if (!file.isFile() || !file.name.endsWith(".json")) continue;
+            const snapshot = await this.#readManifest(directory, file.name);
+            for (const entry of snapshot.entries) {
+              if (entry.kind === "file") retained.add(entry.hash);
+            }
+          }
+        }
+        await this.#sweepUnreferencedBlobs(retained);
       }
       return { removed };
     });
+  }
+
+  async #sweepUnreferencedBlobs(retained: ReadonlySet<string>): Promise<void> {
+    const blobs = join(this.#root, "blobs");
+    for (const prefix of await readdir(blobs, { withFileTypes: true }).catch(
+      missingDirectory,
+    )) {
+      if (!prefix.isDirectory()) continue;
+      for (const file of await readdir(join(blobs, prefix.name), {
+        withFileTypes: true,
+      })) {
+        if (
+          file.isFile() &&
+          file.name.endsWith(".gz") &&
+          !retained.has(file.name.slice(0, -3))
+        ) {
+          await rm(join(blobs, prefix.name, file.name));
+        }
+      }
+    }
   }
 
   async *#sessionDirectories(): AsyncGenerator<string> {

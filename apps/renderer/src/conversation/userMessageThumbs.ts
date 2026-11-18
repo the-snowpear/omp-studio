@@ -265,10 +265,18 @@ export function createIndexedDbThumbStore(): UserThumbStore {
   return {
     async load(sessionId, itemIds) {
       if (itemIds.length === 0) return {};
-      return withStore("readonly", store => loadSelectedThumbs(itemIds, async itemId => {
-        const row = await requestValue(store.get(recordId(sessionId, itemId))) as StoredRow | undefined;
-        return row?.images;
-      }));
+      return withStore("readonly", async (store) => {
+        const keys = new Set(
+          (await requestValue(store.index("sessionId").getAllKeys(sessionId))) as string[],
+        );
+        if (keys.size === 0) return {};
+        return loadSelectedThumbs(itemIds, async (itemId) => {
+          const id = recordId(sessionId, itemId);
+          if (!keys.has(id)) return undefined;
+          const row = await requestValue(store.get(id)) as StoredRow | undefined;
+          return row?.images;
+        });
+      });
     },
     async save(sessionId, itemId, thumbs) {
       if (thumbs.length === 0) return;

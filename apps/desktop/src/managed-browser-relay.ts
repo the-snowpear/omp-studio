@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { lstat, readFile, readdir } from "node:fs/promises";
+import { watch, type FSWatcher } from "node:fs";
+import { lstat, readFile, readdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { WebContents } from "electron";
 import type { ManagedBrowserPage } from "@omp-studio/studio-protocol";
@@ -27,51 +28,107 @@ export class ManagedBrowserRelay implements ManagedBrowserRuntime {
   #nextControl = 1;
   #disposed = false;
   #scanning = false;
+  #rescan = false;
+  #watchDir = "";
+  #watcher: FSWatcher | undefined;
+  #watchDebounce: NodeJS.Timeout | undefined;
   readonly #timer: NodeJS.Timeout;
 
   constructor(readonly options: { manager: DesktopManagedBrowser; directory(): string }) {
     options.manager.setRuntime(this);
-    this.#timer = setInterval(() => { void this.#scan(); }, 1000);
+    this.#timer = setInterval(() => { void this.#scan(); }, 5000);
     this.#timer.unref();
     void this.#scan();
   }
+  #scheduleScan(): void {
+    if (this.#disposed || this.#watchDebounce) return;
+    this.#watchDebounce = setTimeout(() => {
+      this.#watchDebounce = undefined;
+      void this.#scan();
+    }, 80);
+    this.#watchDebounce.unref();
+  }
+  #syncWatcher(target: string): void {
+    if (this.#disposed || this.#watchDir === target) return;
+    this.#watcher?.close();
+    this.#watcher = undefined;
+    this.#watchDir = "";
+    try {
+      const watcher = watch(target, () => this.#scheduleScan());
+      watcher.on("error", () => {
+        if (this.#watcher === watcher) {
+          watcher.close();
+          this.#watcher = undefined;
+          this.#watchDir = "";
+        }
+      });
+      watcher.unref();
+      this.#watcher = watcher;
+      this.#watchDir = target;
+    } catch {
+      // Directory does not exist yet; fallback timer will pick it up once created.
+    }
+  }
   async #scan(): Promise<void> {
-    if (this.#disposed || this.#scanning) return;
+    if (this.#disposed) return;
+    if (this.#scanning) { this.#rescan = true; return; }
     this.#scanning = true;
     try {
-      await this.options.manager.ready;
-      const directory = join(this.options.directory(), "managed-browser");
-      let files: string[];
-      try { files = await readdir(directory); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
-      const candidates: { descriptor: Descriptor; modified: number }[] = [];
-      for (const file of files) {
-        if (!file.endsWith(".json")) continue;
-        const filename = join(directory, file), info = await lstat(filename);
-        if (!info.isFile() || info.isSymbolicLink() || info.size > 4096) continue;
-        let descriptor: Descriptor;
-        try { descriptor = JSON.parse(await readFile(filename, "utf8")) as Descriptor; } catch { continue; }
-        if (descriptor.version !== 1 || typeof descriptor.sessionId !== "string" || typeof descriptor.generation !== "string") continue;
-        const endpoint = new URL(descriptor.endpoint);
-        if (endpoint.protocol !== "http:" || endpoint.hostname !== "127.0.0.1" || !/^\/managed\/[a-f0-9]{64}$/u.test(endpoint.pathname)) continue;
-        try { process.kill(descriptor.pid, 0); } catch { continue; }
-        candidates.push({ descriptor, modified: info.mtimeMs });
-      }
-      const selected = new Set<string>();
-      candidates.sort((first, second) => second.modified - first.modified || second.descriptor.generation.localeCompare(first.descriptor.generation));
-      for (const { descriptor } of candidates) {
-        if (selected.has(descriptor.sessionId)) continue;
-        const current = this.#links.get(descriptor.sessionId);
-        if (current?.descriptor.generation === descriptor.generation && current.socket.readyState < WebSocket.CLOSING) { selected.add(descriptor.sessionId); continue; }
-        try {
-          const response = await fetch(descriptor.endpoint + "/json/list", { signal: AbortSignal.timeout(1000) });
-          if (!response.ok) continue;
-          await response.body?.cancel();
-        } catch { continue; }
+      do {
+        this.#rescan = false;
+        await this.options.manager.ready;
         if (this.#disposed) return;
-        selected.add(descriptor.sessionId);
-        if (current) this.#disconnect(current);
-        this.#connect(descriptor);
-      }
+        const rootDir = this.options.directory();
+        const directory = join(rootDir, "managed-browser");
+        let files: string[];
+        try {
+          files = await readdir(directory);
+          this.#syncWatcher(directory);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            this.#syncWatcher(rootDir);
+            continue;
+          }
+          throw error;
+        }
+        const candidates: { descriptor: Descriptor; modified: number }[] = [];
+        for (const file of files) {
+          if (!file.endsWith(".json")) continue;
+          const filename = join(directory, file);
+          let info;
+          try { info = await lstat(filename); } catch { continue; }
+          if (!info.isFile() || info.isSymbolicLink() || info.size > 4096) continue;
+          let descriptor: Descriptor;
+          try { descriptor = JSON.parse(await readFile(filename, "utf8")) as Descriptor; } catch { continue; }
+          if (descriptor.version !== 1 || typeof descriptor.sessionId !== "string" || typeof descriptor.generation !== "string") continue;
+          let endpoint: URL;
+          try { endpoint = new URL(descriptor.endpoint); } catch { continue; }
+          if (endpoint.protocol !== "http:" || endpoint.hostname !== "127.0.0.1" || !/^\/managed\/[a-f0-9]{64}$/u.test(endpoint.pathname)) continue;
+          try {
+            process.kill(descriptor.pid, 0);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ESRCH") await unlink(filename).catch(() => {});
+            continue;
+          }
+          candidates.push({ descriptor, modified: info.mtimeMs });
+        }
+        const selected = new Set<string>();
+        candidates.sort((first, second) => second.modified - first.modified || second.descriptor.generation.localeCompare(first.descriptor.generation));
+        for (const { descriptor } of candidates) {
+          if (selected.has(descriptor.sessionId)) continue;
+          const current = this.#links.get(descriptor.sessionId);
+          if (current?.descriptor.generation === descriptor.generation && current.socket.readyState < WebSocket.CLOSING) { selected.add(descriptor.sessionId); continue; }
+          try {
+            const response = await fetch(descriptor.endpoint + "/json/list", { signal: AbortSignal.timeout(1000) });
+            if (!response.ok) continue;
+            await response.body?.cancel();
+          } catch { continue; }
+          if (this.#disposed) return;
+          selected.add(descriptor.sessionId);
+          if (current) this.#disconnect(current);
+          this.#connect(descriptor);
+        }
+      } while (this.#rescan && !this.#disposed);
     } catch (error) {
       if (!this.#disposed) console.warn("[managed-browser] Descriptor discovery failed", (error as NodeJS.ErrnoException).code ?? "unavailable");
     } finally { this.#scanning = false; }
@@ -215,5 +272,13 @@ export class ManagedBrowserRelay implements ManagedBrowserRuntime {
       default: throw new Error(`Unsupported Studio browser operation: ${request.op}`);
     }
   }
-  async dispose(): Promise<void> { this.#disposed = true; clearInterval(this.#timer); for (const link of [...this.#links.values()]) this.#disconnect(link); }
+  async dispose(): Promise<void> {
+    this.#disposed = true;
+    clearInterval(this.#timer);
+    if (this.#watchDebounce) { clearTimeout(this.#watchDebounce); this.#watchDebounce = undefined; }
+    this.#watcher?.close();
+    this.#watcher = undefined;
+    this.#watchDir = "";
+    for (const link of [...this.#links.values()]) this.#disconnect(link);
+  }
 }

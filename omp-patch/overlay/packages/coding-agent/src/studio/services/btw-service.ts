@@ -553,6 +553,7 @@ export class StudioBtwService {
 			const text = parts?.closed ? formatBtwInjectText(parts.inject) : "";
 			if (parts?.closed && text) {
 				const id = `${record.topicId}:${record.history?.length ?? 0}`;
+				this.#injections.delete(id);
 				this.#injections.set(id, {
 					ephemeralId: record.ephemeralId,
 					sessionId: record.originalSessionId,
@@ -560,6 +561,13 @@ export class StudioBtwService {
 					turn: record.history?.length ?? 0,
 					value: { id, text, before: parts.before, after: parts.after, state: "ready" },
 				});
+				if (this.#injections.size > 64) {
+					for (const [candidateId, candidate] of this.#injections) {
+						if (candidateId === id || candidate.pending !== undefined) continue;
+						this.#injections.delete(candidateId);
+						if (this.#injections.size <= 64) break;
+					}
+				}
 			}
 			this.#emit(record);
 		} catch (error) {
@@ -646,8 +654,12 @@ export class StudioBtwService {
 	}
 
 	#deliver(record: StudioBtwRecord): void {
+		if (this.#listeners.size === 0) return;
 		const snapshot = this.#snapshot(record);
-		for (const listener of this.#listeners) listener(structuredClone(snapshot));
+		const listeners = [...this.#listeners];
+		for (let index = 0; index < listeners.length; index += 1) {
+			listeners[index]!(index + 1 < listeners.length ? structuredClone(snapshot) : snapshot);
+		}
 	}
 }
 

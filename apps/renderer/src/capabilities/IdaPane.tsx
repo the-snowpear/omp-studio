@@ -58,32 +58,60 @@ export function IdaPane({ client, sessionId, available, visible = true, capabili
     return () => { epoch.current++; };
   }, [client, preview, sessionId, available]);
 
-  const refresh = useCallback(async () => {
-    if (preview || !canRead) return;
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
+  const hasLoadedRef = useRef(false);
+
+  const refresh = useCallback(async (silent = false): Promise<StudioIdaStatus | undefined> => {
+    if (preview || !canRead) return undefined;
     const generation = epoch.current, serial = ++readSerial.current;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const next = await invoke("ida.status.details", { sessionId: sessionId! });
-      if (generation !== epoch.current || serial !== readSerial.current) return;
+      if (generation !== epoch.current || serial !== readSerial.current) return undefined;
+      hasLoadedRef.current = true;
       setStatus(next);
       if (!configLoaded.current) {
         setEnabled(next.enabled); setInstallDir(next.installDir); setPython(next.python); configLoaded.current = true;
       }
+      return next;
     } catch (cause) {
-      if (generation === epoch.current && serial === readSerial.current) setError(hostErrorMessage(cause, zh ? "IDA 状态读取失败" : "Cannot read IDA status"));
+      if (generation === epoch.current && serial === readSerial.current) setError(hostErrorMessage(cause, zhRef.current ? "IDA 状态读取失败" : "Cannot read IDA status"));
+      return undefined;
     } finally { if (generation === epoch.current && serial === readSerial.current) setLoading(false); }
-  }, [preview, canRead, sessionId, invoke, zh]);
+  }, [preview, canRead, sessionId, invoke]);
 
   useEffect(() => {
     if (!visible || !canRead || preview) return;
     let active = true;
-    let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      if (!document.hidden && !lock.current) await refresh();
-      if (active) timer = setTimeout(() => void poll(), 4000);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const clearTimer = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
     };
-    void poll();
-    return () => { active = false; clearTimeout(timer); };
+    const poll = async (silent: boolean) => {
+      clearTimer();
+      if (!active || document.hidden) return;
+      let next: StudioIdaStatus | undefined;
+      if (!lock.current) next = await refresh(silent);
+      const keepPolling = !next || next.databases.some((database) => database.busy) || lock.current;
+      if (active && keepPolling && !document.hidden) {
+        timer = setTimeout(() => void poll(true), 4000);
+      }
+    };
+    const onVisibility = () => {
+      if (document.hidden) clearTimer();
+      else void poll(hasLoadedRef.current);
+    };
+    void poll(hasLoadedRef.current);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      active = false;
+      clearTimer();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [visible, canRead, preview, refresh]);
 
   const db = status?.databases.find(row => row.id === selected) ?? status?.databases[0];

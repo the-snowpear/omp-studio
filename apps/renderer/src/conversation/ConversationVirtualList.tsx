@@ -152,8 +152,10 @@ export const ConversationVirtualList = memo(function ConversationVirtualList({
       scroller, host, beforeEvent: TYPOGRAPHY_BEFORE_CHANGE, changeEvent: TYPOGRAPHY_CHANGE,
       measureMargin, pinRow: setAnchorKey,
       measure: (width) => {
-        const style = getComputedStyle(host);
-        const root = getComputedStyle(document.documentElement);
+        const ownerDoc = host.ownerDocument ?? document;
+        const ownerWin = ownerDoc.defaultView ?? window;
+        const style = ownerWin.getComputedStyle(host);
+        const root = ownerWin.getComputedStyle(ownerDoc.documentElement);
         heightContext.current = {
           width,
           panel: `${scroller.className}:${conversationScrollIdentity(scroller)}`,

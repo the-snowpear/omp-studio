@@ -711,7 +711,7 @@ index 9cb6ca36cc..e1a372f3f9 100644
  	readonly agent: AgentViewLoop;
  	/** Agent loop state (same object as `agent.state`). */
 diff --git a/packages/coding-agent/src/session/agent-session-types.ts b/packages/coding-agent/src/session/agent-session-types.ts
-index f03708235d..476445cf57 100644
+index f03708235d..dba02af3d1 100644
 --- a/packages/coding-agent/src/session/agent-session-types.ts
 +++ b/packages/coding-agent/src/session/agent-session-types.ts
 @@ -47,12 +47,14 @@ import type { SecretObfuscator } from "../secrets/obfuscator";
@@ -738,7 +738,15 @@ index f03708235d..476445cf57 100644
  	/** Tools mounted under `xd://`, for `/tools` display. */
  	getXdevToolEntries?: () => Array<{ name: string; summary: string }>;
  	/** `xd://` presentation state backed by the canonical tool map. */
-@@ -484,6 +488,8 @@ export interface PromptOptions {
+@@ -476,6 +480,7 @@ export interface PromptOptions {
+ 	 * failed before admission still only settles through the returned promise.
+ 	 */
+ 	onPromptAdmitted?: () => void;
++	onPromptStarted?: () => void;
+ 	/**
+ 	 * Called synchronously when this prompt is pushed onto the steer or
+ 	 * follow-up queue, just before {@link onPromptAdmitted}, with the messages it
+@@ -484,6 +489,8 @@ export interface PromptOptions {
  	 * is queued as an aside.
  	 */
  	onPromptQueued?: (queued: readonly AgentMessage[]) => void;
@@ -747,7 +755,7 @@ index f03708235d..476445cf57 100644
  	/**
  	 * Text prompts that must run after this one, in order. The session holds them off the
  	 * queue until this prompt reaches the agent (its run goes live, it lands on a queue, or an
-@@ -514,6 +520,8 @@ export interface DroppedPrompt {
+@@ -514,6 +521,8 @@ export interface DroppedPrompt {
  
  /** Options for AgentSession.followUp(). */
  export interface FollowUpOptions {
@@ -756,7 +764,7 @@ index f03708235d..476445cf57 100644
  	/** Enqueue as a hidden developer message instead of a user follow-up. */
  	synthetic?: boolean;
  	/** Whether to expand file-based prompt templates (default: true). */
-@@ -526,6 +534,8 @@ export interface FollowUpOptions {
+@@ -526,6 +535,8 @@ export interface FollowUpOptions {
  
  /** Options for AgentSession.steer(). */
  export interface SteerOptions {
@@ -766,7 +774,7 @@ index f03708235d..476445cf57 100644
  	attribution?: MessageAttribution;
  	/** Called synchronously with the messages pushed onto the steering queue. See {@link PromptOptions.onPromptQueued}. */
 diff --git a/packages/coding-agent/src/session/agent-session.ts b/packages/coding-agent/src/session/agent-session.ts
-index 4446c01159..0afa955652 100644
+index 4446c01159..54857e78a9 100644
 --- a/packages/coding-agent/src/session/agent-session.ts
 +++ b/packages/coding-agent/src/session/agent-session.ts
 @@ -143,6 +143,7 @@ import { RawSseDebugBuffer } from "@oh-my-pi/pi-tui/apps/debug/raw-sse-buffer";
@@ -919,7 +927,47 @@ index 4446c01159..0afa955652 100644
  		// Revoke before the first await: delayed end-of-turn maintenance must
  		// never revoke a foreground-control grant acquired by a later prompt.
  		const computerControlRevocation =
-@@ -5470,7 +5513,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -4387,8 +4430,10 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		if (this.#sessionMessageAlreadyPersisted(message)) return;
+ 		if (message.role === "assistant") {
+ 			const assistantMsg = message as AssistantMessage;
+-			if (this.#recovery.isClassifierRefusal(assistantMsg)) return;
+-			if (isEmptyErrorTurn(assistantMsg)) return;
++			if (this.#recovery.isClassifierRefusal(assistantMsg) || isEmptyErrorTurn(assistantMsg)) {
++				this.sessionManager.discardReservedMessageId?.("assistant");
++				return;
++			}
+ 			if (assistantMsg.stopReason !== "aborted" && assistantMsg.stopReason !== "error" && assistantMsg.usage) {
+ 				assistantMsg.contextSnapshot = {
+ 					promptTokens: calculatePromptTokens(assistantMsg.usage),
+@@ -4475,6 +4520,17 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 			if (message.role === "custom" && message.customType === "ttsr-injection") {
+ 				this.#ttsr.releaseDeferredReservationFromDetails(message.details);
+ 			}
++			if (message.role === "hookMessage" || message.role === "custom") {
++				this.sessionManager.discardReservedCustomMessageId?.(message.customType, message.timestamp);
++			} else if (
++				(message.role === "user" || message.role === "assistant") &&
++				!this.#sessionMessageAlreadyPersisted(message)
++			) {
++				const skipUser =
++					message.role === "user" &&
++					(message.synthetic === true || (message.steering === true && message.attribution !== "user"));
++				if (!skipUser) this.sessionManager.discardReservedMessageId?.(message.role);
++			}
+ 			return;
+ 		}
+ 		if (message.role === "hookMessage" || message.role === "custom") {
+@@ -4492,6 +4548,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 					// provider preparation / hook time from the prompt→yield anchor.
+ 					message.timestamp,
+ 				);
++			} else {
++				this.sessionManager.discardReservedCustomMessageId?.(message.customType, message.timestamp);
+ 			}
+ 			if (message.role === "custom" && message.customType === "ttsr-injection") {
+ 				this.#ttsr.markInjectedFromDetails(message.details);
+@@ -5470,7 +5528,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  					return;
  				}
  			}
@@ -928,7 +976,7 @@ index 4446c01159..0afa955652 100644
  				options?.onSkip?.("aborted");
  				return;
  			}
-@@ -5613,6 +5656,14 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -5613,6 +5671,14 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  					this.#skipAgentContinue("should-continue-false", request);
  					return;
  				}
@@ -943,7 +991,7 @@ index 4446c01159..0afa955652 100644
  
  				for (;;) {
  					const active = this.#activeAgentContinue;
-@@ -5701,6 +5752,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -5701,6 +5767,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  				delayMs: 100,
  				generation: options.generation,
  				shouldContinue: () => this.agent.hasQueuedMessages(),
@@ -951,7 +999,7 @@ index 4446c01159..0afa955652 100644
  			});
  			return true;
  		}
-@@ -5744,6 +5796,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -5744,6 +5811,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  						source: "auto-continue-queued-message",
  						generation,
  						shouldContinue: () => this.agent.hasQueuedMessages(),
@@ -959,7 +1007,7 @@ index 4446c01159..0afa955652 100644
  					});
  					return;
  				}
-@@ -5946,6 +5999,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -5946,6 +6014,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		options?: AgentEndSettleOptions,
  	): Promise<void> {
  		this.#settledAgentEnd = event;
@@ -969,7 +1017,7 @@ index 4446c01159..0afa955652 100644
  		// Maintenance awaits before settling, and a wake, steer, or scheduled
  		// continuation can start the next run in the meantime. That run already
  		// reported `running`; a late `idle` from this one would leave the session
-@@ -6056,6 +6112,37 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -6056,6 +6127,37 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		await this.#extensionRunner.emit(mapped);
  	}
  
@@ -1007,7 +1055,7 @@ index 4446c01159..0afa955652 100644
  	/**
  	 * Subscribe to agent events.
  	 * Session persistence is handled internally (saves messages on message_end).
-@@ -7004,6 +7091,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -7004,6 +7106,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  
  	/** Drop the in-memory conversation state after the terminal dispose flush. */
  	#releaseRetainedSessionMemory(): void {
@@ -1015,7 +1063,7 @@ index 4446c01159..0afa955652 100644
  		this.#releaseQueuedTtsrReservations();
  		this.agent.reset();
  		this.#prunedTerminalFailure = undefined;
-@@ -7455,6 +7543,15 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -7455,6 +7558,15 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		return this.#tools.systemPromptSources;
  	}
  
@@ -1031,7 +1079,7 @@ index 4446c01159..0afa955652 100644
  	/** Base system prompt blocks the next turn builds on, before any `before_agent_start` override. */
  	get baseSystemPrompt(): string[] {
  		return this.#tools.baseSystemPrompt;
-@@ -7863,6 +7960,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -7863,6 +7975,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  
  	/** Cancel active manual, automatic, and handoff maintenance, preserving an optional source reason. */
  	abortCompaction(reason?: unknown): void {
@@ -1039,7 +1087,7 @@ index 4446c01159..0afa955652 100644
  		void this.#maintenance.abortCompaction(reason);
  	}
  
-@@ -7918,6 +8016,30 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -7918,6 +8031,30 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	}
  
  	/** All messages including custom types like BashExecutionMessage */
@@ -1070,7 +1118,7 @@ index 4446c01159..0afa955652 100644
  	get messages(): AgentMessage[] {
  		return this.agent.state.messages;
  	}
-@@ -8913,9 +9035,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -8913,9 +9050,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  
  		const promptAttribution = options?.attribution ?? (options?.synthetic ? "agent" : "user");
  
@@ -1083,7 +1131,7 @@ index 4446c01159..0afa955652 100644
  			if (!streamingBehavior) {
  				// Busy because the agent owns a turn: that turn supersedes the interrupted
  				// one (after compaction it is the queued-message drain). Busy only from
-@@ -8930,7 +9052,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -8930,7 +9067,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  			const queued = await this.#queueUserMessage(expandedText, options?.images, streamingBehavior, {
  				timestamp: submittedAt,
  				attribution: promptAttribution,
@@ -1092,7 +1140,7 @@ index 4446c01159..0afa955652 100644
  				rawText: typedText,
  				onPromptQueued: options?.onPromptQueued,
  				onPromptAdmitted: onPromptQueuedAdmitted,
-@@ -9004,7 +9126,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -9004,7 +9141,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  			const queued = await this.#queueUserMessage(expandedText, options?.images, streamingBehavior, {
  				timestamp: submittedAt,
  				attribution: promptAttribution,
@@ -1101,7 +1149,7 @@ index 4446c01159..0afa955652 100644
  				rawText: typedText,
  				preprocessed: {
  					images: normalizedImages,
-@@ -9066,18 +9188,13 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -9066,18 +9203,13 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  				...options,
  				followUpBatch: followUps,
  				images: normalizedImages,
@@ -1127,7 +1175,16 @@ index 4446c01159..0afa955652 100644
  			});
  		} catch (error) {
  			turnError = error;
-@@ -9539,6 +9656,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -9515,7 +9647,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		expandedText: string,
+ 		options?: Pick<
+ 			PromptOptions,
+-			"toolChoice" | "images" | "skipCompactionCheck" | "solutionSpace" | "onPromptAdmitted"
++			"toolChoice" | "images" | "skipCompactionCheck" | "solutionSpace" | "onPromptAdmitted" | "onPromptStarted"
+ 		> & {
+ 			prependMessages?: AgentMessage[];
+ 			skipPostPromptRecoveryWait?: boolean;
+@@ -9539,6 +9671,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		this.#promptSetupAbortController = setupAbort;
  		try {
  			options?.onPromptAdmitted?.();
@@ -1135,7 +1192,15 @@ index 4446c01159..0afa955652 100644
  			await this.#recovery.maybeRestoreRetryFallbackPrimary();
  			// Auto-prewalk: return from the previous task's handoff before the usage preflight checks the model,
  			// then judge this task alongside the rest of setup; the decision is applied right before dispatch.
-@@ -9822,19 +9940,24 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -9796,6 +9929,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 					// the dispatch so they admit into the run they targeted.
+ 					this.#wakeDispatchLiveWaiters();
+ 					options?.followUpBatch?.release();
++					options?.onPromptStarted?.();
+ 				});
+ 				await run;
+ 			} finally {
+@@ -9822,19 +9956,24 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * `onRouted` fires once the command is found, before its handler runs.
  	 */
  	async #tryExecuteExtensionCommand(text: string, onRouted?: () => void): Promise<"ran" | "failed" | undefined> {
@@ -1166,7 +1231,7 @@ index 4446c01159..0afa955652 100644
  
  		try {
  			await this.#extensionRunner.runScoped(() => command.handler(args, ctx));
-@@ -9942,12 +10065,34 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -9942,12 +10081,34 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * If the command returns void, returns empty string to indicate it was handled.
  	 */
  	async #tryExecuteCustomCommand(text: string): Promise<string | null> {
@@ -1203,7 +1268,7 @@ index 4446c01159..0afa955652 100644
  
  		// Find matching command
  		const loaded =
-@@ -9959,6 +10104,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -9959,6 +10120,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		const baseCtx = this.#createCommandContext();
  		const ctx = {
  			...baseCtx,
@@ -1211,7 +1276,7 @@ index 4446c01159..0afa955652 100644
  			hasQueuedMessages: baseCtx.hasPendingMessages,
  		} as unknown as CustomCommandContext;
  
-@@ -10001,6 +10147,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -10001,6 +10163,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		await this.#queueUserMessage(expandedText, images, "steer", {
  			timestamp: submittedAt,
  			attribution: options?.attribution,
@@ -1219,7 +1284,7 @@ index 4446c01159..0afa955652 100644
  			rawText: text,
  			onPromptQueued: options?.onPromptQueued,
  		});
-@@ -10027,6 +10174,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -10027,6 +10190,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  			await this.#queueUserMessage(expandedText, images, "followUp", {
  				timestamp: submittedAt,
  				attribution: options?.attribution,
@@ -1227,7 +1292,7 @@ index 4446c01159..0afa955652 100644
  				rawText: text,
  				onPromptQueued: options?.onPromptQueued,
  			});
-@@ -10282,13 +10430,21 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -10282,13 +10446,21 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		) {
  			return false;
  		}
@@ -1255,7 +1320,7 @@ index 4446c01159..0afa955652 100644
  			this.#irc.queueAside(records);
  			options?.onPromptAdmitted?.();
  			// The awaits above (image normalization / vision description) can span the run's
-@@ -10331,13 +10487,16 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -10331,13 +10503,16 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		timestamp: number,
  		rawText: string,
  	): AgentMessage[] {
@@ -1273,7 +1338,7 @@ index 4446c01159..0afa955652 100644
  		if (mode === "followUp") {
  			for (const message of group) this.agent.followUp(message);
  			return group;
-@@ -10555,6 +10714,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -10555,6 +10730,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		this.#queuedMessageDrainScheduled = true;
  		this.#scheduleAgentContinue({
  			source: "queued-message-drain",
@@ -1281,7 +1346,7 @@ index 4446c01159..0afa955652 100644
  			shouldContinue: () => {
  				this.#queuedMessageDrainScheduled = false;
  				return (
-@@ -10855,6 +11015,16 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -10855,6 +11031,16 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  			this.#resumeStrandedIrcAsides();
  			return;
  		}
@@ -1298,7 +1363,7 @@ index 4446c01159..0afa955652 100644
  		this.#allowQueuedMessageDrainRetry();
  		// Keyword notices and their user message must enter the queue in one synchronous phase.
  		if (deliverAs === "followUp") {
-@@ -11198,15 +11368,24 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -11198,15 +11384,24 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 *  `forInterrupt` also withdraws input the run already dequeued but never recorded — live-steered
  	 *  into the aborted response, or taken for its next model call — and treats it as queued ahead of
  	 *  the rest (it was queued first). */
@@ -1326,7 +1391,7 @@ index 4446c01159..0afa955652 100644
  		const recordable = (m: AgentMessage): boolean =>
  			m.role !== "developer" && isDisplayableQueuedMessage(m) && !isUserAuthoredQueuedMessage(m);
  		const recordedOnInterrupt = new Set<AgentMessage>();
-@@ -11260,6 +11439,39 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -11260,6 +11455,39 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		);
  	}
  
@@ -1366,7 +1431,7 @@ index 4446c01159..0afa955652 100644
  	/** Whether an empty submit should interrupt the streaming turn: displayable input is
  	 *  queued, or live steering sits in the in-flight response, which the abort requeues
  	 *  for the continuation turn. */
-@@ -11269,17 +11481,154 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -11269,17 +11497,154 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  
  	/** Chip texts for the queue display. Steering live steering took for the streaming response
  	 *  stays listed until the transcript records it, when the model actually switches to it. */
@@ -1527,7 +1592,7 @@ index 4446c01159..0afa955652 100644
  	/** Last {@link getQueuedMessages} snapshot emitted as a `queue_update` event.
  	 *  Coalesces the agent's internal `onQueueChange` notification down to the
  	 *  externally observable transitions RPC/ACP/TUI subscribers actually care
-@@ -11322,7 +11671,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -11322,7 +11687,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * already delivered target changes nothing; repeated calls may remove further
  	 * duplicates.
  	 */
@@ -1536,7 +1601,7 @@ index 4446c01159..0afa955652 100644
  		return this.takeQueuedMessage(text, queue) !== undefined;
  	}
  
-@@ -11344,7 +11693,19 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -11344,7 +11709,19 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * {@link removeQueuedMessage}, returning the removed message as editor-restorable
  	 * content (its chip text and images); undefined when nothing matched.
  	 */
@@ -1557,7 +1622,7 @@ index 4446c01159..0afa955652 100644
  		const selected = queue === "steering" ? this.agent.peekSteeringQueue() : this.agent.peekFollowUpQueue();
  		const index = this.#findQueuedUserMessage(selected, text);
  		if (index < 0) return undefined;
-@@ -11361,7 +11722,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -11361,7 +11738,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * {@link removeQueuedMessage}; agent-attributed handoffs are never promoted. A missing
  	 * or already delivered target changes nothing; repeated calls may promote duplicates.
  	 */
@@ -1566,7 +1631,7 @@ index 4446c01159..0afa955652 100644
  		const followUp = this.agent.peekFollowUpQueue();
  		const index = this.#findQueuedUserMessage(followUp, text);
  		if (index < 0) return false;
-@@ -11387,7 +11748,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -11387,7 +11764,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * matches the raw text the caller originally submitted first, then the queued chip text
  	 * itself (exact); -1 when nothing matches.
  	 */
@@ -1579,7 +1644,7 @@ index 4446c01159..0afa955652 100644
  		let index = queue.findIndex(
  			message => isUserAuthoredQueuedMessage(message) && this.#queuedMessageRawText.get(message) === text,
  		);
-@@ -11400,7 +11765,13 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -11400,7 +11781,13 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	/** Companions are inserted contiguously before their user; this is where that group starts. */
  	#queuedUserGroupStart(queue: readonly AgentMessage[], userIndex: number): number {
  		let start = userIndex;
@@ -1594,7 +1659,7 @@ index 4446c01159..0afa955652 100644
  		return start;
  	}
  
-@@ -12193,7 +12564,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -12193,7 +12580,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		deliverQueuedMessages?: boolean;
  		/** Internal `/compact` startup keeps the manual-compaction marker alive while aborting the active turn. */
  		preserveCompaction?: boolean;
@@ -1606,7 +1671,7 @@ index 4446c01159..0afa955652 100644
  		const userInterrupt = options?.reason === USER_INTERRUPT_LABEL;
  		this.#pendingAbortErrorId = userInterrupt ? AIError.create(AIError.Flag.UserInterrupt) : undefined;
  		// Latch only when the interrupt stops something; an idle Esc would otherwise fold
-@@ -12305,6 +12680,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -12305,6 +12696,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  				} else this.#recordWithoutTurn([message]);
  			}
  		} finally {
@@ -1614,7 +1679,7 @@ index 4446c01159..0afa955652 100644
  			this.#abortInProgress = false;
  			this.#drainStrandedQueuedMessages();
  			if (forceQueuedDelivery) this.#forcedQueuedMessageDeliveryCount--;
-@@ -13471,6 +13847,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -13471,6 +13863,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  
  	/** Retry the last failed assistant turn when the session is idle. */
  	async retry(): Promise<boolean> {
@@ -1624,7 +1689,7 @@ index 4446c01159..0afa955652 100644
  		const didRetry = await this.#recovery.retry(this.#prunedTerminalFailure);
  		// A manual retry is the user resuming the run they interrupted, so it lifts the
  		// interrupt's auto-resume suppression the same way a typed prompt does.
-@@ -14816,6 +15195,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -14816,6 +15211,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		options: {
  			summarize?: boolean;
  			customInstructions?: string;
@@ -1633,7 +1698,7 @@ index 4446c01159..0afa955652 100644
  			/**
  			 * Opts into the two-phase `ask` toolResult re-answer protocol
  			 * (issue #5642): set only by the interactive `/tree` selector, which
-@@ -14869,7 +15250,12 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -14869,7 +15266,12 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		// navigated straight onto the ask result), and must still return
  		// `reopenAsk` / branch the new answer instead of silently reporting a
  		// no-op (chatgpt-codex review on #5895).
@@ -1647,7 +1712,7 @@ index 4446c01159..0afa955652 100644
  			return { cancelled: false };
  		}
  
-@@ -15011,7 +15397,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -15011,7 +15413,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		// model consumes it, mirroring a live `ask` completion (issue #6483).
  		let isAskReanswerCompletion = false;
  
@@ -1660,7 +1725,7 @@ index 4446c01159..0afa955652 100644
  			// User request (plain prompt, or a user-invoked skill/collab prompt): leaf = parent
  			// (null if root), the draft the user typed goes back to the editor with its images.
  			newLeafId = targetEntry.parentId;
-@@ -15437,7 +15827,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -15437,7 +15843,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		];
  		const keyList = keys.map(key => key.id).join(", ");
  		const runner = this.#extensionRunner;
@@ -1669,7 +1734,7 @@ index 4446c01159..0afa955652 100644
  			if (!coordinator.notifiedKeys.has(actions[0].attemptKey)) {
  				coordinator.notifiedKeys.add(actions[0].attemptKey);
  				this.emitNotice(
-@@ -15470,10 +15860,12 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -15470,10 +15876,12 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  				? `Spend a saved ${providerLabel} rate-limit reset?\n${lines[0]}`
  				: `Spend ${actions.length} saved ${providerLabel} rate-limit resets?\n${lines.join("\n")}`;
  		try {
@@ -1686,7 +1751,7 @@ index 4446c01159..0afa955652 100644
  			if (choice === "Yes" || choice === "No") {
  				for (const key of keys) {
  					if (key.get(this.settings) === "unset") key.set(this.settings, choice === "Yes" ? "yes" : "no");
-@@ -16034,7 +16426,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -16034,7 +16442,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * @returns the archive path and member names, or `undefined` when the main
  	 * session has no messages.
  	 */
@@ -1695,7 +1760,7 @@ index 4446c01159..0afa955652 100644
  		const messages = this.messages;
  		if (messages.length === 0) return undefined;
  		const entries: Array<readonly [string, string]> = [["session.md", `${this.formatSessionAsText()}\n`]];
-@@ -16077,7 +16469,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -16077,7 +16485,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  			entries.push([`subagents/${key}.md`, `${text}\n`]);
  			subagentCount++;
  		}
@@ -1970,7 +2035,7 @@ index 516f36838d..0a262f8b28 100644
  	}
  
 diff --git a/packages/coding-agent/src/session/session-manager.ts b/packages/coding-agent/src/session/session-manager.ts
-index 5835039797..7125b7bb86 100644
+index 5835039797..cfceed6717 100644
 --- a/packages/coding-agent/src/session/session-manager.ts
 +++ b/packages/coding-agent/src/session/session-manager.ts
 @@ -1,3 +1,5 @@
@@ -2034,7 +2099,7 @@ index 5835039797..7125b7bb86 100644
  		this.#fileIsCurrent = false;
  		this.#rewriteRequired = false;
  		this.#loadedMalformedRecords = 0;
-@@ -2141,17 +2155,108 @@ export class SessionManager {
+@@ -2141,17 +2155,115 @@ export class SessionManager {
  		const repairedUsage = normalizeLoadedUsage(entries);
  		if (repairedUsage > 0) logger.warn("Loaded assistant messages with incomplete usage", { count: repairedUsage });
  		this.#index.rebuild(entries);
@@ -2085,8 +2150,8 @@ index 5835039797..7125b7bb86 100644
 +	}
 +
 +	/** Reserve a visible custom message independently of the user/assistant message FIFO. */
-+	reserveCustomMessageId(customType: string, timestamp: number): string {
-+		const key = JSON.stringify([customType, timestamp]);
++	reserveCustomMessageId(customType: string, timestamp?: number): string {
++		const key = JSON.stringify([customType, timestamp ?? null]);
 +		const id = this.#nextId();
 +		this.#reservedMessageIdSet.add(id);
 +		const ids = this.#reservedCustomMessageIds.get(key) ?? [];
@@ -2096,8 +2161,7 @@ index 5835039797..7125b7bb86 100644
 +	}
 +
 +	#takeReservedCustomMessageId(customType: string, timestamp: number | undefined): string | undefined {
-+		if (timestamp === undefined) return undefined;
-+		const key = JSON.stringify([customType, timestamp]);
++		const key = JSON.stringify([customType, timestamp ?? null]);
 +		const ids = this.#reservedCustomMessageIds.get(key);
 +		const id = ids?.shift();
 +		if (!ids?.length) this.#reservedCustomMessageIds.delete(key);
@@ -2128,6 +2192,14 @@ index 5835039797..7125b7bb86 100644
 +		this.#reservedMessageIdSet.delete(id);
 +	}
 +
++	discardReservedMessageId(role: "user" | "assistant" | "system"): void {
++		this.#takeReservedMessageId(role);
++	}
++
++	discardReservedCustomMessageId(customType: string, timestamp: number | undefined): void {
++		this.#takeReservedCustomMessageId(customType, timestamp);
++	}
++
 +	#takeReservedCompactionId(): string | undefined {
 +		const id = this.#reservedCompactionIds.shift();
 +		if (id === undefined) return undefined;
@@ -2145,7 +2217,7 @@ index 5835039797..7125b7bb86 100644
  	#setLeaf(id: string | null): void {
  		this.#index.setLeaf(id);
  		const batch = this.#atomicEntryBatch;
-@@ -3258,6 +3363,10 @@ export class SessionManager {
+@@ -3258,6 +3370,10 @@ export class SessionManager {
  		return this.#sessionId;
  	}
  
@@ -2156,7 +2228,7 @@ index 5835039797..7125b7bb86 100644
  	getSessionFile(): string | undefined {
  		return this.#sessionFile;
  	}
-@@ -3431,6 +3540,70 @@ export class SessionManager {
+@@ -3431,6 +3547,70 @@ export class SessionManager {
  		return this.#sessionName;
  	}
  
@@ -2227,13 +2299,20 @@ index 5835039797..7125b7bb86 100644
  	onSessionNameChanged(cb: () => void): () => void {
  		this.#sessionNameChangedCallbacks.add(cb);
  		return () => {
-@@ -3600,7 +3773,13 @@ export class SessionManager {
+@@ -3600,7 +3780,20 @@ export class SessionManager {
  			| PythonExecutionMessage
  			| FileMentionMessage,
  	): string {
 -		const entry: SessionMessageEntry = { type: "message", ...this.#freshEntryFields(), message };
 +		const role = message.role;
-+		const reserved = role === "user" || role === "assistant" ? this.#takeReservedMessageId(role) : undefined;
++		const skipReservation =
++			role === "user" &&
++			(("synthetic" in message && message.synthetic === true) ||
++				("steering" in message &&
++					message.steering === true &&
++					(!("attribution" in message) || message.attribution !== "user")));
++		const reserved =
++			!skipReservation && (role === "user" || role === "assistant") ? this.#takeReservedMessageId(role) : undefined;
 +		const entry: SessionMessageEntry = {
 +			type: "message",
 +			...this.#freshEntryFields(reserved),
@@ -2242,7 +2321,7 @@ index 5835039797..7125b7bb86 100644
  		this.#recordEntry(entry);
  		return entry.id;
  	}
-@@ -3755,9 +3934,10 @@ export class SessionManager {
+@@ -3755,9 +3948,10 @@ export class SessionManager {
  			tokensAfter?: number;
  		} = {},
  	): string {
@@ -2254,7 +2333,7 @@ index 5835039797..7125b7bb86 100644
  			summary,
  			shortSummary,
  			firstKeptEntryId,
-@@ -3818,7 +3998,7 @@ export class SessionManager {
+@@ -3818,7 +4012,7 @@ export class SessionManager {
  		timestamp?: number,
  	): string {
  		const normalized = normalizeCustomMessagePayload<T>({ customType, content, display, details, attribution });
@@ -2263,7 +2342,7 @@ index 5835039797..7125b7bb86 100644
  		const entry: CustomMessageEntry<T> = {
  			type: "custom_message",
  			customType: normalized.customType,
-@@ -4054,6 +4234,22 @@ export class SessionManager {
+@@ -4054,6 +4248,22 @@ export class SessionManager {
  		return conversationTip(this.#entries, this.#index.branchView());
  	}
  
@@ -2286,7 +2365,7 @@ index 5835039797..7125b7bb86 100644
  	/**
  	 * The session as a tree. A well-formed session has exactly one root; orphaned
  	 * entries (broken parent chain) are returned as roots too.
-@@ -4256,10 +4452,16 @@ export class SessionManager {
+@@ -4256,10 +4466,16 @@ export class SessionManager {
  	 * @param cwd Working directory (stored in the session header)
  	 * @param sessionDir Optional session directory; defaults to the cwd-derived dir.
  	 */
@@ -2305,7 +2384,7 @@ index 5835039797..7125b7bb86 100644
  		return manager;
  	}
  
-@@ -4309,6 +4511,7 @@ export class SessionManager {
+@@ -4309,6 +4525,7 @@ export class SessionManager {
  			copyArtifacts?: boolean;
  			suppressBreadcrumb?: boolean;
  			sessionFile?: string;
@@ -2313,7 +2392,7 @@ index 5835039797..7125b7bb86 100644
  			resetInheritedCost?: boolean;
  			repairInterruptedTail?: boolean;
  			seance?: boolean;
-@@ -4317,6 +4520,7 @@ export class SessionManager {
+@@ -4317,6 +4534,7 @@ export class SessionManager {
  		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
  		const manager = new SessionManager(cwd, dir, true, storage);
  		manager.#suppressBreadcrumb = options?.suppressBreadcrumb === true;
@@ -2321,7 +2400,7 @@ index 5835039797..7125b7bb86 100644
  
  		// A missing source must fail instead of forking an empty parentless session:
  		// the loader swallows ENOENT by default for fresh-session opens, so fork opts out.
-@@ -4339,6 +4543,7 @@ export class SessionManager {
+@@ -4339,6 +4557,7 @@ export class SessionManager {
  				parentSession: sourceHeader?.id,
  				providerPromptCacheKey: SessionManager.getInheritedProviderPromptCacheKey(sourceHeader),
  				taskPromptCacheKey: sourceHeader?.taskPromptCacheKey,
@@ -2329,7 +2408,7 @@ index 5835039797..7125b7bb86 100644
  			},
  			options?.sessionFile,
  		);
-@@ -4492,6 +4697,38 @@ export class SessionManager {
+@@ -4492,6 +4711,38 @@ export class SessionManager {
  		return manager;
  	}
  
@@ -2368,7 +2447,7 @@ index 5835039797..7125b7bb86 100644
  	/**
  	 * Whether `session` is filed under `cwd` (its cwd-derived session directory,
  	 * or a worktree sibling's) while the directory it recorded no longer exists:
-@@ -4595,7 +4832,10 @@ export class SessionManager {
+@@ -4595,7 +4846,10 @@ export class SessionManager {
  		cwd: string,
  		sessionDir?: string,
  		storage: SessionStorage = new FileSessionStorage(),
@@ -2380,7 +2459,7 @@ index 5835039797..7125b7bb86 100644
  	): Promise<SessionManager> {
  		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
  		const resolvedCwd = path.resolve(cwd);
-@@ -4615,7 +4855,8 @@ export class SessionManager {
+@@ -4615,7 +4869,8 @@ export class SessionManager {
  				(!sessionDir || pathIsWithin(dir, path.dirname(breadcrumb.sessionFile)))
  			) {
  				const manager = new SessionManager(cwd, dir, true, storage);
@@ -2390,7 +2469,7 @@ index 5835039797..7125b7bb86 100644
  				return manager;
  			}
  
-@@ -4715,8 +4956,9 @@ export class SessionManager {
+@@ -4715,8 +4970,9 @@ export class SessionManager {
  		}
  
  		const manager = new SessionManager(cwd, dir, true, storage);

@@ -21,17 +21,31 @@ export function WebMcpPane({ client, sessionId, pageId, documentId, agentControl
   const [catalog, setCatalog] = useState<StudioWebMcpCatalog>(), [selected, setSelected] = useState<WebMcpToolRecord>();
   const [input, setInput] = useState("{}"), [result, setResult] = useState<WebMcpInvokeResult>(), [error, setError] = useState(""), [busy, setBusy] = useState(false), [revision, refresh] = useState(0);
   const epoch = useRef(0);
+  const copyRef = useRef(copy); copyRef.current = copy;
+  const zhRef = useRef(zh); zhRef.current = zh;
+  useEffect(() => {
+    if (!shown) return;
+    if (capability === false) {
+      setCatalog({ pageId, status: "unavailable", tools: [], truncated: false, untrusted: true, invocationAvailable: false, reason: reason ?? copyRef.current("WebMCP 需要实际 Chromium；此原生页面不提供。", "WebMCP requires actual Chromium; this native page does not provide it.") });
+      return;
+    }
+    if (!preview) return;
+    const localized = { ...getPreviewWebMcp(zh), pageId };
+    setCatalog(localized);
+    setSelected(previous => previous ? localized.tools.find(tool => tool.name === previous.name && tool.frameId === previous.frameId) ?? previous : undefined);
+    setResult(previous => previous ? getPreviewWebMcpResult(zh) : undefined);
+  }, [shown, capability, reason, preview, pageId, zh]);
   useEffect(() => {
     const current = ++epoch.current;
     setCatalog(undefined); setSelected(undefined); setResult(undefined); setError(""); setBusy(false);
     if (!shown) return;
-    if (capability === false) { setCatalog({ pageId, status: "unavailable", tools: [], truncated: false, untrusted: true, invocationAvailable: false, reason: reason ?? copy("WebMCP 需要实际 Chromium；此原生页面不提供。", "WebMCP requires actual Chromium; this native page does not provide it.") }); return; }
-    if (preview) { setCatalog({ ...getPreviewWebMcp(zh), pageId }); return; }
+    if (capability === false) { setCatalog({ pageId, status: "unavailable", tools: [], truncated: false, untrusted: true, invocationAvailable: false, reason: reason ?? copyRef.current("WebMCP 需要实际 Chromium；此原生页面不提供。", "WebMCP requires actual Chromium; this native page does not provide it.") }); return; }
+    if (preview) { setCatalog({ ...getPreviewWebMcp(zhRef.current), pageId }); return; }
     if (!client) return;
     setBusy(true);
     void client.query("browser.webmcp.list", { sessionId, pageId }).then(value => { if (current === epoch.current) setCatalog(value); }).catch(cause => { if (current === epoch.current) setError(hostErrorMessage(cause, "WebMCP unavailable")); }).finally(() => { if (current === epoch.current) setBusy(false); });
     return () => { epoch.current++; };
-  }, [client, sessionId, pageId, documentId, shown, preview, revision, capability, reason, copy, zh]);
+  }, [client, sessionId, pageId, documentId, shown, preview, revision, capability, reason]);
   const choose = async (tool: WebMcpToolRecord) => {
     const current = ++epoch.current; setSelected(tool); setInput("{}"); setResult(undefined); setError("");
     if (preview || !client) return;

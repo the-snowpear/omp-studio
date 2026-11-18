@@ -4,12 +4,13 @@ import type { StudioClient } from "@omp-studio/client-contract";
 export function startEvaluationPolling({ client, load, intervalMs }: {
   client: StudioClient;
   load(): Promise<void>;
-  intervalMs?: number;
+  intervalMs?: number | (() => number | undefined) | undefined;
 }): () => void {
   let stopped = false;
   let running = false;
   let invalidated = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const isHidden = () => document.hidden || document.visibilityState === "hidden";
   const read = async () => {
     running = true;
     invalidated = false;
@@ -17,14 +18,15 @@ export function startEvaluationPolling({ client, load, intervalMs }: {
       await load();
     } finally {
       running = false;
-      if (!stopped && !document.hidden && (invalidated || intervalMs !== undefined)) {
-        timer = setTimeout(refresh, invalidated ? 0 : intervalMs);
+      const nextInterval = typeof intervalMs === "function" ? intervalMs() : intervalMs;
+      if (!stopped && !isHidden() && (invalidated || nextInterval !== undefined)) {
+        timer = setTimeout(refresh, invalidated ? 0 : nextInterval);
       }
     }
   };
   const refresh = () => {
     clearTimeout(timer);
-    if (stopped || document.hidden) return;
+    if (stopped || isHidden()) return;
     invalidated = true;
     if (!running) void read();
   };

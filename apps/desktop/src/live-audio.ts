@@ -53,10 +53,22 @@ export class DesktopLiveAudio {
   dispose(): void { for (const owner of this.#generations.keys()) this.disposeWindow(owner); }
 }
 export function registerLiveAudioIpc(options: { ipcMain: TerminalIpcMain; isTrustedSender(sender: TerminalSender): boolean; isVisible(sender: TerminalSender): boolean; manager: DesktopLiveAudio }): { dispose(): void } {
-  const tracked = new Set<number>();
+  const tracked = new Map<number, () => void>();
   for (const [kind, channel] of Object.entries(LIVE_AUDIO_CHANNELS)) options.ipcMain.handle(channel, async ({ sender }, payload): Promise<LiveAudioResult> => {
     if (sender.isDestroyed() || !options.isTrustedSender(sender)) throw new Error("Untrusted audio sender");
-    if (!tracked.has(sender.id)) { tracked.add(sender.id); const cleanup = () => { tracked.delete(sender.id); options.manager.disposeWindow(sender.id); }; sender.once("destroyed", cleanup); sender.once("did-navigate", cleanup); }
+    if (!tracked.has(sender.id)) {
+      const cleanup = () => {
+        if (!tracked.delete(sender.id)) return;
+        sender.off("destroyed", cleanup);
+        sender.off("did-navigate", cleanup);
+        sender.off("render-process-gone", cleanup);
+        options.manager.disposeWindow(sender.id);
+      };
+      tracked.set(sender.id, cleanup);
+      sender.once("destroyed", cleanup);
+      sender.once("did-navigate", cleanup);
+      sender.once("render-process-gone", cleanup);
+    }
     try {
       if (kind !== "detach" && !options.isVisible(sender)) { options.manager.disposeWindow(sender.id); throw new Error("Hidden window"); }
       if (kind === "attach") await options.manager.attach(sender.id, payload);
@@ -66,5 +78,5 @@ export function registerLiveAudioIpc(options: { ipcMain: TerminalIpcMain; isTrus
       return { ok: true };
     } catch { return { ok: false, message: "Live microphone connection ended. Reconnect explicitly from a visible desktop window." }; }
   });
-  return { dispose() { for (const owner of tracked) options.manager.disposeWindow(owner); tracked.clear(); for (const channel of Object.values(LIVE_AUDIO_CHANNELS)) options.ipcMain.removeHandler(channel); } };
+  return { dispose() { for (const cleanup of [...tracked.values()]) cleanup(); tracked.clear(); for (const channel of Object.values(LIVE_AUDIO_CHANNELS)) options.ipcMain.removeHandler(channel); } };
 }

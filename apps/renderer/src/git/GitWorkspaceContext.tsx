@@ -125,11 +125,14 @@ export function GitWorkspaceProvider({ client, workspaceId, children }: { client
   const cancel = useCallback(async () => {
     if (!activeRequest) return;
     try {
-      const handle = await client.command(activeRequest.domain === "git" ? "git.execute" : "github.execute", { operation: { kind: "cancel", requestId: activeRequest.requestId } });
+      const handle = await client.command(activeRequest.domain === "git" ? "git.execute" : "github.execute", {
+        ...(workspaceId ? { workspaceId } : {}),
+        operation: { kind: "cancel", requestId: activeRequest.requestId },
+      });
       await waitReceipt(client, handle.requestId, 30_000);
       if (alive.current) setNotice(zhRef.current ? "已请求取消" : "Cancellation requested");
-    } catch (cause) { if (alive.current) setNotice(hostErrorMessage(cause, "Cancellation failed")); }
-  }, [client, activeRequest]);
+    } catch (cause) { if (alive.current) setNotice(hostErrorMessage(cause, zhRef.current ? "取消失败" : "Cancellation failed")); }
+  }, [client, activeRequest, workspaceId]);
   return <Context.Provider value={{ repository: preview ? demoRepository : repositoryHook.repository, loading: preview ? false : repositoryHook.loading, error: preview ? undefined : repositoryHook.error,
     draft, setDraft, busy, activeRequest, notice, setNotice, remote, setRemote, revision, githubRevision, refresh, execute, executeGithub, cancel }}>{children}</Context.Provider>;
 }

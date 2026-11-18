@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { cp, mkdir, rm, rename } from "node:fs/promises";
-import { dirname, join, sep } from "node:path";
+import { cp, mkdir, mkdtemp, realpath, rm, rename } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import process from "node:process";
 
 import { bundlePreload } from "./preload-bundle.mjs";
@@ -106,6 +106,16 @@ async function cleanup() {
   await Promise.all(children.map((child) => stopChild(child)));
 }
 
+async function removeDirectoryWithin(base, target) {
+  if (!existsSync(target)) return;
+  const [basePath, targetPath] = await Promise.all([realpath(base), realpath(target)]);
+  const location = relative(basePath, targetPath);
+  if (!location || location === ".." || location.startsWith(`..${sep}`) || isAbsolute(location)) {
+    throw new Error(`Preview directory is outside ${basePath}: ${targetPath}`);
+  }
+  await rm(target, { recursive: true, force: true });
+}
+
 async function waitForRenderer(child) {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
@@ -123,7 +133,7 @@ async function waitForRenderer(child) {
   throw new Error(`Renderer did not become ready at ${previewUrl}`);
 }
 
-async function registerWindowsPreviewShortcut() {
+async function registerWindowsPreviewShortcut(targetExe = previewElectronExe) {
   if (process.platform !== "win32") return;
   const appData = process.env.APPDATA;
   if (!appData) return;
@@ -209,7 +219,7 @@ namespace ShellHelpers {
 }
 '@
 Add-Type -TypeDefinition $code -Language CSharp
-[ShellHelpers.ShortcutManager]::CreateOrUpdate("${shortcutPath.replace(/\\/g, "\\\\")}", "${previewElectronExe.replace(/\\/g, "\\\\")}", "${appIcon.replace(/\\/g, "\\\\")}", "${aumid}")
+[ShellHelpers.ShortcutManager]::CreateOrUpdate("${shortcutPath.replace(/\\/g, "\\\\")}", "${targetExe.replace(/\\/g, "\\\\")}", "${appIcon.replace(/\\/g, "\\\\")}", "${aumid}")
 `;
   try {
     await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", psScript]);
@@ -218,7 +228,7 @@ Add-Type -TypeDefinition $code -Language CSharp
   }
 }
 
-async function stagePreviewRuntime(runtime) {
+async function stagePreviewRuntime(runtime, electronDirectory) {
   // 开发预览的 exe 保持 electron.exe 这个名字，app.isPackaged === false，
   // 桌面端不会读 <previewElectronDir>/runtime，改从 AppData 的已装 Runtime
   // 与 repo 内产物发现。因此这里无需 stage，也就不必要求已签名产物存在。
@@ -227,7 +237,7 @@ async function stagePreviewRuntime(runtime) {
   // The renamed executable reports app.isPackaged=true. Mirror electron-builder's
   // extraFiles layout so production preview exercises the same managed Runtime
   // discovery, verification and activation path as an installed build.
-  await (await import("./production-preview-runtime.mjs")).stageProductionPreviewRuntime(runtime, previewElectronDir);
+  await (await import("./production-preview-runtime.mjs")).stageProductionPreviewRuntime(runtime, electronDirectory);
 }
 
 async function preparePreviewElectron(runtime) {
@@ -246,60 +256,76 @@ async function preparePreviewElectron(runtime) {
     throw new Error("Preview icon resources are missing. Expected apps/desktop/resources/icon.ico and rcedit.exe.");
   }
 
-  await rm(previewElectronDir, { recursive: true, force: true });
-  await mkdir(previewElectronDir, { recursive: true });
-  // Renaming electron.exe makes Electron report app.isPackaged === true, so the
-  // Desktop Host puts its managed Runtime tree at <previewElectronDir>/runtime.
-  // Anything named `runtime` inside the Electron distribution is therefore a
-  // leftover from an earlier preview run, and copying it in would resurrect a
-  // stale omp.exe that `rm -rf outputs/preview-electron` cannot reach (it lives
-  // under the gitignored node_modules). Skip it so seeding installs the freshly
-  // built, signed artifact instead.
-  await cp(electronDist, previewElectronDir, {
-    recursive: true,
-    filter: (source) => source !== staleRuntimeDir && !source.startsWith(`${staleRuntimeDir}${sep}`),
-  });
-  if (existsSync(staleRuntimeDir)) {
-    await rm(staleRuntimeDir, { recursive: true, force: true });
-    console.log(`[preview] Removed a stale Runtime tree from the Electron distribution: ${staleRuntimeDir}`);
-  }
-
-  /**
-   * 生产预览必须改名：Electron 只看可执行文件名决定 isPackaged。改名后
-   * app.isPackaged === true，桌面端才会走托管 Runtime 的发现、验签与激活
-   * 路径，与已安装形态一致。
-   *
-   * 开发预览必须保持 electron.exe 这个名字：isPackaged === false 时
-   * rendererDevServerUrl() 才会采纳 OMP_RENDERER_DEV_URL，渲染层才会真的
-   * 走 Vite dev server，HMR / Fast Refresh 才有意义。改名会让 dev server
-   * 白起，渲染层仍读 file:// 构建产物。
-   */
-  const exePath = production ? previewElectronExe : join(previewElectronDir, "electron.exe");
+  let electronDirectory = previewElectronDir;
+  let stagedTempDirectory;
   if (production) {
-    await rename(join(previewElectronDir, "electron.exe"), previewElectronExe);
+    const copies = join(root, "outputs", "production-preview", "electrons");
+    await mkdir(copies, { recursive: true });
+    electronDirectory = await mkdtemp(join(copies, "electron-"));
+    stagedTempDirectory = electronDirectory;
+  } else {
+    await removeDirectoryWithin(join(root, "outputs"), electronDirectory);
+    await mkdir(electronDirectory, { recursive: true });
   }
-  await stagePreviewRuntime(runtime);
+  try {
+    // Renaming electron.exe makes Electron report app.isPackaged === true, so the
+    // Desktop Host puts its managed Runtime tree at <previewElectronDir>/runtime.
+    // Anything named `runtime` inside the Electron distribution is therefore a
+    // leftover from an earlier preview run, and copying it in would resurrect a
+    // stale omp.exe that `rm -rf outputs/preview-electron` cannot reach (it lives
+    // under the gitignored node_modules). Skip it so seeding installs the freshly
+    // built, signed artifact instead.
+    await cp(electronDist, electronDirectory, {
+      recursive: true,
+      filter: (source) => source !== staleRuntimeDir && !source.startsWith(`${staleRuntimeDir}${sep}`),
+    });
+    if (!production && existsSync(staleRuntimeDir)) {
+      await removeDirectoryWithin(electronDist, staleRuntimeDir);
+      console.log(`[preview] Removed a stale Runtime tree from the Electron distribution: ${staleRuntimeDir}`);
+    }
 
-  await run(rceditExe, [
-    exePath,
-    "--set-icon",
-    appIcon,
-    "--set-version-string",
-    "ProductName",
-    "OMP Studio",
-    "--set-version-string",
-    "FileDescription",
-    "OMP Studio",
-    "--set-version-string",
-    "InternalName",
-    "OMP Studio",
-    "--set-version-string",
-    "OriginalFilename",
-    "OMP Studio.exe",
-  ]);
+    /**
+     * 生产预览必须改名：Electron 只看可执行文件名决定 isPackaged。改名后
+     * app.isPackaged === true，桌面端才会走托管 Runtime 的发现、验签与激活
+     * 路径，与已安装形态一致。
+     *
+     * 开发预览必须保持 electron.exe 这个名字：isPackaged === false 时
+     * rendererDevServerUrl() 才会采纳 OMP_RENDERER_DEV_URL，渲染层才会真的
+     * 走 Vite dev server，HMR / Fast Refresh 才有意义。改名会让 dev server
+     * 白起，渲染层仍读 file:// 构建产物。
+     */
+    const exePath = join(electronDirectory, production ? "OMP Studio.exe" : "electron.exe");
+    if (production) {
+      await rename(join(electronDirectory, "electron.exe"), exePath);
+    }
+    await stagePreviewRuntime(runtime, electronDirectory);
 
-  await registerWindowsPreviewShortcut();
-  return exePath;
+    await run(rceditExe, [
+      exePath,
+      "--set-icon",
+      appIcon,
+      "--set-version-string",
+      "ProductName",
+      "OMP Studio",
+      "--set-version-string",
+      "FileDescription",
+      "OMP Studio",
+      "--set-version-string",
+      "InternalName",
+      "OMP Studio",
+      "--set-version-string",
+      "OriginalFilename",
+      "OMP Studio.exe",
+    ]);
+
+    await registerWindowsPreviewShortcut(exePath);
+    return exePath;
+  } catch (error) {
+    if (stagedTempDirectory) {
+      await rm(stagedTempDirectory, { recursive: true, force: true }).catch(() => {});
+    }
+    throw error;
+  }
 }
 
 async function main() {
@@ -324,16 +350,55 @@ async function main() {
     await run(process.execPath, [npmCli, "rebuild", "--ignore-scripts", "--bin-links=true"]);
   }
 
-  console.log("[preview] Building workspace...");
-  await run(process.execPath, [npmCli, "run", "build"]);
+  const useProductionCache = production && process.platform === "win32";
+  const cacheTools = useProductionCache ? await import("./production-preview-cache.mjs") : undefined;
+  const cacheOptions = { npmCli, dependencyCache: new Map() };
+  let cache = cacheTools ? await cacheTools.inspectProductionPreviewCache(root, cacheOptions) : undefined;
+  let runtime;
+  let electronExecutable;
+  if (cache?.hit) {
+    runtime = await (await import("./production-preview-runtime.mjs")).prepareProductionPreviewRuntime({ npmCli });
+    // Runtime preparation may take time; recheck before launching if another
+    // developer process changed source or dist/ while it was running.
+    cache = await cacheTools.inspectProductionPreviewCache(root, cacheOptions);
+    if (cache.hit && cache.record.runtimeKey === cacheTools.productionPreviewRuntimeKey(runtime)) {
+      electronExecutable = await cacheTools.reusableProductionPreviewElectron(root, cache.record, runtime);
+      if (electronExecutable) console.log("[preview] Sources and build outputs unchanged; reusing the previous production build.");
+    }
+  }
 
-  console.log("[preview] Bundling sandboxed preload...");
-  bundlePreload();
+  if (!electronExecutable) {
+    console.log("[preview] Building workspace...");
+    await run(process.execPath, [npmCli, "run", "build"]);
 
-  const runtime = production && process.platform === "win32"
-    ? await (await import("./production-preview-runtime.mjs")).prepareProductionPreviewRuntime({ npmCli })
-    : undefined;
-  const electronExecutable = await preparePreviewElectron(runtime);
+    console.log("[preview] Bundling sandboxed preload...");
+    bundlePreload();
+
+    runtime = useProductionCache
+      ? await (await import("./production-preview-runtime.mjs")).prepareProductionPreviewRuntime({ npmCli })
+      : undefined;
+    if (cacheTools && await cacheTools.productionPreviewInputs(root, cacheOptions) !== cache.inputs) {
+      throw new Error("Production preview sources or dependencies changed during the build. Start it again to rebuild the current version.");
+    }
+    electronExecutable = cacheTools && cache.record
+      ? await cacheTools.reusableProductionPreviewElectron(root, cache.record, runtime)
+      : undefined;
+    let createdProductionElectron = false;
+    if (!electronExecutable) {
+      electronExecutable = await preparePreviewElectron(runtime);
+      createdProductionElectron = useProductionCache;
+    }
+    if (cacheTools) {
+      try {
+        await cacheTools.saveProductionPreviewCache(root, cache.inputs, runtime, relative(root, dirname(electronExecutable)), cacheOptions);
+      } catch (error) {
+        if (createdProductionElectron) {
+          await rm(dirname(electronExecutable), { recursive: true, force: true }).catch(() => {});
+        }
+        throw error;
+      }
+    }
+  }
 
   /**
    * 生产模式（OMP_PREVIEW_MODE=production）：跳过 vite dev server。改名后的

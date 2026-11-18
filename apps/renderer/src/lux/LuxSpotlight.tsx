@@ -26,17 +26,31 @@ export function LuxSpotlight({ enabled }: { enabled: boolean }) {
     const root = globalThis.document.documentElement;
     let frame = 0;
     let pointer: { x: number; y: number; target: EventTarget | null } | null = null;
+    let radiusCache = new WeakMap<Element, string>();
+    let lastW = -1, lastH = -1, lastX = Number.NaN, lastY = Number.NaN, lastRadius = "";
+    let lastMx = Number.NaN, lastMy = Number.NaN;
+    let isShown = false;
 
     const hide = () => {
+      if (!isShown && !node.hasAttribute("data-on")) return;
+      isShown = false;
       node.removeAttribute("data-on");
     };
     const place = (element: Element): DOMRect => {
       const rect = element.getBoundingClientRect();
-      const radius = getComputedStyle(element).borderRadius;
-      node.style.width = `${Math.round(rect.width)}px`;
-      node.style.height = `${Math.round(rect.height)}px`;
-      node.style.translate = `${Math.round(rect.left)}px ${Math.round(rect.top)}px`;
-      node.style.borderRadius = radius;
+      let radius = radiusCache.get(element);
+      if (radius === undefined) {
+        radius = getComputedStyle(element).borderRadius;
+        radiusCache.set(element, radius);
+      }
+      const w = Math.round(rect.width);
+      const h = Math.round(rect.height);
+      const x = Math.round(rect.left);
+      const y = Math.round(rect.top);
+      if (w !== lastW) { lastW = w; node.style.width = `${w}px`; }
+      if (h !== lastH) { lastH = h; node.style.height = `${h}px`; }
+      if (x !== lastX || y !== lastY) { lastX = x; lastY = y; node.style.translate = `${x}px ${y}px`; }
+      if (radius !== lastRadius) { lastRadius = radius; node.style.borderRadius = radius; }
       return rect;
     };
     const paint = () => {
@@ -47,12 +61,18 @@ export function LuxSpotlight({ enabled }: { enabled: boolean }) {
       const target = current.target instanceof Element ? current.target.closest(LUX_SPOT_TARGETS) : null;
       if (target === null || target.closest(EXCLUDED) !== null) return hide();
       const rect = place(target);
-      node.style.setProperty("--mx", `${Math.round(current.x - rect.left)}px`);
-      node.style.setProperty("--my", `${Math.round(current.y - rect.top)}px`);
-      node.setAttribute("data-on", "");
+      const mx = Math.round(current.x - rect.left);
+      const my = Math.round(current.y - rect.top);
+      if (mx !== lastMx) { lastMx = mx; node.style.setProperty("--mx", `${mx}px`); }
+      if (my !== lastMy) { lastMy = my; node.style.setProperty("--my", `${my}px`); }
+      if (!isShown) { isShown = true; node.setAttribute("data-on", ""); }
     };
     const onMove = (event: PointerEvent) => {
       if (event.pointerType === "touch") return;
+      if ((event.buttons ?? 0) !== 0) {
+        if (pointer !== null || isShown) { pointer = null; hide(); }
+        return;
+      }
       pointer = { x: event.clientX, y: event.clientY, target: event.target };
       if (frame === 0) frame = requestAnimationFrame(paint);
     };
@@ -60,18 +80,22 @@ export function LuxSpotlight({ enabled }: { enabled: boolean }) {
       pointer = null;
       hide();
     };
+    const onResize = () => {
+      radiusCache = new WeakMap<Element, string>();
+      onLeave();
+    };
     document.addEventListener("pointermove", onMove, { passive: true });
     document.documentElement.addEventListener("pointerleave", onLeave);
     window.addEventListener("blur", onLeave);
     // A fixed light must leave its old position when the layout moves.
-    window.addEventListener("resize", onLeave);
+    window.addEventListener("resize", onResize);
     document.addEventListener("scroll", onLeave, { capture: true, passive: true });
     return () => {
       if (frame !== 0) cancelAnimationFrame(frame);
       document.removeEventListener("pointermove", onMove);
       document.documentElement.removeEventListener("pointerleave", onLeave);
       window.removeEventListener("blur", onLeave);
-      window.removeEventListener("resize", onLeave);
+      window.removeEventListener("resize", onResize);
       document.removeEventListener("scroll", onLeave, { capture: true });
       hide();
     };

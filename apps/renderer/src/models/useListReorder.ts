@@ -1,4 +1,5 @@
-import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { MOTION_MS, motionReduced } from "../motion";
 
 type DragRow = {
   id: string;
@@ -54,10 +55,19 @@ export function useListReorder({ order, selector, gap, sortingClass, onReorder }
   const dragLockRef = useRef(false);
   const settleGenRef = useRef(0);
   const clearDragStylesRef = useRef(false);
+  const cleanupRef = useRef<(() => void) | null>(null);
   const drop = useRef(onReorder);
   drop.current = onReorder;
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragPhase, setDragPhase] = useState<"dragging" | "settling">("dragging");
+
+  useEffect(() => () => {
+    settleGenRef.current += 1;
+    dragLockRef.current = false;
+    cleanupRef.current?.();
+    cleanupRef.current = null;
+    document.body.classList.remove(sortingClass, "is-reordering-cards");
+  }, [sortingClass]);
 
   useLayoutEffect(() => {
     if (!clearDragStylesRef.current) return;
@@ -117,7 +127,7 @@ export function useListReorder({ order, selector, gap, sortingClass, onReorder }
     };
 
     const stopCursor = () => {
-      document.body.classList.remove(sortingClass);
+      document.body.classList.remove(sortingClass, "is-reordering-cards");
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
       try {
@@ -142,17 +152,11 @@ export function useListReorder({ order, selector, gap, sortingClass, onReorder }
       handle.removeEventListener("pointerup", up);
       handle.removeEventListener("pointercancel", up);
       stopCursor();
-      const destY = destinationTranslateY(items, originIndex, overIndex, gap);
       const gen = ++settleGenRef.current;
-      setDragPhase("settling");
-      dragged.el.style.transition = "transform var(--dur-slow) var(--ease-ios), scale var(--dur-slow) var(--ease-ios)";
-      requestAnimationFrame(() => {
-        if (gen !== settleGenRef.current) return;
-        dragged.el.style.transform = `translate3d(0, ${destY}px, 0)`;
-      });
 
       const finish = () => {
         if (gen !== settleGenRef.current) return;
+        cleanupRef.current = null;
         dragLockRef.current = false;
         clearDragStylesRef.current = true;
         setDraggingId(null);
@@ -161,7 +165,34 @@ export function useListReorder({ order, selector, gap, sortingClass, onReorder }
         drop.current(originIndex, overIndex, items.map(item => item.id));
       };
 
-      window.setTimeout(finish, 250);
+      if (motionReduced()) {
+        finish();
+        return;
+      }
+
+      const destY = destinationTranslateY(items, originIndex, overIndex, gap);
+      setDragPhase("settling");
+      dragged.el.style.transition = "transform var(--dur-slow) var(--ease-ios), scale var(--dur-slow) var(--ease-ios)";
+      const rafId = requestAnimationFrame(() => {
+        if (gen !== settleGenRef.current) return;
+        dragged.el.style.transform = `translate3d(0, ${destY}px, 0)`;
+      });
+      const timerId = window.setTimeout(finish, MOTION_MS.slow);
+      cleanupRef.current = () => {
+        cancelAnimationFrame(rafId);
+        window.clearTimeout(timerId);
+      };
+    };
+
+    cleanupRef.current = () => {
+      handle.removeEventListener("pointermove", movePointer);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+      stopCursor();
+      for (const item of items) {
+        item.el.style.removeProperty("transition");
+        item.el.style.removeProperty("transform");
+      }
     };
 
     handle.addEventListener("pointermove", movePointer);
