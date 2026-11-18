@@ -7,10 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-11-18
+
+### Changed
+
+- 缩短工作区内切换会话时的等待，保留各会话的草稿、滚动位置和已展开内容。重新打开近期会话时优先复用已加载首屏。
+- 减少对话流式输出期间的重复渲染、重排和语法高亮工作，归档读取复用索引，关闭会话时回收相关终端资源。
+- 开发环境的生产预览会复用输入未变且文件完整的构建产物，启动时继续验证 Runtime 签名和身份。
+- 内置 Runtime 更新为 `18.20.2-studio.14`。
+
 ### Fixed
 
 - 保存自定义提供商或模型时，保留数字形式、含引号或 YAML 特殊字符的字符串凭据，修复重复编辑后对话模型列表丢失自定义模型的问题。 [#42](https://github.com/the-snowpear/omp-studio/issues/42) · [#43](https://github.com/the-snowpear/omp-studio/pull/43)
 - 用户消息中的 Markdown 链接始终带下划线，在深浅主题、键盘聚焦及选中文本时保持可读。 [#45](https://github.com/the-snowpear/omp-studio/issues/45)
+- 修复会话归档失败回滚时可能丢失原会话、下次启动被误判为更新失败、以及空闲会话无法按预期回收的问题。
+- 修复二级页面的审批、提问和表单有时不可见，以及多窗口重复执行快捷键的问题。切换界面语言时保留正在填写的草稿和连接。
+- 修复预览数据可能写入真实偏好、关闭未保存的文件时对话框卡住，以及中文输入补全斜杠命令时可能清除已附加图片的问题。
+- 评测图片导入仅使用评测目录内的有效文件。Runtime 修复了流式任务异常结束后可能出现的未处理错误。
 
 ## [0.2.3] - 2026-11-18
 
@@ -582,7 +595,9 @@ Agent 改代码改嗨了、或者聊到第五轮发现方向歪了，以前想�
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/the-snowpear/omp-studio/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/the-snowpear/omp-studio/compare/v0.2.2...v0.2.3
 [0.2.0]: https://github.com/the-snowpear/omp-studio/compare/v0.1.17...v0.2.0
 [0.1.17]: https://github.com/the-snowpear/omp-studio/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/the-snowpear/omp-studio/compare/v0.1.15...v0.1.16
