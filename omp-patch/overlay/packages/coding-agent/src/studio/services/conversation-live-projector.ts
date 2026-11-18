@@ -17,7 +17,13 @@ import {
 	type ConversationToolProgress,
 	parseConversationRuntimeEvent,
 } from "../conversation-protocol";
-import { publicToolCallId, sanitizePublicText, sanitizeToolArguments, utf8ByteLength } from "./conversation-sanitizer";
+import {
+	projectAdvisorContent,
+	publicToolCallId,
+	sanitizePublicText,
+	sanitizeToolArguments,
+	utf8ByteLength,
+} from "./conversation-sanitizer";
 import { isHarnessInjectedUserMessage, publicConversationRole } from "./conversation-visibility";
 
 export const CONVERSATION_LIVE_COALESCE_INTERVAL_MS = 16;
@@ -46,7 +52,7 @@ export interface ConversationLiveProjectorOptions {
 	restoreModelMentions?: (text: string) => string;
 	sessionId: string;
 	runtimeEpoch: number;
-	reserveMessageId: (input: { role: Exclude<ConversationRole, "extension">; createdAt: string }) => string;
+	reserveMessageId: (input: { role: "user" | "assistant" | "system"; createdAt: string }) => string;
 	reserveCustomMessageId?: (input: { customType: string; timestamp: number | undefined }) => string;
 	/** Non-message entries (compaction). Must not consume the message-id FIFO. */
 	allocateEntryId?: () => string;
@@ -460,7 +466,8 @@ export class ConversationLiveProjector {
 			this.#diagnostic(`ignored session message role ${message.role}`);
 			return;
 		}
-		if (this.#turnAborted) return;
+		// The native session can preserve a visible advisor card after a user interrupt.
+		if (this.#turnAborted && role !== "advisor") return;
 		const turnId = this.#ensureTurnId();
 		const createdAt = createdAtOf(message, this.#clock.nowIso());
 		let messageId = entryId;
@@ -593,7 +600,7 @@ export class ConversationLiveProjector {
 			const alreadyCompleted = [...this.#openMessages.values()].some(
 				item => item.role === role && item.completed && item.turnId === this.#turnId,
 			);
-			if (alreadyCompleted || this.#turnAborted) return;
+			if (alreadyCompleted || (this.#turnAborted && role !== "advisor")) return;
 			this.#onMessageStart(message, entryId);
 			open =
 				role === "assistant"
@@ -601,7 +608,7 @@ export class ConversationLiveProjector {
 					: [...this.#openMessages.values()].find(item => item.role === role && !item.completed);
 		}
 		if (open === undefined) return;
-		this.#hydrateFromMessage(open, message);
+		if (role !== "advisor") this.#hydrateFromMessage(open, message);
 		open.rawReplyArgs.clear();
 		this.#completeMessage(open, message, messageErrorOf(message));
 		if (isAssistant(message) && message.stopReason === "aborted") this.#turnAborted = true;
@@ -954,6 +961,9 @@ export class ConversationLiveProjector {
 	}
 
 	#contentFromMessage(open: OpenMessage, message: AgentMessage): ConversationContentBlock[] {
+		if (open.role === "advisor" && (message.role === "custom" || message.role === "hookMessage")) {
+			return projectAdvisorContent(message.details, message.content);
+		}
 		if (message.role === "user" || message.role === "custom" || message.role === "hookMessage") {
 			const raw = userText(message);
 			const text = this.#options.restoreModelMentions?.(raw) ?? raw;

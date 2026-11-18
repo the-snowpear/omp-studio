@@ -620,6 +620,20 @@ describe("ConversationLiveProjector", () => {
 		expect(kinds(events)).toContain("conversation.turn.aborted");
 		expect(kinds(events)).not.toContain("conversation.turn.completed");
 		expect(events.some(event => event.kind === "conversation.message.delta" && event.delta === "lo")).toBe(false);
+		const note = {
+			role: "custom",
+			customType: "advisor",
+			display: true,
+			content: "Check before retrying.",
+			timestamp: 3,
+		} as const;
+		projector.project({ type: "message_start", message: note });
+		projector.project({ type: "message_end", message: note });
+		expect(events.at(-1)).toMatchObject({
+			kind: "conversation.message.completed",
+			turnId: "turn-1",
+			item: { role: "advisor", content: [{ type: "text", text: note.content }] },
+		});
 	});
 
 	test("provider error is carried on the completed message and strips the raw-http-request pointer", () => {

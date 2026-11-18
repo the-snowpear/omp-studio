@@ -321,7 +321,10 @@ export class ConversationStore {
         if (clipped.truncated) block.truncated = true; break;
       }
       case "conversation.message.completed": {
-        if (!hydratedIds?.has(update.item.itemId)) this.upsertItem(update.item); this.liveMessages.delete(update.messageId); this.liveOrder = this.liveOrder.filter((id) => id !== update.messageId); this.openTurnItems.set(update.item.itemId, update.turnId);
+        if (!hydratedIds?.has(update.item.itemId)) this.upsertItem(update.item);
+        this.liveMessages.delete(update.messageId);
+        this.liveOrder = this.liveOrder.filter((id) => id !== update.messageId);
+        if (update.item.role !== "advisor") this.openTurnItems.set(update.item.itemId, update.turnId);
         if (update.error === undefined) this.messageErrors.delete(update.messageId); else this.messageErrors.set(update.messageId, update.error);
         if (update.item.role === "user") this.settlePending(update.item.itemId);
         this.markStructureChanged(); break;

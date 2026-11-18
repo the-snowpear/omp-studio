@@ -41,6 +41,7 @@ export type AssistantSegment =
 export type TimelineRow =
   | { readonly type: "user"; readonly itemId: string; readonly createdAt: string; readonly text: string; readonly pending?: PendingUser["status"]; readonly requestId?: string; readonly error?: string; readonly doc?: ComposerDoc; readonly thumbs?: readonly UserMessageThumb[] }
   | { readonly type: "extension"; readonly itemId: string; readonly createdAt: string; readonly text: string }
+  | { readonly type: "advisor"; readonly itemId: string; readonly createdAt: string; readonly notes: readonly Extract<ConversationContentBlock, { type: "text" }>[] }
   | { readonly type: "assistant"; readonly itemId: string; readonly createdAt: string; readonly segments: readonly AssistantSegment[]; readonly status: "streaming" | "completed" | "aborted" | "error"; readonly presentation?: "process" | "reply"; readonly turnOpen?: boolean; readonly error?: ConversationMessageError }
   | { readonly type: "compaction"; readonly item: ConversationCompactionItem }
   | { readonly type: "compacting"; readonly action?: string }
@@ -69,10 +70,10 @@ export function withCompactingRow(rows: readonly TimelineRow[], compacting: bool
 export function tailStreaming(rows: readonly TimelineRow[]): boolean {
   for (let index = rows.length - 1; index >= 0; index -= 1) {
     const row = rows[index]!;
-    // compacting 与尚未落盘的用户请求只是当前尾部的附属 UI；它们后面的运行回合仍应
+    // 压缩提示、顾问意见与尚未落盘的用户请求都不改变运行状态；正在运行的回合仍应
     // 获得流式预算。遇到任何其他实质行就必须停，不能固定向前猜三行——否则一条历史
     // stale streaming 行会让后续一两个完整回合仍被误判为忙碌。
-    if (row.type === "compacting") continue;
+    if (row.type === "compacting" || row.type === "advisor") continue;
     if (row.type === "user" && (row.pending !== undefined || row.itemId.startsWith("pending:"))) continue;
     return row.type === "assistant" && (row.status === "streaming" || row.turnOpen === true);
   }
@@ -90,7 +91,7 @@ export function tailStreaming(rows: readonly TimelineRow[]): boolean {
 export function tailInterrupted(rows: readonly TimelineRow[]): boolean {
   for (let index = rows.length - 1; index >= 0; index -= 1) {
     const row = rows[index]!;
-    if (row.type === "compacting") continue;
+    if (row.type === "compacting" || row.type === "advisor") continue;
     if (row.type === "user" && (row.pending !== undefined || row.itemId.startsWith("pending:"))) continue;
     return row.type === "assistant" && (row.status === "error" || row.status === "aborted");
   }
@@ -215,6 +216,9 @@ function liveToolsByMessage(state: ConversationState): Map<string, LiveTool[]> {
 function persistedTimelineRow(state: ConversationState, item: ConversationItem, tools: readonly LiveTool[], cache: TimelineRowCache): TimelineRow {
   if (item.kind === "compaction" || item.kind === "resetBoundary") return cachedRow(cache, item.itemId, [item], () => item.kind === "compaction" ? { type: "compaction", item } : { type: "resetBoundary", item });
   if (item.role === "extension") return cachedRow(cache, item.itemId, [item], () => ({ type: "extension", itemId: item.itemId, createdAt: item.createdAt, text: messageText(item) }));
+  if (item.role === "advisor") return cachedRow(cache, item.itemId, [item], () => ({
+    type: "advisor", itemId: item.itemId, createdAt: item.createdAt, notes: item.content.filter(block => block.type === "text"),
+  }));
   if (item.role === "user") {
     const doc = state.userDisplays[item.itemId]; const thumbs = state.userThumbs[item.itemId];
     return cachedRow(cache, item.itemId, [item, doc, thumbs], () => ({ type: "user", itemId: item.itemId, createdAt: item.createdAt, text: messageText(item), ...(doc === undefined ? {} : { doc }), ...(thumbs === undefined ? {} : { thumbs }) }));
@@ -244,6 +248,8 @@ export function buildTransientTimeline(state: ConversationState, persistedIds: R
   const liveByMessage = liveToolsByMessage(state);
   for (const messageId of state.liveOrder) {
     if (persistedIds.has(messageId)) continue; const message = state.liveMessages[messageId]; if (message === undefined) continue;
+    // Advisor notes arrive in full on message.completed, without token deltas.
+    if (message.role === "advisor") continue;
     if (message.role === "extension") {
       rows.push(cachedRow(cache, messageId, [message], () => ({ type: "extension", itemId: messageId, createdAt: message.createdAt, text: message.blocks.filter(block => block.blockType === "text").map(block => block.text).join("\n") })));
       continue;

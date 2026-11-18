@@ -94,6 +94,29 @@ function textOf(item: { readonly kind: string } & Record<string, unknown>): stri
   return content.filter((block) => block.type === "text").map((block) => block.text ?? "").join("");
 }
 
+test("reopened history places public advisor notes before the assistant's correction", async () => {
+  const { reader } = await fixture([
+    userLine("question", "Check the run order.", null),
+    ...[
+      { type: "custom_message", id: "hidden", parentId: "question", customType: "advisor", display: false, content: "private" },
+      { type: "custom_message", id: "note", parentId: "hidden", customType: "advisor", display: true,
+        content: "<advisory>model-facing wrapper</advisory>",
+        details: { notes: [{ note: "Run the migration first.", severity: "concern", advisor: "release" }], internal: "private" } },
+      { type: "message", id: "legacy", parentId: "note", message: { role: "hookMessage", customType: "advisor", display: true,
+        content: [{ type: "text", text: "Check the exit code." }] } },
+      { type: "message", id: "reply", parentId: "legacy", message: { role: "assistant", content: "I corrected the order." } },
+    ].map(entry => JSON.stringify({ ...entry, timestamp: HEADER.timestamp }) + "\n"),
+  ]);
+  const { items } = await reader.readPage({ sessionId: "session-a" });
+  assert.deepEqual(items.map(item => item.itemId), ["question", "note", "legacy", "reply"]);
+  assert.deepEqual(items.slice(1, 3).map(item => item.kind === "message" && [item.role, item.content]), [
+    ["advisor", [{ type: "text", text: "Run the migration first.", severity: "concern", advisor: "release" }]],
+    ["advisor", [{ type: "text", text: "Check the exit code." }]],
+  ]);
+  const timeline = await reader.readTimeTravel({ sessionId: "session-a" });
+  assert.equal(timeline.events.find(event => event.id === "note")?.title, "Advisor");
+});
+
 test("Time Travel reads the selected branch, preserves later branches, and pages older events", async () => {
   const lines = Array.from({ length: 130 }, (_, index) => userLine(`m-${index}`, `message ${index}`, index ? `m-${index - 1}` : null));
   lines.push(`${JSON.stringify({ type: "custom", customType: "studio-time-travel", id: "restore", parentId: "m-2", timestamp: "2026-08-16T11:00:00.000Z", data: { targetId: "m-2" } })}\n`);

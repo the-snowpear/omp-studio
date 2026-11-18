@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Advisor 的审阅意见现在按发生顺序显示在对话中，标明顾问名称和严重程度。重开已保存意见的旧会话、复制意见时也能看到来源。 [#46](https://github.com/the-snowpear/omp-studio/issues/46)
+
 ## [0.2.4] - 2026-11-18
 
 ### Changed

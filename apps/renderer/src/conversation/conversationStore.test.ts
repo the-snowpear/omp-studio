@@ -39,6 +39,27 @@ it("keeps extension notifications distinct from assistant replies when the live 
   store.dispose();
 });
 
+it("keeps a preserved advisor note in place without restarting an interrupted turn", () => {
+  const { store, sessionId, frames } = create();
+  const reply = item("reply", "assistant", "First attempt");
+  const advice: ConversationMessageItem = {
+    kind: "message", role: "advisor", itemId: "note", parentId: "reply", createdAt: "later",
+    content: [{ type: "text", text: "Review the order.", severity: "concern" }],
+  };
+  store.hydrate({ items: [], headCursor: "h" as never, hasMoreBefore: false });
+  store.applyEvent({ kind: "conversation.message.completed", sessionId, turnId: "turn", messageId: "reply", item: reply });
+  store.applyEvent({ kind: "conversation.turn.aborted", sessionId, turnId: "turn" });
+  store.applyEvent({ ...started(sessionId, "note"), role: "advisor" });
+  store.applyEvent({ kind: "conversation.message.completed", sessionId, turnId: "turn", messageId: "note", item: advice });
+  frames.flush();
+  const snapshot = store.getSnapshot();
+  expect(snapshot.rows.map(row => row.type)).toEqual(["assistant", "advisor"]);
+  expect(snapshot.state.lastTurnInterrupted).toBe(true);
+  expect(subagentTurnRunning(snapshot.state)).toBe(false);
+  store.hydrate({ items: [reply, advice], headCursor: "h2" as never, hasMoreBefore: false });
+  expect(store.getSnapshot().rows).toMatchObject([{ itemId: "reply" }, { itemId: "note", notes: advice.content }]);
+});
+
 it("keeps intermediate replies as prose through streaming, completion and history reload without duplicating them", () => {
   const { store, sessionId, frames } = create();
   store.hydrate({ items: [], headCursor: "h" as never, hasMoreBefore: false });

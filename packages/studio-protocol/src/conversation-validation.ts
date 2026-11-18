@@ -173,7 +173,7 @@ export function parseOpaqueConversationCursor(value: unknown, path: string): Opa
 }
 
 function parseRole(value: unknown, path: string): ConversationRole {
-  if (value !== "user" && value !== "assistant" && value !== "system" && value !== "extension") {
+  if (value !== "user" && value !== "assistant" && value !== "system" && value !== "extension" && value !== "advisor") {
     throw new ContractValidationError("unsupported conversation role", path);
   }
   return value;
@@ -183,10 +183,16 @@ export function parseConversationContentBlock(value: unknown, path: string): Con
   const input = record(value, path);
   const type = nonEmptyString(input.type, `${path}.type`);
   if (type === "text" || type === "thinking") {
-    exactKeys(input, ["type", "text", "truncated"], path);
+    exactKeys(input, type === "text" ? ["type", "text", "truncated", "advisor", "severity"] : ["type", "text", "truncated"], path);
     const text = boundedUtf8(input.text, `${path}.text`, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
     const truncated = parseTruncated(input.truncated, `${path}.truncated`);
-    return truncated === undefined ? { type, text } : { type, text, truncated };
+    const block: ConversationContentBlock = { type, text };
+    if (truncated !== undefined) block.truncated = truncated;
+    if (block.type === "text") {
+      if (typeof input.advisor === "string") block.advisor = input.advisor;
+      if (input.severity === "nit" || input.severity === "concern" || input.severity === "blocker") block.severity = input.severity;
+    }
+    return block;
   }
   if (type === "toolCall") {
     exactKeys(input, ["type", "toolCallId", "toolName", "arguments", "truncated", "presentation"], path);

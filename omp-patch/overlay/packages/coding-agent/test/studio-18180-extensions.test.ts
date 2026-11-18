@@ -6,7 +6,7 @@ import { StudioConversationEntryIdentity } from "../src/studio/services/conversa
 import { ConversationLiveProjector } from "../src/studio/services/conversation-live-projector";
 import { projectConversationBranch } from "../src/studio/services/session-transcript-service";
 
-test("displayed extension bodies keep their identity across live and history without exposing hidden context or private details", () => {
+test("displayed extension and advisor messages keep their identity and order across live and history", () => {
 	const manager = SessionManager.inMemory();
 	const identities = new StudioConversationEntryIdentity(manager);
 	const events: ConversationRuntimeEvent[] = [];
@@ -25,9 +25,24 @@ test("displayed extension bodies keep their identity across live and history wit
 			details: { privateState: "not-public" },
 			timestamp: 1,
 		},
-		{ role: "custom", customType: "workspace-context", content: "hidden prompt", display: false, timestamp: 2 },
-		{ role: "custom", customType: "advisor", content: "native advisor context", display: true, timestamp: 3 },
-		{ role: "custom", customType: "irc:incoming", content: "agent peer context", display: true, timestamp: 4 },
+		{
+			role: "custom",
+			customType: "advisor",
+			content: "<advisory>agent-facing instructions</advisory>",
+			details: {
+				notes: [
+					{ note: "Run the migration first.", advisor: "release", severity: "concern" },
+					{ note: "Check the result." },
+				],
+				privateState: "not-public",
+			},
+			display: true,
+			timestamp: 2,
+		},
+		{ role: "custom", customType: "advisor", content: "Older plain-text advice", display: true, timestamp: 3 },
+		{ role: "custom", customType: "workspace-context", content: "hidden prompt", display: false, timestamp: 4 },
+		{ role: "custom", customType: "irc:incoming", content: "agent peer context", display: true, timestamp: 5 },
+		{ role: "custom", customType: "advisor", content: "not-public", display: false, timestamp: 6 },
 	];
 	try {
 		for (const message of messages) {
@@ -45,9 +60,19 @@ test("displayed extension bodies keep their identity across live and history wit
 		const live = events.flatMap(event => (event.kind === "conversation.message.completed" ? [event.item] : []));
 		const history = projectConversationBranch(manager.getBranch());
 		expect(history).toEqual(live);
-		expect(history).toMatchObject([{ role: "extension", content: [{ type: "text", text: messages[0].content }] }]);
+		expect(history).toMatchObject([
+			{ role: "extension", content: [{ type: "text", text: messages[0].content }] },
+			{
+				role: "advisor",
+				content: [
+					{ type: "text", text: "Run the migration first.", advisor: "release", severity: "concern" },
+					{ type: "text", text: "Check the result." },
+				],
+			},
+			{ role: "advisor", content: [{ type: "text", text: "Older plain-text advice" }] },
+		]);
 		expect(JSON.stringify(events)).not.toContain("not-public");
-		expect(history).toHaveLength(1);
+		expect(JSON.stringify(events)).not.toContain("agent-facing instructions");
 	} finally {
 		projector.dispose();
 	}

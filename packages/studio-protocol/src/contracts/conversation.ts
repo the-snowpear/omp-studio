@@ -8,10 +8,10 @@ import type { AgentId, OpaqueCursor, RuntimeEpoch, SessionId } from "./ids.js";
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 
-export type ConversationRole = "user" | "assistant" | "system" | "extension";
+export type ConversationRole = "user" | "assistant" | "system" | "extension" | "advisor";
 
 export type ConversationContentBlock =
-  | { type: "text"; text: string; truncated?: boolean }
+  | { type: "text"; text: string; truncated?: boolean; advisor?: string; severity?: "nit" | "concern" | "blocker" }
   | { type: "thinking"; text: string; truncated?: boolean }
   | {
       type: "toolCall";
@@ -81,8 +81,9 @@ export type ConversationMessageError = {
  *   `preserveData`, `details`, or provider payloads)
  * - `reset_boundary` → `resetBoundary`
  * - `branch_summary` → **ignored** (`CONVERSATION_BRANCH_SUMMARY_MAPPING`)
- * - displayed `custom_message` → `message` with the `extension` role; native
- *   harness and dedicated job/advisor records remain outside this transcript
+ * - displayed advisor `custom_message` → `advisor` message, with one text block per note
+ * - other displayed extension messages → `extension` message
+ * - native harness traffic and dedicated job records → ignored
  * - `custom` and other entry types → ignored
  *
  * Absolute session file paths, `providerPayload`, secrets, and unfiltered
