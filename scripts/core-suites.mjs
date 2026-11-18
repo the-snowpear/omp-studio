@@ -26,6 +26,7 @@ export const CORE_NODE_SUITES = [
   "packages/host-client-api/dist/test/facade-history.test.js",
   "packages/host-client-api/dist/test/snapshot-clone.test.js",
   "packages/host-client-api/dist/test/runtime-model-snapshot.test.js",
+  "packages/host-client-api/dist/test/models-yml-roundtrip.test.js",
   "packages/host-client-api/dist/test/session-delete-command.test.js",
   "apps/desktop/dist/test/runtime-session.test.js",
   "apps/desktop/dist/test/runtime-multi-session.test.js",

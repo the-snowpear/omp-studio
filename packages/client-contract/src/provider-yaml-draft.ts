@@ -14,7 +14,7 @@ import type { ModelProviderModelInput } from "./operations.js";
  * - Unknown keys already present on the node survive. The mapping only takes
  *   over the fields the form owns; anything a newer OMP wrote stays untouched.
  * - A secret the form does not carry is never invented. The generated document
- *   redacts a stored key to `"********"` (but leaves `!command` in clear), and
+ *   redacts a stored key to `"********"`, and
  *   the editor leaves its field empty in that case, so the placeholder — and
  *   after the Host's `restoreRedactedApiKeys`, the real credential — survives.
  */
@@ -248,11 +248,9 @@ function isRedactedApiKey(value: string): boolean {
  * invented.
  *
  * `storedAuth` is the auth type the provider was loaded with. The generated
- * document redacts a stored key to `"********"` — except `!command` values,
- * which stay in clear — so the placeholder alone cannot tell a stored env name
- * from a plaintext key; `storedAuth` resolves that so the mapping can drop a
- * stale env name exactly like the Host writer does. Without it the placeholder
- * is kept, which matches a stored plaintext key (the common case).
+ * document redacts a stored key to `"********"`. The placeholder alone cannot
+ * identify a command or environment variable. `storedAuth` lets the form
+ * clear a stale credential when the auth type changes, matching the Host.
  */
 function apiKeyFromDraft(
   draft: ProviderYamlDraft,
