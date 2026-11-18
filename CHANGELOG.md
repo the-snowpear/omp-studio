@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复再次保存自定义提供商或模型时，纯数字及含 YAML 特殊字符的凭据被改写类型或内容，导致 Runtime 无法加载自定义模型的问题。
+
 ## [0.2.3] - 2026-11-18
 
 ### Added

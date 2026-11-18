@@ -6,6 +6,8 @@
  * so we never silently mis-parse a user file.
  */
 
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+
 export type YamlScalar = string | number | boolean | null;
 export type YamlValue = YamlScalar | YamlValue[] | { [key: string]: YamlValue };
 
@@ -27,6 +29,7 @@ function stripComment(line: string): string {
   let inDouble = false;
   for (let i = 0; i < line.length; i += 1) {
     const ch = line[i];
+    if (ch === "\\" && inDouble) { i++; continue; }
     if (ch === "'" && !inDouble) inSingle = !inSingle;
     else if (ch === '"' && !inSingle) inDouble = !inDouble;
     else if (ch === "#" && !inSingle && !inDouble) return line.slice(0, i).trimEnd();
@@ -54,7 +57,7 @@ function parseScalar(raw: string): YamlScalar {
   if (raw === "true") return true;
   if (raw === "false") return false;
   if ((raw.startsWith("'") && raw.endsWith("'")) || (raw.startsWith('"') && raw.endsWith('"'))) {
-    return raw.slice(1, -1);
+    return parseYaml(raw) as string;
   }
   if (/^-?\d+(\.\d+)?$/.test(raw)) return Number(raw);
   return raw;
@@ -141,11 +144,9 @@ export function parseModelsYml(source: string): { [key: string]: YamlValue } {
 }
 
 function quoteIfNeeded(value: string): string {
-  if (value.length === 0) return '""';
-  if (/[:#\n]|^\s|\s$/.test(value) || value === "true" || value === "false" || value === "null") {
-    return JSON.stringify(value);
-  }
-  return value;
+  // Let YAML preserve string types (including numeric credentials and !/*
+  // prefixes), while keeping the codec's single-line scalar representation.
+  return stringifyYaml(value, { lineWidth: 0, blockQuote: false, doubleQuotedAsJSON: true }).trimEnd();
 }
 
 function emit(value: YamlValue, indent: number): string[] {
