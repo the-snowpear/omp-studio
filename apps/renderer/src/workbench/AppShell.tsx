@@ -1748,8 +1748,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       真正成为 Runtime 活动会话；失败时向上抛出，由调用方统一报告并中止后续动作。 */
   const openHistoryEntry = (entry: SessionHistoryEntry, workspaceId?: WorkspaceId, opts?: { resumeForAction?: boolean; skipQueue?: boolean }): Promise<void> => {
     if (mdi && !opts?.resumeForAction) {
-      const viewId = mdi.store.openFromDirectory({ targetId: executionTarget.id, workspaceId: workspaceId ?? mdi.document.ref.workspaceId, sessionId: entry.sessionId, threadId: entry.threadId, historyId: entry.historyId });
-      mdi.store.updateDocument(mdi.store.documentFor(viewId)!.id, { title: entry.title ?? t("conversation.untitledSession") });
+      const viewId = mdi.store.openFromDirectory({ targetId: executionTarget.id, workspaceId: workspaceId ?? mdi.document.ref.workspaceId, sessionId: entry.sessionId, threadId: entry.threadId, historyId: entry.historyId }, entry.title ?? t("conversation.untitledSession"));
       globalThis.window.dispatchEvent(new CustomEvent("omp:conversation-focus", { detail: viewId }));
       return Promise.resolve();
     }
@@ -1836,8 +1835,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     if (!onRoute("workbench")) return;
     if (mdi) {
       const existing = mdi.store.getSnapshot().documents.find(document => document.ref.targetId === executionTarget.id && document.ref.workspaceId === thread.workspaceId && (document.ref.sessionId === thread.sessionId || document.ref.draftId === thread.sessionId));
-      const viewId = mdi.store.openFromDirectory(existing?.ref ?? { targetId: executionTarget.id, workspaceId: thread.workspaceId, ...(thread.submitted ? { sessionId: thread.sessionId } : { draftId: thread.sessionId }) });
-      mdi.store.updateDocument(mdi.store.documentFor(viewId)!.id, { title: thread.title });
+      mdi.store.openFromDirectory(existing?.ref ?? { targetId: executionTarget.id, workspaceId: thread.workspaceId, ...(thread.submitted ? { sessionId: thread.sessionId } : { draftId: thread.sessionId }) }, thread.title);
       return;
     }
     // The current Runtime session can be viewed immediately even while its

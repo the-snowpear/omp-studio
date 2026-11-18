@@ -399,6 +399,9 @@
   transition: none;
   animation: omp-fade-in var(--dur-slower) var(--ease-out);
 }
+.convo-body[data-phase="revealing"][data-warm="true"] {
+  animation: omp-fade-in var(--dur-fast) var(--ease-out);
+}
 
 /* 骨架屏容器：sticky + height:0 + 绝对定位内层，对文档高度零贡献。
    sticky 让它在任意滚动位置都停在滚动视口顶部；内层高度压在视口高度以下，

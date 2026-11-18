@@ -509,7 +509,9 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
             </button>
           </div>
         </div>
-        <div className="sb-scroll" id="projectList">
+        <div className="sb-scroll" id="projectList" onScroll={event => {
+          if (mdi?.active) mdi.store.sidebarScrollTop = event.currentTarget.scrollTop;
+        }}>
           {preview ? getPreviewProjects(zh).map((project) => {
             const open = chrome.previewProjectId === project.id && chrome.projectListExpanded;
             return (

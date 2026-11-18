@@ -3,6 +3,7 @@ import {
   IDLE_CONVERSATION_SWITCH,
   SWITCH_LEAVE_MS,
   SWITCH_REVEAL_MS,
+  SWITCH_WARM_REVEAL_MS,
   nextConversationSwitch,
   switchPhaseMs,
   switchVeilLeaving,
@@ -12,9 +13,9 @@ import {
 function toSession(
   state: ConversationSwitchState,
   key: string,
-  { paintable = false, canFade = true }: { paintable?: boolean; canFade?: boolean } = {},
+  { paintable = false, canFade = true, warm = false }: { paintable?: boolean; canFade?: boolean; warm?: boolean } = {},
 ): ConversationSwitchState {
-  return nextConversationSwitch(state, { type: "identity", key, paintable, canFade });
+  return nextConversationSwitch(state, { type: "identity", key, paintable, canFade, warm });
 }
 
 function elapse(state: ConversationSwitchState, paintable: boolean): ConversationSwitchState {
@@ -70,6 +71,16 @@ describe("conversationSwitchPhase", () => {
       phase: "settling",
       veil: false,
     });
+  });
+
+  it("bypasses fade-out and uses fast reveal when switching to a warm cached transcript", () => {
+    const settling = toSession(IDLE_CONVERSATION_SWITCH, "b", { canFade: true, paintable: true, warm: true });
+    expect(settling).toMatchObject({ phase: "settling", key: "b", veil: false, warm: true });
+    const revealing = settle(settling);
+    expect(revealing).toMatchObject({ phase: "revealing", key: "b", veil: false, warm: true });
+    expect(switchPhaseMs(revealing.phase, false, revealing.warm)).toBe(SWITCH_WARM_REVEAL_MS);
+    expect(switchPhaseMs(revealing.phase, true, revealing.warm)).toBe(0);
+    expect(elapse(revealing, true)).toMatchObject({ phase: "idle", key: "b", veil: false, warm: false });
   });
 
   it("keeps one running fade-out when the target changes mid-fade", () => {

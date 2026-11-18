@@ -50,11 +50,15 @@ export function SharedSurface({ region, children }: { region: SharedRegion; chil
   const slot = workspace?.slots[region];
   const workbenchRegion = ["sidebar", "conversationTitle", "right", "bottom", "bottomReveal"].includes(region);
   const presented = view?.active && !(workbenchRegion && view.document.page);
+  const store = view?.store;
   useLayoutEffect(() => {
-    if (presented && slot) slot.append(host);
-    else host.remove();
+    if (presented && slot) {
+      slot.append(host);
+      const scroller = region === "sidebar" ? host.querySelector<HTMLElement>("#projectList") : null;
+      if (scroller && store) scroller.scrollTop = store.sidebarScrollTop;
+    } else host.remove();
     return () => host.remove();
-  }, [host, slot, presented]);
+  }, [host, slot, presented, region, store]);
   if (!workspace) return children;
   return createPortal(<SurfaceProvider document={document}>{children}</SurfaceProvider>, host);
 }

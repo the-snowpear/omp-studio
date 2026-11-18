@@ -171,3 +171,22 @@ it("releases a context even when switching away before its bootstrap completes",
   await waitFor(() => expect(window.ompSessionPerf.snapshot().counters["real.hosts"]).toBe(1));
   expect(input.counts.opened).toBe(2);
 });
+
+it("preserves sidebar scroll across a context switch while the incoming composer waits for bootstrap", async () => {
+  let blockNext = false;
+  const gate = Promise.withResolvers<void>();
+  const input = await mount(fixture(() => blockNext ? gate.promise : Promise.resolve()));
+  await select(0);
+  const projectList = document.querySelector<HTMLElement>("#projectList")!;
+  projectList.scrollTop = 180;
+  fireEvent.scroll(projectList);
+  blockNext = true;
+  fireEvent.click(row(1)!);
+  await waitFor(() => expect(input.counts.opened).toBe(2));
+  expect(isInaccessible(row(2)!)).toBe(false);
+  expect(document.querySelector<HTMLElement>("#projectList")?.scrollTop).toBe(180);
+  expect(document.querySelector(".cw-main-conversation .convo-wrap")?.hasAttribute("inert")).toBe(true);
+  gate.resolve();
+  await expectConversation(1);
+  expect(document.querySelector<HTMLElement>("#projectList")?.scrollTop).toBe(180);
+});

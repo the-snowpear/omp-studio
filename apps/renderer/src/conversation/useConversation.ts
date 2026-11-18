@@ -18,7 +18,8 @@ export function retainConversationWhileRemounting(current: ConversationSnapshot,
 export function useConversation(input: UseConversationInput): UseConversationResult {
   const { resolvedLanguage } = useI18n();
   const previewLocale = input.preview ? resolvedLanguage : "";
-  const engine = useMemo(() => createConversationEngine(defaultConversationEngineInput({ ...input, zh: input.preview ? resolvedLanguage === "zh" : undefined })), [input.preview, input.client, input.identity?.sessionId, input.identity?.runtimeEpoch, input.identity?.transcriptRevision, input.canRead, input.runtimeConnected, input.deferHydrate, input.previewThreadId, previewLocale]);
+  const liveConnected = Boolean(input.runtimeConnected && input.identity?.runtimeEpoch !== undefined);
+  const engine = useMemo(() => createConversationEngine(defaultConversationEngineInput({ ...input, runtimeConnected: liveConnected, zh: input.preview ? resolvedLanguage === "zh" : undefined })), [input.preview, input.client, input.identity?.sessionId, input.identity?.runtimeEpoch, input.identity?.transcriptRevision, input.canRead, liveConnected, input.deferHydrate, input.previewThreadId, previewLocale]);
   useEffect(() => { engine.start(); return () => engine.dispose(); }, [engine]);
   useEffect(() => {
     if (input.preview) return;

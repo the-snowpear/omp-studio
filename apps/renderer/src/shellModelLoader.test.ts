@@ -112,3 +112,18 @@ it("turns optional page failures into a warning instead of a rejection", async (
   expect(warn).toHaveBeenCalledOnce();
   warn.mockRestore();
 });
+
+it("coalesces same-tick domain completions into a single publish when coalesce is enabled", async () => {
+  const query = vi.fn(async (name: string) => ({ name }));
+  const loader = createShellModelLoader({ query } as unknown as StudioClient, { coalesce: true });
+  const publish = vi.fn();
+  await loader.load(scope("coalesced"), "workbench", publish, vi.fn());
+  expect(publish).toHaveBeenCalledTimes(1);
+  expect(publish).toHaveBeenCalledWith({
+    workspaces: { name: "projects.list" },
+    capabilities: { name: "capabilities.get" },
+    commandManifest: { name: "commands.getManifest" },
+    history: { name: "history.list" },
+    environment: { name: "environment.get" },
+  });
+});

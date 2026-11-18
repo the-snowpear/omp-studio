@@ -116,10 +116,11 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
     if (!input.canRead || input.client === null) { store.setUnavailable(isZh() ? "当前环境无法读取对话。" : "Cannot read conversations in this environment."); return; }
     store.setLoading(resyncing || initialCachedPage !== undefined);
     const source = createConversationSource(input.client);
-    liveTarget = { kind: "session", sessionId: identity.sessionId };
+    const target = input.runtimeConnected && identity.runtimeEpoch !== undefined ? { kind: "session" as const, sessionId: identity.sessionId } : undefined;
+    liveTarget = target;
     try {
-      if (input.runtimeConnected && identity.runtimeEpoch !== undefined) {
-        const opened = await source.open(liveTarget, CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT);
+      if (target) {
+        const opened = await source.open(target, CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT);
         if (disposed || token !== run) return;
         const resolvedSessionId = opened.target.conversationSessionId; conversationSessionId = resolvedSessionId; store.resolveTarget(resolvedSessionId, opened.page.runtimeEpoch);
         watermark = opened.live.watermark;
@@ -129,6 +130,7 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
         } else {
           store.hydrate(opened.page, opened.live.events.map((event) => ({ streamSeq: event.streamSeq, update: event.update })), watermark);
         }
+        initialCachedPage = undefined;
         const buffered = buffer; const overflowed = bufferOverflowed; buffer = []; bufferBytes = 0; bufferOverflowed = false;
         if (overflowed) { store.requireResync(isZh() ? "打开对话期间的事件缓冲已满，正在重新同步。" : "Event buffer filled while opening conversation; resyncing."); void hydrate(true); return; }
         for (const event of buffered) if (event.sessionId === conversationSessionId) applyLiveEvent(event);
@@ -157,7 +159,7 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
     finally { if (!disposed && token === run) { loadingOlder = false; publish(); metadataSnapshot = { ...store.getMetadataSnapshot(), demo: input.preview, loadingOlder, identityKey: identityKey(store.getMetadataSnapshot().state.identity) }; for (const listener of metadataListeners) listener(); } }
   }
 
-  if (!input.preview && input.client && identity && !input.runtimeConnected) {
+  if (!input.preview && input.canRead && input.client && identity) {
     const cached = projectReadsFor(input.client)?.page(identity.sessionId, identity.transcriptRevision);
     if (cached) { initialCachedPage = cached; store.hydrate(cached); store.setLoading(true); sessionSwitchPerformance.mark("conversation.cacheDisplay", { rows: cached.items.length }); }
   }

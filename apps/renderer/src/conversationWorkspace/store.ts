@@ -14,8 +14,25 @@ export const WORKSPACE_STORAGE_KEY = "omp.conversation-workspace.v1";
 type WorkspaceMetadata = Omit<ConversationWorkspaceLayout, "views" | "snap" | "snapAssistCell">;
 const initial = (): WorkspaceMetadata => ({ version: 4, coordinateVersion: 1, documents: [], activeViewId: null, activeDocumentId: null, sidebarWidth: 272, sidebarVisible: true, panelWidth: 480, bottomHeight: 240, railCollapsed: false });
 const asView = (record: WorkbenchWindow): ConversationView => ({ id: record.id, documentId: record.content.documentId, placement: record.placement, rect: record.rect, minimized: record.minimized, maximized: record.maximized, pin: record.pin, ...(record.nativeRect ? { nativeRect: record.nativeRect } : {}), restoreSnap: record.restoreSnap });
+const conversationRefEqual = (first: ConversationRef, second: ConversationRef): boolean =>
+  first.targetId === second.targetId
+  && first.workspaceId === second.workspaceId
+  && first.sessionId === second.sessionId
+  && first.draftId === second.draftId
+  && first.threadId === second.threadId
+  && first.historyId === second.historyId
+  && first.previewThreadId === second.previewThreadId
+  && first.previewProjectId === second.previewProjectId;
+const documentPatchChanged = (current: ConversationDocument, patch: Partial<Pick<ConversationDocument, "ref" | "title" | "projectName" | "route" | "page" | "pagePhase">>): boolean =>
+  (patch.ref !== undefined && !conversationRefEqual(current.ref, patch.ref))
+  || ("title" in patch && patch.title !== current.title)
+  || ("projectName" in patch && patch.projectName !== current.projectName)
+  || ("route" in patch && patch.route !== current.route)
+  || ("page" in patch && patch.page !== current.page)
+  || ("pagePhase" in patch && patch.pagePhase !== current.pagePhase);
 
 export class ConversationWorkspaceStore {
+  sidebarScrollTop = 0;
   readonly manager = new WorkbenchWindows();
   readonly windows = this.manager.focus;
   readonly hosts = new DocumentHosts();
@@ -33,6 +50,9 @@ export class ConversationWorkspaceStore {
   private state: ConversationWorkspaceLayout;
   private listeners = new Set<() => void>();
   private timer: ReturnType<typeof setTimeout> | undefined;
+  private batchDepth = 0;
+  private dirty = false;
+  private dirtySave = false;
   readonly demo: boolean;
 
   constructor(private storage: Pick<Storage, "getItem" | "setItem"> | null, demo = false, private persistenceEnabled = true) {
@@ -104,8 +124,27 @@ export class ConversationWorkspaceStore {
   }
   enablePersistence() { this.persistenceEnabled = true; }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
+  batch<T>(fn: () => T): T {
+    this.batchDepth++;
+    try {
+      return fn();
+    } finally {
+      this.batchDepth--;
+      if (this.batchDepth === 0 && this.dirty) {
+        const save = this.dirtySave;
+        this.dirty = false;
+        this.dirtySave = false;
+        this.publish(save);
+      }
+    }
+  }
   private publish(save = true) {
     this.state = this.snapshot();
+    if (this.batchDepth > 0) {
+      this.dirty = true;
+      this.dirtySave ||= save;
+      return;
+    }
     for (const listener of this.listeners) listener();
     if (!save || this.demo || !this.persistenceEnabled) return;
     clearTimeout(this.timer);
@@ -189,42 +228,63 @@ export class ConversationWorkspaceStore {
     const offset = count % 5 * 24;
     return clampFloat({ x: canvas.x - workbench.x + (canvas.width - width) / 2 + offset, y: canvas.y - workbench.y + Math.min(64, (canvas.height - height) / 2) + offset, width, height }, { width: workbench.width, height: workbench.height }, 280);
   }
-  openFromDirectory(ref: ConversationRef): string {
+  openFromDirectory(ref: ConversationRef, title?: string): string {
     const finish = sessionSwitchPerformance.span("switch.dispatch");
     try {
       const existing = this.viewFor(ref);
-      if (existing) return this.open(ref);
-      return this.isWindowed() ? this.open(ref, "float", this.nextWindowRect()) : this.open(ref);
+      if (existing) return this.open(ref, "current", undefined, title);
+      return this.isWindowed() ? this.open(ref, "float", this.nextWindowRect(), title) : this.open(ref, "current", undefined, title);
     } finally { finish(); }
   }
-  open(ref: ConversationRef, placement: "current" | "float" = "current", rect?: Rect): string {
-    if (this.demo && ref.draftId && ref.draftId !== "initial") ref = { ...ref, previewThreadId: "t0", previewProjectId: ref.workspaceId ?? this.documentFor(this.state.activeViewId)?.ref.previewProjectId };
-    const key = conversationKey(ref);
-    // Only the startup document defers to startupPage; an explicit open reveals the conversation, including cached documents.
-    const document: ConversationDocument = this.state.documents.find(doc => conversationKey(doc.ref) === key) ?? { id: crypto.randomUUID(), ref, title: isZh() ? "新对话" : "New conversation", route: ref.draftId === "initial" ? undefined : "workbench" };
-    if (!this.metadata.documents.includes(document)) this.metadata = { ...this.metadata, documents: [...this.metadata.documents, document] };
-    else this.updateDocument(document.id, { route: "workbench" });
-    const existing = this.state.views.find(view => view.documentId === document.id);
-    if (existing) { if (placement === "float" && existing.placement === "main") this.float(existing.id, rect); this.focus(existing.id); return existing.id; }
-    // A minimized view is not "current": reusing it would swap out a conversation the user only put away.
-    const current = this.state.views.find(view => view.id === this.state.activeViewId && !view.minimized);
-    if (placement === "current" && current) {
-      this.manager.patch(current.id, { content: { kind: "conversation", documentId: document.id }, title: document.title, minimized: false });
-      this.activate(current.id);
-      return current.id;
-    }
-    const id = crypto.randomUUID();
-    this.manager.register({ id, content: { kind: "conversation", documentId: document.id }, title: document.title, placement: placement === "float" ? "float" : "main", pin: "none", minimum: WINDOW_MINIMUM, rect: rect ?? { x: 40, y: 40, width: 640, height: 560 }, minimized: false, maximized: false });
-    this.activate(id);
-    return id;
+  open(ref: ConversationRef, placement: "current" | "float" = "current", rect?: Rect, title?: string): string {
+    return this.batch(() => {
+      if (this.demo && ref.draftId && ref.draftId !== "initial") ref = { ...ref, previewThreadId: "t0", previewProjectId: ref.workspaceId ?? this.documentFor(this.state.activeViewId)?.ref.previewProjectId };
+      const key = conversationKey(ref);
+      // Only the startup document defers to startupPage; an explicit open reveals the conversation, including cached documents.
+      const found = this.state.documents.find(doc => conversationKey(doc.ref) === key);
+      const route = !found && ref.draftId === "initial" ? undefined : ("workbench" as const);
+      let document: ConversationDocument;
+      if (!found) {
+        document = { id: crypto.randomUUID(), ref, title: title ?? (isZh() ? "新对话" : "New conversation"), route };
+        this.metadata = { ...this.metadata, documents: [...this.metadata.documents, document] };
+      } else if (found.route !== route || (title !== undefined && found.title !== title)) {
+        document = { ...found, route, ...(title !== undefined ? { title } : {}) };
+        this.metadata = { ...this.metadata, documents: this.metadata.documents.map(doc => doc.id === found.id ? document : doc) };
+      } else {
+        document = found;
+      }
+      const existing = this.state.views.find(view => view.documentId === document.id);
+      if (existing) {
+        if (title !== undefined) this.manager.patch(existing.id, { title: document.title });
+        if (placement === "float" && existing.placement === "main") this.float(existing.id, rect);
+        this.focus(existing.id);
+        this.publish();
+        return existing.id;
+      }
+      // A minimized view is not "current": reusing it would swap out a conversation the user only put away.
+      const current = this.state.views.find(view => view.id === this.state.activeViewId && !view.minimized);
+      if (placement === "current" && current) {
+        this.manager.patch(current.id, { content: { kind: "conversation", documentId: document.id }, title: document.title, minimized: false });
+        this.activate(current.id);
+        this.publish();
+        return current.id;
+      }
+      const id = crypto.randomUUID();
+      this.manager.register({ id, content: { kind: "conversation", documentId: document.id }, title: document.title, placement: placement === "float" ? "float" : "main", pin: "none", minimum: WINDOW_MINIMUM, rect: rect ?? { x: 40, y: 40, width: 640, height: 560 }, minimized: false, maximized: false });
+      this.activate(id);
+      this.publish();
+      return id;
+    });
   }
   updateDocument(id: string, patch: Partial<Pick<ConversationDocument, "ref" | "title" | "projectName" | "route" | "page" | "pagePhase">>) {
     const current = this.metadata.documents.find(doc => doc.id === id);
-    if (!current || JSON.stringify({ ...current, ...patch }) === JSON.stringify(current)) return;
-    this.metadata = { ...this.metadata, documents: this.metadata.documents.map(doc => doc.id === id ? { ...doc, ...patch } : doc) };
-    const view = this.state.views.find(view => view.documentId === id);
-    if (view && patch.title) this.manager.patch(view.id, { title: patch.title });
-    this.publish();
+    if (!current || !documentPatchChanged(current, patch)) return;
+    this.batch(() => {
+      this.metadata = { ...this.metadata, documents: this.metadata.documents.map(doc => doc.id === id ? { ...doc, ...patch } : doc) };
+      const view = this.state.views.find(view => view.documentId === id);
+      if (view && patch.title !== undefined) this.manager.patch(view.id, { title: patch.title });
+      this.publish();
+    });
   }
   close(id: string) {
     this.pendingDock.delete(id);

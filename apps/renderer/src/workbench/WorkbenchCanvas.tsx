@@ -454,6 +454,8 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     queueMicrotask(() => composerInputRef.current?.focus());
   }, [selectedSessionId]);
   const snapshot = snapshotFrom(state);
+  const terminalConversationId = mdi?.view && mdi.view.placement !== "main" ? mdi.document.id : undefined;
+  const terminalSessionId = terminalConversationId || !mdi ? snapshot?.sessionId : undefined;
   const submittedPromptTitle = submittedPrompt !== undefined && submittedPrompt.sessionId === snapshot?.sessionId
     ? submittedPrompt.title
     : undefined;
@@ -2206,7 +2208,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
           <DockRail mode={hideNewConversationRail ? "hidden" : railMode} />
           <DockCapsules />
           <SessionModelRecovery demo={previewThreadId === "t5"} client={client} currentSessionId={snapshot?.sessionId} targetSessionId={selectedSessionId} threadId={selectedThreadId} available={runtimeConnected && !connection?.resyncRequired} capabilities={capabilities} onOpenModels={() => onRoute("model-config")} />
-          <CommandBlockProvider workspaceId={workspaceId} sessionId={snapshot?.sessionId} conversationId={mdi?.document.id}>
+          <CommandBlockProvider workspaceId={workspaceId} sessionId={terminalSessionId} conversationId={terminalConversationId}>
           <ConversationPane
             {...(preview && previewThreadId === "t15" ? { supplement: <ContentGallerySamples /> } : {})}
             runtimeTools={{ client, actions: client, sessionId: snapshot?.sessionId, enabled: preview || runtimeConnected && executionMatches && can("shell.view.read") }}
@@ -3022,7 +3024,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
           onOpenHub={agentId => { setHubIntent(agentId, "chat"); onRoute("agent-hub"); }}
           onRevealSource={target => target.toolCallId === undefined ? Promise.resolve(false) : revealConversationTarget(convoScrollerRef.current, { toolCallId: target.toolCallId })} />,
         btw: visibility => <><BtwPanel session={btwSession} onClose={() => dock.store.dispatch({ type: "hide", panels: ["btw"] })} visible={visibility.visible} {...(preview ? { demo: true, onDemoNext: onBtwDemoNext } : {})} /></>,
-        terminal: visibility => <><TerminalPane workspaceId={preview ? state.bootstrap?.selected?.workspaceId : workspaceId} sessionId={snapshot?.sessionId} conversationId={mdi?.document.id} visible={visibility.visible} /></>,
+        terminal: visibility => <><TerminalPane workspaceId={preview ? state.bootstrap?.selected?.workspaceId : workspaceId} sessionId={terminalSessionId} conversationId={terminalConversationId} visible={visibility.visible} /></>,
         problems: <>{preview ? <div className="dock-pad"><PreviewProblems /></div> : <Deferred title={t("shell.problemsUnavailableTitle")} detail={t("shell.problemsUnavailableDetail")} />}</>,
         tests: <div className="dock-pad">{preview ? <PreviewTests /> : (
               <AgentTestsPane

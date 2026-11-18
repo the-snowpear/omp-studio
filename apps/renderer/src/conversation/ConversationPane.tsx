@@ -10,6 +10,7 @@ import {
   IDLE_CONVERSATION_SWITCH,
   nextConversationSwitch,
   SWITCH_SETTLE_FRAMES,
+  SWITCH_WARM_SETTLE_FRAMES,
   switchPhaseMs,
   switchVeilLeaving,
   type ConversationSwitchPhase,
@@ -215,7 +216,9 @@ export function ConversationPane({
     if (showWelcome && painted.current?.welcome === true) {
       dispatchSwitch({ type: "adopt", key: switchKey });
     } else {
-      dispatchSwitch({ type: "identity", key: switchKey, paintable, canFade });
+      const warm = paintable && !showWelcome && displayRows.length > 0
+        && (painted.current?.welcome === false || state.hydrateStatus === "resyncing");
+      dispatchSwitch({ type: "identity", key: switchKey, paintable, canFade, warm });
     }
   } else if (pending && (switchState.phase === "idle" || switchState.phase === "revealing")) {
     dispatchSwitch({ type: "pending", canFade });
@@ -268,12 +271,12 @@ export function ConversationPane({
   // "冷 Runtime 开半天"的原因。leaving 期间又切一次会话不会重置 seq，所以这里的
   // 定时器继续跑，旧 transcript 不会因为反复点侧边栏而迟迟淡不完。
   useEffect(() => {
-    const ms = switchPhaseMs(switchState.phase, reducedMotion);
+    const ms = switchPhaseMs(switchState.phase, reducedMotion, switchState.warm === true);
     if (ms === null) return;
     const seq = switchState.seq;
     const timer = window.setTimeout(() => dispatchSwitch({ type: "elapsed", seq, paintable: paintableRef.current }), ms);
     return () => window.clearTimeout(timer);
-  }, [reducedMotion, switchState.phase, switchState.seq]);
+  }, [reducedMotion, switchState.phase, switchState.seq, switchState.warm]);
 
   /* 新 transcript 先隐身挂载两帧：第一帧让虚拟列表量真实行高，第二帧让统一的
      `.convo-doc` ResizeObserver 把 scroller 贴到底。两者完成后才淡入，用户不会看到
@@ -286,7 +289,7 @@ export function ConversationPane({
       return;
     }
     let frameId: number | null = null;
-    let remaining = SWITCH_SETTLE_FRAMES;
+    let remaining = switchState.warm ? SWITCH_WARM_SETTLE_FRAMES : SWITCH_SETTLE_FRAMES;
     const next = () => {
       remaining -= 1;
       if (remaining <= 0) {
@@ -298,7 +301,7 @@ export function ConversationPane({
     };
     frameId = requestAnimationFrame(next);
     return () => { if (frameId !== null) cancelAnimationFrame(frameId); };
-  }, [switchState.phase, switchState.seq]);
+  }, [switchState.phase, switchState.seq, switchState.warm]);
 
   useEffect(() => {
     if (!prevLoading.current && loadingOlder) scroll.preparePrepend();
@@ -435,7 +438,7 @@ export function ConversationPane({
           {...(switchState.phase === "waiting" || switchState.phase === "settling" ? { "aria-busy": true } : {})}
         >
           {switchState.veil ? <ConversationSkeleton {...(switchVeilLeaving(switchState) ? { leaving: true } : {})} /> : null}
-          <div className="convo-body" data-phase={switchState.phase}>{body}</div>
+          <div className="convo-body" data-phase={switchState.phase} {...(switchState.warm ? { "data-warm": "true" } : {})}>{body}</div>
         </div>
         <div className="sr-only" aria-live="polite">
           {latestAnnouncement(state, displayRows.length, switchState.phase, zh)}

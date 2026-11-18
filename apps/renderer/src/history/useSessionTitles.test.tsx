@@ -130,3 +130,65 @@ it("retains separate metadata cards for legacy and preview titles without an emb
   expect(screen.getByText("FIX")).toBeTruthy();
   expect(screen.getByText("SYNC")).toBeTruthy();
 });
+
+it("coalesces concurrent sidebar and topbar title inspections and serves cached rows on switch", async () => {
+  const command = vi.fn().mockResolvedValue({ requestId: "batch-1" });
+  const client = {
+    command,
+    getState: () => ({
+      commands: {
+        "batch-1": {
+          status: "completed",
+          result: {
+            result: {
+              rows: [
+                { sessionId: "s-1", state: "available", title: "One", source: "user" },
+                { sessionId: "s-2", state: "available", title: "Two", source: "user" },
+              ],
+            },
+          },
+        },
+      },
+    }),
+  } as unknown as StudioClient;
+  function Harness({ viewed }: { viewed: string }) {
+    const sidebar = useSessionTitles(client, { sessionId: "live", available: true, capabilities }, [
+      { id: "s-1", title: "One" },
+      { id: "s-2", title: "Two" },
+    ]);
+    const topbar = useSessionTitles(client, { sessionId: "live", available: true, capabilities }, [
+      { id: viewed, title: viewed === "s-1" ? "One" : "Two" },
+    ]);
+    return <output>{`${sidebar.rows.size}:${topbar.rows.get(viewed)?.title ?? "none"}`}</output>;
+  }
+  const mounted = render(<PreviewModeProvider switchEnabled><Harness viewed="s-1" /></PreviewModeProvider>);
+  await screen.findByText("2:One");
+  expect(command).toHaveBeenCalledTimes(1);
+  mounted.rerender(<PreviewModeProvider switchEnabled><Harness viewed="s-2" /></PreviewModeProvider>);
+  await screen.findByText("2:Two");
+  expect(command).toHaveBeenCalledTimes(1);
+});
+
+it("shows the sidebar and topbar title metadata when their combined batch exceeds the Runtime limit", async () => {
+  const sidebar = Array.from({ length: 32 }, (_, index) => ({ id: `sidebar-${index}`, title: `Thread ${index}` }));
+  const receipts: Record<string, unknown> = {};
+  const command = vi.fn(async (_name: string, input: { targetSessionIds: string[] }) => {
+    if (input.targetSessionIds.length > 32) throw new Error("Too many titles in one request");
+    const requestId = `batch-${input.targetSessionIds[0]}`;
+    receipts[requestId] = {
+      status: "completed",
+      result: { result: { rows: input.targetSessionIds.map(sessionId => ({ sessionId, state: "available", title: sessionId, source: "user" })) } },
+    };
+    return { requestId };
+  });
+  const client = { command, getState: () => ({ commands: receipts }) } as unknown as StudioClient;
+  const context = { sessionId: "live", available: true, capabilities };
+  function Harness() {
+    const list = useSessionTitles(client, context, sidebar);
+    const topbar = useSessionTitles(client, context, [{ id: "viewed" }]);
+    return <output>{`${list.rows.size}:${topbar.rows.get("viewed")?.title ?? "none"}`}</output>;
+  }
+  render(<PreviewModeProvider switchEnabled><Harness /></PreviewModeProvider>);
+  await screen.findByText("32:viewed");
+  expect(command.mock.calls.map(([, input]) => input.targetSessionIds)).toEqual([sidebar.map(row => row.id), ["viewed"]]);
+});

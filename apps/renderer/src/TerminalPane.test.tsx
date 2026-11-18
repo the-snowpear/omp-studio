@@ -263,3 +263,27 @@ it("selects a command terminal created outside the pane and keeps the existing s
   expect(api.dispose).not.toHaveBeenCalled();
   expect(api.write).not.toHaveBeenCalled();
 });
+
+it("reuses a single workspace shell across main-view conversations while keeping conversationId-scoped panes isolated", async () => {
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+  const api = {
+    create: vi.fn()
+      .mockResolvedValueOnce({ id: "ws-shared", name: "Shell", cwd: "D:/workspace" })
+      .mockResolvedValueOnce({ id: "float-isolated", name: "Shell", cwd: "D:/workspace" }),
+    write: vi.fn().mockResolvedValue(undefined), resize: vi.fn().mockResolvedValue(undefined), dispose: vi.fn().mockResolvedValue(undefined),
+    onData: vi.fn(() => () => {}), onExit: vi.fn(() => () => {}),
+  };
+  vi.stubGlobal("ompStudioTerminal", api);
+  const view = render(<TerminalSessionsProvider>
+    <section aria-label="Main view"><TerminalPane workspaceId="work" visible /></section>
+  </TerminalSessionsProvider>);
+  await waitFor(() => expect(api.create).toHaveBeenCalledTimes(1));
+  // Rerendering main view across session switches keeps workspaceId without conversationId/sessionId: zero extra shells.
+  view.rerender(<TerminalSessionsProvider>
+    <section aria-label="Main view"><TerminalPane workspaceId="work" visible /></section>
+    <section aria-label="Floating view"><TerminalPane workspaceId="work" sessionId="s-float" conversationId="doc-float" visible /></section>
+  </TerminalSessionsProvider>);
+  await waitFor(() => expect(api.create).toHaveBeenCalledTimes(2));
+  expect(mocks.terminals).toHaveLength(2);
+  expect(api.dispose).not.toHaveBeenCalled();
+});

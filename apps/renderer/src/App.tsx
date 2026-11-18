@@ -143,7 +143,7 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
   const changeWorkspaces = useCallback((workspaces: WorkspaceListReadModel) => dispatch({ type: "model", model: { workspaces } }), []);
   const selectHistory = useCallback((entry: SessionHistoryEntry) => { if (navigate("workbench")) setSelectedHistoryId(entry.historyId); }, [setSelectedHistoryId, navigate]);
   const newThread = useCallback(() => setSelectedHistoryId(null), [setSelectedHistoryId]);
-  const modelLoader = useMemo(() => createShellModelLoader(client), [client]);
+  const modelLoader = useMemo(() => createShellModelLoader(client, { coalesce: true }), [client]);
 
   useEffect(() => {
     let cancelled = false;
