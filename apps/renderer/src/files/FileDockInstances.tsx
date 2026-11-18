@@ -10,9 +10,10 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { useI18n } from "../i18n";
 import { previewFile } from "../preview/filesPreview";
 import { getFileDocument, releaseFileDocument, type FileDocument, type FileDocumentIdentity } from "./fileDocuments";
-import { inspectFileBackend } from "./fileBackend";
+import { inspectFileBackend, resolveWorkspacePaths } from "./fileBackend";
 import { readFileScope } from "./filePreferences";
 import { registerFileOpener, type FileOpenIntent } from "./fileLinks";
+import { registerPathResolver } from "./pathResolution";
 import { requestFileClose } from "./FileCloseDialog";
 import { isAbsoluteFileReference, normalizeFileIdentityPath } from "./fileTypes";
 import type { FileViewerActions } from "./fileActions";
@@ -149,6 +150,12 @@ export function FileDockInstances({ workspaceId, targetId, onSettings, actions }
     store.dispatch({ type: "open", panel });
   }, [catalog, preview, store]);
   useEffect(() => registerFileOpener(view?.document.id ?? "standalone", intent => { void open(intent); }), [view?.document.id, open]);
+  // Transcript links ask the same file service that a click would, so a path is never underlined on a guess alone.
+  useEffect(() => registerPathResolver(view?.document.id ?? "standalone", async paths => {
+    const current = latest.current;
+    if (current.workspaceId === undefined) return [];
+    return (await resolveWorkspacePaths(await current.resolveClient(current.targetId), current.workspaceId as WorkspaceId, paths)).resolutions;
+  }), [view?.document.id]);
 
   const contextActions = (descriptor: FilePanelDescriptor) => {
     const workspace = latest.current.view?.store.getSnapshot(), active = workspace?.documents.find(item => item.id === workspace.activeDocumentId);

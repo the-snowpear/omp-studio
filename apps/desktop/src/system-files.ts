@@ -1,7 +1,7 @@
 import { lstat, mkdir, opendir, readdir, realpath, stat, statfs } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
-import type { SystemDirectory, SystemEntry, SystemFileTarget, SystemListInput, SystemPlaces, SystemQuickKind, WorkspaceId } from "@omp-studio/client-contract";
+import type { SystemDirectory, SystemEntry, SystemFileTarget, SystemListInput, SystemPlaces, SystemQuickKind, WorkspaceId, WorkspacePathResolution } from "@omp-studio/client-contract";
 import type { HostSystemFileService } from "@omp-studio/host-client-api";
 import type { WorkspaceRegistry } from "@omp-studio/studio-host";
 import { inspectFile, readFileChunk, readFileText, writeFileText } from "./file-io.js";
@@ -63,6 +63,18 @@ export function createSystemFileService({ registry, knownFolders, trash }: Syste
     const path = normalizeSystemPath(input.path), file = await inspectFile(await fileTarget(input));
     return { ...file, path, writable: file.writable && !(await lstat(path)).isSymbolicLink() };
   };
+
+  /** Absolute-path twin of the workspace probe: an unreadable path simply reports itself missing. */
+  async function resolveAll(input: { readonly paths: readonly string[] }): Promise<readonly WorkspacePathResolution[]> {
+    return Promise.all(input.paths.map(async path => {
+      try {
+        const target = await realpath(normalizeSystemPath(path));
+        return { path, kind: (await lstat(target)).isDirectory() ? "directory" as const : "file" as const };
+      } catch {
+        return { path, kind: "missing" as const };
+      }
+    }));
+  }
 
   async function volume(path: string): Promise<SystemPlaces["volumes"][number] | undefined> {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -162,7 +174,7 @@ export function createSystemFileService({ registry, knownFolders, trash }: Syste
     return path;
   }
   return {
-    places, list, inspect,
+    places, list, inspect, resolveAll,
     async readText(input) { return readFileText(await fileTarget(input), () => inspect(input)); },
     async readChunk(input) { return readFileChunk(await fileTarget(input), input); },
     async writeText(input) { return writeFileText(await fileTarget(input, true), input, () => inspect(input)); },

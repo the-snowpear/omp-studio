@@ -53,7 +53,7 @@ import type {
 
 /** Version of this client contract; bumped on incompatible contract changes. */
 export const CLIENT_CONTRACT_VERSION = 2 as const;
-export type { WorkspaceFileTarget, WorkspaceFileInfo, WorkspaceFileText, WorkspaceFileChunkInput, WorkspaceFileChunk, WorkspaceFileWrite, WorkspaceFileSaveResult, FileEncoding } from "./files.js";
+export type { WorkspaceFileTarget, WorkspaceFileInfo, WorkspaceFileText, WorkspaceFileChunkInput, WorkspaceFileChunk, WorkspaceFileWrite, WorkspaceFileSaveResult, WorkspacePathResolveInput, WorkspacePathKind, WorkspacePathResolution, WorkspacePathResolveResult, FileEncoding } from "./files.js";
 export type { SystemFileTarget, SystemFileInfo, SystemFileText, SystemFileChunkInput, SystemFileWrite, SystemFileSaveResult, SystemQuickKind, SystemPlaces, SystemEntry, SystemListInput, SystemDirectory, SystemFileMutationResult } from "./system-files.js";
 export type { ArtifactKind, ArtifactRecord, ArtifactListInput, ArtifactPage, ArtifactStorageState, StudioTaskStepState, JobActionsView, JobActionsRun, JobActionsJob, JobActionsStep, JobActionsFailedLog } from "@omp-studio/studio-protocol";
 export type { InteractionForm, InteractionFormField, InteractionFormSection, InteractionFormBlock, FormSpan, FormTextField, FormChoiceField, FormAnswerValue, FormAnswerData, FormOptionNote, FormSubmitValue } from "@omp-studio/studio-protocol";

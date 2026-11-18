@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复点击对话正文里的文件路径打不开文件、报 `ENOENT ... realpath` 的问题：路径先交给 Host 确认，确认存在的才保留为链接；目录改为在文件管理器中定位，绝对路径走系统文件通道。
+
 ## [0.2.4] - 2026-11-18
 
 ### Changed

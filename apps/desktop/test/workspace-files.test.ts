@@ -127,6 +127,27 @@ test("Unix viewer preserves backslashes in filenames returned by Explorer", { sk
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("path probes classify transcript candidates and a missing path reads as missing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-path-resolve-"));
+  const registry = new WorkspaceRegistry(join(root, "registry.json"));
+  try {
+    await mkdir(join(root, "project", "src"), { recursive: true });
+    await writeFile(join(root, "project", "src", "main.ts"), "export {};");
+    await writeFile(join(root, "outside.txt"), "outside");
+    const workspace = await registry.upsertByPath(join(root, "project"));
+    const service = createWorkspaceFileService({ registry });
+    const workspaceId = workspace.workspaceId as WorkspaceId;
+    assert.deepEqual(await service.resolveAll!({ workspaceId, paths: ["src/main.ts", "src", "RSA/ECB/PKCS1Padding", "../outside.txt", "src/main.ts"] }), [
+      { path: "src/main.ts", kind: "file" },
+      { path: "src", kind: "directory" },
+      { path: "RSA/ECB/PKCS1Padding", kind: "missing" },
+      { path: "../outside.txt", kind: "missing" },
+      { path: "src/main.ts", kind: "file" },
+    ]);
+    await assert.rejects(service.inspect!({ workspaceId, path: "RSA/ECB/PKCS1Padding" }), (error: Error) => !/ENOENT|realpath/i.test(error.message) && error.message.includes("RSA/ECB/PKCS1Padding"));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("viewer saves UTF-16 and bounds media reads without loading the whole file", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-file-bytes-"));
   try {
