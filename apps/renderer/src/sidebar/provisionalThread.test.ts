@@ -132,6 +132,46 @@ describe("provisional project thread", () => {
     expect(next).toEqual({});
   });
 
+  it("keeps the row in its own workspace when another project is selected mid-switch", () => {
+    const context = { preview: false, sessionCreating: false, selectedHistoryId: null, untitledTitle: "未命名会话" };
+    const current = { [String(sessionId)]: provisional };
+    // `dockSelection.project` has already moved to the incoming project while the
+    // composer still reports the session that belongs to `provisional.workspaceId`.
+    const switched = reconcileProvisionalProjectThread(current, {
+      sessionId,
+      workspaceId: "workspace-incoming" as WorkspaceId,
+      visible: true,
+      title: provisional.title,
+      running: true,
+      submitted: true,
+    }, context);
+    expect(switched[sessionId]?.workspaceId).toBe(provisional.workspaceId);
+    expect(switched[sessionId]?.title).toBe(provisional.title);
+
+    const settled = reconcileProvisionalProjectThread(switched, {
+      sessionId,
+      workspaceId: "workspace-incoming" as WorkspaceId,
+      visible: true,
+      title: provisional.title,
+      running: false,
+      submitted: true,
+    }, context);
+    expect(settled[sessionId]?.workspaceId).toBe(provisional.workspaceId);
+    expect(settled[sessionId]?.running).toBe(false);
+  });
+
+  it("binds a fresh row to the workspace reported for it", () => {
+    const next = reconcileProvisionalProjectThread({}, {
+      sessionId,
+      workspaceId: "workspace-incoming" as WorkspaceId,
+      visible: true,
+      title: provisional.title,
+      running: true,
+      submitted: true,
+    }, { preview: false, sessionCreating: false, selectedHistoryId: null, untitledTitle: "未命名会话" });
+    expect(next[sessionId]?.workspaceId).toBe("workspace-incoming");
+  });
+
   it("keeps the prompt fallback while switching a persisted missing-title session", () => {
     const current = { [String(sessionId)]: provisional };
     const switching = reconcileProvisionalProjectThread(current, {
