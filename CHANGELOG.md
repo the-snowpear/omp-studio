@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - 保存自定义提供商或模型时，保留数字形式、含引号或 YAML 特殊字符的字符串凭据，修复重复编辑后对话模型列表丢失自定义模型的问题。 [#42](https://github.com/the-snowpear/omp-studio/issues/42) · [#43](https://github.com/the-snowpear/omp-studio/pull/43)
+- 用户消息中的 Markdown 链接始终带下划线，在深浅主题、键盘聚焦及选中文本时保持可读。 [#45](https://github.com/the-snowpear/omp-studio/issues/45)
 
 ## [0.2.3] - 2026-11-18
 

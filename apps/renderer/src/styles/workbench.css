@@ -513,8 +513,9 @@
 }
 .ev-user .ev-head { justify-content: flex-end; }
 .ev-user .ev-body {
+  --user-bubble-text: var(--text-on-accent);
   background: var(--accent);
-  color: var(--text-on-accent);
+  color: var(--user-bubble-text);
   border-radius: var(--r-10) var(--r-10) var(--r-4) var(--r-10);
   padding: var(--sp-10) var(--sp-14);
   max-width: 78%;
@@ -528,11 +529,17 @@
 }
 .ev-user .ev-body p:first-child { margin-top: 0; }
 .ev-user .ev-body p:last-child { margin-bottom: 0; }
-/* 全局 ::selection 是半透明 accent，叠在实底气泡上等于没高亮。改成白色罩。 */
+.ev-user .ev-body a {
+  color: var(--user-bubble-text);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+.ev-user .ev-body a:focus-visible { outline-color: var(--user-bubble-text); }
+/* 提亮深色主题气泡的选区，保留深色文字的对比度。 */
 .ev-user .ev-body::selection,
 .ev-user .ev-body *::selection {
-  background: color-mix(in srgb, var(--text-on-accent) 38%, transparent);
-  color: var(--text-on-accent);
+  background: color-mix(in srgb, var(--text) 38%, transparent);
+  color: var(--user-bubble-text);
 }
 /* 气泡内的代码 chip：accent 色调在实底上会糊，改半透明跟随气泡文字色 */
 .ev-user .ev-body .chip-code {
@@ -543,13 +550,12 @@
    user content remains readable without the dark filled treatment. Dark theme
    intentionally keeps the original high-contrast accent bubble unchanged. */
 :root[data-theme="light"] .ev-user .ev-body {
+  --user-bubble-text: var(--text);
   background: #eee9ff;
-  color: var(--text);
 }
 :root[data-theme="light"] .ev-user .ev-body::selection,
 :root[data-theme="light"] .ev-user .ev-body *::selection {
   background: color-mix(in srgb, var(--accent) 24%, transparent);
-  color: var(--text);
 }
 :root[data-theme="light"] .ev-user .ev-body .chip-code {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
