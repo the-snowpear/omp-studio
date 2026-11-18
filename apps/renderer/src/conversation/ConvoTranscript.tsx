@@ -142,7 +142,6 @@ export function ConvoTranscript({
   scrollerRef,
   rows,
   demo,
-  scopeKey,
   onRestore,
   onRestoreUserMessage,
   onBranchUserMessage,
@@ -158,7 +157,6 @@ export function ConvoTranscript({
   scrollerRef?: RefObject<HTMLElement | null>;
   rows: readonly TimelineRow[];
   demo?: boolean;
-  scopeKey?: string;
   onRestore?: (requestId: string) => void;
   onRestoreUserMessage?: (itemId: string, text: string) => void;
   onBranchUserMessage?: (itemId: string, text: string) => void;
@@ -367,7 +365,6 @@ export function ConvoTranscript({
       <ConversationVirtualList
         revealRef={revealRef}
         {...(scrollerRef === undefined || demo ? {} : { scrollerRef })}
-        {...(scopeKey !== undefined ? { scopeKey } : demo ? { scopeKey: "demo" } : {})}
         itemKeys={itemKeys}
         renderItem={renderItem}
       />

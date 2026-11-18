@@ -37,27 +37,21 @@ export function createShellModelLoader(client: StudioClient, options?: { readonl
   return {
     async load(scope: ShellModelScope, route: string, publish: (value: ShellModel) => void | boolean, projectsSettled: () => void) {
       const requests: Promise<unknown>[] = [];
-      let queued: ShellModel | undefined;
-      let queuedCommits: Array<[string, string]> = [];
+      const queued = new Map<string, { key: string; value: ShellModel }>();
       let flushPromise: Promise<void> | undefined;
       const deliver = (name: string, key: string, value: ShellModel) => {
         if (!options?.coalesce) {
           if (publish(value) !== false) committed.set(name, key);
           return;
         }
-        queued = { ...queued, ...value };
-        queuedCommits.push([name, key]);
+        queued.set(name, { key, value });
         if (!flushPromise) {
           flushPromise = Promise.resolve().then(() => Promise.resolve()).then(() => {
             flushPromise = undefined;
-            const merged = queued;
-            const batch = queuedCommits;
-            queued = undefined;
-            queuedCommits = [];
-            if (merged && publish(merged) !== false) {
-              for (const [domain, domainKey] of batch) {
-                if (selected.get(domain) === domainKey) committed.set(domain, domainKey);
-              }
+            const batch = [...queued].filter(([domain, entry]) => selected.get(domain) === entry.key);
+            queued.clear();
+            if (batch.length && publish(Object.assign({}, ...batch.map(([, entry]) => entry.value))) !== false) {
+              for (const [domain, entry] of batch) committed.set(domain, entry.key);
             }
           });
         }

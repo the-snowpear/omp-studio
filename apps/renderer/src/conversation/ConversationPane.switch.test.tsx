@@ -74,6 +74,18 @@ describe("ConversationPane session switch", () => {
     }
   });
 
+  it("reveals a cached transcript on mount while the archive is still being revalidated", () => {
+    vi.useFakeTimers();
+    const view = render(pane(snapshot("cached", "resyncing", [userRow("Cached transcript")])));
+    const body = view.container.querySelector(".convo-body");
+    expect(body?.getAttribute("data-phase")).toBe("settling");
+    expect(body?.getAttribute("data-warm")).toBe("true");
+    expect(view.container.querySelector(".convo-veil")).toBeNull();
+    act(() => { vi.advanceTimersByTime(SWITCH_WARM_SETTLE_FRAMES * 20); });
+    expect(body?.getAttribute("data-phase")).toBe("revealing");
+    expect(body?.textContent).toContain("Cached transcript");
+  });
+
   it("cross-dissolves through a switch instead of hard-cutting to a placeholder", () => {
     vi.useFakeTimers();
     const view = mounted([userRow("从前的会话")]);

@@ -45,37 +45,6 @@ export class DocumentHosts {
       this.notifyTabs();
     };
   }
-  retarget(fromId: string, toId: string): ConversationHost {
-    if (fromId === toId) return this.get(toId);
-    const host = this.hosts.get(fromId);
-    if (!host || this.hosts.has(toId)) return this.get(toId);
-    if (host.element.isConnected) {
-      for (const listener of this.detachListeners.get(fromId) ?? []) listener();
-    }
-    this.owners.delete(fromId);
-    this.hosts.delete(fromId);
-    this.detachListeners.delete(fromId);
-    const hadTab = this.tabs.delete(fromId) || this.toolTabs.delete(fromId);
-    host.element.dataset.conversationDocument = toId;
-    host.title.dataset.conversationOwner = host.actions.dataset.conversationOwner = toId;
-    const fromSlots = this.slots.get(fromId);
-    if (fromSlots) {
-      this.slots.delete(fromId);
-      const copied: Partial<ConversationHostSlots> = { ...fromSlots };
-      delete fromSlots.element; delete fromSlots.title; delete fromSlots.actions;
-      if (!this.slots.has(toId)) this.slots.set(toId, copied);
-    }
-    const fromPreviews = this.previews.get(fromId);
-    if (fromPreviews) {
-      this.previews.delete(fromId);
-      const copied: Partial<ConversationHostSlots> = { ...fromPreviews };
-      delete fromPreviews.element; delete fromPreviews.title; delete fromPreviews.actions;
-      if (!this.previews.has(toId)) this.previews.set(toId, copied);
-    }
-    this.hosts.set(toId, host);
-    if (hadTab) this.notifyTabs();
-    return host;
-  }
   private slots = new Map<string, Partial<ConversationHostSlots>>();
   private previews = new Map<string, Partial<ConversationHostSlots>>();
   private tabs = new Map<string, ConversationTabInfo>();
@@ -113,7 +82,6 @@ export class DocumentHosts {
   }
   subscribeTabs = (listener: () => void) => { this.tabListeners.add(listener); return () => { this.tabListeners.delete(listener); }; };
   tabsRevision = () => this.tabRevision;
-  peek(id: string) { return this.hosts.get(id); }
   get(id: string) {
     let host = this.hosts.get(id);
     if (!host) {

@@ -7,7 +7,6 @@ import { conversationIsFollowing, conversationScrollIdentity, isConversationRefl
 export const MAX_MOUNTED_CONVERSATION_ROWS = 120;
 export const CONVERSATION_OVERSCAN = 6;
 const UNMEASURED_TAIL_ROWS = 20;
-const scrollerMetrics = new WeakMap<HTMLElement, { readonly width: number; readonly typography: string }>();
 
 /** The transcript is anchored at the bottom, so when the virtualizer hands back
  *  more rows than we are willing to mount, the ones worth keeping are the last
@@ -37,13 +36,11 @@ export function conversationRange(range: Range, anchorIndex = -1): number[] {
 
 export const ConversationVirtualList = memo(function ConversationVirtualList({
   scrollerRef,
-  scopeKey,
   itemKeys,
   renderItem,
   revealRef,
 }: {
   scrollerRef?: RefObject<HTMLElement | null>;
-  scopeKey?: string;
   itemKeys: readonly string[];
   renderItem: (index: number) => ReactNode;
   revealRef?: RefObject<((index: number, mounted: () => void) => void) | null>;
@@ -53,21 +50,9 @@ export const ConversationVirtualList = memo(function ConversationVirtualList({
   const enabled = scrollerRef !== undefined;
   const keysRef = useRef(itemKeys);
   keysRef.current = itemKeys;
-  const scopeKeyRef = useRef(scopeKey);
-  scopeKeyRef.current = scopeKey;
   const mountedRows = useRef(new Map<string, HTMLElement>());
   const heightContext = useRef<RowHeightContext>({ width: 0, typography: "", panel: "" });
   const contextInitialized = useRef(false);
-  const currentScroller = scrollerRef?.current ?? null;
-  if (currentScroller !== null) {
-    const panel = `${currentScroller.className}:${scopeKey !== undefined ? scopeKey : conversationScrollIdentity(currentScroller)}`;
-    const known = scrollerMetrics.get(currentScroller);
-    if (known !== undefined && (heightContext.current.width <= 0 || heightContext.current.panel !== panel)) {
-      heightContext.current = { width: known.width, typography: known.typography, panel };
-    } else if (heightContext.current.panel !== panel && heightContext.current.width > 0) {
-      heightContext.current = { ...heightContext.current, panel };
-    }
-  }
   const [anchorKey, setAnchorKey] = useState<string | null>(null);
   const [revealKey, setRevealKey] = useState<string | null>(null);
   const revealPending = useRef<(() => void) | null>(null);
@@ -169,14 +154,12 @@ export const ConversationVirtualList = memo(function ConversationVirtualList({
       measure: (width) => {
         const style = getComputedStyle(host);
         const root = getComputedStyle(document.documentElement);
-        const typography = [style.fontFamily, style.fontSize, style.lineHeight,
-          root.getPropertyValue("--font-output"), root.getPropertyValue("--font-output-code"),
-          root.getPropertyValue("--output-font-scale"), root.getPropertyValue("--ui-font-scale")].join("|");
-        if (width > 0) scrollerMetrics.set(scroller, { width, typography });
         heightContext.current = {
           width,
-          panel: `${scroller.className}:${scopeKeyRef.current !== undefined ? scopeKeyRef.current : conversationScrollIdentity(scroller)}`,
-          typography,
+          panel: `${scroller.className}:${conversationScrollIdentity(scroller)}`,
+          typography: [style.fontFamily, style.fontSize, style.lineHeight,
+            root.getPropertyValue("--font-output"), root.getPropertyValue("--font-output-code"),
+            root.getPropertyValue("--output-font-scale"), root.getPropertyValue("--ui-font-scale")].join("|"),
         };
         // The first render precedes hostRef, so seed cross-mount estimates once
         // its real context is known. Never repeat this reset during reflow.

@@ -116,11 +116,11 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
     if (!input.canRead || input.client === null) { store.setUnavailable(isZh() ? "当前环境无法读取对话。" : "Cannot read conversations in this environment."); return; }
     store.setLoading(resyncing || initialCachedPage !== undefined);
     const source = createConversationSource(input.client);
-    const liveSession = Boolean(input.runtimeConnected && identity.runtimeEpoch !== undefined);
-    liveTarget = liveSession ? { kind: "session", sessionId: identity.sessionId } : undefined;
+    const target = input.runtimeConnected && identity.runtimeEpoch !== undefined ? { kind: "session" as const, sessionId: identity.sessionId } : undefined;
+    liveTarget = target;
     try {
-      if (liveSession) {
-        const opened = await source.open(liveTarget!, CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT);
+      if (target) {
+        const opened = await source.open(target, CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT);
         if (disposed || token !== run) return;
         const resolvedSessionId = opened.target.conversationSessionId; conversationSessionId = resolvedSessionId; store.resolveTarget(resolvedSessionId, opened.page.runtimeEpoch);
         watermark = opened.live.watermark;
@@ -159,7 +159,7 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
     finally { if (!disposed && token === run) { loadingOlder = false; publish(); metadataSnapshot = { ...store.getMetadataSnapshot(), demo: input.preview, loadingOlder, identityKey: identityKey(store.getMetadataSnapshot().state.identity) }; for (const listener of metadataListeners) listener(); } }
   }
 
-  if (!input.preview && input.client && identity) {
+  if (!input.preview && input.canRead && input.client && identity) {
     const cached = projectReadsFor(input.client)?.page(identity.sessionId, identity.transcriptRevision);
     if (cached) { initialCachedPage = cached; store.hydrate(cached); store.setLoading(true); sessionSwitchPerformance.mark("conversation.cacheDisplay", { rows: cached.items.length }); }
   }

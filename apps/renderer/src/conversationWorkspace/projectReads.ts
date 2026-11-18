@@ -14,7 +14,7 @@ export const WARM_SESSION_BUDGET = 5;
 function estimateValueBytes(value: unknown, depth = 0): number {
   if (typeof value === "string") return (value.length + 2) * 2;
   if (value === null || value === undefined || typeof value === "number" || typeof value === "boolean") return 8;
-  if (depth > 8) return 32;
+  if (depth > 8) return JSON.stringify(value).length * 2;
   if (Array.isArray(value)) {
     let total = 4;
     for (let index = 0; index < value.length; index++) total += estimateValueBytes(value[index], depth + 1) + 2;
@@ -208,7 +208,7 @@ export class ProjectReads {
     if (event.kind === "command.receipt" && event.receipt.status === "completed") {
       const name = event.receipt.commandName;
       if (/^(models\.|skills\.|plugins\.|config\.|runtime\.install)/.test(name)) this.owner.invalidateMetadata();
-      if (/^(session\.|timeTravel\.|core\.prompt)/.test(name)) { this.invalidate("history.list"); this.owner.pages.clear(); }
+      if (name !== "session.titles.inspect" && /^(session\.|timeTravel\.|core\.prompt)/.test(name)) { this.invalidate("history.list"); this.owner.pages.clear(); }
       if (/^(git\.|github\.|workspace\.)/.test(name)) { this.invalidate("git."); this.invalidate("workspace.fileTree"); this.invalidate("projects.list"); }
     }
   }
@@ -238,9 +238,9 @@ export class ProjectReads {
     return page && (!revision || page.transcriptRevision === revision) ? page : undefined;
   }
   savePage(page: ConversationTranscriptReadPage): ConversationTranscriptReadPage {
-    const key = `${this.workspaceId}\0${page.sessionId}`, previous = this.owner.pages.get(key);
+    const key = `${this.workspaceId}\0${page.sessionId}`, previous = this.owner.pages.get(key, TRANSCRIPT_PAGE_TTL_MS);
     if (previous && previous.transcriptRevision !== undefined && previous.transcriptRevision === page.transcriptRevision && previous.headCursor === page.headCursor && previous.olderCursor === page.olderCursor && previous.items.length === page.items.length) {
-      this.owner.pages.set(key, previous, TRANSCRIPT_PAGE_TTL_MS); return previous;
+      return previous;
     }
     // Full-page reconciliation only; streaming deltas never compare full pages.
     const byId = new Map(previous?.items.map(item => [item.itemId, item]));
@@ -278,6 +278,7 @@ export class ProjectReads {
       for (const row of history.entries.slice(0, WARM_HISTORY_SCAN_LIMIT)) {
         if (!row.sessionId || row.sessionId === current || warmed === WARM_SESSION_BUDGET) continue;
         if (this.page(row.sessionId)) { warmed++; continue; }
+        if (!await idle()) return;
         try {
           const epoch = this.owner.epoch;
           const result = await (await this.client()).query("session.transcript.prefetch", { sessionId: row.sessionId });

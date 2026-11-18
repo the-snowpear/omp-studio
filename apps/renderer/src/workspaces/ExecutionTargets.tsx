@@ -45,29 +45,14 @@ export function ExecutionTargetScope({ id, memoryKey, onSelect, children }: { id
 }
 export function useTargetMemory<T>(key: string, initial: () => T) {
   const { memory } = useExecutionTarget();
-  const [entry, setEntry] = useState<{ memory: Map<string, unknown>; key: string; value: T }>(() => {
-    if (memory.has(key)) return { memory, key, value: memory.get(key) as T };
-    const value = initial();
-    memory.set(key, value);
-    return { memory, key, value };
-  });
-  let value = entry.value;
-  if (entry.memory !== memory || entry.key !== key) {
-    if (memory.has(key)) {
-      value = memory.get(key) as T;
-    } else {
-      value = initial();
-      memory.set(key, value);
-    }
-    setEntry({ memory, key, value });
-  }
+  const [value, setValue] = useState<T>(() => memory.has(key) ? memory.get(key) as T : initial());
   const current = useRef(value);
   current.current = value;
   const update = useCallback<Dispatch<SetStateAction<T>>>(action => {
     const next = typeof action === "function" ? (action as (previous: T) => T)(current.current) : action;
     current.current = next;
     memory.set(key, next);
-    setEntry({ memory, key, value: next });
+    setValue(next);
   }, [memory, key]);
   return [value, update] as const;
 }

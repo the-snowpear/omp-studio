@@ -72,6 +72,8 @@ it("page data is scoped to target, workspace, session and revision; equal rows k
   expect(b.reads.page(page.sessionId)).toBeUndefined();
   expect(a.reads.page(page.sessionId, "old")).toBeUndefined();
   expect(a.reads.page(page.sessionId, "new")).toBe(next);
+  a.reads.observe({ kind: "command.receipt", authorityEpoch: 1, receipt: { status: "completed", commandName: "session.titles.inspect" } } as ClientEvent);
+  expect(a.reads.page(page.sessionId, "new")).toBe(next);
   a.release(); b.release(); vi.runAllTimers();
 });
 

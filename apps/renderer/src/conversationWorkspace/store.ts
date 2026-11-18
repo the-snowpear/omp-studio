@@ -32,6 +32,7 @@ const documentPatchChanged = (current: ConversationDocument, patch: Partial<Pick
   || ("pagePhase" in patch && patch.pagePhase !== current.pagePhase);
 
 export class ConversationWorkspaceStore {
+  sidebarScrollTop = 0;
   readonly manager = new WorkbenchWindows();
   readonly windows = this.manager.focus;
   readonly hosts = new DocumentHosts();
@@ -239,9 +240,9 @@ export class ConversationWorkspaceStore {
     return this.batch(() => {
       if (this.demo && ref.draftId && ref.draftId !== "initial") ref = { ...ref, previewThreadId: "t0", previewProjectId: ref.workspaceId ?? this.documentFor(this.state.activeViewId)?.ref.previewProjectId };
       const key = conversationKey(ref);
-      const route = ref.draftId === "initial" ? undefined : ("workbench" as const);
       // Only the startup document defers to startupPage; an explicit open reveals the conversation, including cached documents.
       const found = this.state.documents.find(doc => conversationKey(doc.ref) === key);
+      const route = !found && ref.draftId === "initial" ? undefined : ("workbench" as const);
       let document: ConversationDocument;
       if (!found) {
         document = { id: crypto.randomUUID(), ref, title: title ?? (isZh() ? "新对话" : "New conversation"), route };
@@ -261,14 +262,9 @@ export class ConversationWorkspaceStore {
         return existing.id;
       }
       // A minimized view is not "current": reusing it would swap out a conversation the user only put away.
-      const current = this.state.views.find(view => view.id === this.state.activeViewId && !view.minimized)
-        ?? (placement === "current" ? this.state.views.find(view => view.placement === "main" && !view.minimized) : undefined);
+      const current = this.state.views.find(view => view.id === this.state.activeViewId && !view.minimized);
       if (placement === "current" && current) {
-        const departedId = current.documentId;
         this.manager.patch(current.id, { content: { kind: "conversation", documentId: document.id }, title: document.title, minimized: false });
-        if (departedId !== document.id && !this.manager.getSnapshot().records.some(record => record.content.documentId === departedId)) {
-          this.hosts.retarget(departedId, document.id);
-        }
         this.activate(current.id);
         this.publish();
         return current.id;

@@ -7,86 +7,76 @@ import type {
 import { usePreviewMode } from "../preview/PreviewContext";
 import { waitReceipt, hostErrorMessage } from "../hostError";
 import type { NativeHistoryContext } from "./NativeArchivePane";
+
+const TITLE_BATCH_LIMIT = 32;
 const TITLE_CACHE_TTL_MS = 5_000;
-type CachedTitleEntry = { readonly title: string | undefined; readonly row: SessionTitleRow | undefined; readonly expiresAt: number };
+const TITLE_CACHE_LIMIT = 4 * TITLE_BATCH_LIMIT;
+type CachedTitleEntry = { readonly row: SessionTitleRow | undefined; readonly expiresAt: number };
+type PendingTitle = ReturnType<typeof Promise.withResolvers<SessionTitleRow | undefined>> & { readonly key: string };
 type TitleBatchState = {
   sessionId: string;
   entries: Map<string, CachedTitleEntry>;
-  queuedIds: Set<string>;
-  queuedTitles: Map<string, string | undefined>;
-  waiters: Array<{ resolve: () => void; reject: (reason: unknown) => void }>;
-  scheduled: boolean;
+  pending: Map<string, Promise<SessionTitleRow | undefined>>;
+  queued: Map<string, PendingTitle[]>;
 };
 const sharedTitleCaches = new WeakMap<StudioClient, TitleBatchState>();
 
 function stateForClient(client: StudioClient, sessionId: string): TitleBatchState {
   let state = sharedTitleCaches.get(client);
   if (!state || state.sessionId !== sessionId) {
-    state = { sessionId, entries: new Map(), queuedIds: new Set(), queuedTitles: new Map(), waiters: [], scheduled: false };
+    state = { sessionId, entries: new Map(), pending: new Map(), queued: new Map() };
     sharedTitleCaches.set(client, state);
   }
   return state;
 }
 
-function inspectSharedTitles(client: StudioClient, sessionId: string, pairs: readonly [string, string | undefined][], force = false): Promise<ReadonlyMap<string, SessionTitleRow>> {
+async function flushTitleBatch(client: StudioClient, state: TitleBatchState) {
+  const queued = state.queued;
+  state.queued = new Map();
+  const ids = [...queued.keys()];
+  for (let offset = 0; offset < ids.length; offset += TITLE_BATCH_LIMIT) {
+    const batch = ids.slice(offset, offset + TITLE_BATCH_LIMIT);
+    try {
+      const handle = await client.command("session.titles.inspect", { sessionId: state.sessionId, targetSessionIds: batch });
+      const { result } = await waitReceipt<{ result: SessionTitlesResult }>(client, handle.requestId);
+      const rows = new Map(result.rows.map(row => [row.sessionId, row]));
+      const expiresAt = Date.now() + TITLE_CACHE_TTL_MS;
+      for (const id of batch) {
+        const row = rows.get(id);
+        for (const request of queued.get(id)!) {
+          state.entries.delete(request.key);
+          state.entries.set(request.key, { row, expiresAt });
+          request.resolve(row);
+        }
+      }
+      while (state.entries.size > TITLE_CACHE_LIMIT) state.entries.delete(state.entries.keys().next().value!);
+    } catch (cause) {
+      for (const id of batch) for (const request of queued.get(id)!) request.reject(cause);
+    } finally {
+      for (const id of batch) for (const request of queued.get(id)!) state.pending.delete(request.key);
+    }
+  }
+}
+
+async function inspectSharedTitles(client: StudioClient, sessionId: string, pairs: readonly [string, string | undefined][], force: boolean): Promise<ReadonlyMap<string, SessionTitleRow>> {
   const state = stateForClient(client, sessionId);
   const now = Date.now();
-  const ids: string[] = [];
-  const seen = new Set<string>();
-  let missing = false;
-  for (const [id, title] of pairs) {
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    ids.push(id);
-    const cached = state.entries.get(id);
-    if (force || !cached || cached.expiresAt <= now || cached.title !== title) {
-      missing = true;
-      state.queuedIds.add(id);
-      state.queuedTitles.set(id, title);
-    }
-  }
-  const collect = (): ReadonlyMap<string, SessionTitleRow> => {
-    const out = new Map<string, SessionTitleRow>();
-    for (const id of ids) {
-      const row = state.entries.get(id)?.row;
-      if (row) out.set(id, row);
-    }
-    return out;
-  };
-  if (!missing) return Promise.resolve(collect());
-  const gate = Promise.withResolvers<void>();
-  state.waiters.push(gate);
-  if (!state.scheduled) {
-    state.scheduled = true;
-    queueMicrotask(async () => {
-      state.scheduled = false;
-      const batchIds = [...state.queuedIds];
-      const batchTitles = new Map(state.queuedTitles);
-      const waiters = state.waiters.splice(0);
-      state.queuedIds.clear();
-      state.queuedTitles.clear();
-      if (!batchIds.length) {
-        for (const waiter of waiters) waiter.resolve();
-        return;
-      }
-      try {
-        const handle = await client.command("session.titles.inspect", {
-          sessionId,
-          targetSessionIds: batchIds,
-        });
-        const result = (await waitReceipt<{ result: SessionTitlesResult }>(client, handle.requestId)).result;
-        const byId = new Map(result.rows.map((row) => [row.sessionId, row]));
-        const expiresAt = Date.now() + TITLE_CACHE_TTL_MS;
-        for (const id of batchIds) {
-          state.entries.set(id, { title: batchTitles.get(id), row: byId.get(id), expiresAt });
-        }
-        for (const waiter of waiters) waiter.resolve();
-      } catch (cause) {
-        for (const waiter of waiters) waiter.reject(cause);
-      }
-    });
-  }
-  return gate.promise.then(collect);
+  const entries = new Map(pairs.filter(([id]) => id));
+  const rows = await Promise.all([...entries].map(async ([id, title]) => {
+    const key = JSON.stringify([id, title]);
+    const entry = state.entries.get(key);
+    if (!force && entry && entry.expiresAt > now) return entry.row;
+    const inFlight = state.pending.get(key);
+    if (inFlight) return inFlight;
+    const request = { key, ...Promise.withResolvers<SessionTitleRow | undefined>() };
+    if (state.queued.size === 0) queueMicrotask(() => { void flushTitleBatch(client, state); });
+    const waiting = state.queued.get(id) ?? [];
+    waiting.push(request);
+    state.queued.set(id, waiting);
+    state.pending.set(key, request.promise);
+    return request.promise;
+  }));
+  return new Map(rows.flatMap(row => row ? [[row.sessionId, row] as const] : []));
 }
 
 export function useSessionTitles(
@@ -101,7 +91,7 @@ export function useSessionTitles(
     ),
     [error, setError] = useState("");
   const key = JSON.stringify(
-    targets.slice(0, 32).map((row) => [row.id, row.title]),
+    targets.slice(0, TITLE_BATCH_LIMIT).map((row) => [row.id, row.title]),
   );
   const enabled = !!(
     client &&
@@ -121,8 +111,7 @@ export function useSessionTitles(
     }
     if (!visible) return;
     const pairs = JSON.parse(key) as [string, string | undefined][];
-    const ids = [...new Set(pairs.map((row) => row[0]).filter(Boolean))];
-    if (!ids.length) {
+    if (!pairs.some(([id]) => id)) {
       setRows(new Map());
       return;
     }

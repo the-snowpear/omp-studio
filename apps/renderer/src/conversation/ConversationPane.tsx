@@ -134,12 +134,12 @@ export function ConversationPane({
   const scrollerRef = externalScrollerRef ?? localScrollerRef;
   const conversation = useConversationView();
   const execution = useExecutionTarget();
-  const readingMemory = useMemo<ConversationReadingMemory | undefined>(() => {
+  const [readingMemory] = useState<ConversationReadingMemory | undefined>(() => {
     if (!conversation) return undefined;
     let memory = execution.memory.get("conversation-reading") as ConversationReadingMemory | undefined;
     if (!memory) { memory = {}; execution.memory.set("conversation-reading", memory); }
     return memory;
-  }, [Boolean(conversation), conversation?.document.id, execution.memory]);
+  });
   const beforeDetach = useMemo(() => conversation ? (save: () => void) =>
     conversation.store.hosts.onBeforeDetach(conversation.document.id, save) : undefined,
   [conversation?.store, conversation?.document.id]);
@@ -216,7 +216,8 @@ export function ConversationPane({
     if (showWelcome && painted.current?.welcome === true) {
       dispatchSwitch({ type: "adopt", key: switchKey });
     } else {
-      const warm = paintable && !showWelcome && displayRows.length > 0 && painted.current !== null && painted.current.welcome !== true;
+      const warm = paintable && !showWelcome && displayRows.length > 0
+        && (painted.current?.welcome === false || state.hydrateStatus === "resyncing");
       dispatchSwitch({ type: "identity", key: switchKey, paintable, canFade, warm });
     }
   } else if (pending && (switchState.phase === "idle" || switchState.phase === "revealing")) {
@@ -371,7 +372,6 @@ export function ConversationPane({
           scrollerRef={scrollerRef}
           rows={displayRows}
           demo={demo}
-          {...(state.identity?.sessionId === undefined ? {} : { scopeKey: state.identity.sessionId })}
           {...(onRestore === undefined ? {} : { onRestore })}
           {...(onRestoreUserMessage === undefined ? {} : { onRestoreUserMessage })}
           {...(onBranchUserMessage === undefined ? {} : { onBranchUserMessage })}
