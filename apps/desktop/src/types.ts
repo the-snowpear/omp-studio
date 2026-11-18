@@ -136,6 +136,8 @@ export interface DesktopWindowSurface {
 /** Lifecycle handle returned by `createDesktopApplication`. */
 export interface DesktopApplication {
   readonly runtimeStatus: DesktopRuntimeStatus;
+  /** True once this process acquired the single-instance lock during `start()`. */
+  readonly acquiredLock?: boolean;
   /** Single-instance check, Host start (fail closed), first window. */
   start(): Promise<void>;
   /**
@@ -158,6 +160,8 @@ export interface DesktopApplicationDeps {
   readonly createWindow: DesktopWindowFactory;
   /** true when this instance holds the single-instance lock. */
   readonly requestSingleInstanceLock: () => boolean;
+  /** Invoked once this instance acquires the single-instance lock, before Host startup. */
+  readonly onSingleInstanceAcquired?: () => void;
   /** Retry configuration when restarting (e.g. on --omp-restarted) */
   readonly singleInstanceRetry?: { readonly attempts: number; readonly delayMs: number } | undefined;
   /** Optional argv override for testing single-instance restart flags. */

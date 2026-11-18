@@ -32,15 +32,20 @@ function readTip(el: Element): string {
   return el.getAttribute("data-tip")?.trim() ?? "";
 }
 
-function tipFromPoint(document: Document, x: number, y: number): { el: Element; text: string } | null {
-  const hit = document.elementFromPoint(x, y);
-  if (!hit) return null;
-  if (hit.closest(".omp-tip-bubble")) return null;
-  const el = hit.closest("[data-tip]");
+function tipFromTarget(target: EventTarget | null): { el: Element; text: string } | null {
+  if (!(target instanceof Element)) return null;
+  if (target.closest(".omp-tip-bubble")) return null;
+  const el = target.closest("[data-tip]");
   if (!el) return null;
   const text = readTip(el);
   if (text.length === 0) return null;
   return { el, text };
+}
+
+function tipFromPoint(document: Document, x: number, y: number): { el: Element; text: string } | null {
+  if (typeof document.elementFromPoint !== "function") return null;
+  const hit = document.elementFromPoint(x, y);
+  return tipFromTarget(hit);
 }
 
 /**
@@ -58,7 +63,14 @@ export function TipHost() {
   const timerRef = useRef(0);
 
   useEffect(() => {
+    let probeFrame = 0;
+    let probePoint = { x: 0, y: 0 };
+
     const hide = () => {
+      if (probeFrame !== 0) {
+        window.cancelAnimationFrame(probeFrame);
+        probeFrame = 0;
+      }
       window.clearTimeout(timerRef.current);
       timerRef.current = 0;
       pendingRef.current = null;
@@ -91,14 +103,30 @@ export function TipHost() {
       }, TIP_DELAY_MS);
     };
 
-    const fromPoint = (x: number, y: number) => {
-      const found = tipFromPoint(document, x, y);
-      if (!found) hide();
-      else arm(found.el, found.text);
-    };
-
     const onMove = (event: PointerEvent) => {
-      fromPoint(event.clientX, event.clientY);
+      if ((event.buttons ?? 0) !== 0) {
+        if (shownRef.current || pendingRef.current) hide();
+        return;
+      }
+      if (event.target instanceof Element && event.target.closest(".omp-tip-bubble")) return;
+      const direct = tipFromTarget(event.target);
+      if (direct) {
+        if (probeFrame !== 0) {
+          window.cancelAnimationFrame(probeFrame);
+          probeFrame = 0;
+        }
+        arm(direct.el, direct.text);
+        return;
+      }
+      // Synthetic or overlay events may report document/backdrop as target; coalesce point hit-testing per frame.
+      probePoint = { x: event.clientX, y: event.clientY };
+      if (probeFrame !== 0) return;
+      probeFrame = window.requestAnimationFrame(() => {
+        probeFrame = 0;
+        const found = tipFromPoint(document, probePoint.x, probePoint.y);
+        if (!found) hide();
+        else arm(found.el, found.text);
+      });
     };
 
     const onFocusIn = (event: FocusEvent) => {
@@ -114,6 +142,7 @@ export function TipHost() {
     };
 
     document.addEventListener("pointermove", onMove, { passive: true });
+    document.addEventListener("pointerdown", hide, { passive: true });
     document.addEventListener("focusin", onFocusIn);
     document.addEventListener("scroll", hide, true);
     window.addEventListener("resize", hide);
@@ -121,8 +150,10 @@ export function TipHost() {
     document.documentElement.addEventListener("pointerleave", hide);
 
     return () => {
+      if (probeFrame !== 0) window.cancelAnimationFrame(probeFrame);
       window.clearTimeout(timerRef.current);
       document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerdown", hide);
       document.removeEventListener("focusin", onFocusIn);
       document.removeEventListener("scroll", hide, true);
       window.removeEventListener("resize", hide);

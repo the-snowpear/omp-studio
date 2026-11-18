@@ -1,5 +1,6 @@
 import { PlanExecutionPicker } from "./PlanExecutionPicker";
 import { getPreviewPlanExecution } from "../preview/planExecutionPreview";
+import { usePreviewMode } from "../preview/PreviewContext";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { MarkdownText } from "../conversation/markdown";
@@ -283,9 +284,13 @@ function PlanReviewDialog({
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="plan-review-dialog-head">
+          {viewOnly === true ? <Icon name="file-code" extra="sm plan-review-dialog-ic" /> : null}
           <span id="planReviewDialogTitle" className="plan-review-dialog-title">
-            Plan Review · {title}
+            {viewOnly === true ? `${zh ? "计划详情" : "Plan"} · ${title}` : `Plan Review · ${title}`}
           </span>
+          {viewOnly === true ? (
+            <span className="chip green xs">{zh ? "已批准" : "Approved"}</span>
+          ) : null}
           <PlanHeadActions
             expanded
             collapseRef={closeRef}
@@ -298,7 +303,7 @@ function PlanReviewDialog({
         <div className="plan-review-dialog-body">
           {viewOnly === true ? (
             body.trim().length > 0 ? (
-              <div className="plan-md-preview">
+              <div className="plan-view-doc">
                 <MarkdownText text={body} />
               </div>
             ) : (
@@ -375,8 +380,9 @@ export function PlanCard({
 }) {
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
+  const { preview } = usePreviewMode();
   const [demoRole, setDemoRole] = useState("default");
-  const tierControl = executionControl ?? (demo ? <PlanExecutionPicker details={getPreviewPlanExecution(zh)} role={demoRole} onChange={setDemoRole} disabled={disabled} /> : null);
+  const tierControl = executionControl ?? ((demo || preview) ? <PlanExecutionPicker details={getPreviewPlanExecution(zh)} role={demoRole} onChange={setDemoRole} disabled={disabled} /> : null);
   const cardRef = useRef<HTMLDivElement>(null);
   const controlled = expandedProp !== undefined;
   const [internalExpanded, setInternalExpanded] = useState(false);

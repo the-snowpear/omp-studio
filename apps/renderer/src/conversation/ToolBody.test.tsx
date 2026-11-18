@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { preloadSyncHighlight } from "../highlight/toolCodeHighlight";
 import { ToolBody, TOOL_ROWS_MAX } from "./ToolBody";
 import { CHUNK_LINES } from "./textChunks";
 
@@ -194,5 +195,159 @@ describe("ToolBody: 按行渲染的 DOM 上限", () => {
     const { container } = render(<ToolBody tool={tool} />);
     const numbers = [...container.querySelectorAll(".tc-code .ln")].map((node) => node.textContent);
     expect(numbers).toEqual(["41", "42", "43"]);
+  });
+});
+
+describe("ToolBody: 代码视图语法高亮", () => {
+  beforeAll(async () => {
+    await preloadSyncHighlight();
+  });
+  afterEach(cleanup);
+
+  it("在 Read 源码视图中跨行保留块注释词法状态并保持行号对齐", () => {
+    const { container } = render(
+      <ToolBody
+        tool={{
+          toolCallId: "read-ts",
+          toolName: "read",
+          status: "succeeded",
+          arguments: { path: "src/App.tsx:1-5" },
+          result: {
+            type: "toolResult",
+            toolCallId: "read-ts",
+            isError: false,
+            data: {
+              offset: 1,
+              preview: ["/* line 1", " * line 2 */", "export const answer = 42;"],
+            },
+          },
+        }}
+      />,
+    );
+    const lines = [...container.querySelectorAll(".tc-code .cl")];
+    expect(lines.map((row) => row.querySelector(".ln")?.textContent)).toEqual(["1", "2", "3"]);
+    expect(lines[0]?.querySelector(".lx .hljs-comment")?.textContent).toBe("/* line 1");
+    expect(lines[1]?.querySelector(".lx .hljs-comment")?.textContent).toBe(" * line 2 */");
+    expect(lines[2]?.querySelector(".lx .hljs-keyword")).not.toBeNull();
+    expect(lines[2]?.querySelector(".lx .hljs-number")?.textContent).toBe("42");
+  });
+
+  it("在 Edit diff 视图中分别高亮删除与新增代码行并保留增删类名", () => {
+    const { container } = render(
+      <ToolBody
+        tool={{
+          toolCallId: "edit-ts",
+          toolName: "edit",
+          status: "succeeded",
+          arguments: { path: "src/App.tsx" },
+          result: {
+            type: "toolResult",
+            toolCallId: "edit-ts",
+            isError: false,
+            data: {
+              path: "src/App.tsx",
+              diff: [
+                ["-", "10", "", "const oldVal = 1;"],
+                ["+", "", "10", "const newVal = \"ok\";"],
+              ],
+            },
+          },
+        }}
+      />,
+    );
+    const delRow = container.querySelector(".tc-diff .dl.del .lc");
+    const addRow = container.querySelector(".tc-diff .dl.add .lc");
+    expect(delRow?.querySelector(".hljs-keyword")?.textContent).toBe("const");
+    expect(delRow?.querySelector(".hljs-number")?.textContent).toBe("1");
+    expect(addRow?.querySelector(".hljs-keyword")?.textContent).toBe("const");
+    expect(addRow?.querySelector(".hljs-string")?.textContent).toBe("\"ok\"");
+  });
+
+  it("在 Bash 命令头与 Eval 代码格中产出语法着色节点", () => {
+    const bashView = render(
+      <ToolBody
+        tool={{
+          toolCallId: "bash-hl",
+          toolName: "bash",
+          status: "succeeded",
+          arguments: { command: "npm run check -- --only renderer" },
+          output: "ok",
+        }}
+      />,
+    );
+    const cmd = bashView.container.querySelector(".c-cmd");
+    expect(cmd?.textContent).toBe("$ npm run check -- --only renderer");
+    expect(cmd?.querySelector("[class*='hljs-']")).not.toBeNull();
+    bashView.unmount();
+
+    const evalView = render(
+      <ToolBody
+        tool={{
+          toolCallId: "eval-hl",
+          toolName: "eval",
+          status: "succeeded",
+          arguments: { lang: "py" },
+          result: {
+            type: "toolResult",
+            toolCallId: "eval-hl",
+            isError: false,
+            data: {
+              cells: [{ code: "def run():\n    return True", status: "ok" }],
+            },
+          },
+        }}
+      />,
+    );
+    expect(evalView.container.querySelector(".ev-cell .tc-code .hljs-keyword")?.textContent).toBe("def");
+    expect(evalView.container.querySelector(".ev-cell .tc-code .hljs-literal")?.textContent).toBe("True");
+    evalView.unmount();
+  });
+
+  it("隔离 Grep 独立命中行的词法状态，未闭合块注释不会串染后续命中，且保留 Write 可执行提示", () => {
+    const grepView = render(
+      <ToolBody
+        tool={{
+          toolCallId: "grep-isolated",
+          toolName: "grep",
+          status: "succeeded",
+          result: {
+            type: "toolResult",
+            toolCallId: "grep-isolated",
+            isError: false,
+            data: {
+              matches: [
+                { file: "src/a.ts", line: 10, text: "/* unclosed comment" },
+                { file: "src/b.ts", line: 20, text: "export const clean = 7;" },
+              ],
+            },
+          },
+        }}
+      />,
+    );
+    const hits = [...grepView.container.querySelectorAll(".tt-hit .m-text")];
+    expect(hits).toHaveLength(2);
+    expect(hits[1]?.querySelector(".hljs-keyword")?.textContent).toBe("export");
+    expect(hits[1]?.querySelector(".hljs-number")?.textContent).toBe("7");
+    expect(hits[1]?.querySelector(".hljs-comment")).toBeNull();
+    grepView.unmount();
+
+    const writeView = render(
+      <ToolBody
+        tool={{
+          toolCallId: "write-exec",
+          toolName: "write",
+          status: "succeeded",
+          arguments: { path: "scripts/run.sh" },
+          result: {
+            type: "toolResult",
+            toolCallId: "write-exec",
+            isError: false,
+            data: { executable: true, preview: ["#!/usr/bin/env bash", "echo ok"] },
+          },
+        }}
+      />,
+    );
+    expect(writeView.container.querySelector(".tc-note")?.textContent).toMatch(/已设为可执行|Marked executable/);
+    writeView.unmount();
   });
 });

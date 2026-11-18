@@ -8,11 +8,15 @@ export type StudioAgentSessionEvent = AgentSessionEvent & { studioEntryId?: stri
 /** Reserves display identities before the home thread can persist the corresponding entry. */
 export class StudioConversationEntryIdentity {
 	#compactionId: string | undefined;
-	#messages: Array<{ role: string; timestamp: number; id: string }> = [];
+	#messages: Array<{ role: string; timestamp: number | undefined; id: string }> = [];
 
 	constructor(readonly manager: SessionManager) {}
 
 	prepare(event: AgentSessionEvent): StudioAgentSessionEvent {
+		if (event.type === "agent_end" && event.isTerminal !== false && !event.awaitingAsyncWork) {
+			this.#messages.length = 0;
+			return event;
+		}
 		if (event.type === "auto_compaction_end" || event.type === "manual_compaction_end") {
 			const id = this.#compactionId;
 			this.#compactionId = undefined;

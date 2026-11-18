@@ -35,6 +35,9 @@ export function RuntimeQueueBar({
   const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
+  const prevZhRef = useRef(zh);
   const [result, setResult] = useState<RuntimeQueueResult>({
     entries: [],
     total: 0,
@@ -45,6 +48,7 @@ export function RuntimeQueueBar({
     text: string;
   }>();
   const [error, setError] = useState("");
+  const [refreshFailed, setRefreshFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   const host = useRef<HTMLDivElement>(null);
@@ -59,6 +63,8 @@ export function RuntimeQueueBar({
   }, [result, focusEntry]);
   const epoch = useRef(0);
   const locked = useRef(false);
+  const dirtyRef = useRef(false);
+  const refreshRef = useRef<(() => void) | undefined>(undefined);
   const can = (kind: string) =>
     preview ||
     !!(
@@ -82,47 +88,87 @@ export function RuntimeQueueBar({
       )
     ).result;
   }
+  const showRefreshIssue = refreshFailed && (pending > 0 || result.entries.length > 0);
   useEffect(() => {
     epoch.current++;
     locked.current = false;
+    dirtyRef.current = false;
     setBusy(false);
     setError("");
+    setRefreshFailed(false);
     setEditing(undefined);
     setResult(
       preview && showDemo
-        ? runtimeQueuePreview(zh)
+        ? runtimeQueuePreview(zhRef.current)
         : { entries: [], total: 0, truncated: false },
     );
     return () => {
       epoch.current++;
     };
-  }, [client, sessionId, preview, showDemo, zh]);
+  }, [client, sessionId, preview, showDemo]);
   useEffect(() => {
-    if (preview || !supported) return;
+    if (prevZhRef.current === zh) return;
+    const oldZh = prevZhRef.current;
+    prevZhRef.current = zh;
+    if (!preview || !showDemo) return;
+    const prevDefaults = new Map(runtimeQueuePreview(oldZh).entries.map((entry) => [entry.id, entry.text]));
+    const nextDefaults = new Map(runtimeQueuePreview(zh).entries.map((entry) => [entry.id, entry.text]));
+    setResult((current) => ({
+      ...current,
+      entries: current.entries.map((entry) => {
+        const prevText = prevDefaults.get(entry.id);
+        const nextText = nextDefaults.get(entry.id);
+        return nextText !== undefined && entry.text === prevText
+          ? { ...entry, text: nextText }
+          : entry;
+      }),
+    }));
+    setEditing((current) => {
+      if (!current) return current;
+      const prevText = prevDefaults.get(current.entry.id);
+      const nextText = nextDefaults.get(current.entry.id);
+      if (nextText === undefined || current.entry.text !== prevText) return current;
+      return {
+        entry: { ...current.entry, text: nextText },
+        text: current.text,
+      };
+    });
+  }, [preview, showDemo, zh]);
+  useEffect(() => {
+    if (preview || !supported) {
+      refreshRef.current = undefined;
+      return;
+    }
     let active = true;
     let reading = false;
     async function refresh() {
-      if (document.hidden || reading || locked.current) return;
+      if (document.hidden || reading) return;
+      if (locked.current) {
+        dirtyRef.current = true;
+        return;
+      }
       reading = true;
+      dirtyRef.current = false;
       const current = epoch.current;
       try {
         const next = await invoke("session.queue.get", {
           sessionId: sessionId!,
         });
-        if (active && current === epoch.current && !locked.current)
+        if (active && current === epoch.current && !locked.current) {
+          setRefreshFailed(false);
           setResult(next);
-      } catch (cause) {
-        if (active && current === epoch.current)
-          setError(
-            hostErrorMessage(
-              cause,
-              zh ? "无法读取已提交队列" : "Cannot read submitted messages",
-            ),
-          );
+        }
+      } catch {
+        if (active && current === epoch.current && !locked.current)
+          setRefreshFailed(true);
       } finally {
         reading = false;
+        if (active && dirtyRef.current && !locked.current && !document.hidden) {
+          void refresh();
+        }
       }
     }
+    refreshRef.current = () => { void refresh(); };
     void refresh();
     const timer =
       running || pending > 0 || hasCompaction
@@ -134,10 +180,16 @@ export function RuntimeQueueBar({
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       active = false;
+      if (refreshRef.current) refreshRef.current = undefined;
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [client, sessionId, preview, supported, running, pending, hasCompaction]);
+  useEffect(() => {
+    if (preview || !supported || !showRefreshIssue || running || pending > 0 || hasCompaction) return;
+    const retry = setInterval(() => refreshRef.current?.(), 1500);
+    return () => clearInterval(retry);
+  }, [preview, supported, showRefreshIssue, running, pending, hasCompaction]);
   async function act(
     kind:
       | "session.queue.edit"
@@ -206,10 +258,37 @@ export function RuntimeQueueBar({
       if (current === epoch.current) {
         locked.current = false;
         setBusy(false);
+        if (!preview && dirtyRef.current) {
+          dirtyRef.current = false;
+          refreshRef.current?.();
+        }
       }
     }
   }
-  if (!supported || (!result.entries.length && !error && !result.compactionError && !editing)) return null;
+  const orphanedDraft =
+    editing && !result.entries.some((entry) => entry.id === editing.entry.id) ? (
+      <div className="runtime-queue-editor">
+        <p role="status">
+          {zh
+            ? "消息已离开队列，未发送此草稿。"
+            : "The message left the queue. This draft has not been sent."}
+        </p>
+        <textarea
+          className="input"
+          readOnly
+          aria-label={zh ? "未发送的编辑草稿" : "Unsent edit draft"}
+          value={editing.text}
+        />
+        <button
+          type="button"
+          className="btn small"
+          onClick={() => setEditing(undefined)}
+        >
+          {zh ? "关闭" : "Close"}
+        </button>
+      </div>
+    ) : null;
+  if (!supported || (!result.entries.length && !error && !result.compactionError && !showRefreshIssue && !editing)) return null;
   return (
     <div
       ref={host}
@@ -237,7 +316,9 @@ export function RuntimeQueueBar({
           </span>
         </button>
       </div>
-      {error || result.compactionError ? <p role="alert">{error || result.compactionError}</p> : null}
+      {error || result.compactionError ? <p role="alert">{error || result.compactionError}</p> : showRefreshIssue ? (
+        <p role="status">{zh ? "暂时无法刷新已提交队列" : "Could not refresh submitted messages"}</p>
+      ) : null}
       {open ? (
         <div className="qs-list">
           {result.entries.map((entry) => (
@@ -364,29 +445,10 @@ export function RuntimeQueueBar({
               ) : null}
             </div>
           ))}
-          {editing &&
-          !result.entries.some((entry) => entry.id === editing.entry.id) ? (
-            <div className="runtime-queue-editor">
-              <p role="status">
-                {zh
-                  ? "消息已离开队列，未发送此草稿。"
-                  : "The message left the queue. This draft has not been sent."}
-              </p>
-              <textarea
-                className="input"
-                readOnly
-                aria-label={zh ? "未发送的编辑草稿" : "Unsent edit draft"}
-                value={editing.text}
-              />
-              <button
-                className="btn small"
-                onClick={() => setEditing(undefined)}
-              >
-                {zh ? "关闭" : "Close"}
-              </button>
-            </div>
-          ) : null}
+          {orphanedDraft}
         </div>
+      ) : orphanedDraft ? (
+        <div className="qs-list">{orphanedDraft}</div>
       ) : null}
       {result.truncated ? (
         <p className="small muted">

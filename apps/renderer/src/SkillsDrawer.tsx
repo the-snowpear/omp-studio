@@ -21,7 +21,7 @@ import {
   type SkillTone,
 } from "./skillsPreview";
 import { usePreviewMode } from "./preview/PreviewContext";
-import { pickLocale, useI18n } from "./i18n";
+import { useI18n } from "./i18n";
 import { loadRuntimeSkills } from "./skills/runtimeSkills";
 import { MOTION_MS, MOTION_SLACK_MS, STAGGER_MS, motionReduced } from "./motion";
 
@@ -237,7 +237,21 @@ export function SkillsDrawer({
   const epochAppliedRef = useRef(0);
   slotsRef.current = slots;
 
+  const refreshEpoch = useRef(0);
+  const wasOpenRef = useRef(open);
+  const retryTimersRef = useRef(new Set<number>());
+
+  useEffect(() => {
+    const timers = retryTimersRef.current;
+    return () => {
+      refreshEpoch.current += 1;
+      for (const timer of timers) window.clearTimeout(timer);
+      timers.clear();
+    };
+  }, []);
+
   const refresh = useCallback(async () => {
+    const epoch = ++refreshEpoch.current;
     if (preview) {
       setItems(createPreviewDrawerItems(zh));
       setLoadError(null);
@@ -245,12 +259,18 @@ export function SkillsDrawer({
     }
     try {
       const next = await client.query("skills.get", {});
-      if(runtimeSessionId !== undefined) {
-        const skills=runtimeSessionId?await loadRuntimeSkills(client,runtimeSessionId):[];
-        setItems([...skills.map(skill=>({kind:"skill" as const,name:skill.name,desc:skill.description+(skill.conflict?pickLocale(" · 名称冲突", " · Name conflict"):""),src:[skill.namespace,skill.source].filter(Boolean).join(" · "),scope:skill.scope??"runtime",path:"",enabled:true,loaded:true,session:true})),...toDrawerItems(next).filter(item=>item.kind!=="skill")]);
-        setLoadError(runtimeSessionId?null:pickLocale("Runtime 技能身份不可用", "Runtime skill identities unavailable"));
-      } else { setItems(toDrawerItems(next)); setLoadError(next.unavailableReason ?? null); }
+      if (epoch !== refreshEpoch.current) return;
+      if (runtimeSessionId !== undefined) {
+        const skills = runtimeSessionId ? await loadRuntimeSkills(client, runtimeSessionId) : [];
+        if (epoch !== refreshEpoch.current) return;
+        setItems([...skills.map(skill => ({kind: "skill" as const, name: skill.name, desc: skill.description + (skill.conflict ? (zh ? " · 名称冲突" : " · Name conflict") : ""), src: [skill.namespace, skill.source].filter(Boolean).join(" · "), scope: skill.scope ?? "runtime", path: "", enabled: true, loaded: true, session: true})), ...toDrawerItems(next).filter(item => item.kind !== "skill")]);
+        setLoadError(runtimeSessionId ? null : (zh ? "Runtime 技能身份不可用" : "Runtime skill identities unavailable"));
+      } else {
+        setItems(toDrawerItems(next));
+        setLoadError(next.unavailableReason ?? null);
+      }
     } catch (error) {
+      if (epoch !== refreshEpoch.current) return;
       const message = error instanceof Error ? error.message : "skills.get failed";
       setItems([]);
       setLoadError(message);
@@ -262,7 +282,9 @@ export function SkillsDrawer({
   }, [refresh]);
 
   useEffect(() => {
-    if (open && !preview) void refresh();
+    const openedNow = open && !wasOpenRef.current;
+    wasOpenRef.current = open;
+    if (openedNow && !preview) void refresh();
   }, [open, preview, refresh]);
 
   const skillAdded = (item: DrawerItem): boolean => {
@@ -383,9 +405,11 @@ export function SkillsDrawer({
   const retryItem = (item: DrawerItem) => {
     if (!preview || item.retrying) return;
     patchItem(item, { retrying: true });
-    window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
+      retryTimersRef.current.delete(timer);
       patchItem(item, { retrying: false });
     }, 1600);
+    retryTimersRef.current.add(timer);
   };
 
   const toggleItem = (item: DrawerItem) => {

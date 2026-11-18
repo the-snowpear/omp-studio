@@ -493,6 +493,25 @@ function decodeConversationCursor(cursor: string, secret: Buffer): CursorFields 
 	};
 }
 
+function isTurnBoundaryItem(item: ConversationItem): boolean {
+	return item.kind === "compaction" || item.kind === "resetBoundary" || item.role === "user";
+}
+
+function selectTranscriptPageStart(items: readonly ConversationItem[], endExclusive: number, limit: number): number {
+	const rawStart = Math.max(0, endExclusive - limit);
+	if (rawStart === 0 || rawStart >= endExclusive || isTurnBoundaryItem(items[rawStart]!)) return rawStart;
+	const maxCount =
+		limit >= CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT ? CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MAX : limit;
+	const minStart = Math.max(0, endExclusive - maxCount);
+	for (let index = rawStart - 1; index >= minStart; index--) {
+		if (isTurnBoundaryItem(items[index]!)) return index;
+	}
+	for (let index = rawStart + 1; index < endExclusive; index++) {
+		if (isTurnBoundaryItem(items[index]!)) return index;
+	}
+	return rawStart;
+}
+
 /** Paginate a projected branch with the same signed cursor rules as the live session reader. */
 export function readConversationTranscriptPage(
 	source: ConversationTranscriptSource,
@@ -537,7 +556,7 @@ export function readConversationTranscriptPage(
 			endExclusive = index;
 		}
 	}
-	const start = Math.max(0, endExclusive - limit);
+	const start = selectTranscriptPageStart(publicItems, endExclusive, limit);
 	let items = publicItems.slice(start, endExclusive);
 	let hasMoreBefore = start > 0;
 	const headCursor = encodeConversationCursor(

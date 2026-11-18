@@ -115,7 +115,7 @@ export function AppNavRail({
       onLayoutShift?.();
       return;
     }
-    const total = duration + MOTION_SLACK_MS * 2;
+    const total = duration + MOTION_MS.fast + MOTION_SLACK_MS * 2;
     const start = performance.now();
     let frame = requestAnimationFrame(function step() {
       measureLine();
@@ -141,20 +141,37 @@ export function AppNavRail({
      sidebar side of the line. One requestAnimationFrame coalesces bursts. */
   useEffect(() => {
     let frame = 0;
+    let latestX = -9999;
+    let latestY = -9999;
+    let overBtn = false;
+    const clear = () => {
+      if (frame !== 0) {
+        cancelAnimationFrame(frame);
+        frame = 0;
+      }
+      setHandleNear(false);
+    };
     const onMove = (event: PointerEvent) => {
+      latestX = event.clientX;
+      latestY = event.clientY;
+      overBtn = event.target instanceof Element && event.target.closest(".app-rail-btn") !== null;
       if (frame !== 0) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
         const line = lineRef.current;
-        const near = Math.abs(event.clientX - line.x) <= HANDLE_REACH_X
-          && event.clientY >= line.top - HANDLE_REACH_Y
-          && event.clientY <= line.bottom + HANDLE_REACH_Y;
-        setHandleNear(near && !(event.target instanceof Element && event.target.closest(".app-rail-btn") !== null));
+        const near = Math.abs(latestX - line.x) <= HANDLE_REACH_X
+          && latestY >= line.top - HANDLE_REACH_Y
+          && latestY <= line.bottom + HANDLE_REACH_Y;
+        setHandleNear(near && !overBtn);
       });
     };
     window.addEventListener("pointermove", onMove, { passive: true });
+    document.documentElement.addEventListener("pointerleave", clear);
+    window.addEventListener("blur", clear);
     return () => {
       window.removeEventListener("pointermove", onMove);
+      document.documentElement.removeEventListener("pointerleave", clear);
+      window.removeEventListener("blur", clear);
       if (frame !== 0) cancelAnimationFrame(frame);
     };
   }, []);

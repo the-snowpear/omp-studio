@@ -43,6 +43,15 @@
   --shadow-pop: none;
 }
 
+/* Without backdrop-filter on L2, low-alpha glass tokens over a busy wallpaper
+   hurt contrast; raise surface opacity while preserving light/dark hierarchy. */
+:root[data-perf-tier~="L2"][data-backdrop="on"] {
+  --surface: color-mix(in srgb, var(--bd-surface-base) 88%, transparent);
+  --surface-2: color-mix(in srgb, var(--bd-surface-2-base) 84%, transparent);
+  --surface-3: color-mix(in srgb, var(--bd-surface-3-base) 80%, transparent);
+  --code-bg: color-mix(in srgb, var(--bd-code-base) 92%, transparent);
+}
+
 :root[data-perf-tier~="L2"] *,
 :root[data-perf-tier~="L2"] *::before,
 :root[data-perf-tier~="L2"] *::after {
@@ -97,7 +106,7 @@
 
 /* Non-essential decoration layers: the wallpaper/glass stack is pure blur work
    and the empty-state artwork is a large SVG. */
-:root[data-perf-tier~="L3"] :is(.bg-wallpaper, .bg-glass, .bg-scrim, .app-background) {
+:root[data-perf-tier~="L3"] :is(.app-backdrop, .bg-media, .bg-media-tile, .app-backdrop-scrim, .bg-wallpaper, .bg-glass, .bg-scrim, .app-background) {
   display: none !important;
 }
 :root[data-perf-tier~="L3"] .ce-pi {

@@ -208,7 +208,19 @@ async function cachedSessionHeader(
 ): Promise<ParsedHeader | undefined> {
   const key = `${byteLimit}:${maxSessionBytes}:${file}`;
   const hit = headerCache.get(key);
-  if (hit !== undefined && hit.mtimeMs === metadata.mtimeMs && hit.size === metadata.size) return hit.header;
+  // `SessionManager.updateSessionTitle` rewrites the fixed 256-byte title slot
+  // in place without changing file size, and sub-millisecond writes on NTFS can
+  // share `mtimeMs` with the preceding append. Re-read live untitled headers so
+  // an in-place title write is never hidden behind a same-tick cache hit.
+  const hitHasTitle = sanitizeTitle(hit?.header?.title) !== undefined;
+  if (
+    hit !== undefined &&
+    hit.mtimeMs === metadata.mtimeMs &&
+    hit.size === metadata.size &&
+    (file.endsWith(".jsonl.gz") || hit.header === undefined || hitHasTitle)
+  ) {
+    return hit.header;
+  }
   let header: ParsedHeader | undefined;
   try {
     header = await readSessionHeader(file, byteLimit, maxSessionBytes);
@@ -389,8 +401,22 @@ async function readSessionHeader(
     }
   }
   let titleSlot: string | undefined;
-  let header: Omit<ParsedHeader, "hasConversationMessage"> | undefined;
+  let headerTitle: string | undefined;
+  let latestTitleChange: string | undefined;
+  let header: Omit<ParsedHeader, "hasConversationMessage" | "title"> | undefined;
   let hasConversationMessage = false;
+  const buildParsedHeader = (): ParsedHeader | undefined => {
+    if (header === undefined) return undefined;
+    const resolvedTitle =
+      sanitizeTitle(titleSlot) ??
+      sanitizeTitle(latestTitleChange) ??
+      sanitizeTitle(headerTitle);
+    return {
+      ...header,
+      hasConversationMessage,
+      ...(resolvedTitle === undefined ? {} : { title: resolvedTitle }),
+    };
+  };
   for (const rawLine of text.split(/\r?\n/u)) {
     const line = rawLine.trim();
     if (line.length === 0) continue;
@@ -400,32 +426,48 @@ async function readSessionHeader(
     } catch {
       // A large first message may extend beyond the bounded prefix. Its
       // discriminator is still complete at the start of OMP's JSONL record.
-      if (/^\{\s*"type"\s*:\s*"message"\s*[,}]/u.test(line)) {
+      if (
+        /^\{\s*"type"\s*:\s*"message"\s*[,}]/u.test(line) ||
+        (/^\{\s*"type"\s*:\s*"custom_message"\s*[,}]/u.test(line) && /"display"\s*:\s*true\b/u.test(line))
+      ) {
         hasConversationMessage = true;
-        if (header !== undefined) return { ...header, hasConversationMessage };
+        if (header !== undefined && sanitizeTitle(titleSlot) !== undefined) return buildParsedHeader();
       }
       continue;
     }
-    if (isRecord(value) && value.type === "message") {
+    if (
+      isRecord(value) &&
+      (value.type === "message" || (value.type === "custom_message" && value.display === true))
+    ) {
       hasConversationMessage = true;
-      if (header !== undefined) return { ...header, hasConversationMessage };
+      // Only short-circuit when the fixed-width title slot already carries the
+      // current title; otherwise finish scanning the in-memory prefix for a
+      // trailing `title` slot or `title_change` record.
+      if (header !== undefined && sanitizeTitle(titleSlot) !== undefined) return buildParsedHeader();
       continue;
     }
     if (isRecord(value) && value.type === "title" && typeof value.title === "string") {
       titleSlot = value.title;
+      if (header !== undefined && hasConversationMessage && sanitizeTitle(titleSlot) !== undefined) {
+        return buildParsedHeader();
+      }
+      continue;
+    }
+    if (isRecord(value) && value.type === "title_change" && typeof value.title === "string") {
+      latestTitleChange = value.title;
       continue;
     }
     if (!isRecord(value) || value.type !== "session" || typeof value.id !== "string" || value.id.length === 0) continue;
+    headerTitle = typeof value.title === "string" ? value.title : undefined;
     header = {
       id: value.id,
       ...(typeof value.timestamp === "string" ? { timestamp: value.timestamp } : {}),
-      ...(typeof value.title === "string" ? { title: value.title } : titleSlot === undefined ? {} : { title: titleSlot }),
       ...(typeof value.studioOrigin === "string" ? { studioOrigin: value.studioOrigin } : {}),
       ...(typeof value.cwd === "string" && value.cwd.length > 0 ? { cwd: value.cwd } : {}),
     };
-    if (hasConversationMessage) return { ...header, hasConversationMessage };
+    if (hasConversationMessage && sanitizeTitle(titleSlot) !== undefined) return buildParsedHeader();
   }
-  return header === undefined ? undefined : { ...header, hasConversationMessage };
+  return buildParsedHeader();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

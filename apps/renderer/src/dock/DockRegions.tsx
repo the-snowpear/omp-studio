@@ -442,7 +442,7 @@ function DockTabs({ group, region, expanded = true, trailing, fullscreen }: { gr
         const definition = definitionFor(definitions, id);
         return <div key={id} className={`dock-tab${group.active === id ? " is-active" : ""}${source?.panels.includes(id) ? " dock-drag-source" : ""}`} data-dock-tab={id} data-window-tint={region === "float" ? panelWindowTint(id, workspace?.store) : undefined} role="presentation" onContextMenu={event => menu.onContextMenu(event, [id])}>
           <button type="button" className="dock-tab-label" role="tab" id={`dock-tab-${id}`} aria-selected={group.active === id} aria-controls={`dock-body-${group.id}`}
-            tabIndex={group.active === id ? 0 : -1} data-dock-drag="" data-tip={definition.detail ?? definition.title} title={definition.detail ?? definition.title}
+            tabIndex={group.active === id ? 0 : -1} data-dock-drag="" data-tip={definition.detail ?? definition.title}
             onPointerDown={event => drag(event, [id])} onClick={() => activate(id)} onKeyDown={event => { menu.onKeyDown(event, [id]); tabKeys(event, id); }}>
             <PanelGlyph definition={definition} /><span>{definition.title}</span>
           </button>
@@ -1048,7 +1048,14 @@ export function DockFloatingLayer() {
     document.addEventListener("pointerdown", raise, true); document.addEventListener("focusin", raise, true);
     return () => { document.removeEventListener("pointerdown", raise, true); document.removeEventListener("focusin", raise, true); };
   }, [store]);
-  const minimizedPins = useAllWindowed() ? [] : layout.floats.filter(group => group.pin && !isNativeFloat(group) && group.minimized);
+  const workspaceState = useSyncExternalStore(
+    workspace?.store.subscribe ?? (() => () => {}),
+    () => workspace?.store.getSnapshot() ?? null,
+  );
+  const pageVisible = Boolean(
+    workspaceState?.documents.find(doc => doc.id === workspaceState.activeDocumentId)?.page,
+  );
+  const minimizedPins = useAllWindowed() || pageVisible ? [] : layout.floats.filter(group => group.pin && !isNativeFloat(group) && group.minimized);
   return <>{createPortal(<div className="dock-floating-layer">{modalPanel && <DockModalFocus panel={modalPanel} />}{layout.floats.map((group, order) => {
     const managed = store.windowManager?.get(store.windowId(group.id));
     if (managed?.content.kind === "conversation") return null;

@@ -198,7 +198,63 @@ export class ConversationStore {
     this.setLastTurnInterrupted(false);
     this.markStructureChanged();
     this.trimAncillary();
-    for (const event of replay) this.applyEventInternal(event.update, event.streamSeq);
+    const initialIds = new Set(this.items.map((item) => item.itemId));
+    let lastPageSeq: number | undefined;
+    for (const { streamSeq, update } of replay) {
+      const itemId = update.kind === "conversation.message.completed"
+        ? update.item.itemId
+        : update.kind === "conversation.compaction.completed"
+          ? update.item?.itemId
+          : undefined;
+      if (itemId !== undefined && initialIds.has(itemId)) {
+        lastPageSeq = lastPageSeq === undefined ? streamSeq : Math.max(lastPageSeq, streamSeq);
+      }
+    }
+    const headCreatedAt = this.items[0] !== undefined ? Date.parse(this.items[0].createdAt) : Number.NaN;
+    const tailItemId = this.items.at(-1)?.itemId;
+    const isPreWindowTime = (createdAt: string, parentId?: string | null): boolean => {
+      if (!this.hasMoreBefore || this.items.length === 0 || (parentId != null && parentId === tailItemId)) return false;
+      const itemCreatedAt = Date.parse(createdAt);
+      return Number.isFinite(headCreatedAt) && Number.isFinite(itemCreatedAt) && itemCreatedAt < headCreatedAt;
+    };
+    const isPreWindowItem = (item: ConversationItem, streamSeq: number): boolean => {
+      if (initialIds.has(item.itemId)) return false;
+      if (lastPageSeq !== undefined) return streamSeq < lastPageSeq;
+      return isPreWindowTime(item.createdAt, item.parentId);
+    };
+    for (const { streamSeq, update } of replay) {
+      if (
+        update.kind === "conversation.message.started"
+        && !initialIds.has(update.messageId)
+        && (lastPageSeq !== undefined ? streamSeq < lastPageSeq : isPreWindowTime(update.createdAt))
+      ) {
+        this.lastStreamSeq = streamSeq;
+        continue;
+      }
+      if (update.kind === "conversation.message.completed" && isPreWindowItem(update.item, streamSeq)) {
+        this.lastStreamSeq = streamSeq;
+        continue;
+      }
+      if (update.kind === "conversation.compaction.completed" && update.item !== undefined && isPreWindowItem(update.item, streamSeq)) {
+        this.lastStreamSeq = streamSeq;
+        this.compacting = undefined;
+        continue;
+      }
+      if (
+        (update.kind === "conversation.turn.aborted" || update.kind === "conversation.turn.completed")
+        && lastPageSeq !== undefined
+        && streamSeq < lastPageSeq
+        && ![...this.liveMessages.values()].some((msg) => msg.turnId === update.turnId)
+      ) {
+        this.lastStreamSeq = streamSeq;
+        continue;
+      }
+      if (update.kind === "conversation.tool.started" && !initialIds.has(update.messageId) && !this.liveMessages.has(update.messageId) && !this.hasItem(update.messageId)) {
+        this.lastStreamSeq = streamSeq;
+        continue;
+      }
+      this.applyEventInternal(update, streamSeq, initialIds);
+    }
     this.settlePendingFromItems();
     if (watermark !== undefined) this.lastStreamSeq = Math.max(this.lastStreamSeq ?? 0, watermark);
     this.publishNow();
@@ -224,7 +280,7 @@ export class ConversationStore {
     return true;
   }
 
-  private applyEventInternal(update: ConversationRuntimeEvent, streamSeq?: number): void {
+  private applyEventInternal(update: ConversationRuntimeEvent, streamSeq?: number, hydratedIds?: ReadonlySet<string>): void {
     if (streamSeq !== undefined) this.lastStreamSeq = streamSeq;
     switch (update.kind) {
       case "conversation.message.started": {
@@ -265,7 +321,7 @@ export class ConversationStore {
         if (clipped.truncated) block.truncated = true; break;
       }
       case "conversation.message.completed": {
-        this.upsertItem(update.item); this.liveMessages.delete(update.messageId); this.liveOrder = this.liveOrder.filter((id) => id !== update.messageId); this.openTurnItems.set(update.item.itemId, update.turnId);
+        if (!hydratedIds?.has(update.item.itemId)) this.upsertItem(update.item); this.liveMessages.delete(update.messageId); this.liveOrder = this.liveOrder.filter((id) => id !== update.messageId); this.openTurnItems.set(update.item.itemId, update.turnId);
         if (update.error === undefined) this.messageErrors.delete(update.messageId); else this.messageErrors.set(update.messageId, update.error);
         if (update.item.role === "user") this.settlePending(update.item.itemId);
         this.markStructureChanged(); break;
@@ -299,7 +355,7 @@ export class ConversationStore {
       case "conversation.turn.completed": this.setLastTurnInterrupted(false); this.closeTurn(update.turnId, false); this.finishResync(); break;
       case "conversation.turn.aborted": this.setLastTurnInterrupted(true); this.closeTurn(update.turnId, true); this.finishResync(); break;
       case "conversation.compaction.started": this.compacting = { action: update.action }; this.markStructureChanged(false); break;
-      case "conversation.compaction.completed": if (update.item !== undefined) this.upsertItem(update.item); this.compacting = undefined; this.markStructureChanged(); break;
+      case "conversation.compaction.completed": if (update.item !== undefined && !hydratedIds?.has(update.item.itemId)) this.upsertItem(update.item); this.compacting = undefined; this.markStructureChanged(); break;
       case "conversation.notice": this.notices = [...this.notices.slice(-(NOTICE_LIMIT - 1)), { id: `notice:${this.generation}:${this.notices.length}`, level: update.level, message: update.message, ...(update.source === undefined ? {} : { source: update.source }) }]; break;
     }
   }
@@ -319,7 +375,24 @@ export class ConversationStore {
 
   private upsertItem(item: ConversationItem): void {
     const index = this.items.findIndex((current) => current.itemId === item.itemId);
-    if (index < 0) this.items = [...this.items, item]; else if (this.items[index] !== item) { const next = this.items.slice(); next[index] = item; this.items = next; }
+    if (index < 0) {
+      this.items = [...this.items, item];
+    } else if (this.items[index] !== item) {
+      const existing = this.items[index]!;
+      let merged = item;
+      if (existing.kind === "message" && item.kind === "message") {
+        const incomingResults = new Set(item.content.flatMap((block) => (block.type === "toolResult" ? [block.toolCallId] : [])));
+        const preservedResults = existing.content.filter((block) => block.type === "toolResult" && !incomingResults.has(block.toolCallId));
+        if (preservedResults.length > 0) {
+          merged = { ...item, parentId: existing.parentId ?? item.parentId, content: [...item.content, ...preservedResults] };
+        } else if (existing.parentId !== null && item.parentId === null) {
+          merged = { ...item, parentId: existing.parentId };
+        }
+      }
+      const next = this.items.slice();
+      next[index] = merged;
+      this.items = next;
+    }
     const bounded = pageItems(this.items, this.maxRows, this.maxBytes); this.items = bounded.items; if (bounded.trimmed) this.hasMoreBefore = true; this.markStructureChanged(); this.trimAncillary();
   }
   private finishResync(): void {

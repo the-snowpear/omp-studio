@@ -10,23 +10,38 @@ export function systemFileReference(entry: FsEntry): FileOpenIntent {
 }
 
 export function createHostFileBrowserSource(options: {
-  client(): Promise<StudioClient>; targetId: string | null; label: string; workspaceId?: string | undefined; language: "zh" | "en";
+  client(): Promise<StudioClient>;
+  targetId: string | null;
+  label: string | (() => string);
+  workspaceId?: string | (() => string | undefined) | undefined;
+  language: "zh" | "en" | (() => "zh" | "en");
 }): FileBrowserSource {
   let trash = false;
   let separator = "/";
-  const copy = (zh: string, en: string) => options.language === "zh" ? zh : en;
-  const quickLabels = { home: copy("主目录", "Home"), desktop: copy("桌面", "Desktop"), downloads: copy("下载", "Downloads"), documents: copy("文档", "Documents"), pictures: copy("图片", "Pictures") };
+  const resolveLanguage = () => (typeof options.language === "function" ? options.language() : options.language);
+  const resolveLabel = () => (typeof options.label === "function" ? options.label() : options.label);
+  const resolveWorkspaceId = () => (typeof options.workspaceId === "function" ? options.workspaceId() : options.workspaceId);
+  const copy = (zh: string, en: string) => (resolveLanguage() === "zh" ? zh : en);
   async function readPlaces() {
     const client = await options.client();
     const [system, projects] = await Promise.all([client.query("fs.places", {}), client.query("projects.list", {})]);
     trash = system.trash;
     separator = system.separator;
+    const quickLabels = {
+      home: copy("主目录", "Home"),
+      desktop: copy("桌面", "Desktop"),
+      downloads: copy("下载", "Downloads"),
+      documents: copy("文档", "Documents"),
+      pictures: copy("图片", "Pictures"),
+    };
+    const activeWorkspaceId = resolveWorkspaceId();
+    const label = resolveLabel();
     const places: FsPlaces = {
       platform: system.platform, separator: system.separator, home: system.home,
-      computerLabel: options.targetId ? options.label : system.platform === "darwin" ? copy("此 Mac", "This Mac") : copy("此电脑", "This computer"),
+      computerLabel: options.targetId ? label : system.platform === "darwin" ? copy("此 Mac", "This Mac") : copy("此电脑", "This computer"),
       quick: system.quick.map(place => ({ ...place, label: quickLabels[place.kind] })),
       drives: system.volumes.map(volume => ({ path: volume.path, label: volume.label, ready: volume.ready, ...(volume.totalBytes === undefined ? {} : { total: volume.totalBytes }), ...(volume.freeBytes === undefined ? {} : { free: volume.freeBytes }) })),
-      projects: projects.workspaces.flatMap(project => project.root ? [{ name: project.name, root: project.root, current: project.workspaceId === options.workspaceId }] : []),
+      projects: projects.workspaces.flatMap(project => project.root ? [{ name: project.name, root: project.root, current: project.workspaceId === activeWorkspaceId }] : []),
     };
     return { places, projects };
   }
@@ -42,7 +57,9 @@ export function createHostFileBrowserSource(options: {
     throw new Error(text);
   };
   return {
-    kind: "host", label: options.label, local: options.targetId === null,
+    kind: "host",
+    get label() { return resolveLabel(); },
+    local: options.targetId === null,
     get trash() { return trash; },
     async places() { try { return await loadPlaces(); } catch (error) { return report(error); } },
     async list(path, showHidden = false) {

@@ -24,9 +24,39 @@ export type BackgroundTasksOptions = {
   canStopServices: boolean;
   canCancelJobs: boolean;
   active: boolean;
+  expanded?: boolean | undefined;
   preview: boolean;
   document?: Document | undefined;
 };
+
+const ACTIVE_POLL_MS = 4_000;
+const IDLE_COLLAPSED_POLL_MS = 16_000;
+
+function sameServices(a: readonly StudioServiceRow[], b: readonly StudioServiceRow[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const left = a[i]!;
+    const right = b[i]!;
+    if (
+      left.name !== right.name
+      || left.instanceId !== right.instanceId
+      || left.state !== right.state
+      || left.startedAt !== right.startedAt
+      || left.exitedAt !== right.exitedAt
+      || left.exitCode !== right.exitCode
+      || left.restartCount !== right.restartCount
+      || left.outputBytes !== right.outputBytes
+      || left.mode !== right.mode
+      || left.ownerId !== right.ownerId
+      || left.ownerAgentId !== right.ownerAgentId
+      || left.previewUrl !== right.previewUrl
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
 
 type ServicesState = "loading" | "ready" | "unavailable" | "error";
 type TaskScope = {
@@ -72,7 +102,7 @@ function invalidateReads(scope: TaskScope) {
 export function useBackgroundTasks(options: BackgroundTasksOptions) {
   const {
     client, sessionId, scopeKey, mainAgentId, jobs, jobAgents, jobsReady, available,
-    canListServices, canStopServices, canCancelJobs, active, preview,
+    canListServices, canStopServices, canCancelJobs, active, expanded, preview,
   } = options;
   const document = options.document ?? globalThis.document;
   const [, redraw] = useReducer((revision: number) => revision + 1, 0);
@@ -98,23 +128,31 @@ export function useBackgroundTasks(options: BackgroundTasksOptions) {
     }
     if (scope.flight) return scope.flight;
     const epoch = scope.readEpoch;
-    scope.servicesState = "loading";
-    redraw();
+    // Never flip an already settled view back to "loading" on background polls
+    // (doing so flashes "Loading" <-> "No tasks" every poll tick).
     const flight = (async () => {
       try {
         const result = await invokeServiceCommand(client, "services.list", {});
         if (!scope.mounted || epoch !== scope.readEpoch || document?.hidden) return;
+        const nextState: ServicesState = result.enabled ? "ready" : "unavailable";
+        const changed =
+          scope.servicesState !== nextState
+          || scope.servicesEnabled !== result.enabled
+          || scope.servicesError !== ""
+          || !sameServices(scope.services, result.services);
         scope.services = result.services;
         scope.servicesEnabled = result.enabled;
-        scope.servicesState = result.enabled ? "ready" : "unavailable";
+        scope.servicesState = nextState;
         scope.servicesError = "";
-        redraw();
+        if (changed) redraw();
       } catch (cause) {
         if (!scope.mounted || epoch !== scope.readEpoch || document?.hidden) return;
         // Preserve last-known services and all snapshot jobs on a source failure.
+        const nextError = hostErrorMessage(cause, "Services unavailable");
+        const changed = scope.servicesState !== "error" || scope.servicesError !== nextError;
         scope.servicesState = "error";
-        scope.servicesError = hostErrorMessage(cause, "Services unavailable");
-        redraw();
+        scope.servicesError = nextError;
+        if (changed) redraw();
       }
     })();
     scope.flight = flight;
@@ -124,11 +162,31 @@ export function useBackgroundTasks(options: BackgroundTasksOptions) {
 
   useEffect(() => {
     if (preview) return;
-    let timer: ReturnType<typeof setInterval> | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+    const clearTimer = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    };
     const suspend = () => {
-      clearInterval(timer);
-      timer = undefined;
+      clearTimer();
       invalidateReads(scope);
+    };
+    const nextInterval = () => {
+      if (expanded !== false) return ACTIVE_POLL_MS;
+      if (scope.servicesState !== "ready") return ACTIVE_POLL_MS;
+      if (scope.rows.some((row) => row.active)) return ACTIVE_POLL_MS;
+      return IDLE_COLLAPSED_POLL_MS;
+    };
+    const schedule = (epoch: number) => {
+      clearTimer();
+      if (cancelled || !scope.mounted || epoch !== scope.readEpoch || document?.hidden) return;
+      timer = setTimeout(() => {
+        if (cancelled || !scope.mounted || epoch !== scope.readEpoch || document?.hidden) return;
+        void refresh().finally(() => schedule(epoch));
+      }, nextInterval());
     };
     const resume = () => {
       suspend();
@@ -136,17 +194,19 @@ export function useBackgroundTasks(options: BackgroundTasksOptions) {
       const epoch = scope.readEpoch;
       // Coalesce StrictMode's initial effect replay before sending any command.
       queueMicrotask(() => {
-        if (scope.mounted && epoch === scope.readEpoch) void refresh();
+        if (!cancelled && scope.mounted && epoch === scope.readEpoch && !document?.hidden) {
+          void refresh().finally(() => schedule(epoch));
+        }
       });
-      timer = setInterval(() => { void refresh(); }, 4000);
     };
     resume();
     document?.addEventListener("visibilitychange", resume);
     return () => {
+      cancelled = true;
       document?.removeEventListener("visibilitychange", resume);
       suspend();
     };
-  }, [scope, preview, active, available, client, canListServices, document, refresh]);
+  }, [scope, preview, active, expanded, available, client, canListServices, document, refresh]);
 
   // Terminal truth (not a cancellation receipt) releases pending. Evicted keys
   // are discarded only when their source is known, keeping this state bounded.

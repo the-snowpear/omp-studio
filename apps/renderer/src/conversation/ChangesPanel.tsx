@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { ChunkedRows } from "./textChunks";
 import { GIT_STATUS_META, gitStatusLabel, type TreeGitStatus } from "../git/treeStatus";
 import { Icon } from "../icons";
 import { fileTypeOf, iconNameFor, isSensitive } from "../explorer-types";
@@ -116,13 +117,17 @@ function FileDiff({ file, split, bare = false }: { file: ChangesDiffFile; split:
           file.hunks.map((hunk, hunkIndex) => (
             <div className="ch-file-hunk" key={`${file.file}-${hunkIndex}`}>
               <div className="diff-head-row">{hunk.hunkLabel}</div>
-              {hunk.lines.map((line, lineIndex) => (
-                <DiffLine
-                  key={`${file.file}-${hunkIndex}-${lineIndex}`}
-                  line={line}
-                  split={split}
-                />
-              ))}
+              <ChunkedRows
+                count={hunk.lines.length}
+                chunkClassName="cv-chunk-rows"
+                renderRow={(lineIndex) => (
+                  <DiffLine
+                    key={`${file.file}-${hunkIndex}-${lineIndex}`}
+                    line={hunk.lines[lineIndex]!}
+                    split={split}
+                  />
+                )}
+              />
             </div>
           ))
         )}

@@ -161,11 +161,24 @@ function GitQuickCardBody({ client, workspaceId, workspaceName, visible, worktre
       }}><Icon name={tab.icon} extra="sm" /></button>)}
       </div>
     </div>
-    {menu ? createPortal(<div ref={menuRoot} className="menu git-quick-menu" style={{ position: "fixed", top: menu.top, left: menu.left }} role="group" aria-label={zh ? "更多 Git 操作" : "More Git actions"}>
-      <button type="button" className="menu-item" onClick={() => { setMenu(undefined); void shared.refresh(); }}><Icon name="refresh" extra="sm" />{zh ? "刷新" : "Refresh"}</button>
-      <button type="button" className="menu-item" onClick={() => navigate({ view: "history" })}><Icon name="history" extra="sm" />{zh ? "提交历史" : "History"}</button>
-      {worktrees}
-    </div>, doc.body) : null}
+    {menu || worktrees ? createPortal(
+      <div
+        ref={menuRoot}
+        className="menu git-quick-menu"
+        hidden={!menu}
+        style={menu ? { position: "fixed", top: menu.top, left: menu.left } : { display: "none" }}
+        role="group"
+        aria-label={zh ? "更多 Git 操作" : "More Git actions"}
+        onClick={event => { if ((event.target as HTMLElement).closest(".worktree-launcher")) setMenu(undefined); }}
+      >
+        {menu ? <>
+          <button type="button" className="menu-item" onClick={() => { setMenu(undefined); void shared.refresh(); }}><Icon name="refresh" extra="sm" />{zh ? "刷新" : "Refresh"}</button>
+          <button type="button" className="menu-item" onClick={() => navigate({ view: "history" })}><Icon name="history" extra="sm" />{zh ? "提交历史" : "History"}</button>
+        </> : null}
+        {worktrees}
+      </div>,
+      doc.body,
+    ) : null}
     {preview && marks ? <span className="git-quick-demo">{zh ? "演示" : "Demo"}</span> : null}
     <div className="git-quick-body" role="tabpanel" id={`${tabsId}-panel`} aria-labelledby={`${tabsId}-${view}`}>
     {!target && !preview ? <p className="git-quick-empty">{zh ? "请先选择项目" : "Choose a project"}</p> : shared.loading && !repository ? <p className="git-quick-empty" role="status">{zh ? "正在读取 Git…" : "Loading Git…"}</p> : shared.error || !repository?.isRepository ? <p className="git-quick-empty" role="status">{shared.error ?? repository?.unavailableReason ?? (zh ? "当前项目不是 Git 仓库" : "Not a Git repository")}</p> : <>

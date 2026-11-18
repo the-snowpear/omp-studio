@@ -7,6 +7,7 @@
  * what reaches git's ssh and credential helpers or a shell's jobs.
  */
 import { spawn, type ChildProcess } from "node:child_process";
+import { win32 } from "node:path";
 
 export function processGroupSpawnOptions(platform: NodeJS.Platform = process.platform): { readonly detached?: true } {
   return platform === "win32" ? {} : { detached: true };
@@ -20,8 +21,13 @@ export interface ProcessTreeOptions {
   readonly spawnTaskkill?: (pid: number) => void;
 }
 
+function resolveTaskkillExe(env: NodeJS.ProcessEnv = process.env): string {
+  const systemRoot = env.SystemRoot ?? env.windir;
+  return systemRoot ? win32.join(systemRoot, "System32", "taskkill.exe") : "taskkill.exe";
+}
+
 function spawnTaskkill(pid: number): void {
-  const killer = spawn("taskkill.exe", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore", windowsHide: true, shell: false });
+  const killer = spawn(resolveTaskkillExe(), ["/pid", String(pid), "/t", "/f"], { stdio: "ignore", windowsHide: true, shell: false });
   killer.on("error", () => { /* best effort */ });
   killer.unref();
 }

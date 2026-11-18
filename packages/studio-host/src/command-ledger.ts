@@ -59,6 +59,7 @@ export const COMMAND_LEDGER_TERMINAL_CAP = 256;
 
 export class CommandLedger {
   readonly #entries = new Map<CommandId, CommandLedgerEntry>();
+  readonly #byRequestId = new Map<string, CommandId>();
   /**
    * Request ids whose terminal row the capacity policy dropped. A receipt for
    * one of these must not throw: its outcome was published when the row went
@@ -79,6 +80,7 @@ export class CommandLedger {
     for (const entry of store?.load() ?? []) {
       if (this.#entries.has(entry.commandId)) throw new Error(`Duplicate restored command id ${entry.commandId}`);
       this.#entries.set(entry.commandId, structuredClone(entry));
+      this.#byRequestId.set(entry.requestId, entry.commandId);
     }
     this.#evictTerminal();
   }
@@ -103,6 +105,8 @@ export class CommandLedger {
       ...(stateVersionBefore === undefined ? {} : { stateVersionBefore }),
     };
     this.#entries.set(commandId, entry);
+    this.#byRequestId.set(entry.requestId, commandId);
+    this.#evictedRequestIds.delete(entry.requestId);
     this.store?.append(entry);
     this.#evictTerminal();
     return structuredClone(entry);
@@ -161,6 +165,9 @@ export class CommandLedger {
       if (extra <= 0) break;
       if (!TERMINAL.has(entry.status)) continue;
       this.#entries.delete(commandId);
+      if (this.#byRequestId.get(entry.requestId) === commandId) {
+        this.#byRequestId.delete(entry.requestId);
+      }
       this.#evictedRequestIds.add(entry.requestId);
       extra -= 1;
     }
@@ -175,6 +182,7 @@ export class CommandLedger {
       if (oldest === undefined) break;
       this.#evictedRequestIds.delete(oldest);
     }
+    this.store?.compact?.([...this.#entries.values()]);
   }
 
   /**
@@ -239,10 +247,10 @@ export class CommandLedger {
   }
 
   getByRequestId(requestId: string): CommandLedgerEntry | undefined {
-    for (const entry of this.#entries.values()) {
-      if (entry.requestId === requestId) return structuredClone(entry);
-    }
-    return undefined;
+    const commandId = this.#byRequestId.get(requestId);
+    if (commandId === undefined) return undefined;
+    const entry = this.#entries.get(commandId);
+    return entry === undefined ? undefined : structuredClone(entry);
   }
 
   snapshot(): CommandLedgerEntry[] {
@@ -272,6 +280,7 @@ export class CommandLedger {
     this.#entries.delete(current.commandId);
     const rebound = { ...current, commandId };
     this.#entries.set(commandId, rebound);
+    this.#byRequestId.set(rebound.requestId, commandId);
     this.store?.append(rebound);
     return structuredClone(rebound);
   }

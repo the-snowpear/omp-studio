@@ -32,3 +32,12 @@ it("switches Git patches between unified and split views while keeping text and 
   expect(screen.getAllByText("unchanged")).toHaveLength(1);
   expect(oldRow().querySelector(".half")).toBeNull();
 });
+
+it("keeps old and new line numbers aligned across empty context lines inside a hunk", () => {
+  const patch = "@@ -10,3 +10,3 @@\n before\n\n-after-old\n+after-new\n";
+  render(<I18nProvider forcedLanguage="en"><GitPatch patch={patch} split={false} /></I18nProvider>);
+  const oldRow = screen.getByText("after-old").closest(".dl")!;
+  const newRow = screen.getByText("after-new").closest(".dl")!;
+  expect(oldRow.querySelectorAll(".ln")[0]?.textContent).toBe("12");
+  expect(newRow.querySelectorAll(".ln")[1]?.textContent).toBe("12");
+});

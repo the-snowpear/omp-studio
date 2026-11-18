@@ -57,6 +57,23 @@ describe("ToolCardScroll follow", () => {
     expect(box.scrollTop).toBe(500);
   });
 
+  it("does not immediately snap back when wheeling up slightly inside the 24px threshold", () => {
+    const { container, rerender } = render(<ToolCardScroll follow className="tc">a</ToolCardScroll>);
+    const box = container.querySelector<HTMLElement>(".tc")!;
+    stageScrollBox(box, { scrollHeight: 400, clientHeight: 100 });
+    act(() => { rerender(<ToolCardScroll follow className="tc">b</ToolCardScroll>); });
+    expect(box.scrollTop).toBe(400);
+    // Simulate browser clamping scrollTop to 300 at bottom, then user wheeling up 12px to 288.
+    box.scrollTop = 300;
+    act(() => { box.dispatchEvent(new Event("scroll", { bubbles: false })); });
+    act(() => { box.dispatchEvent(new WheelEvent("wheel", { deltaY: -12 })); });
+    box.scrollTop = 288;
+    act(() => { box.dispatchEvent(new Event("scroll", { bubbles: false })); });
+    stageScrollBox(box, { scrollHeight: 600, clientHeight: 100 });
+    act(() => { rerender(<ToolCardScroll follow className="tc">c</ToolCardScroll>); });
+    expect(box.scrollTop).toBe(288);
+  });
+
   it("resumes following when `follow` flips back to true after an in-card unpin", () => {
     // 回到最新 re-arms the card. Without an edge reset the in-card unpin sticks
     // forever and the card silently stops tracking its own output.

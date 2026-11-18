@@ -37,13 +37,51 @@ export function subagentViewKey(scope: string, agentId: string): string {
   return JSON.stringify([scope, agentId]);
 }
 
-export function createSubagentViewBook() {
+const SUBAGENT_VIEW_BOOK_MAX_ENTRIES = 64;
+
+function isIdleSubagentViewState(state: SubagentViewState): boolean {
+  return (
+    state.queued.length === 0
+    && state.queueEdit === undefined
+    && state.draft.text.length === 0
+    && state.draft.images.length === 0
+    && state.btw.draft.text.length === 0
+    && state.btw.draft.images.length === 0
+  );
+}
+
+export function createSubagentViewBook(maxEntries = SUBAGENT_VIEW_BOOK_MAX_ENTRIES) {
   const entries = new Map<string, SubagentViewState>();
+  const prune = () => {
+    if (entries.size <= maxEntries) return;
+    for (const [candidateKey, candidateState] of entries) {
+      if (entries.size <= maxEntries) break;
+      if (isIdleSubagentViewState(candidateState)) entries.delete(candidateKey);
+    }
+    while (entries.size > maxEntries) {
+      const oldestKey = entries.keys().next().value as string | undefined;
+      if (oldestKey === undefined) break;
+      entries.delete(oldestKey);
+    }
+  };
   return {
     get(key: string): SubagentViewState {
       let value = entries.get(key);
-      if (value === undefined) { value = createSubagentViewState(); entries.set(key, value); }
+      if (value !== undefined) {
+        entries.delete(key);
+        entries.set(key, value);
+        return value;
+      }
+      value = createSubagentViewState();
+      entries.set(key, value);
+      prune();
       return value;
+    },
+    delete(key: string): boolean {
+      return entries.delete(key);
+    },
+    get size(): number {
+      return entries.size;
     },
   };
 }

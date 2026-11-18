@@ -105,13 +105,25 @@ export class DesktopBrowserObservation {
   dispose(): void { for (const owner of new Set([...this.#connections.values()].map(entry => entry.sender.id))) this.disposeWindow(owner); }
 }
 export function registerBrowserObservationIpc(options: { ipcMain: TerminalIpcMain; manager: DesktopBrowserObservation; isTrustedSender(sender: TerminalSender): boolean; isVisible(sender: TerminalSender): boolean }): { dispose(): void } {
-  const owners = new Set<number>();
+  const owners = new Map<number, () => void>();
   for (const kind of ["attach", "input", "detach"] as const) options.ipcMain.handle(BROWSER_OBSERVATION_CHANNELS[kind], async ({ sender }, input): Promise<BrowserObservationResult> => {
     if (sender.isDestroyed() || !options.isTrustedSender(sender)) throw new Error("Untrusted browser observation request");
     if (kind !== "detach" && !options.isVisible(sender)) { options.manager.disposeWindow(sender.id); return { ok: false, message: "Browser observation requires a visible window" }; }
-    if (!owners.has(sender.id)) { owners.add(sender.id); const dispose = () => { options.manager.disposeWindow(sender.id); owners.delete(sender.id); }; sender.once("destroyed", dispose); sender.once("did-navigate", dispose); }
+    if (!owners.has(sender.id)) {
+      const dispose = () => {
+        if (!owners.delete(sender.id)) return;
+        sender.off("destroyed", dispose);
+        sender.off("did-navigate", dispose);
+        sender.off("render-process-gone", dispose);
+        options.manager.disposeWindow(sender.id);
+      };
+      owners.set(sender.id, dispose);
+      sender.once("destroyed", dispose);
+      sender.once("did-navigate", dispose);
+      sender.once("render-process-gone", dispose);
+    }
     try { if (kind === "attach") await options.manager.attach(sender, input); else if (kind === "input") options.manager.input(sender, input); else await options.manager.detach(sender, input); return { ok: true }; }
     catch (error) { return { ok: false, message: error instanceof Error ? error.message : "Browser observation unavailable" }; }
   });
-  return { dispose() { for (const owner of owners) options.manager.disposeWindow(owner); owners.clear(); for (const kind of ["attach", "input", "detach"] as const) options.ipcMain.removeHandler(BROWSER_OBSERVATION_CHANNELS[kind]); } };
+  return { dispose() { for (const cleanup of [...owners.values()]) cleanup(); owners.clear(); for (const kind of ["attach", "input", "detach"] as const) options.ipcMain.removeHandler(BROWSER_OBSERVATION_CHANNELS[kind]); } };
 }

@@ -32,45 +32,64 @@ export function StatisticsPage({ client }: { client: StudioClient }) {
   const [reason, setReason] = useState("");
   const [attempt, setAttempt] = useState(0);
   const framedRef = useRef(false);
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
+  const urlRef = useRef(url);
+  urlRef.current = url;
+  const epochRef = useRef(0);
 
   useEffect(() => {
-    if (preview) return;
+    if (preview) {
+      epochRef.current += 1;
+      return;
+    }
+    const epoch = ++epochRef.current;
     let active = true;
-    setPhase("loading");
     setReason("");
-    framedRef.current = false;
+    setPhase("loading");
     void (async () => {
       try {
         const result = await client.query("stats.dashboard", {});
-        if (!active) return;
+        if (!active || epoch !== epochRef.current) return;
         if (result.available && result.url !== undefined) {
+          if (result.url === urlRef.current && framedRef.current) {
+            setPhase("ready");
+            return;
+          }
+          framedRef.current = false;
           setUrl(result.url);
           return;
         }
+        framedRef.current = false;
         setPhase("unavailable");
-        setReason(result.reason ?? (zh ? "本机统计面板不可用。" : "The local statistics panel is unavailable."));
+        setReason(result.reason ?? (zhRef.current ? "本机统计面板不可用。" : "The local statistics panel is unavailable."));
       } catch (cause) {
-        if (!active) return;
+        if (!active || epoch !== epochRef.current) return;
+        framedRef.current = false;
         setPhase("unavailable");
-        setReason(hostErrorMessage(cause, zh ? "统计面板不可用" : "Statistics panel unavailable"));
+        setReason(hostErrorMessage(cause, zhRef.current ? "统计面板不可用" : "Statistics panel unavailable"));
       }
     })();
     return () => {
       active = false;
+      epochRef.current += 1;
     };
-  }, [client, preview, attempt, zh]);
+  }, [client, preview, attempt]);
 
   // A load event also fires for the panel's own error document, so the frame is
   // only trusted once a probe confirms the server still answers.
   const onFrameLoad = useCallback(() => {
     if (framedRef.current) return;
     framedRef.current = true;
+    const epoch = epochRef.current;
     void (async () => {
       try {
         const result = await client.query("stats.dashboard", {});
+        if (epoch !== epochRef.current) return;
         setPhase(result.available ? "ready" : "unavailable");
         if (!result.available) setReason(result.reason ?? "");
       } catch {
+        if (epoch !== epochRef.current) return;
         setPhase("unavailable");
       }
     })();

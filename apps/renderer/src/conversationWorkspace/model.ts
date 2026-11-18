@@ -12,7 +12,7 @@ export type ConversationView = {
 };
 export type ConversationDocument = { id: string; ref: ConversationRef; title: string; projectName?: string | undefined; route?: WorkspaceRoute | undefined; page?: boolean; pagePhase?: "in" | "out" };
 export type ConversationWorkspaceLayout = {
-  version: 4; coordinateVersion: 1; views: ConversationView[]; documents: ConversationDocument[];
+  version: 4; coordinateVersion: 0 | 1; views: ConversationView[]; documents: ConversationDocument[];
   snap: ConversationSnapLayout | null; snapAssistCell: number | null;
   activeViewId: string | null; activeDocumentId: string | null; sidebarWidth: number; sidebarVisible: boolean; panelWidth: number; bottomHeight: number; railCollapsed: boolean;
 };

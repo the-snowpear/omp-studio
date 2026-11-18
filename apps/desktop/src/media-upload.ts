@@ -60,10 +60,22 @@ export class MediaUploadManager {
   dispose(): void { clearInterval(this.#timer); for (const upload of this.#uploads.values()) this.abort(upload.owner, upload.id); }
 }
 export function registerMediaUploadIpc(options: { ipcMain: TerminalIpcMain; isTrustedSender(sender: TerminalSender): boolean; manager: MediaUploadManager }): { dispose(): void } {
-  const tracked = new Set<number>();
+  const tracked = new Map<number, () => void>();
   for (const [kind, channel] of Object.entries(MEDIA_UPLOAD_CHANNELS)) options.ipcMain.handle(channel, async ({ sender }, payload): Promise<MediaUploadResult> => {
     if (sender.isDestroyed() || !options.isTrustedSender(sender)) throw new Error("Untrusted media upload");
-    if (!tracked.has(sender.id)) { tracked.add(sender.id); const dispose = () => { tracked.delete(sender.id); options.manager.disposeWindow(sender.id); }; sender.once("destroyed", dispose); sender.once("did-navigate", dispose); }
+    if (!tracked.has(sender.id)) {
+      const dispose = () => {
+        if (!tracked.delete(sender.id)) return;
+        sender.off("destroyed", dispose);
+        sender.off("did-navigate", dispose);
+        sender.off("render-process-gone", dispose);
+        options.manager.disposeWindow(sender.id);
+      };
+      tracked.set(sender.id, dispose);
+      sender.once("destroyed", dispose);
+      sender.once("did-navigate", dispose);
+      sender.once("render-process-gone", dispose);
+    }
     try {
       if (kind === "begin") return { ok: true, ...options.manager.begin(sender.id, payload) };
       if (kind === "chunk") { await options.manager.chunk(sender.id, payload); return { ok: true }; }
@@ -72,5 +84,5 @@ export function registerMediaUploadIpc(options: { ipcMain: TerminalIpcMain; isTr
       options.manager.abort(sender.id, input.uploadId); return { ok: true };
     } catch { return { ok: false, message: "Media upload failed. Check the file size, upload order and artifact storage location." }; }
   });
-  return { dispose: () => { for (const owner of tracked) options.manager.disposeWindow(owner); tracked.clear(); Object.values(MEDIA_UPLOAD_CHANNELS).forEach(channel => options.ipcMain.removeHandler(channel)); } };
+  return { dispose: () => { for (const cleanup of [...tracked.values()]) cleanup(); tracked.clear(); Object.values(MEDIA_UPLOAD_CHANNELS).forEach(channel => options.ipcMain.removeHandler(channel)); } };
 }

@@ -289,6 +289,29 @@ export function sameStringList(left: ReadonlyArray<string> | undefined, right: R
   return a.length === b.length && a.every((item, index) => item === b[index]);
 }
 
+function sameHeaders(
+  left: Readonly<Record<string, string>> | undefined,
+  right: Readonly<Record<string, string>> | undefined,
+): boolean {
+  const a = left ?? {};
+  const b = right ?? {};
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every((key) => key in b && a[key] === b[key]);
+}
+
+function sameRemoteCompaction(
+  left: ModelProviderRemoteCompaction | undefined,
+  right: ModelProviderRemoteCompaction | undefined,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return left.enabled === right.enabled
+    && (left.endpoint || undefined) === (right.endpoint || undefined)
+    && (left.model || undefined) === (right.model || undefined);
+}
+
 function catalogDraftEqual(left: ModelCatalogEntry, right: ModelCatalogEntry): boolean {
   return left.id === right.id
     && left.name === right.name
@@ -299,9 +322,22 @@ function catalogDraftEqual(left: ModelCatalogEntry, right: ModelCatalogEntry): b
     && left.tools === right.tools
     && left.image === right.image
     && left.contextWindow === right.contextWindow
+    && left.maxContextWindow === right.maxContextWindow
     && left.maxTokens === right.maxTokens
     && left.api === right.api
     && left.baseUrl === right.baseUrl
+    && (left.omitMaxOutputTokens ?? false) === (right.omitMaxOutputTokens ?? false)
+    && left.bedrockMessagesApi === right.bedrockMessagesApi
+    && left.requiresThinkingPresence === right.requiresThinkingPresence
+    && left.extendedCacheTtlBeta === right.extendedCacheTtlBeta
+    && left.statefulResponses === right.statefulResponses
+    && left.preferWebsockets === right.preferWebsockets
+    && left.premiumMultiplier === right.premiumMultiplier
+    && left.imageCountBudget === right.imageCountBudget
+    && (left.contextPromotionTarget || undefined) === (right.contextPromotionTarget || undefined)
+    && (left.compactionModel || undefined) === (right.compactionModel || undefined)
+    && sameHeaders(left.headers, right.headers)
+    && sameRemoteCompaction(left.remoteCompaction, right.remoteCompaction)
     && left.cost?.input === right.cost?.input
     && left.cost?.output === right.cost?.output
     && left.cost?.cacheRead === right.cost?.cacheRead
@@ -334,6 +370,8 @@ function overrideDraftEqual(left: DraftOverride | undefined, right: DraftOverrid
     && left.imageCountBudget === right.imageCountBudget
     && left.contextPromotionTarget === right.contextPromotionTarget
     && left.compactionModel === right.compactionModel
+    && sameHeaders(left.headers, right.headers)
+    && sameRemoteCompaction(left.remoteCompaction, right.remoteCompaction)
     && sameStringList(left.thinking, right.thinking)
     && (left.cost?.input === right.cost?.input && left.cost?.output === right.cost?.output && left.cost?.cacheRead === right.cost?.cacheRead && left.cost?.cacheWrite === right.cost?.cacheWrite);
 }

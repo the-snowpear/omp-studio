@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "./icons";
 import { useSurfaceDocument } from "./dock/SurfaceContext";
-import { MOTION_MS, MOTION_SLACK_MS } from "./motion";
+import { MOTION_MS, MOTION_SLACK_MS, motionReduced } from "./motion";
 
 /** 提示停留时长（ms）。 */
 const SHOW_MS = 2800;
@@ -39,14 +39,19 @@ export function ToastHost({
     if (sticky) return;
     let outTimer = 0;
     const showTimer = window.setTimeout(() => {
+      const exitMs = motionReduced() ? 0 : OUT_MS;
+      if (exitMs === 0) {
+        dismissRef.current();
+        return;
+      }
       setLeaving(true);
-      outTimer = window.setTimeout(() => dismissRef.current(), OUT_MS);
+      outTimer = window.setTimeout(() => dismissRef.current(), exitMs);
     }, SHOW_MS);
     return () => {
       window.clearTimeout(showTimer);
       if (outTimer) window.clearTimeout(outTimer);
     };
-  }, [message, sticky]);
+  }, [message, sticky, icon]);
 
   if (!message) return null;
   return createPortal(

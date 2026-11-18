@@ -32,13 +32,13 @@ interface GitWorkbenchPanelsProps {
   onOpenGit: () => void;
 }
 
-export function GitWorkbenchPanels({ gitScope, client, gitSharedWorkspaceId, composerOwner, activeWorkspace, onOpenWorktree, sessionId, available, capabilities, onRoute, composerInputRef, onOpenGit }: GitWorkbenchPanelsProps) {
+export function GitWorkbenchPanels({ gitScope, client, gitSharedWorkspaceId, composerOwner: _composerOwner, activeWorkspace, onOpenWorktree, sessionId, available, capabilities, onRoute, composerInputRef, onOpenGit }: GitWorkbenchPanelsProps) {
   const [gitIntent, setGitIntent] = useState<{ scope: string; intent: GitOpenIntent }>();
   const gitIntentSequence = useRef(0);
   return (<GitWorkspaceProvider key={gitScope} client={client} workspaceId={gitSharedWorkspaceId}>
         <GitDockMeter />
         <PanelRegistration panels={{
-        git: visibility => <GitWorkbench key={composerOwner ?? "draft"} client={client} {...(activeWorkspace ? { workspaceId: activeWorkspace.workspaceId, workspaceName: activeWorkspace.name } : {})} visible={visibility.visible}
+        git: visibility => <GitWorkbench client={client} {...(activeWorkspace ? { workspaceId: activeWorkspace.workspaceId, workspaceName: activeWorkspace.name } : {})} visible={visibility.visible}
           {...(gitIntent?.scope === gitScope ? { intent: gitIntent.intent } : {})}
           worktrees={<SessionWorktreesPane launcher launcherLabel="Worktree" onOpenWorkspace={onOpenWorktree} client={client} context={{ sessionId, available, capabilities }} visible={visibility.visible} />}
           onReference={reference => {

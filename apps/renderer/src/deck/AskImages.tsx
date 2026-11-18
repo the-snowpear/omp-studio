@@ -2,16 +2,16 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefO
 import type { AskImage } from "@omp-studio/studio-protocol";
 import { ChipComposer, type ChipComposerHandle } from "../composer/ChipComposer";
 import { fileToPromptImage } from "../composer/ingest";
-import { defaultImageChipLabel, snapshotFromDoc } from "../composer/serialize";
+import { defaultImageChipLabel, localizeImageChipLabel, snapshotFromDoc } from "../composer/serialize";
 import { newChipId, type ComposerDoc, type ComposerNode, type ComposerSnapshot, type PromptImage } from "../composer/types";
-import { useI18n, pickLocale } from "../i18n";
+import { isZh, useI18n } from "../i18n";
 import { Icon } from "../icons";
 import "./askImages.css";
 
-export async function askImage(file:File):Promise<AskImage>{
- if(!["image/png","image/jpeg","image/gif","image/webp"].includes(file.type)||file.size>20*1024*1024)throw Error(pickLocale("请选择 20 MB 以内的 PNG、JPEG、GIF 或 WebP 图片", "Choose PNG, JPEG, GIF, or WebP under 20 MB"));
+export async function askImage(file:File, zh = isZh()):Promise<AskImage>{
+ if(!["image/png","image/jpeg","image/gif","image/webp"].includes(file.type)||file.size>20*1024*1024)throw Error(zh ? "请选择 20 MB 以内的 PNG、JPEG、GIF 或 WebP 图片" : "Choose PNG, JPEG, GIF, or WebP under 20 MB");
  if(file.size<=96*1024)return (await fileToPromptImage(file)) as AskImage;
- const bitmap=await createImageBitmap(file);try{const canvas=document.createElement("canvas");for(const edge of [1280,800,480]){const scale=Math.min(1,edge/Math.max(bitmap.width,bitmap.height));canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));const context=canvas.getContext("2d")!;context.fillStyle="#fff";context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(bitmap,0,0,canvas.width,canvas.height);const blob=await new Promise<Blob|null>(resolve=>canvas.toBlob(resolve,"image/jpeg",0.7));if(blob&&blob.size<=96*1024)return (await fileToPromptImage(new File([blob],"attachment.jpg",{type:"image/jpeg"}))) as AskImage;}throw Error(pickLocale("图片超出回答容量", "Image exceeds response budget"));}finally{bitmap.close();}
+ const bitmap=await createImageBitmap(file);try{const canvas=document.createElement("canvas");for(const edge of [1280,800,480]){const scale=Math.min(1,edge/Math.max(bitmap.width,bitmap.height));canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));const context=canvas.getContext("2d")!;context.fillStyle="#fff";context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(bitmap,0,0,canvas.width,canvas.height);const blob=await new Promise<Blob|null>(resolve=>canvas.toBlob(resolve,"image/jpeg",0.7));if(blob&&blob.size<=96*1024)return (await fileToPromptImage(new File([blob],"attachment.jpg",{type:"image/jpeg"}))) as AskImage;}throw Error(zh ? "图片超出回答容量" : "Image exceeds response budget");}finally{bitmap.close();}
 }
 
 export type AskEditorValue = Omit<ComposerSnapshot, "images"> & { readonly images: readonly AskImage[] };
@@ -66,17 +66,27 @@ export function AskImages({
   useLayoutEffect(() => {
     const previous = last.current;
     if (previous && (doc ? doc === previous.doc : text === previous.text && sameImages(images, previous.images))) return;
+    const currentZh = zhRef.current;
     const nodes: ComposerNode[] = text ? [{ type: "text", value: text }] : [];
-    if (!doc) for (const image of images) nodes.push({ type: "chip", chip: { id: newChipId(), kind: "image", label: defaultImageChipLabel(undefined, zh), image } });
+    if (!doc) for (const image of images) nodes.push({ type: "chip", chip: { id: newChipId(), kind: "image", label: defaultImageChipLabel(undefined, currentZh), image } });
+    const initialDoc: ComposerDoc = doc
+      ? {
+          nodes: doc.nodes.map(node =>
+            node.type === "chip" && node.chip.kind === "image"
+              ? { ...node, chip: { ...node.chip, label: localizeImageChipLabel(node.chip.label, currentZh) } }
+              : node
+          ),
+        }
+      : { nodes };
     epoch.current++;
     processing.current = false;
     setBusy(false);
     syncing.current = true;
     try {
-      composer.current?.setSnapshot(snapshotFromDoc(doc ?? { nodes }), { preserveFocus: true });
+      composer.current?.setSnapshot(snapshotFromDoc(initialDoc), { preserveFocus: true });
       last.current = { text, images, doc };
     } finally { syncing.current = false; }
-  }, [text, images, doc, composer, zh]);
+  }, [text, images, doc, composer]);
   useLayoutEffect(() => {
     if (!busy && focusAfterUpload.current) {
       focusAfterUpload.current = false;
@@ -107,7 +117,7 @@ export function AskImages({
     try {
       if ((composer.current?.getSnapshot().images.length ?? 0) + files.length > 4) throw Error(zhRef.current ? "每个回答区最多 4 张图片" : "Up to 4 images per field");
       const added: AskImage[] = [];
-      for (const file of files) added.push(await askImage(file));
+      for (const file of files) added.push(await askImage(file, zhRef.current));
       if (epoch.current !== generation) return;
       const editor = field.current?.querySelector(".chip-composer-editor");
       if (editor && range && editor.contains(range.commonAncestorContainer)) {

@@ -1,4 +1,5 @@
 import { AppSelect } from "../AppSelect";
+import { useSurfaceDocument } from "../dock/SurfaceContext";
 import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
@@ -23,6 +24,7 @@ export function RecordingPlayer({
   demoText?: string | undefined;
   visible?: boolean;
 }) {
+  const document = useSurfaceDocument();
   const { resolvedLanguage } = useI18n();
   const { settings } = useAppSettings();
   const zh = resolvedLanguage === "zh";
@@ -160,7 +162,7 @@ export function RecordingPlayer({
       term.current = undefined;
       terminal.dispose();
     };
-  }, [recording]);
+  }, [recording, document]);
   useEffect(() => {
     const terminal = term.current;
     if (terminal) applyTheme(terminal);
@@ -170,26 +172,42 @@ export function RecordingPlayer({
     let frame = 0;
     const start = performance.now();
     const initial = position;
+    let lastCommitted = initial;
+    let latestAt = initial;
     const tick = () => {
       if (!visibleRef.current || document.hidden) return;
       const at = Math.min(
         recording.durationMs,
         initial + (performance.now() - start) * speed,
       );
-      setPosition(at);
+      latestAt = at;
+      const hasDueEvent =
+        cursor.current < recording.events.length &&
+        recording.events[cursor.current]!.at <= at;
+      if (
+        at >= recording.durationMs ||
+        hasDueEvent ||
+        at - lastCommitted >= 50 * speed
+      ) {
+        lastCommitted = at;
+        setPosition(at);
+      }
       if (at >= recording.durationMs) setPlaying(false);
       else frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [recording, playing, speed, seek, visible]);
+    return () => {
+      cancelAnimationFrame(frame);
+      if (latestAt !== lastCommitted) setPosition(latestAt);
+    };
+  }, [recording, playing, speed, seek, visible, document]);
   useEffect(() => {
     const hide = () => {
       if (document.hidden) { paintGeneration.current++; setPlaying(false); }
     };
     document.addEventListener("visibilitychange", hide);
     return () => document.removeEventListener("visibilitychange", hide);
-  }, []);
+  }, [document]);
   const paintGeneration = useRef(0);
   useEffect(() => {
     const terminal = term.current;

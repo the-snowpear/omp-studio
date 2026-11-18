@@ -26,11 +26,21 @@ test("private DNS results and IPv4-mapped private addresses never reach the Desk
   const proxy = await proxyFixture();
   let lookups = 0;
   try {
-    for (const address of ["192.168.4.5", "::ffff:127.0.0.1", "::ffff:a01:203"]) {
+    for (const address of [
+      "192.168.4.5",
+      "100.64.0.1",
+      "198.18.0.1",
+      "224.0.0.1",
+      "::ffff:127.0.0.1",
+      "::ffff:a01:203",
+      "::127.0.0.1",
+      "64:ff9b::7f00:1",
+      "fe80::1%eth0",
+    ]) {
       const resolveHost: NetworkLookup = async () => { lookups++; return [{ address, family: address.includes(":") ? 6 : 4 }]; };
       await assert.rejects(localNetworkConnect({ host: "private.example.test", port: 443 }, proxy.url, undefined, resolveHost), { code: "PRIVATE_NETWORK_DESTINATION" });
     }
-    assert.equal(lookups, 3); assert.equal(proxy.requests.length, 0);
+    assert.equal(lookups, 9); assert.equal(proxy.requests.length, 0);
   } finally { await proxy.close(); }
 });
 

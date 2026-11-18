@@ -30,10 +30,12 @@ export function AppBackgroundLayer({
     reducedMotion,
     reducedTransparency,
     settings,
+    suppressedByTier,
   } = background;
 
   const strength = reducedTransparency ? Math.min(settings.strength, 10) : settings.strength;
   const visible = settings.enabled
+    && !suppressedByTier
     && activeAsset !== undefined
     && (settings.scope === "app" || route === "workbench")
     && strength > 0

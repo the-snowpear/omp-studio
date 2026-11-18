@@ -188,6 +188,10 @@ export class TimeTravelService {
     return this.#restoring;
   }
 
+  removeSession(sessionId: string): Promise<{ removed: number }> {
+    return this.#serial(() => this.#store.removeSession(sessionId));
+  }
+
   cleanup(scope: "expired" | "all"): Promise<{ removed: number }> {
     return this.#serial(async () => {
       const settings = await this.settings();

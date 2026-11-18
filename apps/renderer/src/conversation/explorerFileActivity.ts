@@ -1,6 +1,6 @@
 import type { JsonValue } from "@omp-studio/client-contract";
 import { jsonRecord, jsonString, type ToolView } from "./conversationViewModel";
-import { toolKind } from "./toolMeta";
+import { extractEditInputPaths, stripFileSelector, toolKind } from "./toolMeta";
 
 export type ExplorerFileActivity = {
   readonly reading: readonly string[];
@@ -33,7 +33,7 @@ function asToolView(tool: ExplorerLiveTool): ToolView {
 }
 
 function normalizePath(path: string): string | undefined {
-  const normalized = path.replaceAll("\\", "/").trim();
+  const normalized = stripFileSelector(path).replaceAll("\\", "/").trim();
   if (!normalized || normalized.includes(" → ")) return undefined;
   return normalized;
 }
@@ -50,6 +50,12 @@ function collectToolPaths(args: { readonly [key: string]: JsonValue } | undefine
   pushPath(paths, jsonString(args.path));
   pushPath(paths, jsonString(args.resolvedPath));
   pushPath(paths, jsonString(args.target));
+  if (kind === "edit") {
+    const input = jsonString(args.input) ?? jsonString(args._input);
+    if (input !== undefined) {
+      for (const item of extractEditInputPaths(input)?.paths ?? []) pushPath(paths, item);
+    }
+  }
   if (kind === "ast_edit" && Array.isArray(args.changes)) {
     for (const entry of args.changes) {
       pushPath(paths, jsonString(jsonRecord(entry)?.file));

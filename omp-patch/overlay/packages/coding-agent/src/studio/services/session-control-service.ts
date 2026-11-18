@@ -33,6 +33,8 @@ export interface SessionControlSession {
 			synthetic?: boolean;
 			/** Mark the prompt as a deliberate operator action (synthetic continues). */
 			userInitiated?: boolean;
+			throwOnDrop?: boolean;
+			onPromptStarted?: () => void;
 		},
 	): Promise<boolean>;
 	steer(text: string, images?: ImageContent[], options?: { prependMessages?: CustomMessage[] }): Promise<void>;
@@ -304,8 +306,26 @@ export class SessionControlService {
 		}
 		if (!input.interrupted) return { started: false, mode: "none" };
 		checkOwner();
-		const started = await this.#session.prompt(manualContinuePrompt, { synthetic: true, userInitiated: true });
-		return started ? { started: true, mode: "continue" } : { started: false, mode: "none" };
+		const started = Promise.withResolvers<ContinueTurnOutcome>();
+		const outcome: ContinueTurnOutcome = { started: true, mode: "continue" };
+		let promptStarted = false;
+		const turn = this.#session.prompt(manualContinuePrompt, {
+			synthetic: true,
+			userInitiated: true,
+			throwOnDrop: true,
+			onPromptStarted: () => {
+				promptStarted = true;
+				started.resolve(outcome);
+			},
+		});
+		const settledTurn = turn.then<ContinueTurnOutcome, ContinueTurnOutcome>(
+			accepted => (accepted ? outcome : { started: false, mode: "none" }),
+			error => {
+				if (promptStarted) return outcome;
+				throw this.#mapBusy(error);
+			},
+		);
+		return await Promise.race([started.promise, settledTurn]);
 	}
 
 	/**

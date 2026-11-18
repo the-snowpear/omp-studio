@@ -1,6 +1,7 @@
 import { useConversationDom } from "../conversationWorkspace/Context";
 import { useLayoutEffect, useRef, type RefObject } from "react";
 import { afterConversationLayoutChange, beforeConversationLayoutChange, CONVERSATION_LAYOUT_CHANGE } from "../conversation/conversationReflow";
+import { TYPOGRAPHY_CHANGE } from "../settings/typography";
 
 export type ReadingColumnPreference = {
   readonly mode: "standard" | "wide" | "full" | "custom";
@@ -20,6 +21,27 @@ type ReadingColumnGeometry = {
  * because container-type would make .convo-wrap a containing block for the
  * fixed-position overlays (composer menu backdrops, image lightbox) inside it. */
 export const NARROW_COLUMN_MAX = 480;
+
+/** Below these `.convo-wrap` heights (short OS window, open bottom terminal, or
+ * tiled/floating conversation window), the composer sheds vertical chrome in two
+ * steps (`compact` -> `tight`) while preserving fixed-overlay containing blocks. */
+export const SHORT_COLUMN_MAX = 580;
+export const TIGHT_COLUMN_MAX = 380;
+export const SHORT_COLUMN_HYSTERESIS = 12;
+
+export type ReadingColumnHeightTier = "compact" | "tight" | undefined;
+
+export function readingColumnHeightTier(
+  containerHeight: number,
+  current?: ReadingColumnHeightTier,
+): ReadingColumnHeightTier {
+  if (!(containerHeight > 0)) return undefined;
+  const tightLimit = current === "tight" ? TIGHT_COLUMN_MAX + SHORT_COLUMN_HYSTERESIS : TIGHT_COLUMN_MAX;
+  if (containerHeight <= tightLimit) return "tight";
+  const compactLimit = current !== undefined ? SHORT_COLUMN_MAX + SHORT_COLUMN_HYSTERESIS : SHORT_COLUMN_MAX;
+  if (containerHeight <= compactLimit) return "compact";
+  return undefined;
+}
 
 /** All widths are CSS pixels. The scrollbar is already absent from the document's
  * containing block, but must also be reserved by its composer sibling. */
@@ -81,11 +103,23 @@ export function useReadingColumn(
       const markersChanged = element.dataset.readingMinimap !== minimap;
       const narrow = containerWidth <= NARROW_COLUMN_MAX;
       const narrowChanged = element.hasAttribute("data-reading-narrow") !== narrow;
-      if (markersChanged || narrowChanged || !sameGeometry(previous, geometry)) {
+      const height = element.clientHeight;
+      const currentShort = (element.dataset.readingShort as ReadingColumnHeightTier) || undefined;
+      const shortTier = readingColumnHeightTier(height, currentShort);
+      const shortChanged = currentShort !== shortTier;
+      if (markersChanged || narrowChanged || shortChanged || !sameGeometry(previous, geometry)) {
         beforeConversationLayoutChange();
         try {
           element.dataset.readingColumn = current.mode;
           if (narrowChanged) element.toggleAttribute("data-reading-narrow", narrow);
+          if (shortChanged) {
+            if (shortTier === undefined) delete element.dataset.readingShort;
+            else element.dataset.readingShort = shortTier;
+          }
+          if (height !== previousHeight) {
+            previousHeight = height;
+            element.style.setProperty("--reading-height", `${height}px`);
+          }
           if (markersChanged) {
             element.dataset.readingMinimap = minimap;
             // Switching to native scrollbars changes the scroller's clientWidth.
@@ -100,15 +134,16 @@ export function useReadingColumn(
         } finally {
           afterConversationLayoutChange();
         }
-      } else if (element.dataset.readingColumn !== current.mode) {
-        // Different presets can resolve to the same narrow column. Don't clear
-        // virtual row measurements or restore scroll anchors for that no-op.
-        element.dataset.readingColumn = current.mode;
-      }
-      const height = element.clientHeight;
-      if (height !== previousHeight) {
-        previousHeight = height;
-        element.style.setProperty("--reading-height", `${height}px`);
+      } else {
+        if (element.dataset.readingColumn !== current.mode) {
+          // Different presets can resolve to the same narrow column. Don't clear
+          // virtual row measurements or restore scroll anchors for that no-op.
+          element.dataset.readingColumn = current.mode;
+        }
+        if (height !== previousHeight) {
+          previousHeight = height;
+          element.style.setProperty("--reading-height", `${height}px`);
+        }
       }
       // Extend the scroller beneath the tray while reserving the same space at
       // the transcript tail. Collapsing either queue keeps the latest row clear.
@@ -129,16 +164,18 @@ export function useReadingColumn(
     if (scroller !== null) observer?.observe(scroller);
     if (queues !== null) observer?.observe(queues);
     const densityObserver = new MutationObserver(schedule);
-    densityObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-density", "style"] });
+    densityObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-density"] });
     const syncAfterLayout = () => {
       if (document.documentElement.hasAttribute("data-dock-rail-transition")) measure();
     };
     window.addEventListener(CONVERSATION_LAYOUT_CHANGE, syncAfterLayout);
+    window.addEventListener(TYPOGRAPHY_CHANGE, schedule);
     window.addEventListener("resize", schedule);
     return () => {
       observer?.disconnect();
       densityObserver.disconnect();
       window.removeEventListener(CONVERSATION_LAYOUT_CHANGE, syncAfterLayout);
+      window.removeEventListener(TYPOGRAPHY_CHANGE, schedule);
       window.removeEventListener("resize", schedule);
       if (frame !== null) cancelAnimationFrame(frame);
       measureRef.current = null;

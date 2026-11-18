@@ -15,10 +15,63 @@ export type ConversationTabInfo = { title: string; titleRow: SessionTitleRow | u
 /** What a tool window's tab shows, published by the dock that owns the window. */
 export type ToolTabInfo = { windowId: string; title: string; mark: PanelDefinition; count: number; closeTip: string; focus: () => void; close: () => void };
 
+const NON_SCROLLABLE_TAGS = new Set(["SPAN", "CODE", "A", "I", "B", "EM", "STRONG", "SMALL", "MARK", "TIME", "KBD", "ABBR", "BR", "HR", "IMG", "SVG", "PATH", "CIRCLE", "RECT", "LINE", "POLYLINE", "POLYGON", "G", "DEFS", "USE"]);
+
+function sameConversationTab(a: ConversationTabInfo | undefined, b: ConversationTabInfo): boolean {
+  if (!a || a.title !== b.title) return false;
+  if ((a.status?.tone ?? "") !== (b.status?.tone ?? "") || (a.status?.label ?? "") !== (b.status?.label ?? "")) return false;
+  if (a.titleRow === b.titleRow) return true;
+  if (!a.titleRow || !b.titleRow || a.titleRow.state !== b.titleRow.state) return false;
+  if (a.titleRow.state !== "available" || b.titleRow.state !== "available") return true;
+  return a.titleRow.title === b.titleRow.title
+    && a.titleRow.source === b.titleRow.source
+    && a.titleRow.card?.code === b.titleRow.card?.code
+    && a.titleRow.card?.emoji === b.titleRow.card?.emoji
+    && a.titleRow.card?.nf === b.titleRow.card?.nf;
+}
+
+function sameToolTabs(a: readonly ToolTabInfo[], b: readonly ToolTabInfo[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!, y = b[i]!;
+    if (
+      x.windowId !== y.windowId
+      || x.title !== y.title
+      || x.count !== y.count
+      || x.closeTip !== y.closeTip
+      || x.mark.id !== y.mark.id
+      || x.mark.title !== y.mark.title
+      || x.mark.icon !== y.mark.icon
+      || x.mark.glyph !== y.mark.glyph
+      || x.mark.status !== y.mark.status
+      || Boolean(x.mark.stale) !== Boolean(y.mark.stale)
+    ) return false;
+  }
+  return true;
+}
+
+function captureScrollPositions(root: HTMLElement): Array<{ node: HTMLElement; top: number; left: number }> {
+  const saved: Array<{ node: HTMLElement; top: number; left: number }> = [];
+  const stack: Element[] = [root];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (current instanceof HTMLElement && (current.scrollTop || current.scrollLeft)) {
+      saved.push({ node: current, top: current.scrollTop, left: current.scrollLeft });
+    }
+    const children = current.children;
+    for (let i = children.length - 1; i >= 0; i--) {
+      const child = children[i]!;
+      if (!NON_SCROLLABLE_TAGS.has(child.tagName)) stack.push(child);
+    }
+  }
+  return saved;
+}
+
 export class DocumentHosts {
   private hosts = new Map<string, ConversationHost>();
   private owners = new Map<string, symbol>();
   private detachListeners = new Map<string, Set<() => void>>();
+  existing(id: string) { return this.hosts.get(id); }
   onBeforeDetach(id: string, listener: () => void) {
     const listeners = this.detachListeners.get(id) ?? new Set<() => void>();
     listeners.add(listener); this.detachListeners.set(id, listeners);
@@ -63,7 +116,7 @@ export class DocumentHosts {
   }
   tab(id: string) { return this.tabs.get(id); }
   setTab(id: string, info: ConversationTabInfo) {
-    if (JSON.stringify(this.tabs.get(id)) === JSON.stringify(info)) return;
+    if (sameConversationTab(this.tabs.get(id), info)) return;
     this.tabs.set(id, info); this.notifyTabs();
   }
   toolTab(windowId: string) {
@@ -72,7 +125,8 @@ export class DocumentHosts {
   }
   /** Listeners hear about visible changes only; the stored callbacks are always the latest. */
   setToolTabs(documentId: string, tabs: readonly ToolTabInfo[]) {
-    const changed = JSON.stringify(this.toolTabs.get(documentId) ?? []) !== JSON.stringify(tabs);
+    const previous = this.toolTabs.get(documentId) ?? [];
+    const changed = !sameToolTabs(previous, tabs);
     if (tabs.length) this.toolTabs.set(documentId, tabs); else this.toolTabs.delete(documentId);
     if (changed) this.notifyTabs();
   }
@@ -128,7 +182,7 @@ export class DocumentHosts {
       for (const listener of this.detachListeners.get(id) ?? []) listener();
     }
     if (destination && element.parentElement !== destination) {
-      const scroll = [element, ...element.querySelectorAll<HTMLElement>("*")].filter(node => node.scrollTop || node.scrollLeft).map(node => ({ node, top: node.scrollTop, left: node.scrollLeft }));
+      const scroll = captureScrollPositions(element);
       const movable = destination as HTMLElement & { moveBefore?: (node: Node, before: Node | null) => void };
       if (movable.moveBefore && element.isConnected && destination.isConnected && element.ownerDocument === destination.ownerDocument) movable.moveBefore(element, null);
       else destination.append(element);

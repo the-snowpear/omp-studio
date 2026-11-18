@@ -182,13 +182,8 @@ export function shellArgs(
 }
 
 function killProcessTree(child: ChildProcess): void {
-  if (child.pid === undefined) return;
-  if (process.platform === "win32") {
-    spawn("taskkill.exe", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore", windowsHide: true });
-    return;
-  }
-  // The shell leads its own process group; SIGHUP reaches its jobs like a closed terminal.
-  terminateProcessTree(child, "SIGHUP");
+  // Windows walks the child tree with taskkill; POSIX signals the shell's process group with SIGHUP.
+  terminateProcessTree(child, process.platform === "win32" ? "SIGKILL" : "SIGHUP");
 }
 
 function spawnWithPipes(options: PtySpawnOptions): PtyProcess {

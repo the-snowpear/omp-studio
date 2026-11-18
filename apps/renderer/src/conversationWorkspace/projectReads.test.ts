@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { contractFixtures } from "@omp-studio/testkit";
 import type { ClientEvent, ConversationTranscriptReadPage, SessionId, StudioClient, WorkspaceId } from "@omp-studio/client-contract";
-import { acquireProjectReads, DisplayCache, WARM_SESSION_BUDGET } from "./projectReads";
+import { acquireProjectReads, bindProjectReads, DisplayCache, invalidateProjectHistoryReads, WARM_SESSION_BUDGET } from "./projectReads";
 
 afterEach(() => vi.useRealTimers());
 
@@ -104,5 +104,57 @@ it("idle warming reads up to WARM_SESSION_BUDGET recent pages and is cancelled o
   expect(query.mock.calls.filter(call => call[0] === "session.transcript.prefetch").map(call => call[1].sessionId)).toEqual(["one", "two", "three", "four", "five"]);
   query.mockClear(); handle.reads.warm("current" as SessionId); handle.release();
   await vi.advanceTimersByTimeAsync(2001); expect(query).not.toHaveBeenCalled();
+  await vi.runAllTimersAsync();
+});
+
+it("invalidates cached history.list immediately on mid-turn snapshot title updates and explicit forced refreshes", async () => {
+  vi.useFakeTimers();
+  let currentTitle: string | undefined;
+  const query = vi.fn(async (name: string) => {
+    if (name === "history.list") {
+      return {
+        entries: [{ sessionId: "session-live", ...(currentTitle ? { title: currentTitle } : {}) }],
+        total: 1,
+      };
+    }
+    return {};
+  });
+  const target = {
+    subscribe: () => () => {},
+    openContext: async () => ({ query, subscribe: () => () => {}, close: async () => {} }),
+  } as unknown as StudioClient;
+  const workspaceId = "workspace-live" as WorkspaceId;
+  const handle = acquireProjectReads(target, workspaceId);
+  const viewClient = { query, subscribe: () => () => {} } as unknown as StudioClient;
+  bindProjectReads(viewClient, handle.reads);
+
+  const initial = await handle.reads.read("history.list", { workspaceId, limit: 6, status: "active" });
+  expect(initial.entries[0]?.title).toBeUndefined();
+  expect(query).toHaveBeenCalledTimes(1);
+
+  // Within the 3s TTL, an unchanged state stays cached.
+  await handle.reads.read("history.list", { workspaceId, limit: 6, status: "active" });
+  expect(query).toHaveBeenCalledTimes(1);
+
+  // Mid-turn snapshot carrying a generated sessionTitle invalidates history.list before core.prompt completes.
+  currentTitle = "审查对话标题链路";
+  handle.reads.observe({
+    kind: "snapshot",
+    authorityEpoch: "auth-1",
+    snapshot: { sessionId: "session-live", sessionTitle: currentTitle, sessionTitleSource: "auto", isStreaming: true },
+  } as unknown as ClientEvent);
+
+  const afterSnapshot = await handle.reads.read("history.list", { workspaceId, limit: 6, status: "active" });
+  expect(afterSnapshot.entries[0]?.title).toBe("审查对话标题链路");
+  expect(query).toHaveBeenCalledTimes(2);
+
+  // Explicit forced refresh invalidates ProjectReads even before another event arrives.
+  currentTitle = "手动重命名后的标题";
+  invalidateProjectHistoryReads(viewClient, workspaceId);
+  const afterForce = await handle.reads.read("history.list", { workspaceId, limit: 6, status: "active" });
+  expect(afterForce.entries[0]?.title).toBe("手动重命名后的标题");
+  expect(query).toHaveBeenCalledTimes(3);
+
+  handle.release();
   await vi.runAllTimersAsync();
 });

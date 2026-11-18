@@ -276,3 +276,76 @@ test("page byte fitting preserves assistant and tool shells before truncating pa
   }
   assert.ok(Buffer.byteLength(JSON.stringify(page), "utf8") <= CONVERSATION_LIMITS.PAGE_MAX_BYTES);
 });
+
+test("snaps pagination to user turn boundaries and honours entry activeLeafId and custom_message", async () => {
+  const lines: string[] = [userLine("u-1", "first turn", null)];
+  let parentId = "u-1";
+  for (let index = 1; index <= 44; index += 1) {
+    const assistantId = `a-${index}`;
+    const resultId = `r-${index}`;
+    const toolCallId = `call-${index}`;
+    lines.push(assistantToolLine(assistantId, toolCallId, parentId, "step"));
+    lines.push(toolResultLine(resultId, toolCallId, assistantId, "ok"));
+    parentId = resultId;
+  }
+  lines.push(userLine("u-2", "second turn", parentId));
+  parentId = "u-2";
+  for (let index = 45; index <= 107; index += 1) {
+    const assistantId = `a-${index}`;
+    const resultId = `r-${index}`;
+    const toolCallId = `call-${index}`;
+    lines.push(assistantToolLine(assistantId, toolCallId, parentId, "step"));
+    lines.push(toolResultLine(resultId, toolCallId, assistantId, "ok"));
+    parentId = resultId;
+  }
+  lines.push(
+    `${JSON.stringify({
+      type: "custom_message",
+      id: "cm-continue",
+      parentId,
+      timestamp: "2026-08-16T10:05:00.000Z",
+      customType: "studio-computer-continue",
+      attribution: "user",
+      display: true,
+      content: "continue computer task",
+    })}\n`,
+  );
+  lines.push(
+    `${JSON.stringify({
+      type: "custom_message",
+      id: "cm-ext",
+      parentId: "cm-continue",
+      timestamp: "2026-08-16T10:05:01.000Z",
+      customType: "ext-banner",
+      display: true,
+      content: "extension notice",
+    })}\n`,
+  );
+  // Off-branch usage record pointing at `u-1`, while preserving `cm-ext` as the active leaf.
+  lines.push(
+    `${JSON.stringify({
+      type: "model_usage",
+      id: "usage-late",
+      parentId: "u-1",
+      activeLeafId: "cm-ext",
+      timestamp: "2026-08-16T10:05:02.000Z",
+    })}\n`,
+  );
+
+  const { reader } = await fixture(lines);
+  const latest = await reader.readPage({ sessionId: "session-a", limit: 50 });
+  assert.equal(latest.branchLeafId, "cm-ext");
+  assert.equal(latest.items[0]?.itemId, "u-2");
+  assert.equal(latest.hasMoreBefore, true);
+  assert.deepEqual(
+    latest.items.slice(-2).map((entry) => ({ id: entry.itemId, role: entry.kind === "message" ? entry.role : entry.kind })),
+    [
+      { id: "cm-continue", role: "user" },
+      { id: "cm-ext", role: "extension" },
+    ],
+  );
+  const older = await reader.readPage({ sessionId: "session-a", limit: 50, cursor: latest.olderCursor! });
+  assert.equal(older.items[0]?.itemId, "u-1");
+  assert.equal(older.hasMoreBefore, false);
+  assert.equal(older.items.length + latest.items.length, 111);
+});

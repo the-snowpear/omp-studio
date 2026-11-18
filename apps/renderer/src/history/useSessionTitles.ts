@@ -40,9 +40,12 @@ async function flushTitleBatch(client: StudioClient, state: TitleBatchState) {
       const handle = await client.command("session.titles.inspect", { sessionId: state.sessionId, targetSessionIds: batch });
       const { result } = await waitReceipt<{ result: SessionTitlesResult }>(client, handle.requestId);
       const rows = new Map(result.rows.map(row => [row.sessionId, row]));
-      const expiresAt = Date.now() + TITLE_CACHE_TTL_MS;
+      const now = Date.now();
       for (const id of batch) {
         const row = rows.get(id);
+        // Do not hold an untitled inspection in cache for the full 5s TTL when
+        // the caller already has a non-empty title or the session is still being named.
+        const expiresAt = row?.title ? now + TITLE_CACHE_TTL_MS : now + 400;
         for (const request of queued.get(id)!) {
           state.entries.delete(request.key);
           state.entries.set(request.key, { row, expiresAt });

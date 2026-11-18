@@ -5,20 +5,23 @@ import { usePreviewMode } from "../preview/PreviewContext";
 
 export type PlanCreatedLink = {
   readonly title?: string;
+  readonly body?: string;
   readonly demo?: boolean;
   /** Review / preview gallery: pin the card on the last assistant row even without `xd://propose`. */
   readonly attachEvenWithoutPropose?: boolean;
-  readonly onOpen: (origin: HTMLElement) => void;
+  readonly onOpen: (origin: HTMLElement, doc?: { readonly title: string; readonly body: string }) => void;
 };
 
 export function PlanCreatedCard({
   title,
   demo,
+  toolCallId,
   cardRef,
   onOpen,
 }: {
   title: string;
   demo?: boolean;
+  toolCallId?: string;
   cardRef?: RefObject<HTMLButtonElement | null>;
   onOpen: (origin: HTMLElement) => void;
 }) {
@@ -32,6 +35,7 @@ export function PlanCreatedCard({
       ref={originRef}
       type="button"
       className="plan-created"
+      {...(toolCallId === undefined ? {} : { "data-tool-call-id": toolCallId })}
       aria-label={zh ? `打开计划：${title}` : `Open plan: ${title}`}
       onClick={() => {
         const origin = originRef.current;

@@ -1,7 +1,7 @@
 import { AppSelect } from "../AppSelect";
 import { WorkspaceSection } from "../workspaces/Workspace";
 import { JudgeModelPane } from "./JudgeModelPane";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type {
   ClientBootstrap,
   CommandInput,
@@ -25,6 +25,7 @@ import {
 import "./judgments.css";
 
 type QuestionDraft = {
+  uid: string;
   id: string;
   type: "bool" | "choice" | "score";
   instructions: string;
@@ -33,12 +34,47 @@ type QuestionDraft = {
 type Confirmation =
   | { kind: "create"; spec: JudgmentBatchSpec }
   | { kind: "retry" | "cancel" | "close"; batch: JudgmentBatchRow };
-const emptyQuestion = (index = 1): QuestionDraft => ({
-  id: "q" + index,
+let questionUidSeq = 0;
+const emptyQuestion = (id = "q1"): QuestionDraft => ({
+  uid: `q-draft-${++questionUidSeq}`,
+  id,
   type: "bool",
   instructions: "",
   criteria: "",
 });
+function nextQuestionId(rows: readonly QuestionDraft[]): string {
+  const used = new Set(rows.map((row) => row.id));
+  let n = rows.length + 1;
+  while (used.has(`q${n}`)) n += 1;
+  return `q${n}`;
+}
+function parseBoundedInt(
+  raw: string,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const trimmed = raw.trim();
+  if (!trimmed) return fallback;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(parsed)));
+}
+function LazyPreDetails({
+  summary,
+  value,
+}: {
+  summary: ReactNode;
+  value: unknown;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>{summary}</summary>
+      {open ? <pre>{JSON.stringify(value, null, 2)}</pre> : null}
+    </details>
+  );
+}
 function buildSpec(
   intent: string,
   itemsText: string,
@@ -120,6 +156,8 @@ export function JudgmentsPane({
   const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   const t = (cn: string, en: string) => (zh ? cn : en);
   const [open, setOpen] = useState(standalone);
   const [batches, setBatches] = useState<JudgmentBatchRow[]>([]);
@@ -134,12 +172,12 @@ export function JudgmentsPane({
   const [intent, setIntent] = useState("");
   const [items, setItems] = useState("");
   const [jsonItems, setJsonItems] = useState(false);
-  const [questions, setQuestions] = useState<QuestionDraft[]>([
+  const [questions, setQuestions] = useState<QuestionDraft[]>(() => [
     emptyQuestion(),
   ]);
-  const [concurrency, setConcurrency] = useState(4);
-  const [retries, setRetries] = useState(1);
-  const [minOk, setMinOk] = useState(1);
+  const [concurrencyInput, setConcurrencyInput] = useState("4");
+  const [retriesInput, setRetriesInput] = useState("1");
+  const [minOkInput, setMinOkInput] = useState("1");
   const [confirmation, setConfirmation] = useState<Confirmation>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -187,7 +225,7 @@ export function JudgmentsPane({
     setError("");
     setNotice("");
     setConfirmation(undefined);
-    setBatches(preview ? [structuredClone(getPreviewJudgmentBatch(zh))] : []);
+    setBatches(preview ? [structuredClone(getPreviewJudgmentBatch(zhRef.current))] : []);
     setPage(undefined);
     setSelected(undefined);
     setOffset(0);
@@ -198,42 +236,81 @@ export function JudgmentsPane({
     setIntent("");
     setItems("");
     setQuestions([emptyQuestion()]);
+    setConcurrencyInput("4");
+    setRetriesInput("1");
+    setMinOkInput("1");
     setAttachId("");
     return () => {
       generation.current++;
     };
-  }, [sessionId, workspaceId, preview, available, zh]);
+  }, [sessionId, workspaceId, preview, available]);
+  useEffect(() => {
+    if (!preview) return;
+    const demoBatch = structuredClone(getPreviewJudgmentBatch(zh));
+    setBatches((rows) =>
+      rows.length
+        ? rows.map((row) =>
+            row.id === demoBatch.id ? { ...row, intent: demoBatch.intent } : row,
+          )
+        : [demoBatch],
+    );
+  }, [preview, zh]);
   useEffect(() => {
     if (confirmation) confirmRef.current?.focus();
   }, [confirmation]);
   useEffect(() => {
     if (!visible || !open || !canRead || preview || !sessionId) return;
     let active = true;
-    let timer: ReturnType<typeof setTimeout>;
+    let inFlight = false;
+    let hasRunning: boolean | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const isHidden = () => document.hidden || document.visibilityState === "hidden";
+    const clear = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    };
     const poll = async () => {
+      if (!active || inFlight || isHidden()) return;
+      clear();
+      inFlight = true;
       try {
-        if (!document.hidden) {
-          const result = await invoke("judgments.list", {
-            sessionId,
-            ...(listCursor ? { cursor: listCursor } : {}),
-            limit: 50,
-          });
-          if (active) {
-            setBatches(result.batches);
-            setNextCursor(result.nextCursor);
-          }
+        const result = await invoke("judgments.list", {
+          sessionId,
+          ...(listCursor ? { cursor: listCursor } : {}),
+          limit: 50,
+        });
+        if (active) {
+          hasRunning = result.batches.some((batch) => batch.running);
+          setBatches(result.batches);
+          setNextCursor(result.nextCursor);
         }
       } catch (cause) {
         if (active)
-          setError(hostErrorMessage(cause, "Cannot read judgment batches"));
+          setError(
+            hostErrorMessage(
+              cause,
+              zhRef.current ? "无法读取评审批次" : "Cannot read judgment batches",
+            ),
+          );
       } finally {
-        if (active) timer = setTimeout(() => void poll(), 4000);
+        inFlight = false;
+        if (active && !isHidden() && hasRunning === true) {
+          timer = setTimeout(() => void poll(), 4000);
+        }
       }
     };
+    const onVisibility = () => {
+      if (isHidden()) clear();
+      else if (active && !inFlight && hasRunning !== false) void poll();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     void poll();
     return () => {
       active = false;
-      clearTimeout(timer);
+      clear();
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [visible, open, canRead, preview, sessionId, listCursor, invoke, refresh]);
   useEffect(() => {
@@ -260,28 +337,56 @@ export function JudgmentsPane({
     }
     if (!sessionId) return;
     let active = true;
-    let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      try {
-        if (!document.hidden) {
-          const result = await invoke("judgments.read", {
-            sessionId,
-            id: selected,
-            offset,
-            limit: 25,
-          });
-          if (active) setPage(result);
-        }
-      } catch (cause) {
-        if (active) setError(hostErrorMessage(cause, "Cannot read this batch"));
-      } finally {
-        if (active) timer = setTimeout(() => void poll(), 4000);
+    let inFlight = false;
+    let lastRunning: boolean | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const isHidden = () => document.hidden || document.visibilityState === "hidden";
+    const clear = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
       }
     };
+    const poll = async () => {
+      if (!active || inFlight || isHidden()) return;
+      clear();
+      inFlight = true;
+      try {
+        const result = await invoke("judgments.read", {
+          sessionId,
+          id: selected,
+          offset,
+          limit: 25,
+        });
+        if (active) {
+          lastRunning = result.batch.running;
+          setPage(result);
+        }
+      } catch (cause) {
+        if (active)
+          setError(
+            hostErrorMessage(
+              cause,
+              zhRef.current ? "无法读取此批次" : "Cannot read this batch",
+            ),
+          );
+      } finally {
+        inFlight = false;
+        if (active && !isHidden() && lastRunning === true) {
+          timer = setTimeout(() => void poll(), 4000);
+        }
+      }
+    };
+    const onVisibility = () => {
+      if (isHidden()) clear();
+      else if (active && !inFlight && lastRunning !== false) void poll();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     void poll();
     return () => {
       active = false;
-      clearTimeout(timer);
+      clear();
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [
     visible,
@@ -293,7 +398,7 @@ export function JudgmentsPane({
     sessionId,
     invoke,
     refresh,
-    zh,
+    preview ? zh : false,
     preview ? batches : undefined,
   ]);
   const choose = (id: string) => {
@@ -443,11 +548,9 @@ export function JudgmentsPane({
         start = result.nextOffset;
       } while (parts < 10000);
     });
-  const updateQuestion = (index: number, patch: Partial<QuestionDraft>) =>
+  const updateQuestion = (uid: string, patch: Partial<QuestionDraft>) =>
     setQuestions((rows) =>
-      rows.map((row, position) =>
-        position === index ? { ...row, ...patch } : row,
-      ),
+      rows.map((row) => (row.uid === uid ? { ...row, ...patch } : row)),
     );
   return (
     <WorkspaceSection
@@ -586,7 +689,7 @@ export function JudgmentsPane({
               </label>
               {questions.map((question, index) => (
                 <fieldset
-                  key={index}
+                  key={question.uid}
                   disabled={busy}
                   className="judgment-question"
                 >
@@ -601,7 +704,7 @@ export function JudgmentsPane({
                         value={question.id}
                         maxLength={128}
                         onChange={(event) =>
-                          updateQuestion(index, { id: event.target.value })
+                          updateQuestion(question.uid, { id: event.target.value })
                         }
                       />
                     </label>
@@ -611,7 +714,7 @@ export function JudgmentsPane({
                         className="select"
                         value={question.type}
                         onChange={(event) =>
-                          updateQuestion(index, {
+                          updateQuestion(question.uid, {
                             type: event.target.value as QuestionDraft["type"],
                             criteria: "",
                           })
@@ -631,7 +734,7 @@ export function JudgmentsPane({
                       disabled={questions.length === 1}
                       onClick={() =>
                         setQuestions((rows) =>
-                          rows.filter((_, position) => position !== index),
+                          rows.filter((item) => item.uid !== question.uid),
                         )
                       }
                     >
@@ -646,7 +749,7 @@ export function JudgmentsPane({
                       maxLength={8000}
                       value={question.instructions}
                       onChange={(event) =>
-                        updateQuestion(index, {
+                        updateQuestion(question.uid, {
                           instructions: event.target.value,
                         })
                       }
@@ -669,7 +772,7 @@ export function JudgmentsPane({
                         maxLength={64000}
                         value={question.criteria}
                         onChange={(event) =>
-                          updateQuestion(index, {
+                          updateQuestion(question.uid, {
                             criteria: event.target.value,
                           })
                         }
@@ -684,7 +787,7 @@ export function JudgmentsPane({
                 onClick={() =>
                   setQuestions((rows) => [
                     ...rows,
-                    emptyQuestion(rows.length + 1),
+                    emptyQuestion(nextQuestionId(rows)),
                   ])
                 }
               >
@@ -698,9 +801,12 @@ export function JudgmentsPane({
                     type="number"
                     min={1}
                     max={32}
-                    value={concurrency}
-                    onChange={(event) =>
-                      setConcurrency(event.target.valueAsNumber)
+                    value={concurrencyInput}
+                    onChange={(event) => setConcurrencyInput(event.target.value)}
+                    onBlur={() =>
+                      setConcurrencyInput(
+                        String(parseBoundedInt(concurrencyInput, 4, 1, 32)),
+                      )
                     }
                   />
                 </label>
@@ -711,8 +817,13 @@ export function JudgmentsPane({
                     type="number"
                     min={0}
                     max={5}
-                    value={retries}
-                    onChange={(event) => setRetries(event.target.valueAsNumber)}
+                    value={retriesInput}
+                    onChange={(event) => setRetriesInput(event.target.value)}
+                    onBlur={() =>
+                      setRetriesInput(
+                        String(parseBoundedInt(retriesInput, 1, 0, 5)),
+                      )
+                    }
                   />
                 </label>
                 <label>
@@ -722,8 +833,13 @@ export function JudgmentsPane({
                     type="number"
                     min={0}
                     max={500}
-                    value={minOk}
-                    onChange={(event) => setMinOk(event.target.valueAsNumber)}
+                    value={minOkInput}
+                    onChange={(event) => setMinOkInput(event.target.value)}
+                    onBlur={() =>
+                      setMinOkInput(
+                        String(parseBoundedInt(minOkInput, 1, 0, 500)),
+                      )
+                    }
                   />
                 </label>
               </div>
@@ -739,11 +855,9 @@ export function JudgmentsPane({
                     setJsonItems(true);
                     setQuestions([
                       {
-                        id: "clear",
-                        type: "bool",
+                        ...emptyQuestion("clear"),
                         instructions:
                           spec.questions.clear!.instructions,
-                        criteria: "",
                       },
                     ]);
                   }}
@@ -756,6 +870,9 @@ export function JudgmentsPane({
                 disabled={busy || !canCreate}
                 onClick={() => {
                   try {
+                    const concurrency = parseBoundedInt(concurrencyInput, 4, 1, 32);
+                    const retries = parseBoundedInt(retriesInput, 1, 0, 5);
+                    const minOk = parseBoundedInt(minOkInput, 1, 0, 500);
                     setConfirmation({
                       kind: "create",
                       spec: buildSpec(
@@ -770,7 +887,12 @@ export function JudgmentsPane({
                     });
                     setError("");
                   } catch (cause) {
-                    setError(hostErrorMessage(cause, "Invalid batch input"));
+                    setError(
+                      hostErrorMessage(
+                        cause,
+                        t("批次输入无效", "Invalid batch input"),
+                      ),
+                    );
                   }
                 }}
               >
@@ -807,12 +929,10 @@ export function JudgmentsPane({
                       )}
               </p>
               {confirmation.kind === "create" ? (
-                <details>
-                  <summary>
-                    {t("检查实际请求内容", "Inspect the request")}
-                  </summary>
-                  <pre>{JSON.stringify(confirmation.spec, null, 2)}</pre>
-                </details>
+                <LazyPreDetails
+                  summary={t("检查实际请求内容", "Inspect the request")}
+                  value={confirmation.spec}
+                />
               ) : null}
               <button
                 ref={confirmRef}
@@ -963,7 +1083,7 @@ export function JudgmentsPane({
                       </thead>
                       <tbody>
                         {page.items.map((item, index) => (
-                          <tr key={page.offset + index}>
+                          <tr key={`${page.offset}:${String(item.key)}:${index}`}>
                             <td className="mono">{String(item.key)}</td>
                             <td>
                               {item.error ? (
@@ -973,19 +1093,20 @@ export function JudgmentsPane({
                               ) : (
                                 Object.entries(item.answers ?? {}).map(
                                   ([id, answer]) => (
-                                    <details key={id}>
-                                      <summary>
-                                        <strong>{id}</strong>:{" "}
-                                        {answer.type === "bool"
-                                          ? `P(yes) ${(answer.bool * 100).toFixed(1)}%`
-                                          : answer.type === "choice"
-                                            ? answer.choice
-                                            : answer.score.toFixed(3)}
-                                      </summary>
-                                      <pre>
-                                        {JSON.stringify(answer, null, 2)}
-                                      </pre>
-                                    </details>
+                                    <LazyPreDetails
+                                      key={id}
+                                      summary={
+                                        <>
+                                          <strong>{id}</strong>:{" "}
+                                          {answer.type === "bool"
+                                            ? `P(yes) ${(answer.bool * 100).toFixed(1)}%`
+                                            : answer.type === "choice"
+                                              ? answer.choice
+                                              : answer.score.toFixed(3)}
+                                        </>
+                                      }
+                                      value={answer}
+                                    />
                                   ),
                                 )
                               )}

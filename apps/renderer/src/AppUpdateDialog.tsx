@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouse
 import { createPortal } from "react-dom";
 import { Brand } from "./brands";
 import { Icon } from "./icons";
-import { pickLocale, useI18n } from "./i18n";
+import { useI18n } from "./i18n";
 import { PLATFORM } from "./platform";
 import { usePreviewMode } from "./preview/PreviewContext";
 
@@ -86,7 +86,8 @@ export function AppUpdateDialog({
   onSkip,
   onCancel,
 }: AppUpdateDialogProps): ReactNode {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const { marks } = usePreviewMode();
   const [operation, setOperation] = useState<"download" | "apply" | null>(null);
   const downloading = isDownloading || operation === "download";
@@ -244,7 +245,7 @@ export function AppUpdateDialog({
             >
               {update.releaseNotes?.trim() || t("appUpdate.noReleaseNotes")}
             </div>
-            {update.component !== "runtime" && onOpenComponents ? <div className="file-release-note"><p>{pickLocale("文件现在可以在工作台中打开。Word 和 PPT 使用单独安装的 Office 文档预览组件，Excel / CSV 已内置支持。", "Documents now open inside the workbench. Word and PPT use the separately installed Office preview component; Excel and CSV are built in.")}</p><button className="btn small outline" disabled={busy} onClick={onOpenComponents}>{pickLocale("管理可选组件", "Manage optional components")}</button></div> : null}
+            {update.component !== "runtime" && onOpenComponents ? <div className="file-release-note"><p>{zh ? "文件现在可以在工作台中打开。Word 和 PPT 使用单独安装的 Office 文档预览组件，Excel / CSV 已内置支持。" : "Documents now open inside the workbench. Word and PPT use the separately installed Office preview component; Excel and CSV are built in."}</p><button className="btn small outline" disabled={busy} onClick={onOpenComponents}>{zh ? "管理可选组件" : "Manage optional components"}</button></div> : null}
           </div>
 
           {([
@@ -282,7 +283,7 @@ export function AppUpdateDialog({
                     height: "100%",
                     background: "var(--accent)",
                     width: progressPct !== null ? `${progressPct}%` : "100%",
-                    transition: "width 0.3s ease",
+                    transition: "width var(--dur) var(--ease)",
                   }}
                 />
               </div>

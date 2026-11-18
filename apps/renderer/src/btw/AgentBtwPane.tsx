@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { BtwSnapshot, PromptImageInput, StudioClient } from "@omp-studio/client-contract";
 import type { AgentBtwOperation, AgentBtwState } from "@omp-studio/studio-protocol";
+import { useSurfaceDocument } from "../dock/SurfaceContext";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { agentBtwPreview, getPreviewChildBtwTurns } from "../preview/agentBtwPreview";
 import { useI18n } from "../i18n";
@@ -12,14 +13,19 @@ import type { BtwSessionApi } from "./useBtwSession";
 import { invokeUpgrade } from "../runtimeUpgrade";
 import type { SubagentBtwViewState } from "../conversation/subagentViewState";
 
-export function AgentBtwPane({ client, sessionId, agentId, available, viewState, showTarget = true }: {
-  client: StudioClient | undefined; sessionId: string | undefined; agentId: string; available: boolean; viewState?: SubagentBtwViewState;
+export function AgentBtwPane({ client, sessionId, agentId, available, visible = true, viewState, showTarget = true }: {
+  client: StudioClient | undefined; sessionId: string | undefined; agentId: string; available: boolean; visible?: boolean; viewState?: SubagentBtwViewState;
   /** The `agentId · target session` line; the Agent Hub shows the id in its own technical details instead. */
   showTarget?: boolean;
 }) {
+  const surfaceDoc = useSurfaceDocument();
   const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
+  const prevZhRef = useRef(zh);
+  const [docVisible, setDocVisible] = useState(() => !surfaceDoc.hidden);
   const [state, setState] = useState<AgentBtwState | undefined>(() => preview ? viewState?.previewState : undefined);
   const [draft, setDraftValue] = useState<ComposerSnapshot>(() => viewState?.draft ?? emptySnapshot());
   const [topic, setTopicValue] = useState(() => viewState?.topic ?? "");
@@ -29,61 +35,165 @@ export function AgentBtwPane({ client, sessionId, agentId, available, viewState,
   const [notice, setNotice] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
+  const rootRef = useRef<HTMLElement>(null);
   const demoHistory = useRef<Record<string, AgentBtwState["turns"]>>({ "demo-child-topic": [...getPreviewChildBtwTurns(zh)] });
   const epoch = useRef(0);
   const binding = useRef<string | undefined>(undefined);
   const stopped = useRef(false);
   const action = useRef(false);
+  const reading = useRef(false);
+  const pendingRead = useRef(false);
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const topicRef = useRef(topic); topicRef.current = topic;
   const availableRef = useRef(available); availableRef.current = available;
+  const visibleRef = useRef(visible); visibleRef.current = visible;
   const stateRef = useRef(state); stateRef.current = state;
   const historyTopic = useRef("");
   const historyVersion = useRef("");
-  const execute = async (operation: AgentBtwOperation) => {
+  const isShown = useCallback(() => {
+    if (!visibleRef.current || surfaceDoc.hidden) return false;
+    return rootRef.current?.closest("[hidden]") === null || rootRef.current === null;
+  }, [surfaceDoc]);
+  const clearPoll = useCallback(() => {
+    if (pollTimer.current !== undefined) {
+      clearTimeout(pollTimer.current);
+      pollTimer.current = undefined;
+    }
+  }, []);
+  const execute = useCallback(async (operation: AgentBtwOperation) => {
     if (!client) throw Error("Host unavailable");
     const { kind, ...input } = operation;
     const handle = await client.command(kind, input as never);
     return (await waitReceipt<{ result: AgentBtwState }>(client, handle.requestId)).result;
-  };
-  useEffect(() => {
-    const generation = ++epoch.current;
-    binding.current = undefined; stopped.current = false; action.current = false;
-    historyTopic.current = ""; historyVersion.current = "";
-    setState(preview ? viewState?.previewState ?? agentBtwPreview(agentId, zh) : undefined);
-    setTopic(viewState?.topic ?? ""); setDraft(viewState?.draft ?? emptySnapshot()); setError(undefined); setNotice(undefined); setBusy(false);
-    demoHistory.current = viewState?.previewHistory ?? { "demo-child-topic": [...getPreviewChildBtwTurns(zh)] };
-    if (preview && viewState) viewState.previewHistory = demoHistory.current;
-    let timer: ReturnType<typeof setTimeout>;
-    const read = async () => {
-      if (!preview && client && sessionId && availableRef.current && !stopped.current && !action.current) {
-        const requestedTopic = topicRef.current;
-        const current = stateRef.current?.snapshot;
-        const version = current ? current.ephemeralId + ":" + current.status : "idle";
-        const includeHistory = !!requestedTopic && (historyTopic.current !== requestedTopic || historyVersion.current !== version);
-        try {
-          const result = await execute({ kind: "agent.btw.read", sessionId, agentId, ...(binding.current ? { binding: binding.current } : {}), ...(includeHistory ? { topicId: requestedTopic } : {}) });
-          if (generation === epoch.current) {
-            binding.current = result.binding;
-            if (requestedTopic === topicRef.current) {
-              if (includeHistory) { historyTopic.current = requestedTopic; historyVersion.current = result.snapshot ? result.snapshot.ephemeralId + ":" + result.snapshot.status : "idle"; }
-              setState(previous => ({ ...result, turns: includeHistory ? result.turns : previous?.turns ?? [] })); setLoading(false);
-            }
-          }
-        } catch (cause) {
-          if (generation === epoch.current) { stopped.current = true; setLoading(false); setError(hostErrorMessage(cause, zh ? "子代理 BTW 不可用；请重新打开此目标" : "Child BTW unavailable; reopen this target")); }
+  }, [client]);
+  const readOnce = useCallback(async (): Promise<void> => {
+    clearPoll();
+    if (preview || !client || !sessionId || !availableRef.current || !isShown() || stopped.current || action.current) return;
+    if (reading.current) {
+      pendingRead.current = true;
+      return;
+    }
+    reading.current = true;
+    pendingRead.current = false;
+    const generation = epoch.current;
+    const requestedTopic = topicRef.current;
+    const current = stateRef.current?.snapshot;
+    const version = current ? current.ephemeralId + ":" + current.status : "idle";
+    const includeHistory = !!requestedTopic && (historyTopic.current !== requestedTopic || historyVersion.current !== version);
+    let nextRunning = false;
+    try {
+      const result = await execute({ kind: "agent.btw.read", sessionId, agentId, ...(binding.current ? { binding: binding.current } : {}), ...(includeHistory ? { topicId: requestedTopic } : {}) });
+      if (generation === epoch.current) {
+        binding.current = result.binding;
+        nextRunning = result.snapshot?.status === "running";
+        if (requestedTopic === topicRef.current) {
+          if (includeHistory) { historyTopic.current = requestedTopic; historyVersion.current = result.snapshot ? result.snapshot.ephemeralId + ":" + result.snapshot.status : "idle"; }
+          setState(previous => ({ ...result, turns: includeHistory ? result.turns : previous?.turns ?? [] }));
+          setLoading(false);
+        } else {
+          pendingRead.current = true;
         }
       }
-      if (generation === epoch.current) timer = setTimeout(() => void read(), 500);
+    } catch (cause) {
+      if (generation === epoch.current) {
+        stopped.current = true;
+        setLoading(false);
+        setError(hostErrorMessage(cause, zhRef.current ? "子代理 BTW 不可用；请重新打开此目标" : "Child BTW unavailable; reopen this target"));
+      }
+    } finally {
+      reading.current = false;
+      if (generation === epoch.current && !preview && availableRef.current && isShown() && !stopped.current && !action.current) {
+        if (pendingRead.current) {
+          pendingRead.current = false;
+          void readOnce();
+        } else if (nextRunning) {
+          pollTimer.current = setTimeout(() => {
+            pollTimer.current = undefined;
+            void readOnce();
+          }, 500);
+        }
+      }
+    }
+  }, [agentId, clearPoll, client, execute, isShown, preview, sessionId]);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      const next = !surfaceDoc.hidden;
+      setDocVisible(next);
+      if (!next) clearPoll();
     };
-    if (!preview) void read();
-    return () => { epoch.current++; clearTimeout(timer); };
-  }, [client, sessionId, agentId, preview, zh]);
+    surfaceDoc.addEventListener("visibilitychange", onVisibility);
+    return () => surfaceDoc.removeEventListener("visibilitychange", onVisibility);
+  }, [clearPoll, surfaceDoc]);
+
+  useEffect(() => {
+    epoch.current++;
+    clearPoll();
+    reading.current = false; pendingRead.current = false;
+    binding.current = undefined; stopped.current = false; action.current = false;
+    historyTopic.current = ""; historyVersion.current = "";
+    const nextTopic = viewState?.topic ?? "";
+    topicRef.current = nextTopic;
+    setState(preview ? viewState?.previewState ?? agentBtwPreview(agentId, zhRef.current) : undefined);
+    setTopic(nextTopic); setDraft(viewState?.draft ?? emptySnapshot()); setError(undefined); setNotice(undefined); setBusy(false); setLoading(false);
+    demoHistory.current = viewState?.previewHistory ?? { "demo-child-topic": [...getPreviewChildBtwTurns(zhRef.current)] };
+    if (preview && viewState) viewState.previewHistory = demoHistory.current;
+    if (!preview) void readOnce();
+    return () => { epoch.current++; clearPoll(); };
+  }, [client, sessionId, agentId, preview, clearPoll, readOnce]);
+
+  const prevGateRef = useRef({ available, visible, docVisible });
+  useEffect(() => {
+    const prev = prevGateRef.current;
+    prevGateRef.current = { available, visible, docVisible };
+    if (prev.available === available && prev.visible === visible && prev.docVisible === docVisible) return;
+    if (!available || !visible || !docVisible) {
+      clearPoll();
+      return;
+    }
+    if (!prev.available && available) {
+      stopped.current = false;
+      setError(undefined);
+    }
+    if (!preview) void readOnce();
+  }, [available, visible, docVisible, preview, clearPoll, readOnce]);
+
+  useEffect(() => {
+    if (prevZhRef.current === zh) return;
+    const oldZh = prevZhRef.current;
+    prevZhRef.current = zh;
+    if (!preview) return;
+    const prevTurn = getPreviewChildBtwTurns(oldZh)[0]!;
+    const nextTurn = getPreviewChildBtwTurns(zh)[0]!;
+    const demoTurns = demoHistory.current["demo-child-topic"];
+    if (demoTurns) {
+      demoHistory.current["demo-child-topic"] = demoTurns.map(turn =>
+        turn.question === prevTurn.question && turn.answer === prevTurn.answer
+          ? { ...turn, question: nextTurn.question, answer: nextTurn.answer }
+          : turn,
+      );
+    }
+    setState(current => {
+      if (!current) return current;
+      const updatedTopics = current.topics.map(item =>
+        item.topicId === "demo-child-topic" && item.question === prevTurn.question
+          ? { ...item, question: nextTurn.question }
+          : item,
+      );
+      const updatedTurns = topicRef.current === "demo-child-topic"
+        ? (demoHistory.current["demo-child-topic"] ?? current.turns)
+        : current.turns;
+      return { ...current, topics: updatedTopics, turns: updatedTurns };
+    });
+  }, [preview, zh]);
+
   useEffect(() => { if (preview && viewState && state) viewState.previewState = state; }, [preview, viewState, state]);
 
   const choose = (next: string) => {
     topicRef.current = next; setTopic(next); setDraft(emptySnapshot()); setNotice(undefined);
     setLoading(!!next && !preview);
     setState(current => current ? { ...current, turns: preview ? demoHistory.current[next] ?? [] : [] } : current);
+    if (next && !preview) void readOnce();
   };
   const running = state?.snapshot?.status === "running";
   const refreshHistory = async () => {
@@ -111,6 +221,13 @@ export function AgentBtwPane({ client, sessionId, agentId, available, viewState,
       const result = await execute({ kind: "agent.btw.ask", sessionId, agentId, binding: binding.current, question: question.trim(), ...(topic ? { topicId: topic } : {}), ...(images?.length ? { images } : {}) });
       if (generation !== epoch.current) return false;
       setState(result); setTopic(result.snapshot?.topicId ?? topic); setLoading(false);
+      if (result.snapshot?.status === "running" && availableRef.current && isShown() && !stopped.current) {
+        clearPoll();
+        pollTimer.current = setTimeout(() => {
+          pollTimer.current = undefined;
+          void readOnce();
+        }, 500);
+      }
       return true;
     } catch (cause) {
       if (generation === epoch.current) { stopped.current = true; setError(hostErrorMessage(cause, zh ? "目标失效或回执不确定，请检查后重新打开" : "Target invalid or outcome uncertain; reopen it")); }
@@ -155,9 +272,10 @@ export function AgentBtwPane({ client, sessionId, agentId, available, viewState,
     ...(!preview && client && available ? { resolveImagePaste: async (text: string) => (await invokeUpgrade(client, "btw.images.resolve", { text })).images } : {}),
     ...(client && sessionId ? { dictation: { client, sessionId, available } } : {}),
   };
-  return <section className="btw-child-pane" aria-label={zh ? "子代理 BTW" : "Child agent BTW"}>
+  const paneVisible = visible && docVisible && (preview || available || rootRef.current?.closest("[hidden]") === null);
+  return <section ref={rootRef} className="btw-child-pane" aria-label={zh ? "子代理 BTW" : "Child agent BTW"}>
     {showTarget ? <p className="btw-child-context">{agentId} · {preview && marks ? (zh ? "演示" : "Demo") : state?.targetSessionId ?? "—"}</p> : null}
     {!preview && !available ? <p role="status" className="btw-child-context">{zh ? "当前 Runtime 或目标不支持子代理 BTW" : "This Runtime or target does not support child BTW"}</p> : null}
-    <BtwPanel session={session} demo={preview} />
+    <BtwPanel session={session} demo={preview} visible={paneVisible} />
   </section>;
 }

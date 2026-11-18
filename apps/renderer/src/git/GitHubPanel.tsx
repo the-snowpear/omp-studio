@@ -18,7 +18,8 @@ export function GitHubPanel({ client, workspaceId, kind, onReference, visible = 
   const { preview, marks } = usePreviewMode();
   const source = useMemo(() => preview ? previewGithubSource : githubSource(client), [preview, client]);
   const target = preview ? "preview-git" as WorkspaceId : workspaceId;
-  const [repositories, setRepositories] = useState<readonly GitHubRepository[]>();
+  const [repositoriesState, setRepositoriesState] = useState<{ target: WorkspaceId; repositories: readonly GitHubRepository[] }>();
+  const repositories = target !== undefined && repositoriesState !== undefined && repositoriesState.target === target ? repositoriesState.repositories : undefined;
   const shared = useOptionalGitWorkspace();
   const [localRemote, setLocalRemote] = useState("");
   const remote = shared?.remote ?? localRemote;
@@ -28,7 +29,8 @@ export function GitHubPanel({ client, workspaceId, kind, onReference, visible = 
   if (remoteRef.current !== remote) { remoteRef.current = remote; authGeneration.current++; }
   const [pendingRemote, setPendingRemote] = useState(intent?.remote);
   const [detailIntent, setDetailIntent] = useState(intent);
-  const [auth, setAuth] = useState<GitHubAuthReadModel>();
+  const [authState, setAuthState] = useState<{ target: WorkspaceId; remote: string; auth: GitHubAuthReadModel }>();
+  const auth = target !== undefined && authState !== undefined && authState.target === target && authState.remote === remote ? authState.auth : undefined;
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
   const [loginBusy, setLoginBusy] = useState(false);
@@ -36,11 +38,12 @@ export function GitHubPanel({ client, workspaceId, kind, onReference, visible = 
   const repository = repositories?.find(repo => repo.remote === remote);
   useEffect(() => {
     if (!visible || !target) return;
+    const requestedTarget = target;
     let current = true;
-    setError(""); setRepositories(undefined);
-    void source.query("github.repositories.list", { workspaceId: target }).then(result => {
+    setError(""); setRepositoriesState(undefined);
+    void source.query("github.repositories.list", { workspaceId: requestedTarget }).then(result => {
       if (!current) return;
-      setRepositories(result.repositories);
+      setRepositoriesState({ target: requestedTarget, repositories: result.repositories });
       setRemote(prior => result.repositories.some(repo => repo.remote === prior) ? prior : (result.repositories.find(repo => repo.remote === "origin") ?? result.repositories[0])?.remote ?? "");
     }, cause => { if (current) setError(hostErrorMessage(cause, t("github.failed"))); });
     return () => { current = false; };
@@ -49,22 +52,32 @@ export function GitHubPanel({ client, workspaceId, kind, onReference, visible = 
   useEffect(() => {
     if (!pendingRemote || !repositories) return;
     if (repositories.some(repo => repo.remote === pendingRemote)) setRemote(pendingRemote);
+    else setDetailIntent(undefined);
     setPendingRemote(undefined);
   }, [pendingRemote, repositories, setRemote]);
   useEffect(() => {
     if (!target || !remote || !visible) return;
+    const requestedTarget = target;
+    const requestedRemote = remote;
     let current = true;
-    setAuth(undefined); setError("");
-    void source.query("github.auth.get", { workspaceId: target, remote }).then(value => { if (current) setAuth(value); }, cause => { if (current) setError(hostErrorMessage(cause, t("github.failed"))); });
+    setAuthState(undefined); setError("");
+    void source.query("github.auth.get", { workspaceId: requestedTarget, remote: requestedRemote }).then(value => {
+      if (current) setAuthState({ target: requestedTarget, remote: requestedRemote, auth: value });
+    }, cause => { if (current) setError(hostErrorMessage(cause, t("github.failed"))); });
     return () => { current = false; };
   }, [source, target, remote, refresh, visible]);
   const login = async () => {
     const generation = authGeneration.current;
     const currentRemote = remote;
+    const currentTarget = target;
     setLoginBusy(true); setError("");
     try {
       if (!preview) {
-        const handle = await client.command("github.execute", { operation: { kind: "auth.login", host: repository?.host ?? "github.com" } });
+        const handle = await client.command("github.execute", {
+          ...(currentTarget ? { workspaceId: currentTarget } : {}),
+          ...(currentRemote ? { remote: currentRemote } : {}),
+          operation: { kind: "auth.login", host: repository?.host ?? "github.com" },
+        });
         await waitReceipt(client, handle.requestId);
       }
       if (authGeneration.current === generation && remoteRef.current === currentRemote) setRefresh(value => value + 1);
@@ -113,14 +126,20 @@ function GitHubCollection({ source, client, workspaceId, repository, kind, previ
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
   const [included, setIncluded] = useState<ReadonlySet<string>>(new Set());
   const [detailTab, setDetailTab] = useState("description");
+  const [addingNumbers, setAddingNumbers] = useState<ReadonlySet<number>>(new Set());
+  const [loadingDiffPaths, setLoadingDiffPaths] = useState<ReadonlySet<string>>(new Set());
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [commentsLoading, setCommentsLoading] = useState(false);
   const [operationBusy, setOperationBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [mergePending, setMergePending] = useState(false);
   const alive = useRef(true);
+  const scopeVersion = useRef(0);
   const listVersion = useRef(0);
   const detailVersion = useRef(0);
   const target = { workspaceId, remote: repository.remote };
-  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; scopeVersion.current++; }; }, []);
+  useEffect(() => () => { scopeVersion.current++; }, [source, workspaceId, repository.remote, kind]);
   useEffect(() => {
     if (!intent) return;
     setSelected(intent.number);
@@ -142,7 +161,7 @@ function GitHubCollection({ source, client, workspaceId, repository, kind, previ
 
   useEffect(() => {
     const version = ++detailVersion.current;
-    setDetail(undefined); setComments([]); setFiles(undefined); setDiffs({}); setOpened(new Set()); setIncluded(new Set()); setDetailError(""); setDetailTab("description"); setMergePending(false); setOperationBusy(false);
+    setDetail(undefined); setComments([]); setFiles(undefined); setDiffs({}); setOpened(new Set()); setIncluded(new Set()); setLoadingDiffPaths(new Set()); setFilesLoading(false); setCommentsLoading(false); setDetailError(""); setDetailTab("description"); setMergePending(false); setOperationBusy(false);
     if (selected === undefined) return;
     setDetailBusy(true);
     const input = { ...target, kind, number: selected };
@@ -156,19 +175,27 @@ function GitHubCollection({ source, client, workspaceId, repository, kind, previ
   }, [source, workspaceId, repository.remote, kind, selected, revision, preview ? resolvedLanguage : ""]);
 
   const add = async (row: GitHubItem) => {
-    const version = detailVersion.current;
-    setOperationBusy(true); setNotice("");
+    if (addingNumbers.has(row.number)) return;
+    const version = scopeVersion.current;
+    const current = detail?.item.number === row.number;
+    const capturedDiffs = current ? [...included].flatMap(path => diffs[path] ? [diffs[path]!] : []) : [];
+    const capturedDetail = current ? detail : undefined;
+    const capturedComments = current ? comments : undefined;
+    setAddingNumbers(prior => new Set(prior).add(row.number));
+    setNotice("");
     try {
-      const current = detail?.item.number === row.number;
-      const [value, discussion] = current ? [detail!, { comments }] : await Promise.all([
+      const [value, discussion] = capturedDetail && capturedComments ? [capturedDetail, { comments: capturedComments }] : await Promise.all([
         source.query("github.items.get", { ...target, kind, number: row.number }), source.query("github.discussion.list", { ...target, kind, number: row.number }),
       ]);
-      if (!alive.current || version !== detailVersion.current) return;
-      onReference({ repository: value.repository, item: value.item, comments: discussion.comments, checks: value.checks, capturedAt: new Date().toISOString(),
-        diffs: current ? [...included].flatMap(path => diffs[path] ? [diffs[path]!] : []) : [] });
+      if (!alive.current || version !== scopeVersion.current) return;
+      onReference({ repository: value.repository, item: value.item, comments: discussion.comments, checks: value.checks, capturedAt: new Date().toISOString(), diffs: capturedDiffs });
       setNotice(t("github.added"));
-    } catch (cause) { if (alive.current) setNotice(errorText(cause)); }
-    finally { if (alive.current) setOperationBusy(false); }
+    } catch (cause) { if (alive.current && version === scopeVersion.current) setNotice(errorText(cause)); }
+    finally {
+      if (alive.current) {
+        setAddingNumbers(prior => { const next = new Set(prior); next.delete(row.number); return next; });
+      }
+    }
   };
 
   const moreItems = async () => {
@@ -183,35 +210,40 @@ function GitHubCollection({ source, client, workspaceId, repository, kind, previ
   };
 
   const loadFiles = async (nextPage = 1) => {
-    if (!detail?.item.headOid) return;
+    if (!detail?.item.headOid || filesLoading) return;
     const version = detailVersion.current;
-    setOperationBusy(true); setDetailError("");
+    setFilesLoading(true); setDetailError("");
     try {
       const next = await source.query("github.pr.files", { ...target, number: detail.item.number, headOid: detail.item.headOid, page: nextPage });
       if (alive.current && version === detailVersion.current) { setFiles(prior => nextPage === 1 ? next.files : [...(prior ?? []), ...next.files]); setFilePage(next.nextPage); }
     } catch (cause) { if (alive.current && version === detailVersion.current) setDetailError(errorText(cause)); }
-    finally { if (alive.current && version === detailVersion.current) setOperationBusy(false); }
+    finally { if (alive.current && version === detailVersion.current) setFilesLoading(false); }
   };
   const toggleFile = async (path: string) => {
     setOpened(prior => { const next = new Set(prior); next.has(path) ? next.delete(path) : next.add(path); return next; });
-    if (diffs[path] || !detail?.item.headOid) return;
+    if (diffs[path] || loadingDiffPaths.has(path) || !detail?.item.headOid) return;
     const version = detailVersion.current;
-    setOperationBusy(true); setDetailError("");
+    setLoadingDiffPaths(prior => new Set(prior).add(path));
+    setDetailError("");
     try {
       const value = await source.query("github.pr.diff", { ...target, number: detail.item.number, headOid: detail.item.headOid, path });
       if (alive.current && version === detailVersion.current) setDiffs(prior => ({ ...prior, [path]: value }));
     } catch (cause) { if (alive.current && version === detailVersion.current) setDetailError(errorText(cause)); }
-    finally { if (alive.current && version === detailVersion.current) setOperationBusy(false); }
+    finally {
+      if (alive.current && version === detailVersion.current) {
+        setLoadingDiffPaths(prior => { const next = new Set(prior); next.delete(path); return next; });
+      }
+    }
   };
   const moreComments = async () => {
-    if (!detail || !commentPage) return;
+    if (!detail || !commentPage || commentsLoading) return;
     const version = detailVersion.current;
-    setOperationBusy(true);
+    setCommentsLoading(true);
     try {
       const next = await source.query("github.discussion.list", { ...target, kind, number: detail.item.number, page: commentPage });
       if (alive.current && version === detailVersion.current) { setComments(prior => [...prior, ...next.comments.filter(row => !prior.some(old => old.id === row.id))].sort((a, b) => a.createdAt.localeCompare(b.createdAt))); setCommentPage(next.nextPage); }
     } catch (cause) { if (alive.current && version === detailVersion.current) setDetailError(errorText(cause)); }
-    finally { if (alive.current && version === detailVersion.current) setOperationBusy(false); }
+    finally { if (alive.current && version === detailVersion.current) setCommentsLoading(false); }
   };
   const execute = async (operation: GitHubOperation) => {
     const version = detailVersion.current;
@@ -260,7 +292,7 @@ function GitHubCollection({ source, client, workspaceId, repository, kind, previ
             {row.labels.length ? <span className="gh-labels">{row.labels.map(name => <span key={name}>{name}</span>)}</span> : null}
             {kind === "pr" ? <span className="gh-item-meta">CI: {status(row.checkState)} · {status(row.reviewDecision)}</span> : null}
           </button>
-          <button type="button" className="icon-btn small gh-add" disabled={operationBusy} title={t("github.add")} aria-label={`${t("github.add")} #${row.number}`} onClick={() => void add(row)}><Icon name="at" extra="sm" /></button>
+          <button type="button" className="icon-btn small gh-add" disabled={addingNumbers.has(row.number)} title={t("github.add")} aria-label={`${t("github.add")} #${row.number}`} onClick={() => void add(row)}><Icon name="at" extra="sm" /></button>
         </div>)}
         {page?.nextCursor ? <button className="btn small outline gh-load-more" disabled={listBusy} onClick={() => void moreItems()}>{t("github.more")}</button> : null}
       </div>
@@ -268,7 +300,7 @@ function GitHubCollection({ source, client, workspaceId, repository, kind, previ
         {selected === undefined ? <div className="gh-empty">{t("github.selectItem")}</div> : <>
           <div className="gh-detail-actions"><button type="button" className="icon-btn small gh-back" aria-label={t("github.back")} title={t("github.back")} onClick={() => setSelected(undefined)}><Icon name="chevron-l" /></button><span className="spacer" />
             <button className="icon-btn small" aria-label={t("github.refresh")} onClick={() => setRevision(value => value + 1)}><Icon name="refresh" extra="sm" /></button>
-            {detail ? <><a href={detail.item.url} target="_blank" rel="noreferrer" className="icon-btn small" aria-label={t("github.openGithub")} title={t("github.openGithub")}><Icon name="github" /></a><button type="button" className="icon-btn small gh-reference-action" aria-label={t("github.add")} title={t("github.add")} disabled={operationBusy} onClick={() => void add(detail.item)}><Icon name="at" /></button></> : null}
+            {detail ? <><a href={detail.item.url} target="_blank" rel="noreferrer" className="icon-btn small" aria-label={t("github.openGithub")} title={t("github.openGithub")}><Icon name="github" /></a><button type="button" className="icon-btn small gh-reference-action" aria-label={t("github.add")} title={t("github.add")} disabled={addingNumbers.has(detail.item.number)} onClick={() => void add(detail.item)}><Icon name="at" /></button></> : null}
           </div>
           {detailError ? <div className="gh-error" role="alert">{detailError}<button className="btn small outline" onClick={() => setRevision(value => value + 1)}>{t("github.refresh")}</button></div> : null}
           {detailBusy ? <div className="gh-empty" role="status">{t("github.loading")}</div> : detail ? <>
@@ -277,16 +309,16 @@ function GitHubCollection({ source, client, workspaceId, repository, kind, previ
                 {mergePending ? <div className="gh-merge-confirm"><p>{t("github.confirmMerge")}</p><button className="btn small primary" disabled={operationBusy} onClick={() => void execute({ kind: "pr.merge", number: detail.item.number, method: "squash", expectedHeadOid: detail.item.headOid! })}>{t("github.merge")}</button><button className="btn small outline" onClick={() => setMergePending(false)}>{t("common.cancel")}</button></div> : null}</> : null}
             </header>
             <div className="gh-detail-tabs" role="tablist" aria-label={t("github.detail")}>
-              {["description", "discussion", ...(kind === "pr" ? ["checks", "files"] : [])].map(tab => <button type="button" role="tab" aria-selected={detailTab === tab} key={tab} onClick={() => { setDetailTab(tab); if (tab === "files" && files === undefined && !operationBusy) void loadFiles(); }}>{t(`github.${tab}`)}{tab === "discussion" ? ` (${comments.length})` : ""}</button>)}
+              {["description", "discussion", ...(kind === "pr" ? ["checks", "files"] : [])].map(tab => <button type="button" role="tab" aria-selected={detailTab === tab} key={tab} onClick={() => { setDetailTab(tab); if (tab === "files" && files === undefined && !filesLoading) void loadFiles(); }}>{t(`github.${tab}`)}{tab === "discussion" ? ` (${comments.length})` : ""}</button>)}
             </div>
             <div className="gh-detail-body" role="tabpanel">
               {detailTab === "description" ? <MarkdownText text={detail.item.body || t("github.noDescription")} /> : null}
-              {detailTab === "discussion" ? <><p className="muted">{t("github.loadedComments", { count: comments.length })}</p>{comments.map(comment => <article className="gh-comment" key={comment.id}><div><strong>{comment.author}</strong><span className="muted">{date(comment.createdAt)} {comment.state ? status(comment.state) : ""}</span><a href={comment.url} target="_blank" rel="noreferrer" aria-label={t("github.openGithub")}><Icon name="link" extra="sm" /></a></div>{comment.path ? <p className="gh-comment-path">{comment.path}{comment.line ? `:${comment.line}` : ""}</p> : null}<MarkdownText text={comment.body} /></article>)}{commentPage ? <button className="btn small outline" disabled={operationBusy} onClick={() => void moreComments()}>{t("github.more")}</button> : null}</> : null}
+              {detailTab === "discussion" ? <><p className="muted">{t("github.loadedComments", { count: comments.length })}</p>{comments.map(comment => <article className="gh-comment" key={comment.id}><div><strong>{comment.author}</strong><span className="muted">{date(comment.createdAt)} {comment.state ? status(comment.state) : ""}</span><a href={comment.url} target="_blank" rel="noreferrer" aria-label={t("github.openGithub")}><Icon name="link" extra="sm" /></a></div>{comment.path ? <p className="gh-comment-path">{comment.path}{comment.line ? `:${comment.line}` : ""}</p> : null}<MarkdownText text={comment.body} /></article>)}{commentPage ? <button className="btn small outline" disabled={commentsLoading} onClick={() => void moreComments()}>{t("github.more")}</button> : null}</> : null}
               {detailTab === "checks" ? detail.checks.length ? <ul className="gh-checks">{detail.checks.map((check, index) => <li key={`${check.name}:${index}`}><span className={`gh-check ${check.bucket}`}>{status(check.state)}</span>{check.link ? <a href={check.link} target="_blank" rel="noreferrer">{check.name}</a> : <span>{check.name}</span>}</li>)}</ul> : <p className="muted">{t("github.noChecks")}</p> : null}
-              {detailTab === "files" ? <><p className="muted">{t("github.diffHint")}</p>{files === undefined && operationBusy ? <p role="status">{t("github.loading")}</p> : null}{files?.map(file => <article className="gh-file" key={file.path}>
-                <button className="gh-file-head" disabled={operationBusy} aria-expanded={opened.has(file.path)} onClick={() => void toggleFile(file.path)}><Icon name={opened.has(file.path) ? "chevron-d" : "chevron-r"} extra="sm" /><span>{file.path}</span><span>+{file.additions} −{file.deletions}</span></button>
-                {opened.has(file.path) ? diffs[file.path] ? <>{diffs[file.path]!.patch ? <><label className="gh-include"><input type="checkbox" checked={included.has(file.path)} onChange={event => setIncluded(prior => { const next = new Set(prior); event.target.checked ? next.add(file.path) : next.delete(file.path); return next; })} />{t("github.includeDiff")}</label><pre className="gh-patch">{diffs[file.path]!.patch.split("\n").map((line, index) => <div key={index} className={line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : ""}>{line || " "}</div>)}</pre></> : <p className="muted">{t("github.noPatch")}</p>}</> : <p role="status">{operationBusy ? t("github.loading") : t("github.retryDiff")}</p> : null}
-              </article>)}{filePage ? <button className="btn small outline" disabled={operationBusy} onClick={() => void loadFiles(filePage)}>{t("github.more")}</button> : null}</> : null}
+              {detailTab === "files" ? <><p className="muted">{t("github.diffHint")}</p>{files === undefined && filesLoading ? <p role="status">{t("github.loading")}</p> : null}{files?.map(file => <article className="gh-file" key={file.path}>
+                <button className="gh-file-head" disabled={loadingDiffPaths.has(file.path)} aria-expanded={opened.has(file.path)} onClick={() => void toggleFile(file.path)}><Icon name={opened.has(file.path) ? "chevron-d" : "chevron-r"} extra="sm" /><span>{file.path}</span><span>+{file.additions} −{file.deletions}</span></button>
+                {opened.has(file.path) ? diffs[file.path] ? <>{diffs[file.path]!.patch ? <><label className="gh-include"><input type="checkbox" checked={included.has(file.path)} onChange={event => setIncluded(prior => { const next = new Set(prior); event.target.checked ? next.add(file.path) : next.delete(file.path); return next; })} />{t("github.includeDiff")}</label><pre className="gh-patch">{diffs[file.path]!.patch.split("\n").map((line, index) => <div key={index} className={line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : ""}>{line || " "}</div>)}</pre></> : <p className="muted">{t("github.noPatch")}</p>}</> : <p role="status">{loadingDiffPaths.has(file.path) ? t("github.loading") : t("github.retryDiff")}</p> : null}
+              </article>)}{filePage ? <button className="btn small outline" disabled={filesLoading} onClick={() => void loadFiles(filePage)}>{t("github.more")}</button> : null}</> : null}
             </div>
           </> : null}
         </>}

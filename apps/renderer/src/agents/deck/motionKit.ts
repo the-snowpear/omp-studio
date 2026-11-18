@@ -166,26 +166,40 @@ export function useWheel(target: { current: HTMLElement | null }, handler: (even
   }, [target]);
 }
 
-/** A number that rolls to its new value (counts, totals). Motion off: it simply changes. */
-export function useRolledNumber(value: number, anchor: { current: Element | null }, step: MotionStep = "hero"): number {
+/** A number that rolls to its new value (counts, totals). Motion off or instant: it simply changes. */
+export function useRolledNumber(
+  value: number,
+  anchor: { current: Element | null },
+  step: MotionStep = "hero",
+  instant = false,
+): number {
   const [shown, setShown] = useState(value);
   const from = useRef(value);
   const started = useRef(0);
   const [active, setActive] = useState(false);
   useEffect(() => {
+    if (instant || motionReduced() || !Number.isFinite(value)) {
+      if (active) setActive(false);
+      if (shown !== value) setShown(value);
+      return;
+    }
     if (value === shown && !active) return;
-    if (motionReduced() || !Number.isFinite(value)) { setShown(value); return; }
     from.current = shown;
     started.current = performance.now();
     setActive(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
+  }, [value, instant]);
   const ease = easing("out");
-  useFrameLoop(active, anchor, now => {
+  useFrameLoop(active && !instant, anchor, now => {
+    if (motionReduced()) {
+      setShown(value);
+      setActive(false);
+      return false;
+    }
     const progress = Math.min(1, (now - started.current) / MOTION_MS[step]);
     setShown(from.current + (value - from.current) * ease(progress));
     if (progress >= 1) { setActive(false); return false; }
     return true;
   });
-  return shown;
+  return instant ? value : shown;
 }

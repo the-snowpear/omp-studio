@@ -60,7 +60,7 @@ export class DesktopManagedBrowser {
   readonly #notifications = new Map<string, Notification>();
   readonly #controlChanges = new Map<string, Promise<void>>();
   readonly #windowStops = new Map<BrowserWindow, () => void>();
-  #parking?: BrowserWindow;
+  #parking: BrowserWindow | undefined;
   #runtime?: ManagedBrowserRuntime;
   #disposed = false;
 
@@ -112,8 +112,9 @@ export class DesktopManagedBrowser {
     space.setPermissionCheckHandler((contents, permission, origin, details) => {
       if (permission === "clipboard-sanitized-write") return true;
       const requestingOrigin = details.securityOrigin || origin;
-      if (requestingOrigin === "null") return false;
-      const normalizedOrigin = new URL(requestingOrigin).origin;
+      if (!requestingOrigin || requestingOrigin === "null") return false;
+      const normalizedOrigin = originOf(requestingOrigin);
+      if (!normalizedOrigin || normalizedOrigin === "null") return false;
       const names = permission === "media" ? details.mediaType === "audio" || details.mediaType === "video" ? [`media:${details.mediaType}`] : ["media:audio", "media:video"] : [permission];
       return names.every(name => this.store.permissionFor(spaceId, normalizedOrigin, name)?.allowed === true);
     });
@@ -123,7 +124,8 @@ export class DesktopManagedBrowser {
       if (permission === "clipboard-sanitized-write") { callback(true); return; }
       const securityOrigin = "securityOrigin" in details ? details.securityOrigin : undefined;
       if (securityOrigin === "null") { callback(false); return; }
-      const origin = new URL(securityOrigin || details.requestingUrl || contents.getURL()).origin;
+      const origin = originOf(securityOrigin || details.requestingUrl || contents.getURL());
+      if (!origin || origin === "null") { callback(false); return; }
       const types = "mediaTypes" in details && details.mediaTypes?.length ? details.mediaTypes : ["audio", "video"];
       const names = permission === "media" ? types.map(type => `media:${type}`) : [permission];
       const existing = names.map(name => this.store.permissionFor(spaceId, origin, name));
@@ -294,10 +296,23 @@ export class DesktopManagedBrowser {
     this.#inputState(live);
     return live;
   }
+  #destroyShield(live: LivePage): void {
+    const shield = live.shield;
+    if (!shield) return;
+    delete live.shield;
+    live.clip.removeChildView(shield);
+    if (!shield.webContents.isDestroyed()) {
+      shield.webContents.close({ waitForBeforeUnload: false });
+    }
+  }
   #inputState(live: LivePage): void {
     if (live.closed) return;
     const locked = this.store.state(live.page.sessionId).control !== "human";
-    if (locked && live.presentation?.visible && !live.shield) {
+    if (!locked || !live.presentation?.visible) {
+      this.#destroyShield(live);
+      return;
+    }
+    if (!live.shield) {
       live.shield = new WebContentsView({ webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
       live.shield.setBackgroundColor("#00000000");
       live.shield.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -305,8 +320,10 @@ export class DesktopManagedBrowser {
       void live.shield.webContents.loadURL("data:text/html,<html style='background:transparent'><body style='margin:0;cursor:default' ondragover='event.preventDefault()' ondrop='event.preventDefault()'></body></html>");
       live.clip.addChildView(live.shield);
     }
-    if (live.shield) { const bounds = live.clip.getBounds(); live.shield.setBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height }); live.shield.setVisible(locked); }
-    if (locked && live.view.webContents.isFocused() && !live.parent.isDestroyed()) live.parent.webContents.focus();
+    const bounds = live.clip.getBounds();
+    live.shield.setBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height });
+    live.shield.setVisible(true);
+    if (live.view.webContents.isFocused() && !live.parent.isDestroyed()) live.parent.webContents.focus();
   }
   async present(presentation: ManagedBrowserPresentation): Promise<void> {
     await this.ready;
@@ -339,6 +356,7 @@ export class DesktopManagedBrowser {
     const live = this.#pages.get(pageId);
     if (!live || (surfaceId && live.presentation?.surfaceId !== surfaceId)) return;
     delete live.presentation;
+    this.#destroyShield(live);
     this.#stopPicking(live);
     void live.inspection?.stop();
     live.clip.setVisible(false);
@@ -368,6 +386,13 @@ export class DesktopManagedBrowser {
         if (child.webContents.debugger.isAttached()) child.webContents.debugger.detach();
         await new Promise<void>(resolve => { child.webContents.once("destroyed", () => resolve()); child.webContents.close({ waitForBeforeUnload: false }); });
       }
+    }
+    if (this.#pages.size === 0 && this.#parking) {
+      const parking = this.#parking;
+      this.#parking = undefined;
+      this.#windowStops.get(parking)?.();
+      this.#windowStops.delete(parking);
+      if (!parking.isDestroyed()) parking.destroy();
     }
   }
   async #control(sessionId: string, control: "human" | "agent"): Promise<void> {
@@ -565,8 +590,26 @@ export class DesktopManagedBrowser {
       item.setSavePath(target);
     }
     const release = this.holdActivity(page.id);
-    const publish = () => { download.path = item.getSavePath(); download.receivedBytes = item.getReceivedBytes(); download.totalBytes = item.getTotalBytes(); this.store.download(page.sessionId, download); };
-    item.on("updated", (_event, state) => { download.state = state === "interrupted" ? "interrupted" : "progressing"; publish(); });
+    let progressTimer: NodeJS.Timeout | undefined;
+    let lastPublishedAt = 0;
+    const publish = () => {
+      if (progressTimer) { clearTimeout(progressTimer); progressTimer = undefined; }
+      lastPublishedAt = Date.now();
+      download.path = item.getSavePath();
+      download.receivedBytes = item.getReceivedBytes();
+      download.totalBytes = item.getTotalBytes();
+      this.store.download(page.sessionId, download);
+    };
+    item.on("updated", (_event, state) => {
+      download.state = state === "interrupted" ? "interrupted" : "progressing";
+      const elapsed = Date.now() - lastPublishedAt;
+      if (elapsed >= 100) {
+        publish();
+      } else if (!progressTimer) {
+        progressTimer = setTimeout(publish, 100 - elapsed);
+        progressTimer.unref?.();
+      }
+    });
     item.once("done", (_event, state) => {
       release();
       download.state = state; publish(); this.#downloads.delete(download.id);

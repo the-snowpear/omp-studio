@@ -20,7 +20,7 @@ import type { SessionHistoryEntry, SessionHistoryReadModel, StudioClient, Worksp
 import { type ClientState } from "@omp-studio/client";
 import { clientShellChanged, shouldRecordShellEvent } from "./shellMemory";
 import { Icon } from "./icons";
-import { I18nProvider, pickLocale, useI18n } from "./i18n";
+import { I18nProvider, useI18n } from "./i18n";
 import { createShellModelLoader } from "./shellModelLoader";
 import { TerminalSessionsProvider } from "./terminalSessions";
 import { TipHost } from "./TipHost";
@@ -50,7 +50,7 @@ export { RealFileTree } from "./sidebar/WorkspaceTree";
 export { AppSidebar } from "./sidebar/AppSidebar";
 
 export function App({ client }: { readonly client: StudioClient }) {
-  return <PreviewModeProvider><FileCloseDialog /><ConversationWidthProvider><I18nProvider><TerminalSessionsProvider>{client.supportsContexts === true || (client.supportsContexts === undefined && client.openContext) ? <ExecutionTargets client={client}>{() => <ConversationWorkspace client={client} renderDocument={renderConversationDocument} />}</ExecutionTargets> : <LegacyWorkbench client={client} />}</TerminalSessionsProvider></I18nProvider></ConversationWidthProvider></PreviewModeProvider>;
+  return <PreviewModeProvider><FileCloseDialog /><ConversationWidthProvider><I18nProvider><TerminalSessionsProvider>{client.supportsContexts === true || (client.supportsContexts === undefined && client.openContext) ? <ExecutionTargets client={client}>{() => <ConversationWorkspace client={client} renderDocument={renderConversationDocument} />}</ExecutionTargets> : <LegacyWorkbench client={client} />}<TipHost /></TerminalSessionsProvider></I18nProvider></ConversationWidthProvider></PreviewModeProvider>;
 }
 
 function renderConversationDocument(client: StudioClient) { return <TargetApp client={client} />; }
@@ -62,7 +62,12 @@ function LegacyWorkbench({ client }: { client: StudioClient }) {
 
 function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
   const mdi = useConversationView();
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  const tRef = useRef(t);
+  tRef.current = t;
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   const client = inputClient as ClientStateSource;
   const executionTarget = useExecutionTarget();
   const connectionStatus = executionTarget.inventory.statuses.find(status => status.id === executionTarget.id)?.state;
@@ -74,7 +79,7 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
     previousConnectionStatus.current = connectionStatus;
     if (connectionStatus !== "connected") {
       if (connectionStatus === "synchronizing" || connectionStatus === previousStatus) return;
-      (client as StudioClient & { transportLost?(reason: string): void }).transportLost?.(pickLocale("SSH 连接已中断；保留对话与草稿，等待重新同步。", "SSH connection lost; keeping conversation and drafts while waiting to resync."));
+      (client as StudioClient & { transportLost?(reason: string): void }).transportLost?.(zhRef.current ? "SSH 连接已中断；保留对话与草稿，等待重新同步。" : "SSH connection lost; keeping conversation and drafts while waiting to resync.");
       return;
     }
     if (connectionRevision.current !== executionTarget.syncRevision) {
@@ -133,7 +138,7 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
     return () => window.removeEventListener(EMBED_SET_ROUTE_EVENT, onSetRoute);
   }, [embed, setRoute]);
   const navigate = useCallback((next: Route) => {
-    if (!embed && next !== routeRef.current && modelConfigHasUnsavedChanges() && !window.confirm(pickLocale("有未保存的模型配置更改，确定离开吗？", "You have unsaved model configuration changes. Leave anyway?"))) return false;
+    if (!embed && next !== routeRef.current && modelConfigHasUnsavedChanges() && !window.confirm(zhRef.current ? "有未保存的模型配置更改，确定离开吗？" : "You have unsaved model configuration changes. Leave anyway?")) return false;
     hostRouteRef.current = null;
     routeRef.current = next;
     setRoute(next);
@@ -148,7 +153,7 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
   useEffect(() => {
     let cancelled = false;
     const offEvent = client.subscribe({ scope: "all" }, (event) => {
-      if (!mdi?.store.demo || mdi.active) notifyFromEvent(event, t);
+      if (!mdi?.store.demo && (!mdi || mdi.active)) notifyFromEvent(event, tRef.current);
       if (!cancelled && shouldRecordShellEvent(event)) dispatch({ type: "event", event });
     });
     let lastShell: ClientState | undefined;
@@ -195,8 +200,8 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
   const workspaceScope = `${authorityScope}:${workspaceId ?? "none"}`;
   const environmentScope = `${authorityScope}:${runtimeConnection?.runtimeVersion ?? "none"}:${runtimeConnection?.upstreamCommit ?? "none"}:${runtimeStatus === "connected" ? "connected" : "unavailable"}`;
   const runtimeScope = `${environmentScope}:${runtimeConnection?.runtimeId ?? "none"}:${runtimeEpoch ?? "none"}`;
-  const modelScope = `${workspaceScope}:${runtimeScope}`;
-  const modelLoadScope = useMemo(() => ({ authority: authorityScope, workspace: workspaceScope, runtime: runtimeScope, environment: environmentScope, workspaceId, connecting: runtimeStatus === "connecting" }), [authorityScope, workspaceScope, runtimeScope, environmentScope, workspaceId, runtimeStatus]);
+  const modelScope = `${workspaceScope}:${runtimeScope}:${resolvedLanguage}`;
+  const modelLoadScope = useMemo(() => ({ authority: authorityScope, workspace: workspaceScope, runtime: runtimeScope, environment: environmentScope, locale: resolvedLanguage, workspaceId, connecting: runtimeStatus === "connecting" }), [authorityScope, workspaceScope, runtimeScope, environmentScope, resolvedLanguage, workspaceId, runtimeStatus]);
   useEffect(() => {
     if (state.loading || state.hostError) return;
     let cancelled = false;
@@ -248,8 +253,8 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
       <div className="main-col">
         <div className="empty" style={{ flex: 1, justifyContent: "center" }}>
           <span className="spinner" />
-          <h1>Connecting</h1>
-          <p className="muted">Requesting bootstrap…</p>
+          <h1>{zh ? "正在连接" : "Connecting"}</h1>
+          <p className="muted">{zh ? "正在请求启动数据…" : "Requesting bootstrap…"}</p>
         </div>
       </div>
     </div>
@@ -259,7 +264,7 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
       <div className="main-col">
         <div className="empty" style={{ flex: 1, justifyContent: "center" }}>
           <Icon name="alert" extra="lg" />
-          <h1>Bootstrap failed</h1>
+          <h1>{zh ? "启动失败" : "Bootstrap failed"}</h1>
           <p><span className="mono">{state.error.code}</span> {state.error.message}</p>
         </div>
       </div>
@@ -283,7 +288,6 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
         <RemoteScopeNotice />
         <ShellReadinessContext.Provider value={!state.loading}>{body}</ShellReadinessContext.Provider>
         {(!mdi || mdi.active) ? <OnboardingHost /> : null}
-        <TipHost />
     </>
   );
 }

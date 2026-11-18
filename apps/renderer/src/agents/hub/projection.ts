@@ -4,7 +4,7 @@ import type { SubagentComposerAgent } from "../../conversation/subagentComposerG
 import { type SubagentHubTarget } from "../../conversation/toolMeta";
 import { isTickingAgentStatus } from "../../conversation/SubagentMetrics";
 import { type HubTab } from "../../pageIntents";
-import { type HubAgent, type HubJob, type HubStatus, type HubView } from "./types";
+import { type HubAgent, type HubJob, type HubStatus, type HubTreeGroup, type HubTreeNode, type HubView } from "./types";
 import type { IconName } from "../../icons";
 import type { DeckTone } from "../deck/deckModel";
 
@@ -13,6 +13,7 @@ export const STATUS_LABEL: Record<HubStatus, string> = {
   idle: "idle",
   parked: "parked",
   aborted: "aborted",
+  released: "released",
 };
 
 const HUB_WORDS: Record<string, string> = {
@@ -20,6 +21,7 @@ const HUB_WORDS: Record<string, string> = {
   idle: "空闲",
   parked: "已停驻",
   aborted: "已中止",
+  released: "已释放",
   Streaming: "生成中",
   archived: "已归档",
   plan: "计划",
@@ -63,6 +65,7 @@ export const STATUS_DOT: Record<HubStatus, string> = {
   idle: "blue",
   parked: "gray",
   aborted: "red",
+  released: "gray",
 };
 
 export const TABS: ReadonlyArray<readonly [HubTab, string, IconName]> = [
@@ -75,6 +78,7 @@ export const TABS: ReadonlyArray<readonly [HubTab, string, IconName]> = [
 
 /** The deck's tone for a Hub row, so its sigil reads the same in both places. */
 export function hubTone(agent: HubAgent): DeckTone {
+  if (agent.status === "released" || agent.rawStatus === "released") return "stopped";
   if (agent.status === "aborted" || agent.rawStatus === "failed" || agent.activity === "failed") return "failed";
   if (agent.activity === "waiting") return "waiting";
   return agent.status;
@@ -149,6 +153,7 @@ export function hubStatus(status: StudioAgentSnapshot["status"]): HubStatus {
     return "running";
   if (status === "idle") return "idle";
   if (status === "parked") return "parked";
+  if (status === "released") return "released";
   return "aborted";
 }
 
@@ -190,6 +195,12 @@ export function activityPill(
   zh = false,
 ): { cls: string; label: string } {
   const copy = (cn: string, en: string) => (zh ? cn : en);
+  if (agent.status === "released" || agent.rawStatus === "released") {
+    return {
+      cls: "parked",
+      label: copy("已释放", "Released"),
+    };
+  }
   if (agent.status === "aborted" || agent.rawStatus === "failed") {
     return {
       cls: "aborted",
@@ -415,27 +426,73 @@ export function sortByCreation(rows: HubAgent[]): HubAgent[] {
   return rows.slice().sort(byCreation);
 }
 
+export function flattenTreeNodes(nodes: readonly HubTreeNode[]): HubAgent[] {
+  const out: HubAgent[] = [];
+  const walk = (list: readonly HubTreeNode[]) => {
+    for (const node of list) {
+      out.push(node.agent);
+      if (node.children.length > 0) walk(node.children);
+    }
+  };
+  walk(nodes);
+  return out;
+}
+
 export function treeGroups(rows: HubAgent[]): {
-  groups: Array<{ head: HubAgent; kids: HubAgent[] }>;
+  groups: HubTreeGroup[];
   orphans: HubAgent[];
 } {
   const byId = new Map(rows.map((agent) => [agent.id, agent]));
+  const ordered = sortByCreation(rows);
+  const childrenMap = new Map<string, HubAgent[]>();
+  for (const agent of ordered) {
+    if (
+      agent.parentId &&
+      agent.parentId !== "main" &&
+      agent.parentId !== agent.id &&
+      byId.has(agent.parentId)
+    ) {
+      const list = childrenMap.get(agent.parentId) ?? [];
+      list.push(agent);
+      childrenMap.set(agent.parentId, list);
+    }
+  }
   const hasVisParent = (agent: HubAgent) =>
     Boolean(
-      agent.parentId && agent.parentId !== "main" && byId.has(agent.parentId),
+      agent.parentId &&
+        agent.parentId !== "main" &&
+        agent.parentId !== agent.id &&
+        byId.has(agent.parentId),
     );
-  const isGroupHead = (agent: HubAgent) =>
-    !hasVisParent(agent) && rows.some((row) => row.parentId === agent.id);
-  const heads = sortByCreation(rows.filter(isGroupHead));
-  const used = new Set(heads.map((head) => head.id));
-  const groups = heads.map((head) => {
-    const kids = sortByCreation(rows.filter((row) => row.parentId === head.id));
-    kids.forEach((kid) => used.add(kid.id));
-    return { head, kids };
-  });
+  const used = new Set<string>();
+  const buildNodes = (parentId: string, path: ReadonlySet<string>): HubTreeNode[] => {
+    const direct = childrenMap.get(parentId) ?? [];
+    const nodes: HubTreeNode[] = [];
+    for (const child of direct) {
+      if (path.has(child.id) || used.has(child.id)) continue;
+      used.add(child.id);
+      const nextPath = new Set(path);
+      nextPath.add(child.id);
+      nodes.push({
+        agent: child,
+        children: buildNodes(child.id, nextPath),
+      });
+    }
+    return nodes;
+  };
+  const heads = ordered.filter(
+    (agent) => !hasVisParent(agent) && (childrenMap.get(agent.id)?.length ?? 0) > 0,
+  );
+  const groups: HubTreeGroup[] = [];
+  for (const head of heads) {
+    if (used.has(head.id)) continue;
+    used.add(head.id);
+    const nodes = buildNodes(head.id, new Set([head.id]));
+    groups.push({ head, nodes, kids: flattenTreeNodes(nodes) });
+  }
   return {
     groups,
-    orphans: sortByCreation(rows.filter((agent) => !used.has(agent.id))),
+    orphans: ordered.filter((agent) => !used.has(agent.id)),
   };
 }
 

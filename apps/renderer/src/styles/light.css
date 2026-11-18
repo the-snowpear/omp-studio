@@ -219,6 +219,7 @@
 .lux-ambient > i:nth-child(2) { --lux-c: var(--blue); --drift-x: -5vmax; --drift-y: -4vmax; right: -24vmax; bottom: -32vmax; animation-delay: calc(var(--loop-ambient) / -3); }
 .lux-ambient > i:nth-child(3) { --lux-c: var(--lux-tint, var(--tint-pink)); --drift-x: 4vmax; --drift-y: -5vmax; width: 40vmax; height: 40vmax; left: 40%; top: 30%; animation-delay: calc(var(--loop-ambient) / -1.5); }
 .lux-ambient[data-activity="waiting"] > i:nth-child(3) { --lux-c: var(--amber); }
+:root[data-light~="vivid"] .lux-ambient:is([data-activity="idle"], [data-hidden]) > i { animation-play-state: paused; }
 
 /* ==========================================================
    Pointer spotlight (vivid)

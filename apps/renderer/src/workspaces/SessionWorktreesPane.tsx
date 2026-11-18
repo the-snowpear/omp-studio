@@ -26,7 +26,7 @@ export function WorktreeLaunchGate(props: FeatureSettingsProps & { onGateChange(
   const { preview } = usePreviewMode(), { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   const [phase, setPhase] = useState<"idle" | "checking" | "ask" | "creating" | "continuing" | "failed">("idle"), [error, setError] = useState("");
   const [dismissed, setDismissed] = useState(false);
-  const epoch = useRef(0), lock = useRef(false), moving = useRef(false);
+  const epoch = useRef(0), lock = useRef(false), movingSession = useRef<string | undefined>(undefined);
   const createdWorkspace = useRef<{ sessionId: string; workspaceId: string } | undefined>(undefined);
   const openWorkspaceAction = useRef(props.onOpenWorkspace);
   useLayoutEffect(() => { openWorkspaceAction.current = props.onOpenWorkspace; }, [props.onOpenWorkspace]);
@@ -47,28 +47,33 @@ export function WorktreeLaunchGate(props: FeatureSettingsProps & { onGateChange(
         createdWorkspace.current = { sessionId, workspaceId };
       }
       if (epoch.current !== current) return;
-      moving.current = true;
-      if (openWorkspaceAction.current) await openWorkspaceAction.current(workspaceId);
-      else await openWorkspace(props.client, workspaceId, true);
+      movingSession.current = sessionId;
+      try {
+        if (openWorkspaceAction.current) await openWorkspaceAction.current(workspaceId);
+        else await openWorkspace(props.client, workspaceId, true);
+      } finally {
+        if (movingSession.current === sessionId) movingSession.current = undefined;
+      }
       if (createdWorkspace.current?.sessionId === sessionId) createdWorkspace.current = undefined;
       if (epoch.current === current) { setPhase("idle"); gate(false); }
     } catch (cause) { if (epoch.current === current) { setPhase("failed"); setError(hostErrorMessage(cause, "Worktree creation failed")); } }
-    finally { if (epoch.current === current) { lock.current = false; moving.current = false; } }
+    finally { if (epoch.current === current) lock.current = false; }
   }, [props.client, props.context?.sessionId, gate]);
   useLayoutEffect(() => {
-    if (moving.current && enabled) return;
+    const activeSessionId = props.context?.sessionId;
+    if (enabled && activeSessionId && movingSession.current === activeSessionId) return;
     const current = ++epoch.current; lock.current = false; setError(""); setDismissed(false);
-    if (!enabled) { moving.current = false; setPhase("idle"); gate(false); return; }
+    if (!enabled) { setPhase("idle"); gate(false); return; }
     setPhase("checking"); gate(true);
-    void invoke(props.client!, "worktrees.session.startPolicy", { sessionId: props.context!.sessionId! }).then(policy => {
+    void invoke(props.client!, "worktrees.session.startPolicy", { sessionId: activeSessionId! }).then(policy => {
       if (current !== epoch.current) return;
-      if (createdWorkspace.current?.sessionId === props.context!.sessionId) {
+      if (createdWorkspace.current?.sessionId === activeSessionId) {
         setPhase("ask");
       } else if (!policy.eligible || policy.policy === "off") { setPhase("idle"); gate(false); }
       else if (policy.policy === "create") void create(current);
       else setPhase("ask");
     }).catch(cause => { if (current === epoch.current) { setPhase("failed"); setError(hostErrorMessage(cause, "Cannot read worktree policy")); } });
-    return () => { if (!moving.current) { epoch.current++; gate(false); } };
+    return () => { if (!activeSessionId || movingSession.current !== activeSessionId) { epoch.current++; gate(false); } };
   }, [enabled, props.context?.sessionId, props.client, create, gate]);
   useEffect(() => () => { epoch.current++; gate(false); }, [gate]);
   useEffect(() => {
@@ -117,7 +122,16 @@ export function SessionWorktreesPane(props: FeatureSettingsProps & { launcher?: 
     const result = await invoke(props.client, "worktrees.session.list", { sessionId: props.context.sessionId });
     if (current === epoch.current) setRows(result.worktrees);
   }, [preview, enabled, props.client, props.context?.sessionId]);
-  useEffect(() => { epoch.current++; lock.current = false; setBusy(false); setRows([]); setError(""); setNotice(""); setRemoval(undefined); if (props.visible && open) void refresh().catch(cause => setError(hostErrorMessage(cause, "Cannot read worktrees"))); return () => { epoch.current++; }; }, [props.visible, open, refresh]);
+  const panelActive = props.launcher ? open : Boolean(props.visible && open);
+  useEffect(() => {
+    epoch.current++; lock.current = false; setBusy(false); setRows([]); setError(""); setNotice(""); setRemoval(undefined);
+    return () => { epoch.current++; };
+  }, [refresh]);
+  useEffect(() => {
+    if (!panelActive || lock.current) return;
+    setError("");
+    void refresh().catch(cause => setError(hostErrorMessage(cause, "Cannot read worktrees")));
+  }, [panelActive, refresh]);
   useLayoutEffect(() => {
     if (!open || !props.launcher) return;
     const element = dialog.current!;

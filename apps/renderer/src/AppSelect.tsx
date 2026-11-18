@@ -105,19 +105,65 @@ export function AppSelect({ value, onChange, children, placeholder, className = 
     const menu = popup.current;
     if (!button || !menu) return;
     const rect = button.getBoundingClientRect();
-    const width = Math.min(Math.max(rect.width, 220), window.innerWidth - 16);
-    const below = window.innerHeight - rect.bottom - 14;
-    const above = rect.top - 14;
+    let offsetX = 0;
+    let offsetY = 0;
+    let minLeft = 8;
+    let maxRight = window.innerWidth - 8;
+    let minTop = 14;
+    let maxBottom = window.innerHeight - 14;
+    let containingBlock: HTMLElement | null = null;
+    const overflowClips: DOMRect[] = [];
+    for (let el = menu.parentElement; el && el !== document.documentElement; el = el.parentElement) {
+      const style = window.getComputedStyle(el);
+      const backdrop = style.getPropertyValue("backdrop-filter") || style.getPropertyValue("-webkit-backdrop-filter");
+      if (containingBlock === null && (
+        (style.transform && style.transform !== "none") ||
+        (style.perspective && style.perspective !== "none") ||
+        (style.filter && style.filter !== "none") ||
+        (backdrop && backdrop !== "none") ||
+        /\b(?:transform|perspective|filter|backdrop-filter)\b/.test(style.willChange) ||
+        /\b(?:paint|layout|strict|content)\b/.test(style.contain)
+      )) {
+        containingBlock = el;
+        const cb = el.getBoundingClientRect();
+        offsetX = cb.left + el.clientLeft;
+        offsetY = cb.top + el.clientTop;
+      }
+      if (style.clipPath && style.clipPath !== "none") {
+        const clip = el.getBoundingClientRect();
+        minLeft = Math.max(minLeft, clip.left + 8);
+        maxRight = Math.min(maxRight, clip.right - 8);
+        minTop = Math.max(minTop, clip.top + 8);
+        maxBottom = Math.min(maxBottom, clip.bottom - 8);
+      } else if (
+        (containingBlock === null || containingBlock === el) &&
+        ((style.overflow && style.overflow !== "visible") || (style.overflowY && style.overflowY !== "visible"))
+      ) {
+        overflowClips.push(el.getBoundingClientRect());
+      }
+    }
+    if (containingBlock !== null) {
+      for (const clip of overflowClips) {
+        minLeft = Math.max(minLeft, clip.left + 8);
+        maxRight = Math.min(maxRight, clip.right - 8);
+        minTop = Math.max(minTop, clip.top + 8);
+        maxBottom = Math.min(maxBottom, clip.bottom - 8);
+      }
+    }
+    const availWidth = Math.max(120, maxRight - minLeft);
+    const width = Math.min(Math.max(rect.width, 220), availWidth);
+    const below = maxBottom - rect.bottom;
+    const above = rect.top - minTop;
     const desired = Math.min((list.current?.scrollHeight ?? 0) + (search.current?.parentElement?.offsetHeight ?? 0) + 14, 360);
     const flip = below < desired && above > below;
     const maxHeight = Math.max(0, Math.min(360, flip ? above : below));
     const height = Math.min(desired, maxHeight);
     setPosition({
-      top: flip ? rect.top - height - 6 : rect.bottom + 6,
-      left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
+      top: (flip ? rect.top - height - 6 : rect.bottom + 6) - offsetY,
+      left: Math.max(minLeft, Math.min(rect.left, maxRight - width)) - offsetX,
       width, maxHeight, above: flip,
     });
-  }, [window]);
+  }, [document, window]);
 
   useLayoutEffect(() => {
     if (!open) return;

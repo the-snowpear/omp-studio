@@ -1407,6 +1407,10 @@ function quoteInline(value: string): string {
   return value;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
 /**
  * Upsert `recordKey.entryKey = entryValue` into a YAML mapping without
  * rewriting the whole file (config.yml carries unrelated keys and comments).
@@ -1416,9 +1420,11 @@ function quoteInline(value: string): string {
 export function upsertYamlRecordEntry(source: string, recordKey: string, entryKey: string, entryValue: string): string {
   const newline = source.includes("\r\n") ? "\r\n" : "\n";
   const lines = source.split(/\r?\n/);
+  const escapedRecord = escapeRegExp(recordKey);
+  const escapedEntry = escapeRegExp(entryKey);
 
   // Block form: `recordKey:` on its own line followed by indented entries.
-  const headerAt = lines.findIndex((line) => new RegExp(`^${recordKey}:\\s*$`).test(line));
+  const headerAt = lines.findIndex((line) => new RegExp(`^${escapedRecord}:\\s*$`).test(line));
   if (headerAt >= 0) {
     let cursor = headerAt + 1;
     let found: number | undefined;
@@ -1437,7 +1443,7 @@ export function upsertYamlRecordEntry(source: string, recordKey: string, entryKe
         if (insertAt === undefined) insertAt = cursor;
         break;
       }
-      if (new RegExp(`^[ \\t]+${entryKey}:\\s*`).test(line)) {
+      if (new RegExp(`^[ \\t]+${escapedEntry}:\\s*`).test(line)) {
         found = cursor;
         break;
       }
@@ -1450,16 +1456,16 @@ export function upsertYamlRecordEntry(source: string, recordKey: string, entryKe
   }
 
   // Inline map form: `recordKey: { key: value, ... }` on a single line.
-  const inlineAt = lines.findIndex((line) => new RegExp(`^${recordKey}:\\s*\\{.*\\}\\s*$`).test(line));
+  const inlineAt = lines.findIndex((line) => new RegExp(`^${escapedRecord}:\\s*\\{.*\\}\\s*$`).test(line));
   if (inlineAt >= 0) {
     const line = lines[inlineAt] ?? "";
     const open = line.indexOf("{");
     const close = line.lastIndexOf("}");
     const body = line.slice(open + 1, close).trim();
-    const entryRe = new RegExp(`(^|,\\s*)${entryKey}\\s*:\\s*[^,]*`);
+    const entryRe = new RegExp(`(^|,\\s*)${escapedEntry}\\s*:\\s*[^,]*`);
     let nextBody: string;
     if (entryRe.test(body)) {
-      nextBody = body.replace(entryRe, `$1${entryKey}: ${quoteInline(entryValue)}`);
+      nextBody = body.replace(entryRe, (_match, prefix: string) => `${prefix}${entryKey}: ${quoteInline(entryValue)}`);
     } else {
       nextBody = body.length > 0 ? `${body}, ${entryKey}: ${quoteInline(entryValue)}` : `${entryKey}: ${quoteInline(entryValue)}`;
     }
@@ -1489,11 +1495,13 @@ export function upsertNestedRecordList(
 ): string {
   const newline = source.includes("\r\n") ? "\r\n" : "\n";
   const lines = source.split(/\r?\n/);
+  const escapedRecord = escapeRegExp(recordKey);
+  const escapedEntry = escapeRegExp(entryKey);
   const entryHeader = items.length === 0 ? `  ${entryKey}: []` : `  ${entryKey}:`;
   const itemLines = items.map((item) => `    - ${item}`);
 
   // Block record form: `recordKey:` on its own line followed by indented entries.
-  const headerAt = lines.findIndex((line) => new RegExp(`^${recordKey}:\\s*$`).test(line));
+  const headerAt = lines.findIndex((line) => new RegExp(`^${escapedRecord}:\\s*$`).test(line));
   if (headerAt >= 0) {
     let cursor = headerAt + 1;
     let found: number | undefined;
@@ -1509,7 +1517,7 @@ export function upsertNestedRecordList(
         if (insertAt === undefined) insertAt = cursor;
         break;
       }
-      if (new RegExp(`^[ \\t]+${entryKey}:\\s*`).test(line)) {
+      if (new RegExp(`^[ \\t]+${escapedEntry}:\\s*`).test(line)) {
         found = cursor;
         break;
       }
@@ -1518,7 +1526,7 @@ export function upsertNestedRecordList(
     if (found !== undefined) {
       let end = found + 1;
       // Consume the trailing indented `- item` lines owned by a block list entry.
-      if (new RegExp(`^[ \\t]+${entryKey}:\\s*$`).test(lines[found] ?? "")) {
+      if (new RegExp(`^[ \\t]+${escapedEntry}:\\s*$`).test(lines[found] ?? "")) {
         while (end < lines.length) {
           const line = lines[end] ?? "";
           if (line.trim().length === 0) break;
@@ -1534,17 +1542,17 @@ export function upsertNestedRecordList(
   }
 
   // Inline record form: `recordKey: { key: value, ... }` on a single line.
-  const inlineAt = lines.findIndex((line) => new RegExp(`^${recordKey}:\\s*\\{.*\\}\\s*$`).test(line));
+  const inlineAt = lines.findIndex((line) => new RegExp(`^${escapedRecord}:\\s*\\{.*\\}\\s*$`).test(line));
   if (inlineAt >= 0) {
     const line = lines[inlineAt] ?? "";
     const open = line.indexOf("{");
     const close = line.lastIndexOf("}");
     const body = line.slice(open + 1, close).trim();
     const encoded = `[${items.join(", ")}]`;
-    const entryRe = new RegExp(`(^|,\\s*)${entryKey}\\s*:\\s*[^,]*`);
+    const entryRe = new RegExp(`(^|,\\s*)${escapedEntry}\\s*:\\s*[^,]*`);
     let nextBody: string;
     if (entryRe.test(body)) {
-      nextBody = body.replace(entryRe, `$1${entryKey}: ${encoded}`);
+      nextBody = body.replace(entryRe, (_match, prefix: string) => `${prefix}${entryKey}: ${encoded}`);
     } else {
       nextBody = body.length > 0 ? `${body}, ${entryKey}: ${encoded}` : `${entryKey}: ${encoded}`;
     }
@@ -1566,8 +1574,9 @@ export function upsertNestedRecordList(
 export function upsertYamlStringList(source: string, recordKey: string, items: ReadonlyArray<string>): string {
   const newline = source.includes("\r\n") ? "\r\n" : "\n";
   const lines = source.split(/\r?\n/);
+  const escapedRecord = escapeRegExp(recordKey);
 
-  const headerAt = lines.findIndex((line) => new RegExp(`^${recordKey}:\\s*$`).test(line));
+  const headerAt = lines.findIndex((line) => new RegExp(`^${escapedRecord}:\\s*$`).test(line));
   if (headerAt >= 0) {
     let end = headerAt + 1;
     // A blank line (or a non-indented line) ends the block; trailing blanks
@@ -1586,7 +1595,7 @@ export function upsertYamlStringList(source: string, recordKey: string, items: R
     return lines.join(newline);
   }
 
-  const inlineAt = lines.findIndex((line) => new RegExp(`^${recordKey}:\\s*\\[.*\\]\\s*$`).test(line));
+  const inlineAt = lines.findIndex((line) => new RegExp(`^${escapedRecord}:\\s*\\[.*\\]\\s*$`).test(line));
   if (inlineAt >= 0) {
     lines.splice(inlineAt, 1, `${recordKey}:`, ...items.map((item) => `  - ${item}`));
     return lines.join(newline);
@@ -1600,20 +1609,22 @@ export function upsertYamlStringList(source: string, recordKey: string, items: R
 export function deleteYamlRecordEntry(source: string, recordKey: string, entryKey: string): string {
   const newline = source.includes("\r\n") ? "\r\n" : "\n";
   const lines = source.split(/\r?\n/);
-  const headerAt = lines.findIndex((line) => new RegExp(`^${recordKey}:\\s*$`).test(line));
+  const escapedRecord = escapeRegExp(recordKey);
+  const escapedEntry = escapeRegExp(entryKey);
+  const headerAt = lines.findIndex((line) => new RegExp(`^${escapedRecord}:\\s*$`).test(line));
   if (headerAt >= 0) {
-    const found = lines.findIndex((line, index) => index > headerAt && new RegExp(`^[ \\t]+${entryKey}:\\s*`).test(line));
+    const found = lines.findIndex((line, index) => index > headerAt && new RegExp(`^[ \\t]+${escapedEntry}:\\s*`).test(line));
     if (found > headerAt) {
       lines.splice(found, 1);
       return lines.join(newline);
     }
   }
-  const inlineAt = lines.findIndex((line) => new RegExp(`^${recordKey}:\\s*\\{.*\\}\\s*$`).test(line));
+  const inlineAt = lines.findIndex((line) => new RegExp(`^${escapedRecord}:\\s*\\{.*\\}\\s*$`).test(line));
   if (inlineAt >= 0) {
     const line = lines[inlineAt] ?? "";
     const open = line.indexOf("{");
     const close = line.lastIndexOf("}");
-    const parts = line.slice(open + 1, close).split(",").map((part) => part.trim()).filter((part) => part.length > 0 && !new RegExp(`^${entryKey}\\s*:`).test(part));
+    const parts = line.slice(open + 1, close).split(",").map((part) => part.trim()).filter((part) => part.length > 0 && !new RegExp(`^${escapedEntry}\\s*:`).test(part));
     lines[inlineAt] = `${recordKey}: { ${parts.join(", ")} }`;
     return lines.join(newline);
   }
@@ -1622,12 +1633,13 @@ export function deleteYamlRecordEntry(source: string, recordKey: string, entryKe
 
 export function replaceYamlRecordStrings(source: string, recordKey: string, entries: Readonly<Record<string, string>>): string {
   const newline = source.includes("\r\n") ? "\r\n" : "\n";
+  const escapedRecord = escapeRegExp(recordKey);
   const keys = Object.keys(entries);
   const block = keys.length === 0
     ? `${recordKey}: {}`
     : [`${recordKey}:`, ...keys.map((key) => `  ${key}: ${quoteInline(entries[key] ?? "")}`)].join(newline);
   const lines = source.split(/\r?\n/);
-  const headerAt = lines.findIndex((line) => new RegExp(`^${recordKey}:\\s*$`).test(line) || new RegExp(`^${recordKey}:\\s*\\{.*\\}\\s*$`).test(line) || new RegExp(`^${recordKey}:\\s*\\{\\}\\s*$`).test(line));
+  const headerAt = lines.findIndex((line) => new RegExp(`^${escapedRecord}:\\s*$`).test(line) || new RegExp(`^${escapedRecord}:\\s*\\{.*\\}\\s*$`).test(line) || new RegExp(`^${escapedRecord}:\\s*\\{\\}\\s*$`).test(line));
   if (headerAt >= 0) {
     let end = headerAt + 1;
     if (!/\{/.test(lines[headerAt] ?? "")) {
@@ -1648,7 +1660,8 @@ export function replaceYamlRecordStrings(source: string, recordKey: string, entr
 export function upsertYamlScalar(source: string, key: string, value: string): string {
   const newline = source.includes("\r\n") ? "\r\n" : "\n";
   const lines = source.split(/\r?\n/);
-  const at = lines.findIndex((line) => new RegExp(`^${key}:\\s*`).test(line));
+  const escapedKey = escapeRegExp(key);
+  const at = lines.findIndex((line) => new RegExp(`^${escapedKey}:\\s*`).test(line));
   const nextLine = `${key}: ${value}`;
   if (at >= 0) {
     lines[at] = nextLine;
@@ -2352,14 +2365,43 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         const child = spawn(exe, ["--mode", "rpc"], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
         let buffer = "";
         let settled = false;
+        let killTimer: ReturnType<typeof setTimeout> | undefined;
+        child.once("close", () => {
+          if (killTimer !== undefined) {
+            clearTimeout(killTimer);
+            killTimer = undefined;
+          }
+        });
+        const terminate = () => {
+          try {
+            child.kill();
+          } catch {
+            return;
+          }
+          if (killTimer === undefined) {
+            killTimer = setTimeout(() => {
+              killTimer = undefined;
+              if (child.exitCode === null && child.signalCode === null) {
+                try {
+                  child.kill("SIGKILL");
+                } catch {
+                  // Best-effort escalation after SIGTERM grace.
+                }
+              }
+            }, 500);
+            killTimer.unref?.();
+          }
+        };
         const finish = (error?: unknown, result?: ConfigWriteResult) => {
           if (settled) return;
           settled = true;
-          child.kill();
+          clearTimeout(timer);
+          terminate();
           if (error) reject(toClientError(error, "CAPABILITY_UNAVAILABLE"));
           else resolve(result ?? writeOk());
         };
         const timer = setTimeout(() => finish({ code: "UNAVAILABLE", message: "login timed out; use omp login in a terminal" }), 120_000);
+        timer.unref?.();
         child.stdout?.setEncoding("utf8");
         child.stdout?.on("data", (chunk: string) => {
           buffer += chunk;
@@ -2771,6 +2813,9 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     async deleteRole(input): Promise<ConfigWriteResult> {
       const paths = await resolvePaths();
       if (!paths) throw { code: "UNAVAILABLE", message: `config directory is missing: ${defaultAgentDir()}` };
+      if (!/^[a-z][a-z0-9_-]*$/.test(input.roleId)) {
+        throw { code: "INVALID_ARGUMENT", message: hostText("角色 id 只能使用小写字母、数字、连字符和下划线", "Role IDs may only contain lowercase letters, digits, hyphens, and underscores") };
+      }
       if (builtinRoles().some((role) => role.id === input.roleId)) {
         throw { code: "INVALID_ARGUMENT", message: hostText("不能删除内置角色", "Built-in roles cannot be deleted") };
       }

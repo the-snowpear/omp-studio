@@ -5,14 +5,29 @@ import type { FsEntry } from "./model";
 /** Small folders keep their natural flow; large lists/columns mount only the visible rows. */
 export function VirtualFileRows({ entries, selected, children }: { entries: readonly FsEntry[]; selected?: string | undefined; children(entry: FsEntry): ReactNode }) {
   const [element, setElement] = useState<HTMLDivElement | null>(null);
+  const [{ rowHeight, gap }, setMetrics] = useState({ rowHeight: 28, gap: 0 });
   const virtual = entries.length > 80;
-  const rowStyle = element?.ownerDocument.defaultView?.getComputedStyle(element);
-  const rowHeight = parseFloat(rowStyle?.getPropertyValue("--fb-row") ?? "") || 28;
-  const gap = parseFloat(rowStyle?.rowGap ?? "") || 0;
   const scroll = element?.parentElement ?? null;
+  useLayoutEffect(() => {
+    if (!element) return;
+    const doc = element.ownerDocument;
+    const measure = () => {
+      const style = doc.defaultView?.getComputedStyle(element);
+      const nextRowHeight = parseFloat(style?.getPropertyValue("--fb-row") ?? "") || 28;
+      const nextGap = parseFloat(style?.rowGap ?? "") || 0;
+      setMetrics(previous => (previous.rowHeight === nextRowHeight && previous.gap === nextGap ? previous : { rowHeight: nextRowHeight, gap: nextGap }));
+    };
+    measure();
+    const observer = typeof MutationObserver === "undefined" ? undefined : new MutationObserver(measure);
+    observer?.observe(doc.documentElement, { attributes: true, attributeFilter: ["data-density", "style"] });
+    return () => observer?.disconnect();
+  }, [element]);
   const rows = useVirtualizer({ count: entries.length, getScrollElement: () => scroll, estimateSize: () => rowHeight + gap,
     getItemKey: index => entries[index]!.path, overscan: 8, enabled: virtual,
   });
+  useLayoutEffect(() => {
+    if (virtual) rows.measure();
+  }, [virtual, rowHeight, gap, rows]);
   const items = rows.getVirtualItems();
   useLayoutEffect(() => {
     if (!virtual || !selected) return;

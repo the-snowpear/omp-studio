@@ -1,4 +1,5 @@
 import { useMemo, useRef } from "react";
+import { motionReduced } from "../../motion";
 import type { DeckGroup, DeckTotals } from "./deckModel";
 import { formatClock, formatCost, formatTokens, formatTps } from "./deckModel";
 import { useRolledNumber } from "./motionKit";
@@ -10,7 +11,7 @@ const SPARK_POINTS = 90;
 
 function Rolled({ value, format, instant }: { value: number | undefined; format: (value: number) => string; instant: boolean }) {
   const ref = useRef<HTMLElement>(null);
-  const shown = useRolledNumber(value ?? 0, ref);
+  const shown = useRolledNumber(value ?? 0, ref, "hero", instant);
   return <strong ref={ref}>{value === undefined ? "—" : format(instant ? value : shown)}</strong>;
 }
 
@@ -33,12 +34,13 @@ function Spark({ samples, now }: { samples: readonly SwarmSample[]; now: number 
   </svg>;
 }
 
-export function PulseHeader({ totals, samples, source, preview, marks, now, replayAt, groups, onGroup, d, compact }: {
+export function PulseHeader({ totals, samples, source, preview, marks, live = true, now, replayAt, groups, onGroup, d, compact }: {
   totals: DeckTotals;
   samples: readonly SwarmSample[];
   source: AgentRosterSource;
   preview: boolean;
   marks: boolean;
+  live?: boolean | undefined;
   now: number;
   replayAt: number | null;
   groups: ReadonlySet<DeckGroup>;
@@ -50,6 +52,7 @@ export function PulseHeader({ totals, samples, source, preview, marks, now, repl
   const elapsed = totals.startedAt === undefined ? undefined : formatClock((replayAt ?? now) - totals.startedAt);
   const total = Math.max(1, totals.children);
   const replaying = replayAt !== null;
+  const instant = replaying || !live || motionReduced();
   const cut = replayAt ?? now;
   const replaySamples = samples.filter(sample => sample.at <= cut);
   const rate = replaying ? replaySamples.at(-1)?.tps ?? totals.tps : totals.tps;
@@ -74,12 +77,12 @@ export function PulseHeader({ totals, samples, source, preview, marks, now, repl
       {totals.children === 0 ? <span className="ad-ribbon-empty" aria-hidden="true" /> : null}
     </div>
     <dl className="ad-metrics" data-tip={totals.tokens === undefined || totals.cost === undefined || totals.tools === undefined ? d("replay.usageUnknown") : undefined}>
-      <div><dt>{d("metrics.tokens")}</dt><dd><Rolled value={totals.tokens} format={formatTokens} instant={replaying} /></dd></div>
-      <div><dt>{d("metrics.cost")}</dt><dd><Rolled value={totals.cost} format={formatCost} instant={replaying} /></dd></div>
-      <div><dt>{d("metrics.tools")}</dt><dd><Rolled value={totals.tools} format={value => String(Math.round(value))} instant={replaying} /></dd></div>
+      <div><dt>{d("metrics.tokens")}</dt><dd><Rolled value={totals.tokens} format={formatTokens} instant={instant} /></dd></div>
+      <div><dt>{d("metrics.cost")}</dt><dd><Rolled value={totals.cost} format={formatCost} instant={instant} /></dd></div>
+      <div><dt>{d("metrics.tools")}</dt><dd><Rolled value={totals.tools} format={value => String(Math.round(value))} instant={instant} /></dd></div>
       <div className="ad-metric-rate" data-tip={d("rateTip")}>
         <dt>{d("metrics.rate")}</dt>
-        <dd><Rolled value={rate} format={formatTps} instant={replaying || rate === 0} /><small>{d("metrics.rateUnit")}</small></dd>
+        <dd><Rolled value={rate} format={formatTps} instant={instant || rate === 0} /><small>{d("metrics.rateUnit")}</small></dd>
         <Spark samples={samples} now={cut} />
       </div>
     </dl>

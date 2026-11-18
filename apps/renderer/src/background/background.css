@@ -94,7 +94,7 @@ body {
   --surface: color-mix(in srgb, var(--bd-surface-base) 46%, transparent);
   --surface-2: color-mix(in srgb, var(--bd-surface-2-base) 40%, transparent);
   --surface-3: color-mix(in srgb, var(--bd-surface-3-base) 34%, transparent);
-  --code-bg: color-mix(in srgb, var(--bd-code-base) 54%, transparent);
+  --code-bg: color-mix(in srgb, var(--bd-code-base) 74%, transparent);
 }
 
 :root[data-backdrop="on"][data-theme="dark"] {
@@ -106,12 +106,11 @@ body {
   --surface: color-mix(in srgb, var(--bd-surface-base) 56%, transparent);
   --surface-2: color-mix(in srgb, var(--bd-surface-2-base) 50%, transparent);
   --surface-3: color-mix(in srgb, var(--bd-surface-3-base) 44%, transparent);
-  --code-bg: color-mix(in srgb, var(--bd-code-base) 62%, transparent);
+  --code-bg: color-mix(in srgb, var(--bd-code-base) 80%, transparent);
 }
 
-/* 只给需要「隔着玻璃读字」的表面加背景模糊，避免上百张卡片同时开合成层。 */
+/* 只给需要「隔着玻璃读字」的少量浮层/输入壳加背景模糊，避免对话流里几十个 .codeblock 同时开 backdrop-filter 合成层。 */
 :root[data-backdrop="on"] .composer,
-:root[data-backdrop="on"] .codeblock,
 :root[data-backdrop="on"] .menu,
 :root[data-backdrop="on"] .modal,
 :root[data-backdrop="on"] .app-select-popup {

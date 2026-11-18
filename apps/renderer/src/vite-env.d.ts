@@ -63,8 +63,8 @@ declare global {
         onFloatWindow?(listener: (event: import("../../desktop/src/floating-windows-shared").FloatWindowEvent) => void): () => void;
         revealSkillshareToken?(input: { secretId: string; sessionId: string }): Promise<{ ok: boolean; token?: string; name?: string; message?: string }>;
         attachLiveAudio?(input: { audioId: string; sessionId: string }): Promise<{ ok: boolean; message?: string }>;
-        attachPrediction?(input: import("@omp-studio/studio-protocol").PredictionChannel): Promise<{ok:boolean;message?:string}>;
-        predictionInput?(input:{channelId:string;input:Exclude<import("@omp-studio/studio-protocol").PredictionInput,{kind:"import"}>}):Promise<{ok:boolean;message?:string}>;
+        attachPrediction?(input: import("@omp-studio/studio-protocol").PredictionChannel): Promise<{ok:boolean;message?:string;channelLost?:true}>;
+        predictionInput?(input:{channelId:string;input:Exclude<import("@omp-studio/studio-protocol").PredictionInput,{kind:"import"}>}):Promise<{ok:boolean;message?:string;channelLost?:true}>;
         detachPrediction?(input:{channelId:string}):Promise<{ok:boolean;message?:string}>;
         importPredictionHistory?(input:{channelId:string}):Promise<{ok:boolean;cancelled?:boolean;message?:string;count?:number;truncated?:boolean}>;
         onPrediction?(listener:(event:import("@omp-studio/studio-protocol").PredictionEvent)=>void):()=>void;

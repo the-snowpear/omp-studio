@@ -36,12 +36,15 @@ export default function GraphicScene({
   const [error, setError] = useState("");
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   useEffect(() => {
     if (!mount.current) return;
     const host = mount.current;
     let renderer: WebGLRenderer | undefined;
     let controls: OrbitControls | undefined;
     let observer: ResizeObserver | undefined;
+    let onContextLost: ((event: Event) => void) | undefined;
     let frame = 0;
     let active = true;
     let needsPoster = true;
@@ -60,10 +63,20 @@ export default function GraphicScene({
       renderer.toneMappingExposure = 0.8;
       renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
       renderer.setClearColor(0x000000, 0);
+      onContextLost = (event: Event) => {
+        event.preventDefault();
+        if (active) setError(zhRef.current ? "WebGL 上下文已丢失" : "WebGL context lost");
+      };
+      renderer.domElement.addEventListener("webglcontextlost", onContextLost);
       host.append(renderer.domElement);
       const scene = new Scene();
       const group = new Group();
       const camera = new PerspectiveCamera(40, 1, 0.01, 10000);
+      const initW = Math.max(1, host.clientWidth || 600);
+      const initH = Math.max(1, host.clientHeight || 380);
+      renderer.setSize(Math.min(initW, 1600), Math.min(initH, 1000), false);
+      camera.aspect = initW / initH;
+      camera.updateProjectionMatrix();
       scene.add(group);
       scene.add(new AmbientLight(0xffffff, 0.8));
       const light = new DirectionalLight(0xffffff, 2);
@@ -84,7 +97,6 @@ export default function GraphicScene({
           geometry.setAttribute("uv", new BufferAttribute(item.uv, 2));
         if (item.color)
           geometry.setAttribute("color", new BufferAttribute(item.color, 3));
-        if (item.index) geometry.setIndex(new BufferAttribute(item.index, 1));
         for (const part of item.groups)
           geometry.addGroup(part.start, part.count, part.materialIndex);
         const material = item.materials.map((value) => {
@@ -162,15 +174,19 @@ export default function GraphicScene({
       controls.addEventListener("change", draw);
       controls.addEventListener("end", () => { needsPoster = true; draw(); });
       fit.current();
-      observer = new ResizeObserver(() => {
-        const width = Math.max(1, host.clientWidth),
-          height = Math.max(1, host.clientHeight);
-        renderer?.setSize(Math.min(width, 1600), Math.min(height, 1000), false);
-        camera.aspect = width / height;
-        camera.updateProjectionMatrix();
-        draw();
-      });
-      observer.observe(host);
+      const ObserverCtor = host.ownerDocument?.defaultView?.ResizeObserver ?? globalThis.ResizeObserver;
+      if (typeof ObserverCtor !== "undefined") {
+        observer = new ObserverCtor(() => {
+          const width = Math.max(1, host.clientWidth),
+            height = Math.max(1, host.clientHeight);
+          renderer?.setSize(Math.min(width, 1600), Math.min(height, 1000), false);
+          camera.aspect = width / height;
+          camera.updateProjectionMatrix();
+          needsPoster = true;
+          draw();
+        });
+        observer.observe(host);
+      }
       setError("");
     } catch (cause) {
       onFailure(cause instanceof Error ? cause.message : String(cause));
@@ -183,6 +199,9 @@ export default function GraphicScene({
       for (const texture of textures) texture.dispose();
       for (const material of materials) material.dispose();
       for (const geometry of geometries) geometry.dispose();
+      if (renderer && onContextLost) {
+        renderer.domElement.removeEventListener("webglcontextlost", onContextLost);
+      }
       renderer?.dispose();
       renderer?.forceContextLoss();
       renderer?.domElement.remove();
@@ -200,7 +219,7 @@ export default function GraphicScene({
         <span>
           {zh ? "拖动旋转 · 滚轮缩放" : "Drag to orbit · Scroll to zoom"}
         </span>
-        <button className="btn small outline" onClick={() => fit.current()}>
+        <button type="button" className="btn small outline" onClick={() => fit.current()}>
           {zh ? "适配视图" : "Fit view"}
         </button>
       </div>

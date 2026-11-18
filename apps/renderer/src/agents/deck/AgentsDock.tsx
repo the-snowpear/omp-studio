@@ -57,9 +57,11 @@ export function AgentsDock({ agents, ready, source, scope, openedIds, selectedId
   const working = recording && agents.some(agent => agent.status === "running" || agent.status === "starting" || agent.status === "reviving");
   useEffect(() => {
     if (!recording) return;
-    sampleSwarm(scope, agentsRef.current);
+    if (!document.hidden && document.visibilityState !== "hidden") sampleSwarm(scope, agentsRef.current);
     if (!working) return;
-    const timer = window.setInterval(() => sampleSwarm(scope, agentsRef.current), 1000);
+    const timer = window.setInterval(() => {
+      if (!document.hidden && document.visibilityState !== "hidden") sampleSwarm(scope, agentsRef.current);
+    }, 1000);
     return () => window.clearInterval(timer);
   }, [recording, working, scope]);
 

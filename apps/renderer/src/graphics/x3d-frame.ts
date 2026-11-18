@@ -229,5 +229,11 @@ async function load(input: {
   report("graphic-loaded");
   capturePoster();
 }
-window.addEventListener("pagehide", () => browser?.endUpdate());
+window.addEventListener("pagehide", () => {
+  browser?.endUpdate();
+  for (const canvas of document.querySelectorAll("canvas")) {
+    const gl = canvas.getContext("webgl2") ?? canvas.getContext("webgl");
+    gl?.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+});
 report("graphic-ready");

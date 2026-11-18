@@ -43,9 +43,10 @@ export function BashRulesEditor({ value, disabled, zh, label, save }: { value: F
   const seq = useRef(0);
   const nextId = () => ++seq.current;
   const [rules, setRules] = useState<RuleDraft[]>(() => readRules(value, nextId));
-  const baseline = useMemo(() => JSON.stringify(value ?? []), [value]);
+  const baseline = useMemo(() => (value === undefined ? "undefined" : JSON.stringify(value)), [value]);
   useEffect(() => { setRules(readRules(value, nextId)); }, [baseline]); // eslint-disable-line react-hooks/exhaustive-deps
-  const dirty = JSON.stringify(toValue(rules)) !== JSON.stringify(toValue(readRules(value, () => 0)));
+  const modified = JSON.stringify(toValue(rules)) !== JSON.stringify(toValue(readRules(value, () => 0)));
+  const dirty = modified || (value === null && rules.length === 0);
   const patch = (id: number, change: Partial<Pick<Extract<RuleDraft, { kind: "rule" }>, "match" | "approval" | "env">>) => setRules(list => list.map(rule => rule.id === id && rule.kind === "rule" ? { ...rule, ...change } : rule));
   const move = (index: number, delta: -1 | 1) => setRules(list => {
     const next = list.slice();
@@ -78,7 +79,7 @@ export function BashRulesEditor({ value, disabled, zh, label, save }: { value: F
     <div className="bash-rules-foot">
       <button type="button" className="btn small ghost" disabled={disabled} onClick={() => setRules(list => [...list, { id: nextId(), kind: "rule", raw: { match: "", approval: "prompt" }, match: "", approval: "prompt", env: "" }])}><Icon name="plus" extra="sm" />{zh ? "添加规则" : "Add rule"}</button>
       <span className="bash-rules-note">{zh ? "从上到下匹配；路径分组保留原结构，不会转成全局规则。表单错误由 Runtime 返回。" : "Matched top to bottom. Path groups retain their structure, never becoming unscoped rules. The Runtime reports form errors."}</span>
-      {dirty ? <button type="button" className="btn small ghost" disabled={disabled} onClick={() => setRules(readRules(value, nextId))}>{zh ? "还原" : "Revert"}</button> : null}
+      {modified ? <button type="button" className="btn small ghost" disabled={disabled} onClick={() => setRules(readRules(value, nextId))}>{zh ? "还原" : "Revert"}</button> : null}
       <button type="button" className="btn small outline" disabled={disabled || !dirty} onClick={() => save(toValue(rules))}>{zh ? "保存规则" : "Save rules"}</button>
     </div>
   </div>;

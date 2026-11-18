@@ -54,14 +54,23 @@ const HOST_STATUS: Record<SessionHistoryStatus, { chip: string; key: string }> =
   closed: { chip: "gray", key: "history.closed" },
 };
 
-function formatHostTime(value: string, t: (key: string) => string): string {
+function formatHostTime(value: string, t: (key: string) => string, zh: boolean): string {
   const then = Date.parse(value);
   if (!Number.isFinite(then)) return value;
   const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
   if (seconds < 60) return t("common.justNow");
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  if (seconds < 86400 * 7) return `${Math.floor(seconds / 86400)}d ago`;
+  if (seconds < 3600) {
+    const m = Math.floor(seconds / 60);
+    return zh ? `${m} 分钟前` : `${m}m ago`;
+  }
+  if (seconds < 86400) {
+    const h = Math.floor(seconds / 3600);
+    return zh ? `${h} 小时前` : `${h}h ago`;
+  }
+  if (seconds < 86400 * 7) {
+    const d = Math.floor(seconds / 86400);
+    return zh ? `${d} 天前` : `${d}d ago`;
+  }
   return new Date(then).toLocaleDateString();
 }
 
@@ -327,7 +336,7 @@ function HostHistRow({
         </span>
         <span className="h-sub">
           <span>{t("history.messagesCount", { count: entry.messageCount })}</span>
-          <span>{formatHostTime(entry.lastActiveAt, t)}</span>
+          <span>{formatHostTime(entry.lastActiveAt, t, zh)}</span>
           {entry.summary ? <span>{entry.summary}</span> : null}
         </span>
       </a>

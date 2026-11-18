@@ -12,6 +12,7 @@ export const PREDICTION_CHANNELS = {
 } as const;
 export interface PredictionResult {
   ok: boolean;
+  channelLost?: true;
   cancelled?: boolean;
   message?: string;
   count?: number;

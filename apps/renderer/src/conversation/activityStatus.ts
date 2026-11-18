@@ -1,4 +1,4 @@
-import { fileBase, isPathKind, toolKind, toolLabel, toolTarget } from "./toolMeta";
+import { fileBase, isPathKind, toolHeaderFileMeta, toolKind, toolLabel, toolTarget } from "./toolMeta";
 import type { ConversationState, LiveTool } from "./conversationViewModel";
 import { isZh } from "../i18n";
 
@@ -20,6 +20,8 @@ export interface ActivityStatus {
   readonly label: string;
   /** Concrete target of the operation (file, command, query); already shortened. */
   readonly detail?: string;
+  /** Concrete file path when the active tool targets a file; drives the file-type icon in ActivityLine. */
+  readonly filePath?: string;
   /** Outstanding auto-retry; shown immediately to the right of `working`. */
   readonly retry?: ActivityRetry;
 }
@@ -425,7 +427,13 @@ export function deriveActivityStatus(input: {
       const pair = KIND_VERB[kind];
       const label = pair ? (zh ? pair[0] : pair[1]) : (zh ? `正在执行 ${toolLabel(tool)}` : `Running ${toolLabel(tool)}`);
       const detail = toolDetail(tool);
-      return { phase: "tool", label, ...(detail === "" ? {} : { detail }) };
+      const fileMeta = detail === "" ? undefined : toolHeaderFileMeta(tool);
+      return {
+        phase: "tool",
+        label,
+        ...(detail === "" ? {} : { detail }),
+        ...(fileMeta === undefined ? {} : { filePath: fileMeta.path }),
+      };
     }
     const blockType = lastLiveBlockType(state);
     if (blockType === "thinking") return { phase: "thinking", label: zh ? "正在思考" : "Thinking" };

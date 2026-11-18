@@ -198,11 +198,29 @@ export class TerminalSessions {
       throw error;
     }
     this.#releaseScreen(id);
+    for (const [ownerKey, activeId] of this.activeIds) {
+      if (activeId === id) this.activeIds.delete(ownerKey);
+    }
     const { [id]: _graphic, ...graphics } = this.#state.graphics;
     const { [id]: _error, ...graphicsErrors } = this.#state.graphicsErrors;
     const { [id]: _notice, ...notices } = this.#state.notices;
     const { [id]: _control, ...controlMode } = this.#state.controlMode;
     this.#publish({ ...this.#state, sessions: this.#state.sessions.filter(session => session.id !== id), graphics, graphicsErrors, notices, controlMode });
+  }
+
+  async disposeConversation(conversationId: string): Promise<void> {
+    if (!conversationId) return;
+    const matching = this.#state.sessions.filter(
+      session => session.kind !== "tmux-pane" && session.conversationId === conversationId,
+    );
+    const ownerSuffix = `,${JSON.stringify(conversationId)}]`;
+    for (const [connectionId, ownerKey] of Object.entries(this.#state.tmuxOwners)) {
+      if (ownerKey.endsWith(ownerSuffix)) this.forgetTmux(connectionId);
+    }
+    for (const key of [...this.activeIds.keys()]) {
+      if (key?.endsWith(ownerSuffix)) this.activeIds.delete(key);
+    }
+    await Promise.allSettled(matching.map(session => this.remove(session.id)));
   }
 
   listTmuxSessions(targetId: string, workspaceId: string) {
@@ -250,6 +268,10 @@ export class TerminalSessions {
     const { [connectionId]: _owner, ...tmuxOwners } = this.#state.tmuxOwners;
     const { [connectionId]: _hidden, ...hiddenWindows } = this.#state.hiddenWindows;
     const ids = new Set(panes.map(pane => pane.id));
+    const prefix = `tmux:${connectionId}:`;
+    for (const [ownerKey, activeId] of this.activeIds) {
+      if (ids.has(activeId) || activeId.startsWith(prefix)) this.activeIds.delete(ownerKey);
+    }
     const keep = <T,>(record: Readonly<Record<string, T>>) => Object.fromEntries(Object.entries(record).filter(([id]) => !ids.has(id)));
     this.#publish({ ...this.#state, tmux, tmuxOwners, hiddenWindows, sessions: this.#state.sessions.filter(session => !ids.has(session.id)), graphics: keep(this.#state.graphics), graphicsErrors: keep(this.#state.graphicsErrors), notices: keep(this.#state.notices), controlMode: keep(this.#state.controlMode) });
   }
@@ -261,6 +283,7 @@ export class TerminalSessions {
     for (const session of this.#state.sessions) if (session.kind !== "tmux-pane") void this.api?.dispose(session.id).catch(() => {});
     for (const id of Object.keys(this.#state.tmux)) void this.api?.tmuxDetach?.(id).catch(() => {});
     for (const id of this.hosts.keys()) this.#releaseScreen(id);
+    this.activeIds.clear();
     this.pending.clear();
     this.#acked.clear();
     this.#creditsClosed.clear();

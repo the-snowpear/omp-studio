@@ -24,11 +24,14 @@ export function MinimizedCapsule({ owner, capsuleId, locked = false, children, c
 
   const place = (next: DragPoint | null, size?: { width: number; height: number }) => {
     const slot = anchor.current!, surface = slot.ownerDocument, view = surface.defaultView!;
+    const ancestorHidden = Boolean(slot.closest("[hidden], [inert]"));
+    host.hidden = ancestorHidden;
     const parent = next ? surface.body : slot;
     // Keep the button itself alive when leaving an overflow/transform container, including during pointerup.
     host.classList.toggle("is-detached", !!next);
     if (host.parentNode !== parent) parent.append(host);
     if (!next) { position.current = null; host.removeAttribute("style"); return; }
+    if (ancestorHidden) return;
     const box = size ?? host.getBoundingClientRect();
     position.current = {
       x: Math.max(8, Math.min(next.x, view.innerWidth - box.width - 8)),

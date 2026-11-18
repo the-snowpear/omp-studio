@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { SessionBrokerError, type SessionLease, type SessionLeaseStore } from "./session-broker.js";
@@ -58,8 +58,10 @@ export class FileSessionLeaseStore implements SessionLeaseStore {
         if (now - current.heartbeatAt <= this.#staleAfterMs) {
           throw new SessionBrokerError("SESSION_LEASE_BUSY", "Session is already owned by another Worker");
         }
+        const stalePath = `${path}.stale-${process.pid}-${now}-${randomBytes(4).toString("hex")}`;
         try {
-          await rename(path, `${path}.stale-${process.pid}-${now}`);
+          await this.#renameFile(path, stalePath);
+          await rm(stalePath, { force: true }).catch(() => {});
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
         }
@@ -78,7 +80,12 @@ export class FileSessionLeaseStore implements SessionLeaseStore {
         if ((error as NodeJS.ErrnoException).code === "EEXIST") continue;
         throw error;
       }
-      await this.#writeEpoch(path, record.leaseEpoch);
+      try {
+        await this.#writeEpoch(path, record.leaseEpoch);
+      } catch (error) {
+        await rm(path, { force: true }).catch(() => {});
+        throw error;
+      }
       let released = false;
       return {
         sessionId: input.sessionId,
@@ -118,6 +125,13 @@ export class FileSessionLeaseStore implements SessionLeaseStore {
     const path = this.#pathFor(sessionId);
     await rm(path, { force: true }).catch(() => {});
     await rm(`${path}.epoch`, { force: true }).catch(() => {});
+    const stalePrefix = `${basename(path)}.stale-`;
+    const entries = await readdir(this.#directory).catch(() => [] as string[]);
+    for (const name of entries) {
+      if (name.startsWith(stalePrefix)) {
+        await rm(join(this.#directory, name), { force: true }).catch(() => {});
+      }
+    }
   }
 
   async #readEpoch(path: string): Promise<number> {
@@ -132,7 +146,7 @@ export class FileSessionLeaseStore implements SessionLeaseStore {
 
   async #writeEpoch(path: string, epoch: number): Promise<void> {
     const epochPath = `${path}.epoch`;
-    const temporary = `${epochPath}.${process.pid}.${this.#now()}.tmp`;
+    const temporary = `${epochPath}.${process.pid}.${this.#now()}.${randomBytes(6).toString("hex")}.tmp`;
     await writeFile(temporary, `${epoch}\n`, { encoding: "utf8", flag: "wx" });
     await this.#replaceFile(temporary, epochPath);
   }
@@ -157,7 +171,7 @@ export class FileSessionLeaseStore implements SessionLeaseStore {
   }
 
   async #replace(path: string, record: StoredLease): Promise<void> {
-    const temporary = `${path}.${process.pid}.${this.#now()}.tmp`;
+    const temporary = `${path}.${process.pid}.${this.#now()}.${randomBytes(6).toString("hex")}.tmp`;
     await writeFile(temporary, `${JSON.stringify(record)}\n`, { encoding: "utf8", flag: "wx" });
     await this.#replaceFile(temporary, path);
   }

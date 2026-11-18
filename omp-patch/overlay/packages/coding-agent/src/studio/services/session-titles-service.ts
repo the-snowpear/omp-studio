@@ -67,7 +67,7 @@ export class StudioSessionTitlesService {
 				check();
 				const identity = stat.dev + ":" + stat.ino + ":" + stat.size + ":" + stat.mtimeMs + ":" + stat.ctimeMs,
 					cached = this.#cache.get(target.path);
-				if (cached?.identity === identity && cached.row.sessionId === id) {
+				if (cached?.identity === identity && cached.row.sessionId === id && cached.row.title !== undefined) {
 					rows.push(cached.row);
 					continue;
 				}

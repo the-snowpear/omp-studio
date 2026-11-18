@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import { Icon, type IconName } from "../icons";
 import { fileTypeOf, iconNameFor, isNoiseDir, isSensitive } from "../explorer-types";
 import { fileBadge, fileKind } from "../files/fileTypes";
-import { baseName, columnRoot, COMPUTER, driveDisplayName, within, formatModified, formatSize, parentPath, pathSegments, samePath, type FsEntry, type FsPeek, type FsPlaces, type SortKey } from "./model";
+import { baseName, columnRoot, COMPUTER, driveDisplayName, within, formatModified, formatSize, nameProblem, parentPath, pathSegments, samePath, type FsEntry, type FsPeek, type FsPlaces, type SortKey } from "./model";
 import type { FileBrowserState } from "./useFileBrowser";
 
 export type Copy = (zh: string, en: string) => string;
@@ -55,32 +55,38 @@ function NameCell({ entry, copy }: { entry: FsEntry; copy: Copy }) {
 }
 
 export function EditInput({ state, places, copy, language }: { state: FileBrowserState; places: FsPlaces; copy: Copy; language: "zh" | "en" }) {
-  const edit = state.edit, input = useRef<HTMLInputElement>(null);
+  const edit = state.edit, input = useRef<HTMLInputElement>(null), handledRef = useRef(false);
+  const editTarget = edit?.kind === "rename" ? edit.path : edit?.parent;
   useLayoutEffect(() => {
+    handledRef.current = false;
     const element = input.current;
     if (!element) return;
     element.focus();
     // 重命名时只选中主名，不选扩展名（与系统文件管理器一致）。
     const dot = edit?.kind === "rename" ? element.value.lastIndexOf(".") : -1;
     element.setSelectionRange(0, dot > 0 ? dot : element.value.length);
-  }, [edit?.kind, edit?.kind === "rename" ? edit.path : edit?.parent]);
+  }, [edit?.kind, editTarget]);
   if (!edit) return null;
   return <span className="fb-edit" onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}>
     <input ref={input} className="input" value={edit.draft} disabled={edit.busy} spellCheck={false}
       aria-label={edit.kind === "new" ? copy("新文件夹名称", "New folder name") : copy("新名称", "New name")}
       aria-invalid={Boolean(edit.error) || undefined}
-      onChange={event => { const { error: _cleared, ...rest } = edit; state.setEdit({ ...rest, draft: event.target.value }); }}
+      onChange={event => { handledRef.current = false; const { error: _cleared, ...rest } = edit; state.setEdit({ ...rest, draft: event.target.value }); }}
       onKeyDown={event => {
         event.stopPropagation();
-        if (event.key === "Enter") { event.preventDefault(); void state.submitEdit(); }
-        if (event.key === "Escape") { event.preventDefault(); state.setEdit(undefined); }
+        if (event.key === "Enter") { event.preventDefault(); handledRef.current = true; void state.submitEdit(); }
+        if (event.key === "Escape") { event.preventDefault(); handledRef.current = true; state.setEdit(undefined); }
       }}
       onBlur={() => {
-        if (edit.busy) return;
+        if (handledRef.current || edit.busy) return;
+        const trimmed = edit.draft.trim();
         // 点走即确认；名称没变、为空或已经报错时点走等于取消。
-        const unchanged = edit.kind === "rename" && edit.draft.trim() === baseName(edit.path, places.separator);
-        if (edit.error || unchanged || !edit.draft.trim()) state.setEdit(undefined);
-        else void state.submitEdit();
+        const unchanged = edit.kind === "rename" && trimmed === baseName(edit.path, places.separator);
+        if (edit.error || unchanged || !trimmed) { handledRef.current = true; state.setEdit(undefined); return; }
+        const problem = nameProblem(trimmed, places.platform, language);
+        if (problem) { state.setEdit({ ...edit, error: problem }); return; }
+        handledRef.current = true;
+        void state.submitEdit();
       }} />
     {edit.busy ? <span className="spinner" aria-hidden="true" /> : null}
     {edit.error ? <span className="fb-edit-error" role="alert">{edit.error}</span> : null}
@@ -143,7 +149,7 @@ function useScrollSelected(container: HTMLElement | null, selected: string | und
     if (!container || !selected) return;
     const row = [...container.querySelectorAll<HTMLElement>("[data-path]")].find(element => element.dataset.path === selected);
     row?.scrollIntoView?.({ block: "nearest" });
-    if (row && container.contains(document.activeElement)) row.focus({ preventScroll: true });
+    if (row && container.contains(container.ownerDocument.activeElement)) row.focus({ preventScroll: true });
   }, [container, selected]);
 }
 

@@ -110,6 +110,10 @@
   border-radius: var(--r-8); cursor: pointer; outline-offset: -2px;
 }
 .scm-path-row:hover { background: var(--bg-hover); }
+.scm-path-toggle {
+  display: flex; align-items: center; gap: var(--sp-6); flex: 1; min-width: 0; min-height: 30px; padding: 0;
+  border: 0; border-radius: var(--r-6); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
 .scm-path.is-unpicked .scm-path-name { color: var(--text-2); }
 .scm-change {
   display: grid; place-items: center; flex: none; width: 16px; height: 16px; border-radius: var(--r-4);

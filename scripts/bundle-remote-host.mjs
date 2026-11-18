@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { mkdir, readFile, writeFile, cp } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile, cp } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
@@ -30,6 +30,11 @@ export async function bundleRemoteHost(output = join(root, "apps/desktop/dist/re
   const bytes = await readFile(join(output, "host.mjs"));
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   await writeFile(join(output, "host.json"), JSON.stringify({ version: 1, sha256, bytes: bytes.length, files: [{ name: workerName, sha256: workerHash, bytes: workerBytes.length }] }));
+  for (const name of await readdir(output)) {
+    if (/^archive-worker-[a-f0-9]{64}\.mjs$/u.test(name) && name !== workerName) {
+      await rm(join(output, name), { force: true });
+    }
+  }
   return { directory: output, sha256, bytes: bytes.length };
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) console.log(await bundleRemoteHost(process.argv[2]));

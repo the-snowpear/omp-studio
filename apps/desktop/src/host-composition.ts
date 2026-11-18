@@ -773,6 +773,7 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
       deleteService = new StudioSessionDeleteService({
         allowedCwd: cwd,
         purgeRows: input => context.sessionPurge.run(input),
+        timeTravel: timeTravelService(context.profileDirectory),
         isResident: (sessionId) =>
           context.runtimeSession?.isResident?.(sessionId) === true
           || sessionRef.current?.controller.publication()?.snapshot?.sessionId === sessionId,

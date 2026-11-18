@@ -169,37 +169,77 @@ export function ServicesPane({
     setError("");
     setConfirm(undefined);
     setForm(false);
+    setEditing(undefined);
     setEnvironment("");
     setSpec(emptySpec);
     setBusy(false);
+  }, [sessionId, workspaceId, preview]);
+  useEffect(() => {
     if (!visible || !open) return;
-    void refresh();
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const clearTimer = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    };
     void loadDefinitions();
-    if (preview)
+    if (preview) {
+      void refresh();
       return () => {
-        generation.current++;
+        active = false;
       };
-    const timer = setInterval(() => {
-      if (!document.hidden) void refresh();
-    }, 4000);
+    }
+    const poll = () => {
+      clearTimer();
+      if (!active || document.hidden) return;
+      void refresh().finally(() => {
+        if (active && !document.hidden) {
+          timer = setTimeout(poll, 4000);
+        }
+      });
+    };
+    const onVisibility = () => {
+      if (document.hidden) clearTimer();
+      else poll();
+    };
+    poll();
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
-      generation.current++;
-      clearInterval(timer);
+      active = false;
+      clearTimer();
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [visible, open, sessionId, preview, refresh, loadDefinitions]);
+  const selectedKey = selected ? `${selected.name}:${selected.instanceId ?? ""}` : "";
   useEffect(() => {
-    let active = true;
     setLogs("");
+  }, [selectedKey, sessionId, preview]);
+  useEffect(() => {
     if (!visible || !open || !selected) return;
-    const load = async () => {
-      if (preview) {
-        setLogs(marks ? "[demo] Server ready\n[demo] Watching workspace files…" : "Server ready\nWatching workspace files…");
-        return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const clearTimer = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
       }
+    };
+    if (preview) {
+      setLogs(marks ? "[demo] Server ready\n[demo] Watching workspace files…" : "Server ready\nWatching workspace files…");
+      return () => {
+        active = false;
+      };
+    }
+    const targetName = selected.name;
+    const targetInstanceId = selected.instanceId;
+    const isExited = selected.state === "exited";
+    const load = async () => {
       try {
         const value = await invoke("services.logs", {
-          name: selected.name,
-          instanceId: selected.instanceId,
+          name: targetName,
+          instanceId: targetInstanceId,
           lines: 300,
         });
         if (active) setLogs(value.text);
@@ -207,15 +247,27 @@ export function ServicesPane({
         if (active) setError(hostErrorMessage(cause, "Cannot read logs"));
       }
     };
-    void load();
-    const timer = setInterval(() => {
-      if (!document.hidden) void load();
-    }, 3000);
+    const poll = () => {
+      clearTimer();
+      if (!active || document.hidden) return;
+      void load().finally(() => {
+        if (active && !isExited && !document.hidden) {
+          timer = setTimeout(poll, 3000);
+        }
+      });
+    };
+    const onVisibility = () => {
+      if (document.hidden) clearTimer();
+      else poll();
+    };
+    poll();
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       active = false;
-      clearInterval(timer);
+      clearTimer();
+      document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [visible, open, selected?.name, selected?.instanceId, preview, invoke]);
+  }, [visible, open, selected?.name, selected?.instanceId, selected?.state, preview, marks, invoke]);
   const run = async (action: () => Promise<void>) => {
     if (busy) return;
     const epoch = generation.current;

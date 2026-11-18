@@ -55,7 +55,7 @@ export function HubDossierHead({
   const duration = hubDurationMs(agent, now);
   const model = agent.fallback ?? agent.resolvedModel;
   const parked = agent.status === "parked";
-  const ended = agent.status === "aborted";
+  const ended = agent.status === "aborted" || agent.status === "released";
   return (
     <header className="hub-dossier-head" data-scrolled={scrolled || undefined}>
       <div className="hub-dossier-top">

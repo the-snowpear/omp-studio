@@ -49,8 +49,8 @@
 .task-stage { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 
 .tc-progress { display: flex; flex-direction: column; gap: 3px; margin: 4px 0 8px; }
-.tc-progress .jw-bar-track.indeterminate .jw-bar-fill { width: 30%; animation: tc-progress-slide var(--loop-pulse) var(--ease-loop) infinite; background: var(--accent); }
-@keyframes tc-progress-slide { 0% { left: -30%; } 100% { left: 100%; } }
+.tc-progress .jw-bar-track.indeterminate .jw-bar-fill { width: 30%; animation: tc-progress-slide var(--loop-pulse) var(--ease-loop) infinite; background: var(--accent); will-change: transform; }
+@keyframes tc-progress-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(334%); } }
 
 .tc-progress-text { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-2); }
 

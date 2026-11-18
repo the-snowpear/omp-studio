@@ -43,6 +43,7 @@ const Context = createContext<DockEngine | null>(null);
 export function DockProvider({ children, definitions, store, ownerId, conversationTitle }: { children: ReactNode; definitions: readonly PanelDefinition[]; store?: DockStore; ownerId?: string; conversationTitle?: string }) {
   const { resolvedLanguage } = useI18n();
   const [engine] = useState(() => ({ store: store ?? new DockStore(), hosts: new PanelHosts() }));
+  useLayoutEffect(() => { engine.store.setLocale(resolvedLanguage === "zh"); }, [engine.store, resolvedLanguage]);
   const snapshot = useSyncExternalStore(engine.store.subscribe, engine.store.getSnapshot);
   const currentScopeKey = JSON.stringify([snapshot.scope.target, snapshot.scope.project, snapshot.scope.session, snapshot.preview]);
   const [newConversation, setNewConversationState] = useState(false);

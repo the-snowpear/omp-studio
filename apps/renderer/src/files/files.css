@@ -36,8 +36,7 @@
 .file-badge.tone-blue{--tone:var(--blue)}.file-badge.tone-green{--tone:var(--green)}.file-badge.tone-amber{--tone:var(--amber)}.file-badge.tone-red{--tone:var(--red)}.file-badge.tone-accent{--tone:var(--accent)}.file-badge.tone-gray{--tone:var(--text-3)}
 .file-badge.is-large{min-width:52px;height:52px;padding:0 10px;border-radius:14px;font-size:14px}
 .file-badge.is-large .icon{width:22px;height:22px}
-.file-badge.is-loading{animation:file-breathe var(--loop-pulse) var(--ease-loop) infinite}
-@keyframes file-breathe{50%{opacity:.45;transform:scale(.96)}}
+.file-badge.is-loading{animation:omp-pulse var(--loop-pulse) var(--ease-loop) infinite}
 
 /* ⋯ menu extras */
 .file-more-menu{min-width:232px}

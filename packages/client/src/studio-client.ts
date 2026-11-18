@@ -101,7 +101,13 @@ export class StudioClientImpl implements StudioClient {
       } catch (error) {
         // Events buffered without a successful snapshot cannot be trusted;
         // discard them so a later retry starts from a clean baseline.
-        if (generation === this.transportGeneration) this.bufferedEvents.length = 0;
+        if (generation === this.transportGeneration) {
+          this.bufferedEvents.length = 0;
+          if (this.state.connection.phase === "initial") {
+            this.transportUnsubscribe?.();
+            this.transportUnsubscribe = null;
+          }
+        }
         throw error;
       } finally {
         if (generation === this.transportGeneration) this.bootstrapping = false;
@@ -246,6 +252,9 @@ export class StudioClientImpl implements StudioClient {
           this.bufferedEvents.push(event);
           return;
         }
+        if (this.state.connection.phase === "initial") {
+          return;
+        }
         this.applyAction({ type: "event", event });
       });
     }
@@ -256,12 +265,17 @@ export class StudioClientImpl implements StudioClient {
     const next = reduceClientState(this.state, action);
     if (next !== this.state) {
       this.state = next;
-      // Computer frames only advance the transport cursor. Notify the scoped
-      // event consumers, not every global shell/conversation state subscriber.
-      const computerProgressOnly = action.type === "event" && action.event.kind === "computer.changed"
-        && next.entities === previous.entities && next.commands === previous.commands
+      // Streaming conversation updates and computer frames only advance the
+      // transport cursor (unless stateVersion or resyncRequired also changed).
+      // Notify the scoped event consumers, not every global shell subscriber.
+      const streamProgressOnly =
+        action.type === "event"
+        && (action.event.kind === "computer.changed" || action.event.kind === "conversation.changed")
+        && next.entities === previous.entities
+        && next.commands === previous.commands
+        && next.connection.stateVersion === previous.connection.stateVersion
         && next.connection.resyncRequired === previous.connection.resyncRequired;
-      if (!computerProgressOnly) for (const listener of this.stateListeners) {
+      if (!streamProgressOnly) for (const listener of this.stateListeners) {
         listener(this.state);
       }
     }

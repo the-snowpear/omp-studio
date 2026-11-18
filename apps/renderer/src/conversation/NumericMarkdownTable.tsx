@@ -40,7 +40,18 @@ export function tableData(
     }
   }
   if (rows.length < 3) return;
-  return { header: rows[0]!, rows: rows.slice(1) };
+  const header = rows[0]!;
+  if (header.length < 2 || header.length > 8) return;
+  const body = rows.slice(1);
+  let numericRows = 0;
+  for (const row of body) {
+    if (row.length !== header.length) return;
+    if (row.some((cell) => /\d/.test(cell))) {
+      numericRows += 1;
+    }
+  }
+  if (numericRows < 2) return;
+  return { header, rows: body };
 }
 export function NumericMarkdownTable({
   node,
@@ -53,7 +64,9 @@ export function NumericMarkdownTable({
 }) {
   const { resolvedLanguage } = useI18n(),
     zh = resolvedLanguage === "zh",
+    zhRef = useRef(zh),
     host = useRef<HTMLDivElement>(null);
+  zhRef.current = zh;
   const visible = usePreviewVisibility(host, true);
   const [open, setOpen] = useState(true),
     [figure, setFigure] = useState<{ svg: string; alt: string }>(),
@@ -97,21 +110,24 @@ export function NumericMarkdownTable({
               error?: string;
             }>,
           ) => {
-            cancelCommit = afterPreviewScroll(host.current!, () => {
-              if (!current) return;
-              if (event.data.ok) setFigure(event.data.figure);
-              else setError(event.data.error ?? "Chart unavailable");
-            });
+            const target = host.current;
+            if (target && current) {
+              cancelCommit = afterPreviewScroll(target, () => {
+                if (!current) return;
+                if (event.data.ok) setFigure(event.data.figure);
+                else setError(event.data.error ?? "Chart unavailable");
+              });
+            }
             worker?.terminate();
             clearTimeout(timer);
             release();
           };
           worker.onerror = () =>
-            fail(zh ? "无法生成图表" : "Chart unavailable");
+            fail(zhRef.current ? "无法生成图表" : "Chart unavailable");
           timer = window.setTimeout(
             () =>
               fail(
-                zh
+                zhRef.current
                   ? "图表计算超过 2 秒限额"
                   : "Chart exceeded the 2 second limit",
               ),
@@ -133,7 +149,7 @@ export function NumericMarkdownTable({
       clearTimeout(timer);
       release();
     };
-  }, [node, streaming, visible, zh]);
+  }, [node, streaming, visible]);
   return (
     <div ref={host}>
       <div className="md-table-wrap">
@@ -142,6 +158,7 @@ export function NumericMarkdownTable({
       {figure || error || !open ? (
         <div className="graphic-controls">
           <button
+            type="button"
             className="btn small ghost"
             onClick={() => setOpen((value) => !value)}
           >

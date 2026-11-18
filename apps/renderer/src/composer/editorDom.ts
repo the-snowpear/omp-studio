@@ -15,16 +15,16 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
-function removeChipLabel(label: string): string {
-  return isZh() ? `移除胶囊 ${label}` : `Remove chip ${label}`;
+function removeChipLabel(label: string, zh = isZh()): string {
+  return zh ? `移除胶囊 ${label}` : `Remove chip ${label}`;
 }
 
 /**
  * `tabindex="-1"` on purpose: the capsule lives inside a textbox, where Tab
  * belongs to the surrounding form and Backspace is the keyboard way to delete.
  */
-function removeButtonHtml(label: string): string {
-  return `<button type="button" class="cm-chip-x" tabindex="-1" aria-label="${escapeHtml(removeChipLabel(label))}">${iconSvg("x", "sm")}</button>`;
+function removeButtonHtml(label: string, zh = isZh()): string {
+  return `<button type="button" class="cm-chip-x" tabindex="-1" aria-label="${escapeHtml(removeChipLabel(label, zh))}">${iconSvg("x", "sm")}</button>`;
 }
 
 function chipNameHtml(label: string): string {
@@ -171,15 +171,17 @@ export function renumberImageChips(editor: HTMLElement, zh = isZh()): void {
   let index = 0;
   for (const chip of chips) {
     const parsed = parseChipPayload(chip.dataset.chip ?? "");
-    if (!parsed) continue;
+    if (!parsed || parsed.path !== undefined) continue;
     index += 1;
     const label = defaultImageChipLabel(index, zh);
-    if (parsed.label === label) continue;
-    chip.dataset.chip = chipPayload({ ...parsed, label });
-    writeChipLabel(chip, label);
-    chip.querySelector(".cm-chip-x")?.setAttribute("aria-label", removeChipLabel(label));
-    // Clipboard images have no path, so the tooltip has to follow the label.
-    if (parsed.path === undefined && parsed.name === undefined) chip.title = label;
+    const removeLabel = removeChipLabel(label, zh);
+    if (parsed.label !== label) {
+      chip.dataset.chip = chipPayload({ ...parsed, label });
+      writeChipLabel(chip, label);
+      // Clipboard images have no path, so the tooltip has to follow the label.
+      if (parsed.name === undefined) chip.title = label;
+    }
+    chip.querySelector(".cm-chip-x")?.setAttribute("aria-label", removeLabel);
   }
 }
 

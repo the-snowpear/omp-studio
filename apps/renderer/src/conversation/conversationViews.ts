@@ -21,7 +21,9 @@ export class ConversationViewLeases {
   }
   setOwnerKnown(): void { this.#ownerKnown = true; this.#schedule(); }
   block(epoch: number, id: string): () => void {
-    const token = {}; this.#blockers.set(token, { epoch, id }); this.#schedule();
+    const token = {};
+    this.#epochs.add(epoch);
+    this.#blockers.set(token, { epoch, id }); this.#schedule();
     return () => { this.#blockers.delete(token); this.#schedule(); };
   }
   #schedule(): void {
@@ -31,15 +33,32 @@ export class ConversationViewLeases {
       this.#scheduled = false;
       const epoch = this.#epoch;
       if (epoch === undefined) return;
-      const ids = [...new Set([...this.#leases.values()].filter((lease) => lease.epoch === epoch).map((lease) => lease.id))];
-      const blocked = [...new Set([...this.#blockers.values()].filter(lease => lease.epoch === epoch).map(lease => lease.id))];
+      const ids = [...new Set([...this.#leases.values()].filter((lease) => lease.epoch === epoch).map((lease) => lease.id))].slice(0, 8);
+      const blocked = [...new Set([...this.#blockers.values()].filter(lease => lease.epoch === epoch).map(lease => lease.id))].slice(0, 8);
       if (this.multiple) {
-        const views = [...this.#epochs].map(runtimeEpoch => ({ runtimeEpoch,
-          visibleSessionIds: [...new Set([...this.#leases.values()].filter(lease => lease.epoch === runtimeEpoch).map(lease => lease.id))],
-          blockedSessionIds: [...new Set([...this.#blockers.values()].filter(lease => lease.epoch === runtimeEpoch).map(lease => lease.id))],
-        }));
+        const views = [...this.#epochs].map(runtimeEpoch => {
+          const visibleSessionIds = [...new Set([...this.#leases.values()].filter(lease => lease.epoch === runtimeEpoch).map(lease => lease.id))].slice(0, 8);
+          const blockedSessionIds = [...new Set([...this.#blockers.values()].filter(lease => lease.epoch === runtimeEpoch).map(lease => lease.id))].slice(0, 8);
+          if (runtimeEpoch !== epoch && visibleSessionIds.length === 0 && blockedSessionIds.length === 0) {
+            this.#epochs.delete(runtimeEpoch);
+          }
+          return { runtimeEpoch, visibleSessionIds, blockedSessionIds };
+        });
         this.report({ runtimeEpoch: epoch, visibleSessionIds: ids, blockedSessionIds: blocked, views });
-      } else if (ids.length <= 8 && blocked.length <= 8) this.report({ runtimeEpoch: epoch, visibleSessionIds: ids, ...(this.#ownerKnown ? { blockedSessionIds: blocked } : {}) });
+      } else {
+        for (const runtimeEpoch of [...this.#epochs]) {
+          if (
+            runtimeEpoch !== epoch
+            && ![...this.#leases.values()].some(lease => lease.epoch === runtimeEpoch)
+            && ![...this.#blockers.values()].some(lease => lease.epoch === runtimeEpoch)
+          ) {
+            this.#epochs.delete(runtimeEpoch);
+          }
+        }
+        if (ids.length <= 8 && blocked.length <= 8) {
+          this.report({ runtimeEpoch: epoch, visibleSessionIds: ids, ...(this.#ownerKnown ? { blockedSessionIds: blocked } : {}) });
+        }
+      }
     });
   }
 }
@@ -62,14 +81,16 @@ export function useConversationViewLease(identity: ConversationIdentity | null, 
   const leases = surfaces.get(doc) ?? conversationViewLeases;
   const epoch = identity?.runtimeEpoch, id = identity?.sessionId;
   useEffect(() => {
-    if (target.id !== null || demo || !enabled || epoch === undefined || id === undefined || host.current === null || globalThis.ompStudioChrome?.setConversationViewState === undefined) return;
+    const surfaceWin = surfaceWindow(doc);
+    if (target.id !== null || demo || !enabled || epoch === undefined || id === undefined || host.current === null || (surfaceWin.ompStudioChrome?.setConversationViewState ?? globalThis.ompStudioChrome?.setConversationViewState) === undefined) return;
     let release: (() => void) | undefined;
     const update = (visible: boolean) => {
       if (visible && release === undefined) release = leases.acquire(Number(epoch), id);
       if (!visible) { release?.(); release = undefined; }
     };
-    if (typeof IntersectionObserver === "undefined") update(true);
-    const observer = typeof IntersectionObserver === "undefined" ? undefined : new IntersectionObserver((entries) => update(entries.some((entry) => entry.isIntersecting)));
+    const ObserverCtor = (surfaceWin as Window & { IntersectionObserver?: typeof IntersectionObserver }).IntersectionObserver ?? globalThis.IntersectionObserver;
+    if (typeof ObserverCtor === "undefined") update(true);
+    const observer = typeof ObserverCtor === "undefined" ? undefined : new ObserverCtor((entries) => update(entries.some((entry) => entry.isIntersecting)));
     observer?.observe(host.current);
     return () => { observer?.disconnect(); release?.(); };
   }, [epoch, id, demo, enabled, host, doc, leases, target.id]);

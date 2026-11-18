@@ -4,6 +4,7 @@ import {
   buildProvisionalProjectThread,
   isPlaceholderSessionTitle,
   projectHasSession,
+  ProvisionalThreadStore,
   provisionalThreadForHistoryEntry,
   provisionalThreadTitle,
   reconcileProvisionalProjectThread,
@@ -226,5 +227,55 @@ describe("provisional project thread", () => {
       title: "LLM 生成标题",
       titleState: "stable",
     });
+  });
+
+  it("prefers live Runtime titles and records submitted fallbacks on untitled selected history rows across shared MDI stores", () => {
+    expect(sidebarThreadTitle(missingTitleEntry(), provisional, "未命名会话", "实时生成标题")).toBe("实时生成标题");
+    expect(sidebarThreadTitle(historyEntry("已持久化标题"), provisional, "未命名会话", undefined)).toBe("已持久化标题");
+
+    const store = new ProvisionalThreadStore();
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => { notifications += 1; });
+
+    // Unsubmitted draft on a selected history row still creates no provisional entry.
+    store.setCache((current) => reconcileProvisionalProjectThread(current, {
+      sessionId,
+      workspaceId: provisional.workspaceId,
+      visible: true,
+      title: "草稿不改名",
+      running: false,
+      submitted: false,
+    }, {
+      preview: false,
+      sessionCreating: false,
+      selectedHistoryId: "history-new",
+      selectedTitleIsPlaceholder: true,
+      untitledTitle: "未命名会话",
+    }));
+    expect(store.getSnapshot()).toEqual({});
+    expect(notifications).toBe(0);
+
+    // Submitting a prompt on an untitled selected history row records the prompt fallback immediately.
+    store.setCache((current) => reconcileProvisionalProjectThread(current, {
+      sessionId,
+      workspaceId: provisional.workspaceId,
+      visible: true,
+      title: "立即显示首条提问标题",
+      running: true,
+      submitted: true,
+    }, {
+      preview: false,
+      sessionCreating: false,
+      selectedHistoryId: "history-new",
+      selectedTitleIsPlaceholder: true,
+      untitledTitle: "未命名会话",
+    }));
+    expect(store.getSnapshot()[String(sessionId)]).toMatchObject({
+      title: "立即显示首条提问标题",
+      submitted: true,
+      running: true,
+    });
+    expect(notifications).toBe(1);
+    unsubscribe();
   });
 });

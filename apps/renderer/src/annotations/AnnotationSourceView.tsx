@@ -60,6 +60,16 @@ function annotationsExtension(source: AnnotationSource, notes: AnnotationNote[],
   ];
 }
 
+function readerContentAttributes(zh: boolean): Extension {
+  return EditorView.contentAttributes.of({
+    role: "textbox",
+    "aria-readonly": "true",
+    tabindex: "0",
+    spellcheck: "false",
+    "aria-label": zh ? "来源快照，可选择文本" : "Source snapshot; select text to annotate",
+  });
+}
+
 /** The same CodeMirror theme as workspace files, with exact, frozen-source anchors. */
 export const AnnotationSourceView = memo(function AnnotationSourceView({
   source, notes, selection, activeNote, wrap, zh, locked, scrollMemory, onSelection, onAnnotate, onEdit, onUndo, onLocate, onReady,
@@ -80,7 +90,9 @@ export const AnnotationSourceView = memo(function AnnotationSourceView({
   onReady(reader: AnnotationReader | null): void;
 }) {
   const host = useRef<HTMLDivElement>(null), view = useRef<EditorView | null>(null);
-  const language = useRef(new Compartment()), wrapping = useRef(new Compartment()), annotations = useRef(new Compartment());
+  const language = useRef(new Compartment()), wrapping = useRef(new Compartment()), annotations = useRef(new Compartment()), contentAttrs = useRef(new Compartment());
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   const latest = useRef({ onSelection, onAnnotate, onEdit, onUndo, onLocate, onReady, locked });
   latest.current = { onSelection, onAnnotate, onEdit, onUndo, onLocate, onReady, locked };
 
@@ -125,8 +137,7 @@ export const AnnotationSourceView = memo(function AnnotationSourceView({
           // exact UTF-16 offsets into source.text, rather than normalized text.
           EditorState.lineSeparator.of("\n"), EditorState.readOnly.of(true), EditorState.tabSize.of(2),
           EditorView.editable.of(false),
-          EditorView.contentAttributes.of({ role: "textbox", "aria-readonly": "true", tabindex: "0", spellcheck: "false",
-            "aria-label": zh ? "来源快照，可选择文本" : "Source snapshot; select text to annotate" }),
+          contentAttrs.current.of(readerContentAttributes(zhRef.current)),
           lineNumbers({ domEventHandlers: { mousedown(editor, line, event) {
             if ((event as MouseEvent).button !== 0 || latest.current.locked) return false;
             event.preventDefault();
@@ -179,7 +190,11 @@ export const AnnotationSourceView = memo(function AnnotationSourceView({
       scrollMemory.set(source.id, editor.scrollDOM.scrollTop);
       latest.current.onReady(null); editor.destroy(); view.current = null;
     };
-  }, [source.id, source.text, zh, scrollMemory]);
+  }, [source.id, source.text, scrollMemory]);
+
+  useEffect(() => {
+    view.current?.dispatch({ effects: contentAttrs.current.reconfigure(readerContentAttributes(zh)) });
+  }, [zh, source.id]);
 
   useEffect(() => {
     const filename = source.kind === "diff" ? "changes.diff" : source.path ?? "reply.md";

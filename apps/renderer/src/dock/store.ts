@@ -168,6 +168,7 @@ export class DockStore {
   private unwatch: (() => void) | undefined;
   /** Storage refused even the degraded payload: this session keeps everything in memory. */
   private blocked = false;
+  private localeZh: boolean | undefined;
 
   constructor(storage?: Storage | null, owner?: DockStore, scope?: DockScope, preview = false) {
     this.owner = owner;
@@ -226,6 +227,17 @@ export class DockStore {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
   };
+
+  setLocale(zh: boolean): void {
+    const root = this.owner ?? this;
+    if (root.localeZh === zh) return;
+    root.localeZh = zh;
+    const fresh = new Map(builtInPresets(zh).map(preset => [preset.id, preset.name]));
+    for (const bucket of [root.real, root.demo]) {
+      bucket.presets = bucket.presets.map(preset => preset.builtin && fresh.has(preset.id) ? { ...preset, name: fresh.get(preset.id)! } : preset);
+    }
+    for (const handle of root.handles) handle.publish();
+  }
 
   fork(scope: DockScope, preview = false): DockStore {
     const store = new DockStore(undefined, this.owner ?? this, scope, preview);
@@ -314,10 +326,11 @@ export class DockStore {
       const groups = withPins(projectConversationPanel(this.layout, this.conversationWindow(), false), pinsForScope(this.state.pins, this.scope)).floats;
       const ids = new Set(groups.map(group => this.windowId(group.id)));
       for (const record of manager.getSnapshot().records) if (record.content.kind === "tools" && record.content.documentId === this.documentId && !ids.has(record.id)) manager.remove(record.id);
+      const zh = (this.owner ?? this).localeZh ?? isZh();
       for (const group of groups) {
         const id = this.windowId(group.id), pin = group.pin?.mode ?? "none";
         const rawDefinition = WORKBENCH_PANELS.find(value => value.id === panelBaseId(group.active));
-        const definition = rawDefinition ? localizePanelDefinition(rawDefinition, isZh()) : undefined;
+        const definition = rawDefinition ? localizePanelDefinition(rawDefinition, zh) : undefined;
         const conversationActive = isConversationPanelId(group.active);
         const minimum = toolWindowMinimum(group.active, group.panels.length);
         const title = conversationActive ? this.conversationTitle : `${definition?.title ?? this.snapshot?.layout.agentPanels[group.active]?.target.displayName ?? (isFilePanelId(group.active) ? this.snapshot?.layout.fileViews[group.active]?.title || "File" : isBrowserPagePanelId(group.active) ? this.snapshot?.layout.browserPages[group.active]?.title || "Browser" : group.active)}${this.conversationTitle ? ` · ${this.conversationTitle}` : ""}`;

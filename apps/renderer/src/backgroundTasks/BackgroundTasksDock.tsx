@@ -130,7 +130,7 @@ export function BackgroundTasksDock({ client, snapshot, sessionId, scopeKey, ava
     ...(client ? { client } : {}), ...(sessionId ? { sessionId } : {}), scopeKey,
     jobs: jobsReady ? snapshot?.jobs ?? NO_JOBS : NO_JOBS, jobAgents: snapshot?.jobAgents ?? NO_LINKS,
     mainAgentId: snapshot?.agents.find(agent => agent.kind === "main")?.agentId,
-    jobsReady, available, canListServices, canStopServices, canCancelJobs, active, preview, document: sourceDocument,
+    jobsReady, available, canListServices, canStopServices, canCancelJobs, active, expanded: bodyVisible, preview, document: sourceDocument,
   });
   const [now, setNow] = useState(Date.now);
   const running = source.rows.some(row => row.active);

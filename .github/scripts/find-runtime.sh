@@ -18,13 +18,27 @@ inputs_hash="$(git ls-tree -r HEAD -- \
 key="runtime-${PLATFORM}-${OMP_RUNTIME_CHANNEL}-${vendor}-bun${BUN_VERSION}-${inputs_hash}"
 run_id=""
 name="$key"
+trusted_run() {
+  local candidate_run="$1"
+  if [ -z "$candidate_run" ]; then return 1; fi
+  local verdict
+  verdict="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${candidate_run}" \
+    --jq "select((.event == \"push\" or .event == \"workflow_dispatch\") and .head_repository.full_name == \"${GITHUB_REPOSITORY}\") | .id" || true)"
+  [ "$verdict" = "$candidate_run" ]
+}
 if [ "${REBUILD:-}" != "true" ]; then
   # Older remote runs used a -remote suffix. Both names carry the same source
   # identity; new releases prepare one artifact per platform for all consumers.
-  for name in "$key" "$key-remote"; do
-    run_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${name}&per_page=20" \
-      --jq '[.artifacts[] | select(.expired | not)][0].workflow_run.id // empty' || true)"
-    if [ -n "$run_id" ]; then break; fi
+  for candidate_name in "$key" "$key-remote"; do
+    candidate_runs="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${candidate_name}&per_page=100" \
+      --jq '.artifacts[] | select(.expired | not) | .workflow_run.id' || true)"
+    while IFS= read -r candidate_run; do
+      if trusted_run "$candidate_run"; then
+        name="$candidate_name"
+        run_id="$candidate_run"
+        break 2
+      fi
+    done <<< "$candidate_runs"
   done
   # Migrate older cache names after build orchestration changes. Reuse the
   # immutable signed binary only when its Runtime sources and public keys match.
@@ -37,10 +51,11 @@ if [ "${REBUILD:-}" != "true" ]; then
     }
     source_hash="$(source_fingerprint HEAD)"
     prefix="runtime-${PLATFORM}-${OMP_RUNTIME_CHANNEL}-${vendor}-bun${BUN_VERSION}-"
-    candidates="$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+    candidates="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
       --jq ".artifacts[] | select((.expired | not) and (.name | startswith(\"${prefix}\"))) | [.name, .workflow_run.id, .workflow_run.head_sha] | @tsv" || true)"
     while IFS=$'\t' read -r candidate_name candidate_run candidate_sha; do
       if [ -z "$candidate_sha" ]; then continue; fi
+      if ! trusted_run "$candidate_run"; then continue; fi
       if ! git cat-file -e "${candidate_sha}^{commit}" 2>/dev/null; then
         git fetch --no-tags --depth=1 origin "$candidate_sha"
       fi

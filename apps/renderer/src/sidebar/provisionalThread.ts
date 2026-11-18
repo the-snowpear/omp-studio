@@ -22,9 +22,44 @@ export type ProvisionalProjectThread = {
   readonly running: boolean;
   /** An accepted prompt keeps its fallback title across Workbench switches. */
   readonly submitted: boolean;
+  /** Set once a ready history.list for this workspace has observed sessionId. */
+  readonly persistedSeen?: boolean;
 };
 
 export type ProvisionalProjectThreadCache = Readonly<Record<string, ProvisionalProjectThread>>;
+
+export class ProvisionalThreadStore {
+  cache: ProvisionalProjectThreadCache = {};
+  excludedSessionIds: ReadonlySet<string> = new Set();
+  private listeners = new Set<() => void>();
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+  getSnapshot = () => this.cache;
+  setCache = (
+    action:
+      | ProvisionalProjectThreadCache
+      | ((previous: ProvisionalProjectThreadCache) => ProvisionalProjectThreadCache),
+  ) => {
+    const next = typeof action === "function" ? action(this.cache) : action;
+    if (next === this.cache) return;
+    this.cache = next;
+    for (const listener of this.listeners) listener();
+  };
+  exclude(sessionId: string): void {
+    if (this.excludedSessionIds.has(sessionId)) return;
+    this.excludedSessionIds = new Set([...this.excludedSessionIds, sessionId]);
+  }
+  unexclude(sessionId: string): void {
+    if (!this.excludedSessionIds.has(sessionId)) return;
+    const next = new Set(this.excludedSessionIds);
+    next.delete(sessionId);
+    this.excludedSessionIds = next;
+  }
+}
 
 export type ProvisionalProjectThreadChange = {
   readonly sessionId?: SessionId;
@@ -39,6 +74,7 @@ export function buildProvisionalProjectThread(input: {
   readonly preview: boolean;
   readonly sessionCreating: boolean;
   readonly selectedHistoryId: string | null;
+  readonly selectedTitleIsPlaceholder?: boolean | undefined;
   readonly composer: {
     readonly visible: boolean;
     readonly title?: string;
@@ -49,10 +85,15 @@ export function buildProvisionalProjectThread(input: {
   readonly workspaceId: WorkspaceId | undefined;
   readonly untitledTitle: string;
 }): ProvisionalProjectThread | undefined {
+  const allowSelectedUntitledSubmit =
+    input.selectedHistoryId !== null
+    && input.selectedTitleIsPlaceholder === true
+    && input.composer.submitted
+    && !isPlaceholderSessionTitle(input.composer.title);
   if (
     input.preview
     || input.sessionCreating
-    || input.selectedHistoryId !== null
+    || (input.selectedHistoryId !== null && !allowSelectedUntitledSubmit)
     || !input.composer.visible
     || input.sessionId === undefined
     || input.workspaceId === undefined
@@ -76,6 +117,7 @@ export function reconcileProvisionalProjectThread(
     readonly preview: boolean;
     readonly sessionCreating: boolean;
     readonly selectedHistoryId: string | null;
+    readonly selectedTitleIsPlaceholder?: boolean | undefined;
     readonly untitledTitle: string;
     readonly excludedSessionIds?: ReadonlySet<string>;
   },
@@ -92,13 +134,19 @@ export function reconcileProvisionalProjectThread(
   if (!change.visible && current[key]?.submitted === true) return current;
   // Selecting a persisted history row briefly clears the Workbench-local
   // composer while Runtime selection catches up. Keep the provisional row so
-  // its session-scoped draft can be selected and restored later.
-  if (context.selectedHistoryId !== null) return current;
-  if (!change.visible) return removeCurrent();
+  // its session-scoped draft can be selected and restored later; only allow
+  // updates when a prompt is actively submitted for an untitled history row
+  // or for an already-tracked provisional session.
+  const canUpdateSelected =
+    context.selectedHistoryId === null
+    || (context.selectedTitleIsPlaceholder === true && (change.submitted || current[key] !== undefined));
+  if (!canUpdateSelected) return current;
+  if (!change.visible) return context.selectedHistoryId !== null ? current : removeCurrent();
   const nextThread = buildProvisionalProjectThread({
     preview: context.preview,
     sessionCreating: context.sessionCreating,
-    selectedHistoryId: context.selectedHistoryId,
+    selectedHistoryId: current[key] !== undefined ? null : context.selectedHistoryId,
+    selectedTitleIsPlaceholder: context.selectedTitleIsPlaceholder,
     composer: change,
     sessionId: change.sessionId,
     workspaceId: change.workspaceId,
@@ -119,6 +167,7 @@ export function reconcileProvisionalProjectThread(
       ...(previous.titleState === "stable" || freezePreviousPromptTitle ? { title: previous.title } : {}),
       titleState: previous.titleState,
       submitted: previous.submitted || nextThread.submitted,
+      ...(previous.persistedSeen ? { persistedSeen: true } : {}),
     }
     : nextThread;
   if (
@@ -128,6 +177,7 @@ export function reconcileProvisionalProjectThread(
     && previous.titleState === nextWithTitleState.titleState
     && previous.running === nextWithTitleState.running
     && previous.submitted === nextWithTitleState.submitted
+    && previous.persistedSeen === nextWithTitleState.persistedSeen
   ) {
     return current;
   }
@@ -171,12 +221,23 @@ export function sidebarThreadTitle(
   entry: SessionHistoryEntry,
   provisional: ProvisionalProjectThread | undefined,
   untitledTitle = "",
+  liveTitle?: string | undefined,
 ): string {
+  const trimmedLive = liveTitle?.trim();
+  if (trimmedLive && !isPlaceholderSessionTitle(trimmedLive)) {
+    return trimmedLive;
+  }
+  if (!isPlaceholderSessionTitle(entry.title)) {
+    return entry.title!;
+  }
   if (
     provisional !== undefined
     && entry.sessionId === provisional.sessionId
-    && isPlaceholderSessionTitle(entry.title)
+    && !isPlaceholderSessionTitle(provisional.title)
   ) {
+    return provisional.title;
+  }
+  if (provisional !== undefined && entry.sessionId === provisional.sessionId) {
     return provisional.title;
   }
   return entry.title ?? untitledTitle;

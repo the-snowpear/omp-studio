@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import { extractRuntimeArchive, verifySignedArtifact, parseRuntimeInstallationManifest, RUNTIME_ARTIFACT_LAYOUT } from "@omp-studio/runtime-installer";
-import { runSsh, nodeRemoteCommand } from "./deploy.js";
+import { runSsh } from "./deploy.js";
+import { remoteNodeCommand } from "./remote-command.js";
 import { hasActiveRemoteWork } from "./server.js";
 import type { RemoteConnectionManager, RemoteMaintenance } from "./manager.js";
 import { desktopText } from "../desktop-language-shared.js";
@@ -32,7 +33,7 @@ async function install(manager: RemoteConnectionManager, id: string, archive: st
       const digest = createHash("sha256");
       for await (const chunk of createReadStream(file)) digest.update(chunk);
       const hash = digest.digest("hex");
-      await runSsh(profile, nodeRemoteCommand(`
+      await runSsh(profile, remoteNodeCommand(remote.environment, `
         const fs=require('node:fs'),p=require('node:path'),crypto=require('node:crypto'),{pipeline}=require('node:stream');
         const dir=p.join(${JSON.stringify(remote.state)},${JSON.stringify(stageName)});
         fs.mkdirSync(dir,{recursive:true,mode:448});
@@ -43,7 +44,7 @@ async function install(manager: RemoteConnectionManager, id: string, archive: st
           if(hash.digest('hex')!==${JSON.stringify(hash)}){process.stderr.write('Upload checksum mismatch');process.exitCode=1;return;}
           process.stdout.write('ok');
         });
-      `), createReadStream(file), 600_000, undefined, authentication);
+      `, remote.node), createReadStream(file), 600_000, undefined, authentication);
     }
     controls.progress(desktopText("正在停止空闲 Host 并安装 Runtime", "Stopping idle Host and installing Runtime"));
     shutdownRequested = true;
@@ -51,7 +52,7 @@ async function install(manager: RemoteConnectionManager, id: string, archive: st
     await controls.disconnect();
     const keys = Object.fromEntries(Object.entries(trustedKeys).map(([keyId, key]) => [keyId, key.toString()]));
     installDispatched = true;
-    await runSsh(profile, nodeRemoteCommand(`
+    await runSsh(profile, remoteNodeCommand(remote.environment, `
       const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');
       const state=${JSON.stringify(remote.state)},stage=p.join(state,${JSON.stringify(stageName)}),keys=p.join(state,${JSON.stringify(`${stageName}-keys`)}),values=${JSON.stringify(keys)};
       try {
@@ -63,11 +64,11 @@ async function install(manager: RemoteConnectionManager, id: string, archive: st
         process.stdout.write('installed');
       } catch(error) { process.stderr.write(String(error.stderr||error.message));process.exitCode=1; }
       finally { fs.rmSync(stage,{recursive:true,force:true});fs.rmSync(keys,{recursive:true,force:true}); }
-    `), undefined, 200_000, undefined, authentication);
+    `, remote.node), undefined, 200_000, undefined, authentication);
   } finally {
     await rm(temp, { recursive: true, force: true });
     if (!installDispatched) {
-      await runSsh(profile, nodeRemoteCommand(`require('node:fs').rmSync(require('node:path').join(${JSON.stringify(remote.state)},${JSON.stringify(stageName)}),{recursive:true,force:true});`), undefined, 30_000, undefined, authentication).catch(() => {});
+      await runSsh(profile, remoteNodeCommand(remote.environment, `require('node:fs').rmSync(require('node:path').join(${JSON.stringify(remote.state)},${JSON.stringify(stageName)}),{recursive:true,force:true});`, remote.node), undefined, 30_000, undefined, authentication).catch(() => {});
     }
     if (shutdownRequested) {
       controls.progress(desktopText("正在重新连接远端 Host", "Reconnecting to remote Host"));

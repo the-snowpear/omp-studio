@@ -29,13 +29,18 @@ export function sigilHue(seed: string): number {
   return sigilHash(`hue:${seed}`) % SIGIL_HUES;
 }
 
+const MAX_SIGIL_CACHE = 1024;
 const cache = new Map<string, SigilSpec>();
 
 /** `commander` is the main agent: a crowned, symmetric face that no child can draw. */
 export function sigilSpec(seed: string, commander = false): SigilSpec {
   const key = `${commander ? 1 : 0}:${seed}`;
   const hit = cache.get(key);
-  if (hit) return hit;
+  if (hit) {
+    cache.delete(key);
+    cache.set(key, hit);
+    return hit;
+  }
   const bits = sigilHash(seed);
   const bit = (index: number) => (bits >>> index) & 1;
   const pick = (index: number, count: number) => ((bits >>> index) & 0xff) % count;
@@ -83,6 +88,10 @@ export function sigilSpec(seed: string, commander = false): SigilSpec {
   else if (body === 2) { mirror(2, 6, "head"); add(3, 6, "head"); if (!narrowJaw) mirror(1, 6, "head"); }
 
   const spec = { cells, eyes };
+  if (cache.size >= MAX_SIGIL_CACHE) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
   cache.set(key, spec);
   return spec;
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   EvaluationRecord,
   EvaluationResultPage,
@@ -10,10 +10,15 @@ import { asObject, displayNumber as number, configDifferences } from "./model";
 
 type T = (cn: string, en: string) => string;
 function NativeDetails({ value, t }: { value: unknown; t: T }) {
+  const [open, setOpen] = useState(false);
   return (
-    <details className="eval-advanced">
+    <details
+      className="eval-advanced"
+      open={open}
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+    >
       <summary>{t("原生数据", "Native data")}</summary>
-      <pre>{JSON.stringify(value, null, 2)}</pre>
+      {open ? <pre>{JSON.stringify(value, null, 2)}</pre> : null}
     </details>
   );
 }
@@ -101,16 +106,27 @@ export function EvaluationResults({
   page: EvaluationResultPage | undefined;
   t: T;
 }) {
+  const benchmarkProfile = record.spec.kind === "benchmark" ? record.spec.profile : "";
+  const defaultMetric = benchmarkProfile === "cache" ? "cold.ttft" : "ttft";
   const [expanded, setExpanded] = useState<string>();
-  const [metric, setMetric] = useState("ttft");
+  const [metric, setMetric] = useState(defaultMetric);
+  useEffect(() => {
+    setExpanded(undefined);
+    setMetric(defaultMetric);
+  }, [record.id, record.spec.kind, benchmarkProfile, defaultMetric]);
+  const validMetrics =
+    benchmarkProfile === "cache"
+      ? ["ttft", "cold.ttft", "warm.ttft", "decode", "prefill", "parallel.aggregateTps", "cost"]
+      : ["ttft", "decode", "prefill", "parallel.aggregateTps", "cost"];
+  const effectiveMetric = validMetrics.includes(metric) ? metric : defaultMetric;
   const ranked =
     record.spec.kind === "benchmark"
       ? [...record.metrics].sort((a, b) => {
-          const x = a.metrics[metric],
-            y = b.metrics[metric];
+          const x = a.metrics[effectiveMetric],
+            y = b.metrics[effectiveMetric];
           if (x == null) return y == null ? 0 : 1;
           if (y == null) return -1;
-          return ["ttft", "ttftP95", "cold.ttft", "warm.ttft", "cost"].includes(metric)
+          return ["ttft", "ttftP95", "cold.ttft", "warm.ttft", "cost"].includes(effectiveMetric)
             ? x - y
             : y - x;
         })
@@ -160,7 +176,7 @@ export function EvaluationResults({
         <div className="eval-toolbar eval-ranking">
           <label>
             {t("排名指标", "Rank by")}
-            <AppSelect value={metric} onChange={(e) => setMetric(e.target.value)}>
+            <AppSelect value={effectiveMetric} onChange={(e) => setMetric(e.target.value)}>
               <option value="ttft">TTFT p50 ↓</option>
               {record.spec.kind === "benchmark" && record.spec.profile === "cache" ? (
                 <>
@@ -350,7 +366,9 @@ export function EvaluationResults({
                               <span key={id}>
                                 {id} ·{" "}
                                 {answer.type === "bool"
-                                  ? `${number(Number(answer.bool) * 100)}%`
+                                  ? typeof answer.bool === "number" && Number.isFinite(answer.bool)
+                                    ? `${number(answer.bool * 100)}%`
+                                    : "—"
                                   : String(answer.choice ?? number(answer.score, 3))}
                               </span>
                             );
@@ -424,7 +442,9 @@ export function EvaluationResults({
                                   </div>
                                   <small>
                                     {t("置信度", "Confidence")} ·{" "}
-                                    {number(Number(answer.confidence) * 100)}%
+                                    {typeof answer.confidence === "number" && Number.isFinite(answer.confidence)
+                                      ? `${number(answer.confidence * 100)}%`
+                                      : "—"}
                                   </small>
                                 </>
                               )}

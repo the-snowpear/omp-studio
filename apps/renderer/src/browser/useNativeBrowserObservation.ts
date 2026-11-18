@@ -57,9 +57,16 @@ export function useNativeBrowserObservation(options: { client?: StudioClient | u
   const current = useRef<ObservationHandle | undefined>(undefined);
   const epoch = useRef(0);
   const controls = useRef<BrowserPageController | undefined>(undefined);
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   const descriptor = options.page?.descriptor;
   const eligible = descriptor?.transport === "frames" && descriptor.capabilities.observe;
   const active = shown && eligible && (!options.capture || !paused);
+  useEffect(() => {
+    if (preview && active && options.inspection && current.current && !current.current.stopped) {
+      setInspection(previewBrowserInspection(options.inspection, zh));
+    }
+  }, [preview, active, options.inspection, zh]);
   const send = useCallback(async (input: BrowserObservationInput) => {
     const handle = current.current;
     if (!handle || handle.stopped) throw new Error("The same-page observation is no longer attached.");
@@ -148,7 +155,7 @@ export function useNativeBrowserObservation(options: { client?: StudioClient | u
           title: options.page!.title, url: options.page!.url, frozen: false, busy: false, control: "agent" };
         handle.state = next; setState(next);
         if (options.capture) { handle.frame = previewBrowserFrame(options.page!.id, descriptor.generation); frames.publish(handle.frame); }
-        if (options.inspection) setInspection(previewBrowserInspection(options.inspection, zh));
+        if (options.inspection) setInspection(previewBrowserInspection(options.inspection, zhRef.current));
       } else {
         const receipt = await options.client!.command("browser.observe.prepare", { sessionId: options.session!.id, tabId: options.page!.id });
         const result = (await waitReceipt<{ result: BrowserObservationResultMap["browser.observe.prepare"] }>(options.client!, receipt.requestId)).result;
@@ -166,7 +173,7 @@ export function useNativeBrowserObservation(options: { client?: StudioClient | u
       if (!disposed) unbind = options.session!.bindPage(options.page!.id, controller);
     })().catch(cause => { if (!disposed && epoch.current === run) { report(cause); void stop(); } }).finally(() => { if (!disposed && epoch.current === run) setConnecting(false); });
     return () => { disposed = true; epoch.current++; unbind?.(); off?.(); if (controls.current === controller) controls.current = undefined; void stop(); };
-  }, [options.client, options.session, options.page?.id, descriptor?.generation, active, options.capture, options.inspection, preview, chrome, document, revision, zh]);
+  }, [options.client, options.session, options.page?.id, descriptor?.generation, active, options.capture, options.inspection, preview, chrome, document, revision]);
 
   const execute = useCallback(async (action: BrowserAction) => {
     try { await controls.current?.execute(action); } catch (cause) { report(cause); }

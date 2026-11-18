@@ -106,7 +106,8 @@ export class StudioStateProjector {
 	readonly #unsubscribeAgents: () => void;
 	#unsubscribeJobs: () => void = () => {};
 	#unsubscribeMemoryCredential: () => void = () => {};
-	readonly #unsubscribeSessionTitle: () => void;
+	#unsubscribeSessionTitle: () => void = () => {};
+	readonly #unsubscribeSessionChange: () => void;
 	readonly #unsubscribeConversation: () => void;
 	readonly #unsubscribeWorker: () => void;
 	#committedSnapshot: StudioOperatorStateSnapshot | undefined;
@@ -122,6 +123,10 @@ export class StudioStateProjector {
 	#agentsRevision = 0;
 	#jobsRevision = 0;
 	#ownedTranscript: StudioSessionTranscriptService | undefined;
+	#stateCommitTimer: ReturnType<typeof setTimeout> | undefined;
+	#stateCommitQueued = false;
+	#lastCoalescedCommitAt = 0;
+	#disposed = false;
 	#telemetryTimer: ReturnType<typeof setTimeout> | undefined;
 	#telemetryInFlight = false;
 	#telemetryQueued = false;
@@ -189,7 +194,7 @@ export class StudioStateProjector {
 		this.#unsubscribeTaskModel = runtime.services.models?.onChange(() => this.commitStateChange()) ?? (() => {});
 		this.#unsubscribeAgents = runtime.services.agents.onChange(() => {
 			this.#agentsRevision += 1;
-			this.commitStateChange();
+			this.#scheduleStateCommit();
 		});
 		let unsubscribeJobManager = () => {};
 		const bindJobManager = (): void => {
@@ -197,7 +202,7 @@ export class StudioStateProjector {
 			const manager = runtime.session.asyncJobManager;
 			const onJobsChanged = (): void => {
 				this.#jobsRevision += 1;
-				this.commitStateChange();
+				this.#scheduleStateCommit();
 			};
 			// Widgets refresh in the background while shown; their registry pushes
 			// those repaints separately from job state changes.
@@ -219,11 +224,34 @@ export class StudioStateProjector {
 		};
 		bindMemoryCredential();
 		this.#unsubscribeJobs = () => unsubscribeJobManager();
-		const sessionManager = runtime.sessionManager as SessionTitlePort | undefined;
-		const onSessionNameChanged = sessionManager?.onSessionNameChanged;
-		this.#unsubscribeSessionTitle =
-			typeof onSessionNameChanged === "function" && sessionManager !== undefined
-				? onSessionNameChanged.call(sessionManager, () => this.commitStateChange())
+		let boundTitleManager: SessionTitlePort | undefined;
+		const bindSessionTitle = (): void => {
+			const residency = runtime.workerResidency?.() ?? "active";
+			if (residency !== "active" && residency !== "sleeping") {
+				this.#unsubscribeSessionTitle();
+				this.#unsubscribeSessionTitle = () => {};
+				boundTitleManager = undefined;
+				return;
+			}
+			const sessionManager = runtime.sessionManager as SessionTitlePort | undefined;
+			if (sessionManager === boundTitleManager) return;
+			this.#unsubscribeSessionTitle();
+			boundTitleManager = sessionManager;
+			const onSessionNameChanged = sessionManager?.onSessionNameChanged;
+			this.#unsubscribeSessionTitle =
+				typeof onSessionNameChanged === "function" && sessionManager !== undefined
+					? onSessionNameChanged.call(sessionManager, () => this.commitStateChange())
+					: () => {};
+		};
+		bindSessionTitle();
+		this.#unsubscribeSessionChange =
+			typeof runtime.session.registerSessionChangeCallback === "function"
+				? runtime.session.registerSessionChangeCallback(() => {
+						bindJobManager();
+						bindMemoryCredential();
+						bindSessionTitle();
+						this.commitStateChange();
+					})
 				: () => {};
 		this.#unsubscribeEvaluations = runtime.services.workbench?.evaluations?.subscribe((id, revision) =>
 			this.#emitEvent({ kind: "evaluation.changed", id, revision }),
@@ -234,6 +262,7 @@ export class StudioStateProjector {
 			runtime.onWorkerStateChange?.(() => {
 				bindJobManager();
 				bindMemoryCredential();
+				bindSessionTitle();
 				this.commitStateChange();
 			}) ?? (() => {});
 	}
@@ -422,7 +451,7 @@ export class StudioStateProjector {
 	}
 
 	emitBtwChanged(snapshot: StudioBtwSnapshot): void {
-		this.#emitEvent({ kind: "btw.changed", snapshot: structuredClone(snapshot) });
+		this.#emitEvent({ kind: "btw.changed", snapshot });
 	}
 
 	emitRuntimeQuiescing(): void {
@@ -607,9 +636,10 @@ export class StudioStateProjector {
 		this.#telemetryInFlight = true;
 		try {
 			const telemetry = this.#telemetry();
-			this.#telemetrySnapshot = structuredClone(telemetry);
+			const storedTelemetry = structuredClone(telemetry);
+			this.#telemetrySnapshot = storedTelemetry;
 			if (this.#committedSnapshot !== undefined) {
-				this.#committedSnapshot = { ...this.#committedSnapshot, telemetry: structuredClone(telemetry) };
+				this.#committedSnapshot = { ...this.#committedSnapshot, telemetry: storedTelemetry };
 				this.#committedKey = undefined;
 			}
 			this.#emitEvent({ kind: "session.telemetry.changed", sessionId: this.#runtime.sessionId, telemetry });
@@ -622,10 +652,36 @@ export class StudioStateProjector {
 		}
 	}
 
+	#scheduleStateCommit(): void {
+		if (this.#disposed || this.#stateCommitQueued || this.#stateCommitTimer !== undefined) return;
+		const elapsed = Date.now() - this.#lastCoalescedCommitAt;
+		if (elapsed >= 16) {
+			this.#stateCommitQueued = true;
+			queueMicrotask(() => {
+				this.#stateCommitQueued = false;
+				if (this.#disposed) return;
+				this.commitStateChange();
+			});
+			return;
+		}
+		this.#stateCommitTimer = setTimeout(
+			() => {
+				this.#stateCommitTimer = undefined;
+				if (this.#disposed) return;
+				this.commitStateChange();
+			},
+			Math.max(1, 16 - elapsed),
+		);
+		this.#stateCommitTimer.unref?.();
+	}
+
 	#notify(event: StudioEventEnvelope): void {
-		for (const listener of this.#listeners) {
+		const listeners = [...this.#listeners];
+		for (let index = 0; index < listeners.length; index += 1) {
+			const listener = listeners[index]!;
+			const delivered = index + 1 < listeners.length ? structuredClone(event) : event;
 			try {
-				listener(structuredClone(event));
+				listener(delivered);
 			} catch (error) {
 				logger.warn("Studio state projector listener failed", {
 					error: error instanceof Error ? error.message : String(error),
@@ -636,18 +692,23 @@ export class StudioStateProjector {
 
 	#emitEvent(eventBody: StudioEventEnvelope["event"]): void {
 		this.#eventSeq += 1;
+		if (this.#listeners.size === 0) return;
 		const event: StudioEventEnvelope = {
 			type: "studio.event",
 			runtimeEpoch: this.#runtime.runtimeEpoch,
 			eventSeq: this.#eventSeq,
 			stateVersion: this.#stateVersion,
 			occurredAt: new Date().toISOString(),
-			event: structuredClone(eventBody),
+			event: Object.isFrozen(eventBody) ? eventBody : structuredClone(eventBody),
 		};
 		this.#notify(event);
 	}
 
 	dispose(): void {
+		this.#disposed = true;
+		if (this.#stateCommitTimer !== undefined) clearTimeout(this.#stateCommitTimer);
+		this.#stateCommitTimer = undefined;
+		this.#stateCommitQueued = false;
 		this.#unsubscribeEvaluations?.();
 		clearInterval(this.#pauseRefresh);
 		if (this.#telemetryTimer !== undefined) clearTimeout(this.#telemetryTimer);
@@ -662,6 +723,7 @@ export class StudioStateProjector {
 		this.#unsubscribeJobs();
 		this.#unsubscribeMemoryCredential();
 		this.#unsubscribeSessionTitle();
+		this.#unsubscribeSessionChange();
 		this.#unsubscribeConversation();
 		this.#unsubscribeWorker();
 		this.#listeners.clear();
@@ -673,6 +735,12 @@ export class StudioStateProjector {
 	 * Returns false (and emits nothing) when no observable change occurred.
 	 */
 	commitStateChange(): boolean {
+		if (this.#stateCommitTimer !== undefined) {
+			clearTimeout(this.#stateCommitTimer);
+			this.#stateCommitTimer = undefined;
+		}
+		this.#stateCommitQueued = false;
+		this.#lastCoalescedCommitAt = Date.now();
 		const snapshot = this.snapshot();
 		const key = stateComparisonKey(snapshot);
 		if (this.#committedSnapshot !== undefined) {

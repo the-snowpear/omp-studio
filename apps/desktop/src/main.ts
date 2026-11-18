@@ -238,7 +238,6 @@ export async function main(): Promise<void> {
   const linuxSwapDirectory = debInstalled ? join(desktopPaths().updatesV2Root, "deb", "swap") : join(desktopPaths().updatesV2Root, "linux-appimage-swap");
   const desktopSwap = macBundle !== undefined ? macSwapMarkers(macSwapDirectory, { version: app.getVersion(), bundlePath: macBundle })
     : appImage !== undefined || debInstalled ? macSwapMarkers(linuxSwapDirectory, { version: app.getVersion(), bundlePath: appImage ?? process.execPath }) : undefined;
-  desktopSwap?.started(process.pid);
   if (process.platform === "win32") {
     app.setAppUserModelId(resolveAppUserModelId());
   }
@@ -747,7 +746,7 @@ export async function main(): Promise<void> {
       await installRemoteRuntime(remoteConnections, id, picked.filePaths[0], trustedKeys);
       return { installed: true };
     } });
-    const disposeChrome = registerTitleBarOverlayIpc({ isTrustedSender });
+    const disposeChrome = registerTitleBarOverlayIpc({ isTrustedSender, hasTitleBarOverlay: sender => sender === window.webContents });
     const disposeLanguage = registerDesktopLanguageIpc({ isTrustedSender });
     const disposeNotify = registerChromeNotifyIpc({
       isTrustedSender,
@@ -956,7 +955,13 @@ export async function main(): Promise<void> {
       ipc: ipcMain, trusted: isTrustedSender, resources: fileResources!,
       office: new OfficeComponent(join(app.getPath("userData"), "components", "office-preview"), trustedKeys),
       pickExport: async name => { const result = await dialog.showSaveDialog({ defaultPath: name }); return result.canceled ? undefined : result.filePath; },
-      show: () => { window.show(); window.focus(); },
+      show: sender => {
+        const owner = sender ? BrowserWindow.fromWebContents(sender as WebContents) : null;
+        const targetWindow = owner && !owner.isDestroyed() ? owner : window;
+        if (targetWindow.isMinimized()) targetWindow.restore();
+        targetWindow.show();
+        targetWindow.focus();
+      },
     });
     const disposeWorkspaceShell = registerWorkspaceShellIpc({
       ipcMain: {
@@ -1174,6 +1179,9 @@ export async function main(): Promise<void> {
         }
       : {}),
     requestSingleInstanceLock: () => app.requestSingleInstanceLock(),
+    onSingleInstanceAcquired: () => {
+      desktopSwap?.started(process.pid);
+    },
     onSecondInstance: (listener) => {
       app.on("second-instance", listener);
     },
@@ -1269,7 +1277,7 @@ export async function main(): Promise<void> {
   });
 
   await application.start();
-  updateCoordinator?.startBackground();
+  if (application.acquiredLock) updateCoordinator?.startBackground();
 }
 
 main().catch((error: unknown) => {

@@ -1,22 +1,30 @@
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, writeSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
 import type { CommandLedgerEntry } from "@omp-studio/studio-protocol";
 
 export interface CommandLedgerStore {
   load(): CommandLedgerEntry[];
   append(entry: CommandLedgerEntry): void;
+  compact?(entries: readonly CommandLedgerEntry[]): void;
 }
 
 export class JsonlCommandLedgerStore implements CommandLedgerStore {
+  #redundantLines = 0;
+
   constructor(private readonly path: string) {}
 
   load(): CommandLedgerEntry[] {
-    if (!existsSync(this.path)) return [];
+    if (!existsSync(this.path)) {
+      this.#redundantLines = 0;
+      return [];
+    }
     const latest = new Map<string, CommandLedgerEntry>();
     const content = readFileSync(this.path, "utf8");
     const lines = content.split(/\r?\n/u);
     let lastNonEmptyIndex = lines.length - 1;
     while (lastNonEmptyIndex >= 0 && lines[lastNonEmptyIndex]?.length === 0) lastNonEmptyIndex -= 1;
+    let parsedLines = 0;
     for (const [index, line] of lines.entries()) {
       if (line.length === 0) continue;
       let value: unknown;
@@ -31,8 +39,10 @@ export class JsonlCommandLedgerStore implements CommandLedgerStore {
         throw new TypeError(`Invalid command ledger entry at line ${index + 1}`);
       }
       const entry = parseLedgerEntry(value, index + 1);
+      parsedLines += 1;
       latest.set(entry.requestId, entry);
     }
+    this.#redundantLines = Math.max(0, parsedLines - latest.size);
     return [...latest.values()];
   }
 
@@ -42,8 +52,31 @@ export class JsonlCommandLedgerStore implements CommandLedgerStore {
     try {
       writeSync(descriptor, `${JSON.stringify(entry)}\n`, undefined, "utf8");
       fsyncSync(descriptor);
+      this.#redundantLines += 1;
     } finally {
       closeSync(descriptor);
+    }
+  }
+
+  compact(entries: readonly CommandLedgerEntry[]): void {
+    if (this.#redundantLines < Math.max(512, entries.length * 2)) return;
+    mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
+    const temporary = `${this.path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+    const payload = entries.length === 0 ? "" : `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`;
+    let descriptor: number | undefined;
+    try {
+      descriptor = openSync(temporary, "wx", 0o600);
+      if (payload.length > 0) writeSync(descriptor, payload, undefined, "utf8");
+      fsyncSync(descriptor);
+      closeSync(descriptor);
+      descriptor = undefined;
+      renameSync(temporary, this.path);
+      this.#redundantLines = 0;
+    } catch {
+      if (descriptor !== undefined) {
+        try { closeSync(descriptor); } catch { /* ignore */ }
+      }
+      try { unlinkSync(temporary); } catch { /* ignore */ }
     }
   }
 }

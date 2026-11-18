@@ -130,6 +130,9 @@ export function QueuedDeck({
   const zh = resolvedLanguage === "zh";
   const [remaining, setRemaining] = useState<readonly QueuedDeckItem[]>(() => items);
   const remainingRef = useRef(remaining);
+  remainingRef.current = remaining;
+  const prevItemsRef = useRef(items);
+  const dismissedIdsRef = useRef(new Set<string>());
   const presentedForms = useRef(new Set<string>());
   const [pos, setPos] = useState(0);
   const posRef = useRef(pos);
@@ -155,6 +158,67 @@ export function QueuedDeck({
   const index = total === 0 ? 0 : Math.min(pos, total - 1);
   const current = remaining[index];
   if (current?.kind === "form") presentedForms.current.add(current.id);
+  useEffect(() => {
+    const prevItems = prevItemsRef.current;
+    if (prevItems === items) return;
+    prevItemsRef.current = items;
+    if (items.length === 0) {
+      dismissedIdsRef.current.clear();
+      presentedForms.current.clear();
+      remainingRef.current = [];
+      posRef.current = 0;
+      setRemaining([]);
+      setPos(0);
+      setAnswers({});
+      setSwap(null);
+      setLockH(null);
+      setSmoothH(false);
+      return;
+    }
+    const prevIds = new Set(prevItems.map((item) => item.id));
+    const hasOverlap = items.some((item) => prevIds.has(item.id));
+    if (!hasOverlap) {
+      dismissedIdsRef.current.clear();
+      presentedForms.current.clear();
+      remainingRef.current = items;
+      posRef.current = 0;
+      setRemaining(items);
+      setPos(0);
+      setAnswers({});
+      setSwap(null);
+      setLockH(null);
+      setSmoothH(false);
+      setCollapsed(false);
+      setAskPhase(askLike(items[0]) && !motionReduced() ? "enter" : askLike(items[0]) ? "open" : "idle");
+      return;
+    }
+    const byId = new Map(items.map((item) => [item.id, item]));
+    const kept: QueuedDeckItem[] = [];
+    const present = new Set<string>();
+    for (const existing of remainingRef.current) {
+      const updated = byId.get(existing.id);
+      if (updated && !dismissedIdsRef.current.has(updated.id)) {
+        kept.push(updated);
+        present.add(updated.id);
+      }
+    }
+    for (const incoming of items) {
+      if (!present.has(incoming.id) && !prevIds.has(incoming.id) && !dismissedIdsRef.current.has(incoming.id)) {
+        kept.push(incoming);
+      }
+    }
+    remainingRef.current = kept;
+    const maxPos = Math.max(0, kept.length - 1);
+    if (posRef.current > maxPos) {
+      posRef.current = maxPos;
+      setPos(maxPos);
+    }
+    if (leaveTimerRef.current === undefined) {
+      setRemaining(kept);
+    } else {
+      setRemaining((prev) => prev.map((existing) => byId.get(existing.id) ?? existing));
+    }
+  }, [items]);
   useEffect(() => { setCollapsed(false); }, [items[0]?.id]);
   useEffect(() => {
     if (current?.kind !== "ask" || leaving) return;
@@ -275,6 +339,7 @@ export function QueuedDeck({
   const drop = useCallback((id: string) => {
     const gone = remainingRef.current.find((item) => item.id === id);
     if (!gone) return;
+    dismissedIdsRef.current.add(id);
     const selected = remainingRef.current[Math.min(posRef.current, remainingRef.current.length - 1)]?.id;
     const next = remainingRef.current.filter((item) => item.id !== id);
     remainingRef.current = next;
@@ -349,13 +414,13 @@ export function QueuedDeck({
     : undefined;
   const out = swap?.out ?? null;
   const dir = swap?.dir ?? "fwd";
-  const askBody = (item: QueuedAskItem) => (
+  const askBody = (item: QueuedAskItem, live = true) => (
     <AskBody
       key={item.id}
-      onBusy={setAttachmentBusy}
+      {...(live ? { onBusy: setAttachmentBusy } : {})}
       question={item.question}
       answer={answers[item.id] ?? initialAskAnswer(item.question)}
-      {...(editsLocked ? { disabled: true } : {})}
+      {...(editsLocked || !live ? { disabled: true } : {})}
       onPick={(label) => pick(item, label)}
       {...(item.question.toggleList ? { onChoose: (label: string) => { void dismissAsk(item, "submit", { ...NO_ASK_ANSWER, picked: [label] }); } } : {})}
       onCustom={custom => patchAnswer(item, { custom })}
@@ -408,11 +473,11 @@ export function QueuedDeck({
               <div ref={swapRef} className={`dk-swap${lockSmooth("swap")}`} style={lockStyle("swap")}>
                 {out ? (
                   <div key={out.id} className={`dk-cell dk-cell-out dk-cell-leave-${dir}`} aria-hidden inert>
-                    {askBody(out)}
+                    {askBody(out, false)}
                   </div>
                 ) : null}
                 <div key={current.id} ref={liveRef} className={`dk-cell${out ? ` dk-cell-enter-${dir}` : ""}`}>
-                  {askBody(current)}
+                  {askBody(current, true)}
                 </div>
               </div>
               {submitError === true ? (

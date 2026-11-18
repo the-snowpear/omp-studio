@@ -70,7 +70,8 @@ export function ContextCard({ context, status = "live", source, demo = false, on
   </div>;
 
   const capacity = context.contextWindow;
-  const percent = context.percent;
+  const percent = Number.isFinite(context.percent) ? context.percent : 0;
+  const ratioOf = (value: number): number => (capacity > 0 ? value / capacity : 0);
   const rows: { id: string; label: string; tokens: number; color: string; group?: ContextUsageGroup }[] = PARTS.map(part => ({ id: part.key, group: part.group, label: zh ? part.zh : part.en, tokens: context[part.key], color: CONTEXT_GROUP_TINT[part.group] }));
   const segments = contextUsageSegments(context, zh);
   rows.push({ id: "free", label: zh ? "剩余空间" : "Free space", tokens: Math.max(0, capacity - context.usedTokens), color: "var(--context-free)" });
@@ -101,7 +102,7 @@ export function ContextCard({ context, status = "live", source, demo = false, on
     const largest = Math.max(1, ...rows.filter(row => row.id !== "free").map(row => row.tokens));
     let offset = 0;
     const arcs = segments.filter(row => row.tokens > 0).map(row => {
-      const length = Math.min(RING_LENGTH - offset, row.tokens / capacity * RING_LENGTH);
+      const length = Math.min(RING_LENGTH - offset, ratioOf(row.tokens) * RING_LENGTH);
       const arc = { row, length, offset };
       offset += length;
       return arc;
@@ -135,7 +136,7 @@ export function ContextCard({ context, status = "live", source, demo = false, on
                 <span className="context-card-label">{row.label}</span>
                 <span className="context-dash-bar" aria-hidden="true">{row.id === "free" ? null : <i style={{ width: `${row.tokens / largest * 100}%`, background: row.color }} />}</span>
                 <span className="context-card-tokens" title={`${row.tokens.toLocaleString()} tokens`}>{tokens(row.tokens)}</span>
-                <span className="context-card-percent">{(row.tokens / capacity * 100).toFixed(1)}%</span>
+                <span className="context-card-percent">{(ratioOf(row.tokens) * 100).toFixed(1)}%</span>
               </div>)}
             </div>
           </div>
@@ -156,14 +157,14 @@ export function ContextCard({ context, status = "live", source, demo = false, on
       </span>
     </div>
     <div className="context-card-meter-wrap"><div className="context-card-meter" role="meter" aria-label={zh ? "上下文占用" : "Context usage"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(100, percent)} aria-valuetext={`${percent.toFixed(1)}%`}>
-      {[...segments, rows.at(-1)!].filter(row => row.tokens > 0).map(row => <i key={row.id} data-context-group={row.group} style={{ width: `${row.tokens / capacity * 100}%`, background: row.color }} tabIndex={0} role="img" aria-label={`${row.label} · ${tokens(row.tokens)} tokens`} data-tip={`${row.label} · ${tokens(row.tokens)} tokens`} />)}
+      {[...segments, rows.at(-1)!].filter(row => row.tokens > 0).map(row => <i key={row.id} data-context-group={row.group} style={{ width: `${ratioOf(row.tokens) * 100}%`, background: row.color }} tabIndex={0} role="img" aria-label={`${row.label} · ${tokens(row.tokens)} tokens`} data-tip={`${row.label} · ${tokens(row.tokens)} tokens`} />)}
     </div>{thresholdPercent != null ? <span className="context-card-threshold-marker" style={{ left: `${Math.min(100, thresholdPercent)}%` }} data-tip={zh ? `压缩触发点 · ${thresholdPercent.toFixed(1)}%` : `Compaction trigger · ${thresholdPercent.toFixed(1)}%`} /> : null}</div>
     <div className="context-card-rows" role="list" aria-label={zh ? "上下文构成" : "Context composition"}>
       {rows.map(row => <div key={row.id} className={`context-card-row${row.id === "free" ? " is-free" : ""}`} role="listitem">
         <i className="context-card-dot" data-context-group={row.group} style={{ background: row.color }} aria-hidden="true" />
         <span className="context-card-label">{row.label}</span>
         <span className="context-card-tokens" title={`${row.tokens.toLocaleString()} tokens`}>{tokens(row.tokens)}</span>
-        <span className="context-card-percent">{(row.tokens / capacity * 100).toFixed(1)}%</span>
+        <span className="context-card-percent">{(ratioOf(row.tokens) * 100).toFixed(1)}%</span>
       </div>)}
     </div>
     {cacheControl}

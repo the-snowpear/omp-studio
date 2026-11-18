@@ -21,6 +21,7 @@ export function useToolCardFollowScroll(follow: boolean): { ref: RefObject<HTMLD
   const ref = useRef<HTMLDivElement>(null); const pinned = useRef(follow);
   const followRef = useRef(follow); followRef.current = follow;
   const previousFollow = useRef(follow);
+  const lastScrollTop = useRef(0);
   const frame = useRef<number | null>(null);
   const stick = useCallback(() => {
     const el = ref.current;
@@ -28,6 +29,7 @@ export function useToolCardFollowScroll(follow: boolean): { ref: RefObject<HTMLD
     // just loses the position once it is laid out.
     if (el === null || !followRef.current || !pinned.current || el.clientHeight <= 0) return;
     el.scrollTop = el.scrollHeight;
+    lastScrollTop.current = el.scrollTop;
   }, []);
   /** At most one deferred write per frame. The same growth reaches this hook as
    *  a render and as a ResizeObserver callback for the box; they must collapse
@@ -55,15 +57,39 @@ export function useToolCardFollowScroll(follow: boolean): { ref: RefObject<HTMLD
   useEffect(() => {
     if (!follow) return;
     const el = ref.current;
-    if (el === null || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(schedule);
+    const ObserverCtor = el?.ownerDocument?.defaultView?.ResizeObserver ?? globalThis.ResizeObserver;
+    if (el === null || typeof ObserverCtor === "undefined") return;
+    const observer = new ObserverCtor(schedule);
     observer.observe(el);
     return () => observer.disconnect();
   }, [follow, schedule]);
-  const onScroll = useCallback((event: UIEvent<HTMLDivElement>) => { if (distanceFromBottom(event.currentTarget) <= TOOL_CARD_FOLLOW_THRESHOLD_PX) pinned.current = true; }, []);
+  const onScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+    const el = event.currentTarget;
+    const top = el.scrollTop;
+    const prevTop = lastScrollTop.current;
+    lastScrollTop.current = top;
+    const distance = distanceFromBottom(el);
+    if (distance <= 1 || (top > prevTop && distance <= TOOL_CARD_FOLLOW_THRESHOLD_PX)) {
+      pinned.current = true;
+    }
+  }, []);
   return { ref, onScroll };
 }
-export function ToolCardScroll({ follow, className, children, ...rest }: Omit<HTMLAttributes<HTMLDivElement>, "onScroll"> & { follow: boolean; children: ReactNode }) {
+export function ToolCardScroll({
+  follow,
+  className,
+  containerRef,
+  children,
+  ...rest
+}: Omit<HTMLAttributes<HTMLDivElement>, "onScroll"> & {
+  follow: boolean;
+  containerRef?: RefObject<HTMLDivElement | null>;
+  children: ReactNode;
+}) {
   const scroll = useToolCardFollowScroll(follow);
-  return <div {...rest} ref={scroll.ref} className={follow ? `${className ?? ""} is-live`.trim() : className} {...(follow ? { "data-live": "tail" } : {})} onScroll={scroll.onScroll}>{children}</div>;
+  const setRefs = useCallback((node: HTMLDivElement | null) => {
+    (scroll.ref as { current: HTMLDivElement | null }).current = node;
+    if (containerRef) (containerRef as { current: HTMLDivElement | null }).current = node;
+  }, [scroll.ref, containerRef]);
+  return <div {...rest} ref={setRefs} className={follow ? `${className ?? ""} is-live`.trim() : className} {...(follow ? { "data-live": "tail" } : {})} onScroll={scroll.onScroll}>{children}</div>;
 }

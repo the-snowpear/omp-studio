@@ -266,6 +266,10 @@ export class TmuxConnection {
         pane.off = !action.visible || available <= 0;
         if (!pane.off) available--;
       }
+      if (entries.length === 0) {
+        this.#changed();
+        return;
+      }
       await this.client.run(`refresh-client ${entries.map(([id, pane]) => `-A '${id}:${pane.off ? "off" : "on"}'`).join(" ")}`);
       for (const [id, pane] of entries) if (!pane.off) {
         this.batcher.open(pane.terminalId, { flowControl: this.options.input.flowControl === true });

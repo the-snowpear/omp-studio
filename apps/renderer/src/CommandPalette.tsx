@@ -14,6 +14,28 @@ export type CommandPaletteHandle = {
   focusInput: () => void;
 };
 
+function firstEnabledIndex(items: ReadonlyArray<PaletteItem>): number {
+  const index = items.findIndex((item) => !item.disabled);
+  return index >= 0 ? index : 0;
+}
+
+function lastEnabledIndex(items: ReadonlyArray<PaletteItem>): number {
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (!items[i]?.disabled) return i;
+  }
+  return Math.max(0, items.length - 1);
+}
+
+function stepEnabledIndex(items: ReadonlyArray<PaletteItem>, current: number, delta: 1 | -1): number {
+  const len = items.length;
+  if (len === 0) return 0;
+  for (let step = 1; step <= len; step++) {
+    const next = (current + delta * step + len) % len;
+    if (!items[next]?.disabled) return next;
+  }
+  return current;
+}
+
 export const CommandPalette = forwardRef<CommandPaletteHandle, {
   open: boolean;
   groups: ReadonlyArray<PaletteGroup>;
@@ -23,6 +45,7 @@ export const CommandPalette = forwardRef<CommandPaletteHandle, {
   onRun: (action: PaletteAction) => void;
 }>(function CommandPalette({ open, groups, query, onQueryChange, onClose, onRun }, ref) {
   const { t } = useI18n();
+  const dialogRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState(0);
@@ -35,22 +58,28 @@ export const CommandPalette = forwardRef<CommandPaletteHandle, {
 
   useEffect(() => {
     if (!open) return;
-    setSelected(0);
+    setSelected(firstEnabledIndex(flat));
     const id = window.requestAnimationFrame(() => inputRef.current?.focus());
     return () => window.cancelAnimationFrame(id);
   }, [open]);
 
   useEffect(() => {
-    setSelected(0);
+    setSelected(firstEnabledIndex(flat));
   }, [query]);
 
   useEffect(() => {
-    if (selected >= flat.length) setSelected(0);
-  }, [flat.length, selected]);
+    if (selected >= flat.length || flat[selected]?.disabled) {
+      const next = firstEnabledIndex(flat);
+      if (next !== selected) setSelected(next);
+    }
+  }, [flat, selected]);
 
   useEffect(() => {
     if (!open || !selectedId || !listRef.current) return;
-    const el = listRef.current.querySelector(`[data-cmdk-id="${CSS.escape(selectedId)}"]`);
+    const esc = typeof CSS !== "undefined" && typeof CSS.escape === "function"
+      ? CSS.escape(selectedId)
+      : selectedId.replace(/["\\]/g, "\\$&");
+    const el = listRef.current.querySelector(`[data-cmdk-id="${esc}"]`);
     if (el instanceof HTMLElement) el.scrollIntoView({ block: "nearest" });
   }, [open, selectedId]);
 
@@ -63,12 +92,36 @@ export const CommandPalette = forwardRef<CommandPaletteHandle, {
         onClose();
         return;
       }
+      if (event.key === "Tab") {
+        const dialog = dialogRef.current;
+        if (dialog) {
+          const focusables = Array.from(
+            dialog.querySelectorAll<HTMLElement>('input:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])'),
+          );
+          if (focusables.length > 0) {
+            const active = document.activeElement as HTMLElement | null;
+            const currentIndex = active ? focusables.indexOf(active) : -1;
+            if (event.shiftKey) {
+              if (currentIndex <= 0) {
+                event.preventDefault();
+                focusables[focusables.length - 1]?.focus();
+              }
+            } else if (currentIndex === -1 || currentIndex >= focusables.length - 1) {
+              event.preventDefault();
+              focusables[0]?.focus();
+            }
+          } else {
+            event.preventDefault();
+          }
+        }
+        return;
+      }
       if (event.isComposing) return;
       const withMod = isPrimaryModifier(event);
       if (withMod && /^[1-9]$/.test(event.key) && !event.shiftKey && !event.altKey) {
         const index = Number(event.key);
         const recent = flat.find((item) => item.recentIndex === index);
-        if (recent) {
+        if (recent && !recent.disabled) {
           event.preventDefault();
           onRun(recent.action);
         }
@@ -77,17 +130,17 @@ export const CommandPalette = forwardRef<CommandPaletteHandle, {
       if (event.key === "ArrowDown") {
         event.preventDefault();
         if (!flat.length) return;
-        setSelected((value) => (value + 1) % flat.length);
+        setSelected((value) => stepEnabledIndex(flat, value, 1));
       } else if (event.key === "ArrowUp") {
         event.preventDefault();
         if (!flat.length) return;
-        setSelected((value) => (value - 1 + flat.length) % flat.length);
+        setSelected((value) => stepEnabledIndex(flat, value, -1));
       } else if (event.key === "Home") {
         event.preventDefault();
-        setSelected(0);
+        setSelected(firstEnabledIndex(flat));
       } else if (event.key === "End") {
         event.preventDefault();
-        if (flat.length) setSelected(flat.length - 1);
+        if (flat.length) setSelected(lastEnabledIndex(flat));
       } else if (event.key === "Enter") {
         event.preventDefault();
         const item = flat[selected];
@@ -113,6 +166,7 @@ export const CommandPalette = forwardRef<CommandPaletteHandle, {
       <div className="cmdk-shell">
         <div className="cmdk-glow" aria-hidden="true" />
         <div
+          ref={dialogRef}
           className="cmdk"
           role="dialog"
           aria-modal="true"
@@ -151,6 +205,7 @@ export const CommandPalette = forwardRef<CommandPaletteHandle, {
                   item={item}
                   selected={item.id === selectedId}
                   onHover={() => {
+                    if (item.disabled) return;
                     const index = flat.findIndex((entry) => entry.id === item.id);
                     if (index >= 0) setSelected(index);
                   }}

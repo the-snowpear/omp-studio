@@ -3,9 +3,10 @@ import { useEffect, useState, type RefObject } from "react";
 const SCROLL_SETTLE_MS = 140;
 
 /** Visibility changes and async results must not initialize a viewer during a scroll gesture. */
-export function afterPreviewScroll(host: HTMLElement, work: () => void): () => void {
-  const document = host.ownerDocument;
-  const window = document.defaultView!;
+export function afterPreviewScroll(host: HTMLElement | null | undefined, work: () => void): () => void {
+  const document = host?.ownerDocument;
+  const window = document?.defaultView;
+  if (!host || !document || !window) return () => {};
   let timer: number;
   const dispose = () => {
     window.clearTimeout(timer);
@@ -29,9 +30,10 @@ export function usePreviewVisibility(host: RefObject<HTMLElement | null>, once =
   const [visible, setVisible] = useState(typeof IntersectionObserver === "undefined");
   useEffect(() => {
     const node = host.current;
-    if (!node || typeof IntersectionObserver === "undefined") return;
+    const ObserverCtor = globalThis.IntersectionObserver ?? node?.ownerDocument?.defaultView?.IntersectionObserver;
+    if (!node || typeof ObserverCtor === "undefined") return;
     let cancel = () => {};
-    const observer = new IntersectionObserver(entries => {
+    const observer = new ObserverCtor(entries => {
       const next = entries.some(entry => entry.isIntersecting);
       cancel();
       cancel = afterPreviewScroll(node, () => {

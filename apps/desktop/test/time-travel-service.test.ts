@@ -58,3 +58,43 @@ test("a switch change waits for the entire in-progress restore", async () => {
   assert.equal(await restore, "restored");
   assert.equal((await disabling).enabled, false);
 });
+
+test("session removal waits for an in-progress restore and preserves another session's snapshot", async () => {
+  const root = await mkdtemp(join(tmpdir(), "studio-time-travel-"));
+  const workspace = join(root, "workspace");
+  await mkdir(workspace);
+  const file = join(workspace, "file");
+  await writeFile(file, "deleted session content");
+  const service = new TimeTravelService(join(root, "profile"));
+  await service.updateSettings({ enabled: true });
+  const capture = { workspace, leafId: null, phase: "before" as const };
+  await service.capture({ ...capture, sessionId: "deleted" });
+
+  let markReady!: () => void;
+  let finish!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    markReady = resolve;
+  });
+  const restoring = service.withRestore(async (store) => {
+    markReady();
+    await new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    assert.equal((await store.list(workspace, "deleted")).length, 1);
+    await writeFile(file, "retained session content");
+    return store.capture({ ...capture, sessionId: "retained" });
+  });
+  await ready;
+  const removal = service.removeSession("deleted");
+  finish();
+  const retained = await restoring;
+  assert.deepEqual(await removal, { removed: 1 });
+  assert.equal((await service.list(workspace, "deleted")).length, 0);
+
+  await writeFile(file, "modified");
+  const preview = await service.preview(workspace, "retained", retained.id);
+  const result = await service.restore({
+    workspace, sessionId: "retained", snapshotId: retained.id, expectedRevision: preview.revision, leafId: null,
+  });
+  assert.equal(result.restored, true);
+});

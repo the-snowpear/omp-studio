@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -7,7 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { StudioClient } from "@omp-studio/client-contract";
+import type { ClientBootstrap, StudioClient } from "@omp-studio/client-contract";
 import { I18nProvider } from "../i18n";
 import { PreviewModeProvider } from "../preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
@@ -73,4 +74,45 @@ it("does not send new queue operations to an old Runtime", () => {
   );
   expect(screen.queryByRole("group")).toBeNull();
   expect(client.command).not.toHaveBeenCalled();
+});
+
+it("keeps an empty queue quiet on a background receipt timeout and clears the queue status on recovery", async () => {
+  vi.useFakeTimers();
+  try {
+    let responding = false;
+    const client = {
+      command: vi.fn(async () => ({ requestId: "read-queue" })),
+      getState: () => ({
+        commands: responding ? {
+          "read-queue": { status: "completed", result: { result: { entries: [], total: 0, truncated: false } } },
+        } : {},
+      }),
+      subscribe: () => () => {},
+    } as unknown as StudioClient;
+    const capabilities = { capabilities: [{ id: "session.queue.get", grade: "stable" }] } as ClientBootstrap["capabilityManifest"];
+    const view = (language: "zh" | "en", pending: number) => (
+      <I18nProvider forcedLanguage={language}>
+        <RuntimeQueueBar client={client} sessionId="s" capabilities={capabilities} available pending={pending} running />
+      </I18nProvider>
+    );
+    const mounted = render(view("zh", 0));
+    await act(async () => {});
+    await act(() => vi.advanceTimersByTimeAsync(120_000));
+    expect(screen.queryByRole("group")).toBeNull();
+
+    mounted.rerender(view("zh", 1));
+    expect(screen.getByRole("status").textContent).toBe("暂时无法刷新已提交队列");
+    mounted.rerender(view("en", 1));
+    expect(screen.getByRole("status").textContent).toBe("Could not refresh submitted messages");
+    mounted.rerender(view("zh", 1));
+    expect(screen.getByRole("status").textContent).toBe("暂时无法刷新已提交队列");
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    responding = true;
+    await act(async () => {});
+    await act(() => vi.advanceTimersByTimeAsync(121_500));
+    expect(screen.queryByRole("group")).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
 });

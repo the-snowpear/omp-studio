@@ -266,6 +266,7 @@ export function SubagentsPanel({
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [saveHint, setSaveHint] = useState<string | null>(null);
   const opened = useRef(false);
+  const refreshSeq = useRef(0);
   const draftRef = useRef<AgentDraft | null>(null);
   draftRef.current = draftState;
 
@@ -273,24 +274,33 @@ export function SubagentsPanel({
     setFlash(text);
   };
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<AgentDefinitionsReadModel | null> => {
+    const seq = ++refreshSeq.current;
     if (preview) {
-      setData(createPreviewAgentDefinitions(undefined, zh));
+      const demo = createPreviewAgentDefinitions(undefined, zh);
+      setData(demo);
       setLoadError(null);
-      return;
+      return demo;
     }
     try {
       const next = await client.query("agents.definitions.get", {});
+      if (seq !== refreshSeq.current) return null;
       setData(next);
       setLoadError(next.unavailableReason ?? null);
+      return next;
     } catch (error) {
+      if (seq !== refreshSeq.current) return null;
       setLoadError(hostErrorMessage(error, "agents.definitions.get failed"));
       setData(null);
+      return null;
     }
   }, [client, preview, zh]);
 
   useEffect(() => {
     void refresh();
+    return () => {
+      refreshSeq.current += 1;
+    };
   }, [refresh]);
 
   useEffect(() => {
@@ -399,8 +409,9 @@ export function SubagentsPanel({
       return;
     }
     if (!AGENT_NAME_RE.test(name)) {
-      setSaveHint(AGENT_NAME_HINT);
-      toast(AGENT_NAME_HINT);
+      const message = t(AGENT_NAME_HINT);
+      setSaveHint(message);
+      toast(message);
       return;
     }
     setSaveHint(null);
@@ -504,24 +515,35 @@ export function SubagentsPanel({
     }
 
     setBusy(true);
+    let wroteDefinition = false;
     try {
       if (draft.editable) {
         await runWrite(client, "agents.definition.upsert", upsert);
+        wroteDefinition = true;
       }
+      const nextOverrideModel = draft.overrideModel.trim();
+      const nextPrewalkOverride = draft.prewalkOverride.trim();
+      const nextAdvisorOverride = draft.advisorOverride.trim();
       const needsConfigure =
         !draft.editable
-        || draft.disabled
-        || Boolean(draft.overrideModel.trim())
-        || Boolean(draft.prewalkOverride.trim())
-        || Boolean(draft.advisorOverride.trim());
+        || (original
+          ? draft.disabled !== original.disabled
+            || nextOverrideModel !== (original.overrideModel ?? "").trim()
+            || nextPrewalkOverride !== (original.prewalkOverride ?? "").trim()
+            || nextAdvisorOverride !== (original.advisorOverride ?? "").trim()
+          : draft.disabled
+            || Boolean(nextOverrideModel)
+            || Boolean(nextPrewalkOverride)
+            || Boolean(nextAdvisorOverride));
       if (needsConfigure) {
         await runWrite(client, "agents.definition.configure", {
           name: upsert.name,
           disabled: draft.disabled,
-          overrideModel: draft.overrideModel.trim() ? draft.overrideModel.trim() : null,
-          prewalkOverride: draft.prewalkOverride.trim() ? draft.prewalkOverride.trim() : null,
-          advisorOverride: draft.advisorOverride.trim() ? draft.advisorOverride.trim() : null,
+          overrideModel: nextOverrideModel ? nextOverrideModel : null,
+          prewalkOverride: nextPrewalkOverride ? nextPrewalkOverride : null,
+          advisorOverride: nextAdvisorOverride ? nextAdvisorOverride : null,
         });
+        wroteDefinition = true;
       }
       const accountOverride = await accountPools.save(name);
       toast(accountOverride
@@ -530,6 +552,21 @@ export function SubagentsPanel({
       setDraft(null);
       await refresh();
     } catch (error) {
+      if (wroteDefinition) {
+        const refreshed = await refresh();
+        const updated = refreshed?.agents.find((item) => item.name === upsert.name);
+        if (updated) {
+          setDraft((current) => {
+            if (!current || current.name.trim() !== upsert.name) return current;
+            const { contentHash: _oldHash, ...rest } = current;
+            return {
+              ...rest,
+              existing: true,
+              ...(updated.contentHash === undefined ? {} : { contentHash: updated.contentHash }),
+            };
+          });
+        }
+      }
       toast(hostErrorMessage(error, t("modelConfig.saveFailed")));
     } finally {
       setBusy(false);
@@ -951,7 +988,7 @@ export function SubagentsPanel({
                 void saveDraft();
               }}
             >
-              {busy ? t("common.saving") : draft.editable ? t("common.save") : t("subagents.saveOverride")}
+              {busy || accountPools.busy ? t("common.saving") : draft.editable ? t("common.save") : t("subagents.saveOverride")}
             </button>
           </div>
         </div>

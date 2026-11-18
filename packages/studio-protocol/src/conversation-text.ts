@@ -2,9 +2,25 @@ import { CONVERSATION_LIMITS } from "./contracts/conversation.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+const nodeByteLength = typeof Buffer === "function" ? (text: string) => Buffer.byteLength(text, "utf8") : undefined;
 
 export function utf8ByteLength(text: string): number {
-  return encoder.encode(text).byteLength;
+  if (nodeByteLength !== undefined) return nodeByteLength(text);
+  let bytes = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code < 0x80) {
+      bytes += 1;
+    } else if (code < 0x800) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff && index + 1 < text.length && (text.charCodeAt(index + 1) & 0xfc00) === 0xdc00) {
+      bytes += 4;
+      index += 1;
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
 }
 
 /** UTF-8 never spends more than 3 bytes per UTF-16 code unit (a surrogate pair

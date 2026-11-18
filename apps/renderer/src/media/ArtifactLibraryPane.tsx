@@ -142,6 +142,8 @@ export function ArtifactLibraryPane({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const generation = useRef(0);
+  const tRef = useRef(t);
+  tRef.current = t;
   const load = useCallback(
     async (after?: string) => {
       const token = ++generation.current;
@@ -168,12 +170,12 @@ export function ArtifactLibraryPane({
         setCursor(page.nextCursor);
       } catch (cause) {
         if (generation.current === token)
-          setError(hostErrorMessage(cause, t("media.unavailable")));
+          setError(hostErrorMessage(cause, tRef.current("media.unavailable")));
       } finally {
         if (generation.current === token) setBusy(false);
       }
     },
-    [client, workspaceId, kind, preview, t],
+    [client, workspaceId, kind, preview],
   );
   useEffect(() => {
     setRows([]);

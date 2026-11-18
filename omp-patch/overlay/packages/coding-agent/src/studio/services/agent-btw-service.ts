@@ -127,11 +127,20 @@ export class StudioAgentBtwService {
 		});
 		this.#entries.set(operation.agentId, entry);
 		this.#timer ??= setInterval(() => {
-			for (const item of this.#entries.values())
-				if (item.valid && !this.#matches(item)) {
+			let hasValid = false;
+			for (const item of this.#entries.values()) {
+				if (!item.valid) continue;
+				if (!this.#matches(item)) {
 					item.valid = false;
 					item.service.dispose();
+				} else {
+					hasValid = true;
 				}
+			}
+			if (!hasValid && this.#timer !== undefined) {
+				clearInterval(this.#timer);
+				this.#timer = undefined;
+			}
 		}, 250);
 		this.#timer.unref?.();
 		return entry;
@@ -182,6 +191,7 @@ export class StudioAgentBtwService {
 	dispose(): void {
 		this.#disposed = true;
 		clearInterval(this.#timer);
+		this.#timer = undefined;
 		for (const entry of this.#entries.values()) entry.service.dispose();
 		this.#entries.clear();
 	}

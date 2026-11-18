@@ -39,7 +39,11 @@ export function LazyMermaid({ code, onFailure }: { code: string; onFailure?: (me
     const request = () => {
       if (cancel !== undefined) return;
       const response = mermaidQueue.request(code, { active: () => alive,
-        result: (svg) => { cancelCommit = afterPreviewScroll(host.current!, () => { if (alive) setResult({ code, svg }); }); } });
+        result: (svg) => {
+          const el = host.current;
+          if (!el || !alive) return;
+          cancelCommit = afterPreviewScroll(el, () => { if (alive) setResult({ code, svg }); });
+        } });
       if (response.status === "accepted") cancel = response.cancel;
     };
     const offSlot = mermaidQueue.onSlot(request);

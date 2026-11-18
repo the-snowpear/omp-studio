@@ -41,10 +41,29 @@ export function createNativeBrowserBackend(client: StudioClient, api?: ManagedBr
       // This policy belongs solely to the embedded adapter, not the CLI's native browsers.
       settings: base?.settings ?? { maxTabs: 0, downloadDirectory: "", askDownloadLocation: false }, downloads: base?.downloads ?? [], permissions: base?.permissions ?? [] };
   };
+  const prune = (keepId: string) => {
+    if (signatures.size <= 32) return;
+    for (const candidateId of signatures.keys()) {
+      if (candidateId === keepId) continue;
+      if ((watches.get(candidateId)?.count ?? 0) > 0) continue;
+      if ([...controllers.keys()].some(key => key.startsWith(`${candidateId}\n`))) continue;
+      signatures.delete(candidateId);
+      native.delete(candidateId);
+      embedded.delete(candidateId);
+      selected.delete(candidateId);
+      nativeVersions.delete(candidateId);
+      embeddedVersions.delete(candidateId);
+      watches.delete(candidateId);
+      for (const key of patches.keys()) if (key.startsWith(`${candidateId}\n`)) patches.delete(key);
+      if (signatures.size <= 32) break;
+    }
+  };
   const emit = (sessionId: string) => {
     const current = state(sessionId), signature = JSON.stringify(current);
     if (signatures.get(sessionId) === signature) return;
+    signatures.delete(sessionId);
     signatures.set(sessionId, signature);
+    prune(sessionId);
     for (const listener of listeners) listener({ kind: "state", state: current });
   };
   const read = async (sessionId: string): Promise<ManagedBrowserState> => {
@@ -125,7 +144,13 @@ export function createNativeBrowserBackend(client: StudioClient, api?: ManagedBr
         finally { current.reading = false; if (current.count) current.timer = clock.setTimeout(() => void poll(), 2000); }
       };
       if (current.count === 1) void poll();
-      return () => { if (--current.count === 0) { clearTimeout(current.timer); current.timer = undefined; } };
+      return () => {
+        if (--current.count === 0) {
+          clearTimeout(current.timer);
+          current.timer = undefined;
+          watches.delete(sessionId);
+        }
+      };
     },
     bindPage(sessionId, pageId, controller) {
       const key = pageKey(sessionId, pageId); controllers.set(key, controller);

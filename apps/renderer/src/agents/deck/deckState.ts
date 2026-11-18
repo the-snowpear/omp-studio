@@ -35,18 +35,34 @@ const initial = (): DeckUi => ({
   replay: null, speed: 4, byEvent: false, timeline: { follow: true, span: null, end: null }, orbit: { zoom: 1, x: 0, y: 0 },
 });
 
+const MAX_DECK_UI = 64;
 const book = new Map<string, DeckUi>();
+
+function touchDeckUi(key: string, value: DeckUi): void {
+  if (book.has(key)) {
+    book.delete(key);
+  } else if (book.size >= MAX_DECK_UI) {
+    const oldest = book.keys().next().value;
+    if (oldest !== undefined) book.delete(oldest);
+  }
+  book.set(key, value);
+}
 
 export type DeckUpdate = (patch: Partial<DeckUi> | ((ui: DeckUi) => Partial<DeckUi>)) => void;
 
 export function useDeckUi(key: string): [DeckUi, DeckUpdate] {
   const [, refresh] = useState(0);
   let ui = book.get(key);
-  if (!ui) { ui = initial(); book.set(key, ui); }
+  if (ui) {
+    touchDeckUi(key, ui);
+  } else {
+    ui = initial();
+    touchDeckUi(key, ui);
+  }
   const update: DeckUpdate = useCallback(patch => {
     const current = book.get(key) ?? initial();
     const next = { ...current, ...(typeof patch === "function" ? patch(current) : patch) };
-    book.set(key, next);
+    touchDeckUi(key, next);
     refresh(value => value + 1);
   }, [key]);
   return [ui, update];

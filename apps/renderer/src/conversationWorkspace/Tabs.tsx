@@ -16,6 +16,12 @@ import type { ConversationWorkspaceStore } from "./store";
 /** A tool picked from the tab bar's + opens at the dock's usual floating size. */
 const TOOL_WINDOW = { width: 560, height: 400 };
 
+function escapeAttrValue(value: string): string {
+  return typeof CSS !== "undefined" && typeof CSS.escape === "function"
+    ? CSS.escape(value)
+    : value.replace(/["\\]/g, "\\$&");
+}
+
 function useText() {
   const { resolvedLanguage } = useI18n();
   return (zh: string, en: string) => resolvedLanguage === "zh" ? zh : en;
@@ -62,9 +68,12 @@ export function WindowTabs({ store, addSlot }: { store: ConversationWorkspaceSto
   const activeKey = tabs.some(tab => tab.key === focused) ? focused : owner ? `conversation:${owner.id}` : undefined;
   const focusableKey = tabs.some(tab => tab.key === activeKey) ? activeKey : tabs[0]?.key;
   useLayoutEffect(() => {
-    if (activeKey) list.current?.querySelector<HTMLElement>(`[data-window-tab="${activeKey}"]`)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    if (activeKey) list.current?.querySelector<HTMLElement>(`[data-window-tab="${escapeAttrValue(activeKey)}"]`)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, [activeKey]);
-  const focusTab = (key: string | undefined) => list.current?.querySelector<HTMLButtonElement>(`[data-window-tab="${key}"] [role="tab"]`)?.focus();
+  const focusTab = (key: string | undefined) => {
+    if (!key) return;
+    list.current?.querySelector<HTMLButtonElement>(`[data-window-tab="${escapeAttrValue(key)}"] [role="tab"]`)?.focus();
+  };
   const close = (index: number) => {
     const neighbour = tabs[index + 1] ?? tabs[index - 1];
     const hadFocus = !!list.current?.contains(document.activeElement);

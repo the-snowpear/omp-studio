@@ -50,13 +50,30 @@ export function AvatarCropDialog({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = view.viewSize * dpr;
-    canvas.height = view.viewSize * dpr;
+    const targetWidth = Math.round(view.viewSize * dpr);
+    const targetHeight = Math.round(view.viewSize * dpr);
+    if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+    } else {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, targetWidth, targetHeight);
+    }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = "#0b0b0f";
     ctx.fillRect(0, 0, view.viewSize, view.viewSize);
     ctx.drawImage(image.source, view.x, view.y, image.width * view.scale, image.height * view.scale);
   }, [image, view]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    return () => {
+      if (canvas) {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const stage = stageRef.current;

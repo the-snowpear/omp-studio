@@ -5,7 +5,18 @@ import { type HubTab } from "../../pageIntents";
 /** How the Agents workspace lists the roster: cards, cards by parent, or the command deck. */
 export type HubView = "flat" | "tree" | "deck";
 
-export type HubStatus = "running" | "idle" | "parked" | "aborted";
+export type HubStatus = "running" | "idle" | "parked" | "aborted" | "released";
+
+export type HubTreeNode = {
+  agent: HubAgent;
+  children: HubTreeNode[];
+};
+
+export type HubTreeGroup = {
+  head: HubAgent;
+  nodes: HubTreeNode[];
+  kids: HubAgent[];
+};
 
 export type Notice = { kind: "ok" | "warn" | "err"; text: string };
 

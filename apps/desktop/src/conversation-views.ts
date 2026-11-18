@@ -28,7 +28,7 @@ export class ConversationViews {
     return () => { this.#controllers.delete(controller); };
   }
   registerWindow(key: object, visible: boolean): void { this.#windows.set(key, { visible }); this.refresh(); }
-  setVisible(key: object, visible: boolean): void { const view = this.#windows.get(key); if (view) { view.visible = visible; this.refresh(); } }
+  setVisible(key: object, visible: boolean): void { const view = this.#windows.get(key); if (view && view.visible !== visible) { view.visible = visible; this.refresh(); } }
   reset(key: object): void { const view = this.#windows.get(key); if (view) { delete view.state; this.refresh(); } }
   remove(key: object): void { this.#windows.delete(key); this.refresh(); }
   report(key: object, input: unknown): boolean {
@@ -39,7 +39,7 @@ export class ConversationViews {
   refresh(): void {
     const epochs = new Set([...this.#controllers.keys()].map((controller) => controller.epoch()));
     for (const view of this.#windows.values()) if (view.state && !(view.state.views ?? [view.state]).some(state => epochs.has(state.runtimeEpoch))) delete view.state;
-    const legacy = !this.#hasReport || [...this.#windows.values()].some((view) => view.state === undefined);
+    const legacy = !this.#hasReport || [...this.#windows.values()].some((view) => view.visible && view.state === undefined);
     for (const [controller, previous] of this.#controllers) {
       const epoch = controller.epoch();
       const visible = new Set<string>();

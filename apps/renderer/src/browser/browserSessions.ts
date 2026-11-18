@@ -57,6 +57,7 @@ export class BrowserSession {
   constructor(readonly id: string, private readonly backend: BrowserBackend) {}
   get nativeAvailable(): boolean { return this.backend.native === true; }
   get embeddedAvailable(): boolean { return this.backend.embedded !== false; }
+  get hasSubscribers(): boolean { return this.#listeners.size > 0 || this.#reading; }
   watch(): () => void { return this.backend.watch?.(this.id) ?? (() => {}); }
   bindPage(pageId: string, controller: BrowserPageController): () => void { return this.backend.bindPage?.(this.id, pageId, controller) ?? (() => {}); }
   updatePage(pageId: string, patch: Partial<ManagedBrowserState["pages"][number]>): void { this.backend.updatePage?.(this.id, pageId, patch); }
@@ -198,7 +199,21 @@ export class BrowserHub {
   session(id: string): BrowserSession {
     this.#unsubscribe ??= this.backend.subscribe(event => this.#sessions.get(event.kind === "state" ? event.state.sessionId : event.sessionId)?.receive(event));
     let session = this.#sessions.get(id);
-    if (!session) this.#sessions.set(id, session = new BrowserSession(id, this.backend));
+    if (session) {
+      this.#sessions.delete(id);
+      this.#sessions.set(id, session);
+      return session;
+    }
+    session = new BrowserSession(id, this.backend);
+    this.#sessions.set(id, session);
+    if (this.#sessions.size > 32) {
+      for (const [candidateId, candidate] of this.#sessions) {
+        if (candidateId !== id && !candidate.hasSubscribers) {
+          this.#sessions.delete(candidateId);
+          break;
+        }
+      }
+    }
     return session;
   }
 }

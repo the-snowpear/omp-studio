@@ -247,6 +247,9 @@ export class ComputerWorkspaceSource {
       if (!this.observations.size) this.closeLease();
     };
   }
+  hasSubscribers(): boolean {
+    return this.listeners.size > 0 || this.observations.size > 0;
+  }
 }
 const sources = new WeakMap<StudioClient, Map<string, ComputerWorkspaceSource>>();
 export function computerWorkspaceSource(client: StudioClient, sessionId: string, scopeKey: string) {
@@ -256,8 +259,18 @@ export function computerWorkspaceSource(client: StudioClient, sessionId: string,
   let source = entries.get(key);
   if (!source) {
     source = new ComputerWorkspaceSource(client, sessionId, scopeKey); entries.set(key, source);
-    // Scope switches must not retain unbounded historical metadata.
-    if (entries.size > 12) entries.delete(entries.keys().next().value!);
+    // Scope switches must not retain unbounded historical metadata, while active subscriptions stay pinned.
+    if (entries.size > 12) {
+      for (const [candidateKey, candidate] of entries) {
+        if (candidateKey !== key && !candidate.hasSubscribers()) {
+          entries.delete(candidateKey);
+          break;
+        }
+      }
+    }
+  } else {
+    entries.delete(key);
+    entries.set(key, source);
   }
   return source;
 }

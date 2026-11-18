@@ -40,6 +40,8 @@ export function SessionOptionsPane({
   const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
+  const zhRef = useRef(zh);
+  zhRef.current = zh;
   const warmingLabel = (mode: SessionWarmingState["mode"]) =>
     mode === "off"
       ? zh
@@ -104,38 +106,75 @@ export function SessionOptionsPane({
   useEffect(() => {
     if (preview || !visible || !enabled || !sessionId) return;
     let active = true;
-    let timer: ReturnType<typeof setTimeout>;
+    let inFlight = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const clearTimer = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    };
+
+    const isVisible = () =>
+      typeof document === "undefined" || document.visibilityState === "visible";
+
+    const schedule = () => {
+      clearTimer();
+      if (!active || !isVisible()) return;
+      timer = setTimeout(() => {
+        timer = undefined;
+        void poll();
+      }, 3000);
+    };
+
     const poll = async () => {
+      if (!active || inFlight || !isVisible()) return;
+      inFlight = true;
+      clearTimer();
       try {
-        if (!document.hidden && !lock.current) {
+        if (!lock.current) {
           const [nextSpeed, nextWarming] = await Promise.all([
             invoke("session.speed.get", { sessionId }),
             invoke("session.warming.get", { sessionId }),
           ]);
-          if (active) {
+          if (active && !lock.current) {
             setSpeed(nextSpeed);
             setWarming(nextWarming);
             setError("");
           }
         }
       } catch (cause) {
-        if (active)
+        if (active && !lock.current)
           setError(
             hostErrorMessage(
               cause,
-              zh ? "会话选项读取失败" : "Session controls unavailable",
+              zhRef.current ? "会话选项读取失败" : "Session controls unavailable",
             ),
           );
       } finally {
-        if (active) timer = setTimeout(() => void poll(), 3000);
+        inFlight = false;
+        if (active) schedule();
       }
     };
-    void poll();
+
+    const onVisibilityChange = () => {
+      if (!active) return;
+      if (!isVisible()) {
+        clearTimer();
+      } else {
+        void poll();
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    if (isVisible()) void poll();
     return () => {
       active = false;
-      clearTimeout(timer);
+      clearTimer();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [preview, visible, enabled, sessionId, invoke, zh]);
+  }, [preview, visible, enabled, sessionId, invoke]);
   const apply = async (change: NonNullable<typeof confirm>) => {
     if (lock.current || !enabled) return;
     const generation = epoch.current;

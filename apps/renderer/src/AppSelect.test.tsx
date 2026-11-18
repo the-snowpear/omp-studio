@@ -149,3 +149,32 @@ it("flips near the lower edge and repositions on scroll and resize", () => {
   fireEvent.resize(window);
   expect(popup.style.top).toBe("138px");
 });
+
+it("compensates for fixed-containing-block offset and flips inside transformed clipped dialogs", () => {
+  render(
+    <I18nProvider forcedLanguage="en">
+      <div
+        role="dialog"
+        aria-label="Plan Review"
+        style={{ willChange: "clip-path, transform, opacity", overflow: "hidden" }}
+      >
+        <AppSelect aria-label="Tier" value="alpha">{ordinary}</AppSelect>
+      </div>
+    </I18nProvider>,
+  );
+  const dialog = screen.getByRole("dialog", { name: "Plan Review" });
+  const trigger = screen.getByRole("combobox", { name: "Tier" });
+  vi.spyOn(dialog, "getBoundingClientRect").mockReturnValue({
+    top: 24, bottom: 760, left: 480, right: 1200, width: 720, height: 736, x: 480, y: 24, toJSON() {},
+  });
+  vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({
+    top: 700, bottom: 736, left: 500, right: 760, width: 260, height: 36, x: 500, y: 700, toJSON() {},
+  });
+  vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(120);
+
+  fireEvent.click(trigger);
+  const popup = screen.getByRole("listbox").parentElement!;
+  expect(popup.dataset.side).toBe("top");
+  expect(popup.style.left).toBe("20px");
+  expect(Number.parseFloat(popup.style.top)).toBeLessThan(700 - 24);
+});

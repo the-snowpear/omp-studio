@@ -226,3 +226,52 @@ test("session catalog scans the cold-archive tree and marks gz members archived"
   assert.equal(byId.get("archived-id")?.title, "Archived chat");
   assert.ok(!JSON.stringify(result).includes("C:\secret"));
 });
+
+test("session catalog prefers live title slots and title_change entries over stale header titles and refreshes untitled live slots", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-studio-catalog-live-title-"));
+  const project = join(root, "--project--");
+  await mkdir(project, { recursive: true });
+
+  // Case 1: Fixed-width 256-byte title slot updated in place while file size and mtime stay identical.
+  const fixedSlot = (title: string): string => {
+    const base = JSON.stringify({ type: "title", v: 1, title, updatedAt: "2026-08-24T00:00:00.000Z", pad: "" });
+    const pad = " ".repeat(Math.max(0, 255 - Buffer.byteLength(base, "utf8")));
+    return `${JSON.stringify({ type: "title", v: 1, title, updatedAt: "2026-08-24T00:00:00.000Z", pad })}\n`;
+  };
+  const liveFile = join(project, "live-slot.jsonl");
+  const restLines = [
+    JSON.stringify({ type: "session", id: "slot-session", timestamp: "2026-08-24T00:00:00.000Z", studioOrigin: "studio-host" }),
+    JSON.stringify({ type: "message", message: { role: "user", content: "review session title pipeline" } }),
+  ].join("\n") + "\n";
+  await writeFile(liveFile, fixedSlot("") + restLines);
+  const { utimes } = await import("node:fs/promises");
+  const fixedTime = new Date("2026-08-24T00:00:05.000Z");
+  await utimes(liveFile, fixedTime, fixedTime);
+
+  const initialScan = await scanSessionCatalog({ sessionsRoot: root });
+  assert.equal(initialScan.sessions.find((entry) => entry.sessionId === "slot-session")?.title, undefined);
+
+  await writeFile(liveFile, fixedSlot("Updated in-place slot title") + restLines);
+  await utimes(liveFile, fixedTime, fixedTime);
+
+  const updatedScan = await scanSessionCatalog({ sessionsRoot: root });
+  assert.equal(updatedScan.sessions.find((entry) => entry.sessionId === "slot-session")?.title, "Updated in-place slot title");
+
+  // Case 2: Populated title slot overrides an older header.title, and title_change overrides an empty slot.
+  await writeFile(join(project, "slot-overrides-header.jsonl"), [
+    JSON.stringify({ type: "title", v: 1, title: "Renamed title", updatedAt: "2026-08-24T00:01:00.000Z", pad: "" }),
+    JSON.stringify({ type: "session", id: "override-session", title: "Old header title", studioOrigin: "studio-host" }),
+    JSON.stringify({ type: "message", message: { role: "user", content: "hello" } }),
+  ].join("\n") + "\n");
+  await writeFile(join(project, "title-change-fallback.jsonl"), [
+    JSON.stringify({ type: "title", v: 1, title: "", updatedAt: "2026-08-24T00:00:00.000Z", pad: "" }),
+    JSON.stringify({ type: "session", id: "change-session", studioOrigin: "studio-host" }),
+    JSON.stringify({ type: "message", message: { role: "user", content: "hello" } }),
+    JSON.stringify({ type: "title_change", title: "Mid-turn appended title", source: "auto" }),
+  ].join("\n") + "\n");
+
+  const finalScan = await scanSessionCatalog({ sessionsRoot: root });
+  const byId = new Map(finalScan.sessions.map((entry) => [entry.sessionId, entry.title]));
+  assert.equal(byId.get("override-session"), "Renamed title");
+  assert.equal(byId.get("change-session"), "Mid-turn appended title");
+});

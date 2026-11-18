@@ -41,7 +41,11 @@ function RuntimeSetting({ name, runtime, persist }: { name: GuiSettingKey; runti
   const { marks } = usePreviewMode();
   const definition = GUI_SETTING_DEFINITIONS[name];
   const preview = runtime?.preview === true;
-  const value = preview ? (runtime?.previewValues?.[name] ?? definition.default) : runtime?.activation?.configured[name] ?? runtime?.snapshot?.[name];
+  const value = preview
+    ? (runtime?.previewValues?.[name] ?? definition.default)
+    : persist
+      ? (runtime?.activation?.configured[name] ?? runtime?.snapshot?.[name])
+      : runtime?.snapshot?.[name];
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   useEffect(() => { setDraft(definition.type === "strings" && Array.isArray(value) ? value.join("\n") : typeof value === "object" ? JSON.stringify(value ?? {}, null, 2) : String(value ?? "")); setError(""); }, [value, definition.type]);

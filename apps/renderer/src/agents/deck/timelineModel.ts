@@ -115,16 +115,35 @@ export function tickLabel(at: number, span: number): string {
   return span < 10 * 60_000 ? `${hh}:${mm}:${ss}` : `${hh}:${mm}`;
 }
 
-/** Running lanes per bucket across the range: the concurrency curve under the axis. */
+/** Running lanes per bucket across the range: the concurrency curve under the axis (single-pass two-pointer scan). */
 export function concurrency(lanes: readonly Lane[], start: number, end: number, now: number, buckets: number): number[] {
-  const out = new Array<number>(Math.max(1, buckets)).fill(0);
+  const count = Math.max(1, buckets);
+  const out = new Array<number>(count).fill(0);
   const span = Math.max(1, end - start);
+  const bucketTimes = new Array<number>(count);
+  for (let index = 0; index < count; index += 1) {
+    bucketTimes[index] = start + (index / count) * span;
+  }
   for (const lane of lanes) {
     if (lane.row.main) continue;
-    for (let index = 0; index < out.length; index += 1) {
-      const at = start + index / out.length * span;
+    const transitions = lane.transitions;
+    let tIdx = 0;
+    const firstBucket = Math.max(0, Math.floor(((lane.start - start) / span) * count));
+    for (let index = firstBucket; index < count; index += 1) {
+      const at = bucketTimes[index]!;
       if (at > now) break;
-      const tone = laneToneAt(lane, at);
+      if (at < lane.start) continue;
+      if (lane.end !== undefined && at >= lane.end) {
+        if (lane.row.tone === "running" || lane.row.tone === "waiting") out[index]! += 1;
+        else break;
+        continue;
+      }
+      while (tIdx < transitions.length && transitions[tIdx]!.at <= at) tIdx += 1;
+      const status = tIdx > 0 ? transitions[tIdx - 1]!.status : undefined;
+      const recorded = status === undefined ? undefined : deckTone(status);
+      const tone = recorded !== undefined
+        ? recorded
+        : (lane.row.tone === "waiting" && at >= lane.row.updatedAt ? "waiting" : "running");
       if (tone === "running" || tone === "waiting") out[index]! += 1;
     }
   }
