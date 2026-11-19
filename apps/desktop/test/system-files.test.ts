@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { lstat, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join, parse, resolve } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { dirname, isAbsolute, join, parse, relative, resolve } from "node:path";
 import test, { beforeEach, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import type { WorkspaceId } from "@omp-studio/client-contract";
@@ -43,6 +43,23 @@ test("system browser lists metadata, hidden files and the containing workspace",
   assert.equal(viaProject.entries.find(entry => entry.name === ".hidden")?.hidden, true);
   assert.equal((await service.places()).quick.find(place => place.kind === "downloads")?.path, src);
   await assert.rejects(service.list({ workspaceId: workspace.workspaceId as WorkspaceId, path: ".." }), /escapes/);
+});
+
+test("system probes and opens use the same home and Windows drive paths", async t => {
+  const { root, registry } = await fixture(t);
+  const folder = await realpath(root);
+  const path = join(folder, "report.txt");
+  await writeFile(path, "example report");
+  const service = createSystemFileService({ registry });
+  const fromHome = relative(homedir(), path).replaceAll("\\", "/");
+  const fileAliases = [path, ...(!isAbsolute(fromHome) ? ["~/" + fromHome] : []),
+    ...(process.platform === "win32" ? ["/" + path.replaceAll("\\", "/")] : [])];
+  assert.deepEqual(await service.resolveAll!({ paths: [...fileAliases, folder] }), [
+    ...fileAliases.map(path => ({ path, kind: "file" })),
+    { path: folder, kind: "directory" },
+  ]);
+  for (const alias of fileAliases) assert.equal((await service.readText({ path: alias })).text, "example report");
+  assert.equal((await service.list({ path: folder })).path, folder);
 });
 
 test("opening a browser folder registers and activates the same project without a picker", async t => {

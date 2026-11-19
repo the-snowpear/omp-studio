@@ -89,6 +89,7 @@ export const CORE_RENDERER_SUITES = [
   "src/dock/browserPages.test.ts",
   "src/dock/fileViews.test.ts",
   "src/files/fileTypes.test.ts",
+  "src/files/fileLinks.test.tsx",
   "src/files/fileDocuments.test.ts",
   "src/browser/browserDockSync.test.ts",
   "src/dock/hosts.test.ts",

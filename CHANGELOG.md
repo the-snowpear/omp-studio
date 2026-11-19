@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - 修复切换项目时会话行被搬到新选的项目下、同一个会话在两个项目里各显示一行、且在重启应用前不会消失的问题。
+- 修复对话和 Markdown 预览里的文件路径链接。确认缺失的路径显示为普通文字，目录在文件浏览器中定位，网络路径在点击后访问。
 
 ## [0.2.4] - 2026-11-18
 

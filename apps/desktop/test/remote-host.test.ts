@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { generateKeyPairSync } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -214,6 +214,7 @@ test("headless Host serves real workspace files without Electron or a fabricated
   await writeFile(join(keys, "trusted-public.pem"), key.publicKey.export({ type: "spki", format: "pem" }));
   const { createRemoteHost } = await import("../src/remote/host.js");
   const host = await createRemoteHost({ stateDirectory: join(root, "state"), runtimeDirectory: join(root, "runtimes"), trustedKeysDirectory: keys });
+  let endpoint: Awaited<ReturnType<typeof serveRemoteHost>> | undefined;
   try {
     const list = await host.registerWorkspace(workspace);
     assert.equal(list.workspaces.length, 1);
@@ -223,6 +224,26 @@ test("headless Host serves real workspace files without Electron or a fabricated
     const result = await host.composition.transport.query({ queryName: "workspace.fileTree", input: { workspaceId: list.activeWorkspaceId as WorkspaceId } });
     assert.equal(result.ok, true);
     if (result.ok) assert.equal(result.result.nodes[0]?.name, "远端文件.txt");
+    endpoint = await serveRemoteHost(host, join(root, "state"));
+    const peer = await connectRemoteEndpoint(join(root, "state"));
+    const transport = new SshRemoteTransport(peer);
+    try {
+      const file = join(await realpath(workspace), "远端文件.txt");
+      const resolution = await transport.query({
+        queryName: "workspace.paths.resolve",
+        input: { workspaceId: list.activeWorkspaceId as WorkspaceId, paths: ["远端文件.txt", file, "missing.txt"] },
+      });
+      assert.ok(resolution.ok);
+      assert.deepEqual(resolution.result.resolutions, [
+        { path: "远端文件.txt", kind: "file" },
+        { path: "missing.txt", kind: "missing" },
+        { path: file, kind: "file" },
+      ]);
+    } finally { await transport.close(); }
     assert.equal(await readFile(join(workspace, "远端文件.txt"), "utf8"), "actual bytes\r\n");
-  } finally { await host.close(); await rm(root, { recursive: true, force: true }); }
+  } finally {
+    if (endpoint) await endpoint.close();
+    else await host.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });

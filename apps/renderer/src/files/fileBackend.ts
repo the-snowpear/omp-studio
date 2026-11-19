@@ -1,4 +1,4 @@
-import type { StudioClient, WorkspaceFileInfo, WorkspaceFileText, WorkspaceFileWrite, WorkspaceFileSaveResult, SystemFileInfo, SystemFileSaveResult } from "@omp-studio/client-contract";
+import type { StudioClient, WorkspaceFileInfo, WorkspaceFileText, WorkspaceFileWrite, WorkspaceFileSaveResult, WorkspaceId, WorkspacePathResolveResult, SystemFileInfo, SystemFileSaveResult } from "@omp-studio/client-contract";
 import { waitReceipt } from "../hostError";
 
 /** workspaceId is empty for system files; source selects the service and buffer identity. */
@@ -10,6 +10,10 @@ const systemInfo = (file: SystemFileInfo, target: FileBackendTarget): DocumentFi
 export async function inspectFileBackend(client: StudioClient, target: FileBackendTarget): Promise<DocumentFileInfo> {
   return target.source === "system" ? systemInfo(await client.query("fs.file.inspect", { path: target.path }), target)
     : client.query("workspace.file.inspect", { workspaceId: target.workspaceId, path: target.path });
+}
+/** One batch classifies every path-like token a transcript stretch put forward. */
+export function resolveWorkspacePaths(client: StudioClient, workspaceId: WorkspaceId, paths: readonly string[], explicit?: boolean): Promise<WorkspacePathResolveResult> {
+  return client.query("workspace.paths.resolve", { workspaceId, paths, ...(explicit ? { explicit } : {}) });
 }
 export async function readFileBackend(client: StudioClient, target: FileBackendTarget): Promise<DocumentFileText> {
   if (target.source !== "system") return client.query("workspace.file.readText", { workspaceId: target.workspaceId, path: target.path });

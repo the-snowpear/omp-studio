@@ -4,8 +4,10 @@ import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } fr
 import type { SystemDirectory, SystemEntry, SystemFileTarget, SystemListInput, SystemPlaces, SystemQuickKind, WorkspaceId } from "@omp-studio/client-contract";
 import type { HostSystemFileService } from "@omp-studio/host-client-api";
 import type { WorkspaceRegistry } from "@omp-studio/studio-host";
+import { fileURLToPath } from "node:url";
 import { inspectFile, readFileChunk, readFileText, writeFileText } from "./file-io.js";
 import { renameWithoutOverwrite } from "./platform/file-rename.js";
+import { probeFilePaths } from "./platform/path-probe.js";
 import { desktopText } from "./desktop-language-shared.js";
 
 const DIRECTORY_LIMIT = 5_000;
@@ -17,6 +19,8 @@ const inside = (root: string, path: string) => { const suffix = relative(root, p
 /** Shared by the executing file service and the local shell actions, never by forwarding layers. */
 export function normalizeSystemPath(value: string): string {
   if (typeof value !== "string" || value.includes("\0")) throw new Error(desktopText("文件路径无效：不能包含 NUL", "Invalid file path: NUL is not allowed"));
+  if (/^file:/i.test(value)) value = fileURLToPath(value);
+  if (process.platform === "win32" && /^\/[A-Za-z]:[\\/]/.test(value)) value = value.slice(1);
   const expanded = value === "~" ? homedir() : /^~[\\/]/.test(value) ? join(homedir(), value.slice(2)) : value;
   if (!isAbsolute(expanded)) throw new Error(desktopText("文件路径必须是绝对路径", "File path must be absolute"));
   if (process.platform === "win32") {
@@ -163,6 +167,7 @@ export function createSystemFileService({ registry, knownFolders, trash }: Syste
   }
   return {
     places, list, inspect,
+    resolveAll: ({ paths, explicit }) => probeFilePaths(paths, normalizeSystemPath, explicit),
     async readText(input) { return readFileText(await fileTarget(input), () => inspect(input)); },
     async readChunk(input) { return readFileChunk(await fileTarget(input), input); },
     async writeText(input) { return writeFileText(await fileTarget(input, true), input, () => inspect(input)); },

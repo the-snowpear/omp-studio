@@ -10,11 +10,12 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { useI18n } from "../i18n";
 import { previewFile } from "../preview/filesPreview";
 import { getFileDocument, releaseFileDocument, type FileDocument, type FileDocumentIdentity } from "./fileDocuments";
-import { inspectFileBackend } from "./fileBackend";
+import { inspectFileBackend, resolveWorkspacePaths } from "./fileBackend";
 import { readFileScope } from "./filePreferences";
 import { registerFileOpener, type FileOpenIntent } from "./fileLinks";
+import { registerPathResolver } from "./pathResolution";
 import { requestFileClose } from "./FileCloseDialog";
-import { isAbsoluteFileReference, normalizeFileIdentityPath } from "./fileTypes";
+import { normalizeFileIdentityPath } from "./fileTypes";
 import type { FileViewerActions } from "./fileActions";
 import "./files.css";
 
@@ -149,6 +150,9 @@ export function FileDockInstances({ workspaceId, targetId, onSettings, actions }
     store.dispatch({ type: "open", panel });
   }, [catalog, preview, store]);
   useEffect(() => registerFileOpener(view?.document.id ?? "standalone", intent => { void open(intent); }), [view?.document.id, open]);
+  useEffect(() => registerPathResolver(view?.document.id ?? "standalone", async (paths, target, explicit) =>
+    (await resolveWorkspacePaths(await latest.current.resolveClient(target.targetId), target.workspaceId as WorkspaceId, paths, explicit)).resolutions
+  ), [view?.document.id]);
 
   const contextActions = (descriptor: FilePanelDescriptor) => {
     const workspace = latest.current.view?.store.getSnapshot(), active = workspace?.documents.find(item => item.id === workspace.activeDocumentId);
@@ -182,8 +186,5 @@ export function FileDockInstances({ workspaceId, targetId, onSettings, actions }
   });
   useLayoutEffect(() => { setFileViewDefinitions(definitions); });
   useLayoutEffect(() => () => setFileViewDefinitions([]), [setFileViewDefinitions]);
-  return <>{descriptors.map(([id, descriptor]) => <DockPanel key={id} id={id}>{visibility => <Suspense fallback={<div className="file-empty">{zh ? "正在打开文件…" : "Opening file…"}</div>}><FilePane id={id} descriptor={descriptor} session={sessionFor(descriptor)} visible={visibility.visible} onSettings={onSettings} onOpen={reference => {
-    const system = descriptor.source === "system" || isAbsoluteFileReference(reference.path);
-    void open({ ...reference, workspaceId: system ? "" : descriptor.workspaceId, targetId: descriptor.targetId, ...(system ? { source: "system" } : {}) });
-  }} onViewState={patch => store.dispatch({ type: "file-state", panel: id, patch })} actions={actions ? { contextWorkspaceId: contextActions(descriptor)?.contextWorkspaceId, openers: actions.openers, addContext: input => contextActions(descriptor)?.addContext(input), runShell: (...args) => contextActions(descriptor)?.runShell(...args) } : undefined} /></Suspense>}</DockPanel>)}</>;
+  return <>{descriptors.map(([id, descriptor]) => <DockPanel key={id} id={id}>{visibility => <Suspense fallback={<div className="file-empty">{zh ? "正在打开文件…" : "Opening file…"}</div>}><FilePane id={id} descriptor={descriptor} session={sessionFor(descriptor)} visible={visibility.visible} onSettings={onSettings} onViewState={patch => store.dispatch({ type: "file-state", panel: id, patch })} actions={actions ? { contextWorkspaceId: contextActions(descriptor)?.contextWorkspaceId, openers: actions.openers, addContext: input => contextActions(descriptor)?.addContext(input), runShell: (...args) => contextActions(descriptor)?.runShell(...args) } : undefined} /></Suspense>}</DockPanel>)}</>;
 }
