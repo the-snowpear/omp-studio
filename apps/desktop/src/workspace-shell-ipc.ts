@@ -38,8 +38,8 @@ export interface WorkspaceShellIpcMain {
 
 export interface WorkspaceShellActions {
   /** Resolve a Renderer-supplied opaque workspaceId to its Host-owned cwd. */
-  resolveWorkspaceCwd(workspaceId: string): Promise<string>;
-  openInExternalEditor(cwd: string): Promise<WorkspaceShellEditorResult>;
+  resolveWorkspaceCwd(workspaceId: string, targetId?: string): Promise<string>;
+  openInExternalEditor(cwd: string, targetId?: string): Promise<WorkspaceShellEditorResult>;
   revealInFileManager(cwd: string): Promise<void>;
   resolveDroppedPaths(cwd: string, paths: readonly string[]): Promise<ReadonlyArray<ResolvedDroppedPath>>;
   /** Native save-as picker for plans; Main owns the dialog and the cwd. */
@@ -80,7 +80,7 @@ export function registerWorkspaceShellIpc(options: WorkspaceShellIpcOptions): Wo
 
   async function resolveCwd(payload: unknown): Promise<string> {
     const input = parseWorkspaceShellInput(payload);
-    return await options.actions.resolveWorkspaceCwd(input.workspaceId);
+    return await options.actions.resolveWorkspaceCwd(input.workspaceId, input.targetId);
   }
 
   ipc.removeHandler(WORKSPACE_SHELL_IPC_CHANNELS.openInEditor);
@@ -95,8 +95,9 @@ export function registerWorkspaceShellIpc(options: WorkspaceShellIpcOptions): Wo
 
   ipc.handle(WORKSPACE_SHELL_IPC_CHANNELS.openInEditor, async (event, payload) => {
     assertTrusted(event.sender);
-    const cwd = await resolveCwd(payload);
-    return await options.actions.openInExternalEditor(cwd);
+    const input = parseWorkspaceShellInput(payload);
+    const cwd = await options.actions.resolveWorkspaceCwd(input.workspaceId, input.targetId);
+    return await options.actions.openInExternalEditor(cwd, input.targetId);
   });
 
   ipc.handle(WORKSPACE_SHELL_IPC_CHANNELS.revealInFileManager, async (event, payload) => {
@@ -121,29 +122,29 @@ export function registerWorkspaceShellIpc(options: WorkspaceShellIpcOptions): Wo
   ipc.handle(WORKSPACE_SHELL_IPC_CHANNELS.fileOpen, async (event, payload) => {
     assertTrusted(event.sender);
     const input = parseWorkspaceFileTargetInput(payload);
-    const cwd = await options.actions.resolveWorkspaceCwd(input.workspaceId);
+    const cwd = await options.actions.resolveWorkspaceCwd(input.workspaceId, input.targetId);
     return await options.actions.openFile(cwd, input);
   });
 
   ipc.handle(WORKSPACE_SHELL_IPC_CHANNELS.fileOpenWith, async (event, payload) => {
     assertTrusted(event.sender);
     const input = parseFileOpenWithInput(payload);
-    const cwd = await options.actions.resolveWorkspaceCwd(input.workspaceId);
-    const target: WorkspaceFileTargetInput = { workspaceId: input.workspaceId, path: input.path, kind: input.kind };
-    return await options.actions.openFileWith(cwd, target, input.openerId);
+    const cwd = await options.actions.resolveWorkspaceCwd(input.workspaceId, input.targetId);
+    const { openerId, ...target } = input;
+    return await options.actions.openFileWith(cwd, target, openerId);
   });
 
   ipc.handle(WORKSPACE_SHELL_IPC_CHANNELS.fileReveal, async (event, payload) => {
     assertTrusted(event.sender);
     const input = parseWorkspaceFileTargetInput(payload);
-    const cwd = await options.actions.resolveWorkspaceCwd(input.workspaceId);
+    const cwd = await options.actions.resolveWorkspaceCwd(input.workspaceId, input.targetId);
     return await options.actions.revealFileInFileManager(cwd, input);
   });
 
   ipc.handle(WORKSPACE_SHELL_IPC_CHANNELS.fileAbsolutePath, async (event, payload) => {
     assertTrusted(event.sender);
     const input = parseWorkspaceFileTargetInput(payload);
-    const cwd = await options.actions.resolveWorkspaceCwd(input.workspaceId);
+    const cwd = await options.actions.resolveWorkspaceCwd(input.workspaceId, input.targetId);
     return await options.actions.resolveFileAbsolutePath(cwd, input);
   });
 

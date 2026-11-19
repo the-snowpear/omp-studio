@@ -131,6 +131,7 @@ import {
   listExternalEditorCommands,
   resolveExternalEditorCommand,
 } from "./external-editor.js";
+import { wslLinuxPath, wslUncPath } from "./remote/wsl-paths.js";
 import { registerWorkspaceShellIpc } from "./workspace-shell-ipc.js";
 import type {
   FileOpener,
@@ -428,7 +429,7 @@ export async function main(): Promise<void> {
   }
   const remoteBundle = join(app.getAppPath(), "dist", "remote-host");
   const remoteHelpers = app.isPackaged ? join(process.resourcesPath, "ssh-askpass") : join(app.getAppPath(), "dist", "ssh-askpass");
-  const remoteInstaller = new RemoteEnvironmentInstaller({ cache: join(desktopPaths().stateRoot, "remote-packages"), repo: "the-snowpear/omp-studio", appVersion: app.getVersion(), keys: trustedKeys, fetcher: net.fetch.bind(net) as typeof fetch,
+  const remoteInstaller = new RemoteEnvironmentInstaller({ logEnvironmentFallback: () => hostFactory.log?.write("warn", "wsl.login_environment", "Login shell environment unavailable; using the distribution environment"), cache: join(desktopPaths().stateRoot, "remote-packages"), repo: "the-snowpear/omp-studio", appVersion: app.getVersion(), keys: trustedKeys, fetcher: net.fetch.bind(net) as typeof fetch,
     mirror: async () => (await createUpdatePrefsStore({ appDataDirectory: desktopPaths().stateRoot }).read()).mirrorPrefix });
   const remoteVault = new LocalCredentialVault({
     agentDirectory: () => defaultOmpAgentDir(),
@@ -505,12 +506,20 @@ export async function main(): Promise<void> {
     return picked.canceled ? undefined : picked.filePaths[0];
   };
 
-  const openInExternalEditor = async (cwd: string): Promise<WorkspaceShellEditorResult> => {
+  const wslDistro = (targetId: string | undefined) => {
+    if (targetId === undefined) return;
+    const profile = remoteConnections.profile(targetId);
+    if (profile.kind !== "wsl") throw new Error(desktopText("SSH 工作区不支持在本机打开", "Not available for SSH workspaces"));
+    return profile.distro!;
+  };
+  const openInExternalEditor = async (cwd: string, targetId?: string): Promise<WorkspaceShellEditorResult> => {
     const file = await showOpenWithPicker(desktopText("选择用于打开项目的编辑器", "Select an Editor to Open the Project"));
     if (file === undefined) {
       return { status: "cancelled" };
     }
-    await launchExternalEditor(externalEditorCommandForPath(file), cwd);
+    const distro = wslDistro(targetId);
+    const command = (distro && listExternalEditorCommands().find(item => item.file.toLowerCase() === file.toLowerCase())) || externalEditorCommandForPath(file);
+    await launchExternalEditor(command, cwd, distro ? { wslDistro: distro } : {});
     return { status: "opened", editorName: basename(file) };
   };
 
@@ -522,7 +531,7 @@ export async function main(): Promise<void> {
   const resolveWorkspaceFileTarget = async (cwd: string, target: WorkspaceFileTargetInput): Promise<string> => {
     const root = resolve(cwd);
     const absolute = resolve(root, target.path);
-    if (absolute !== root && !absolute.startsWith(root + sep)) {
+    if (absolute !== root && !absolute.startsWith(root.endsWith(sep) ? root : root + sep)) {
       throw new Error(desktopText("目标路径超出工作区范围", "Target path is outside the workspace"));
     }
     let info: Awaited<ReturnType<typeof stat>>;
@@ -552,6 +561,7 @@ export async function main(): Promise<void> {
     absolute: string,
     kind: "file" | "dir",
     openerId: string,
+    distro?: string,
   ): Promise<WorkspaceFileActionResult> => {
     if (openerId === "choose") {
       if (process.platform === "win32" && kind === "file") {
@@ -590,7 +600,7 @@ export async function main(): Promise<void> {
     if (command === undefined) {
       return { status: "failed", message: desktopText("未找到所选编辑器，请确认其已安装", "Selected editor was not found. Make sure it is installed.") };
     }
-    await launchExternalEditor(command, absolute);
+    await launchExternalEditor(command, absolute, distro ? { wslDistro: distro } : {});
     return { status: "opened" };
   };
 
@@ -983,7 +993,12 @@ export async function main(): Promise<void> {
       },
       isTrustedSender,
       actions: {
-        resolveWorkspaceCwd: (workspaceId) => hostFactory.resolveWorkspaceCwd(workspaceId),
+        resolveWorkspaceCwd: async (workspaceId, targetId) => {
+          const distro = wslDistro(targetId);
+          if (!distro) return hostFactory.resolveWorkspaceCwd(workspaceId);
+          const { path } = await remoteConnections.get(targetId!).transport.peer.request<{ path: string }>("workspace.path", { workspaceId });
+          return wslUncPath(distro, path);
+        },
         openInExternalEditor,
         revealInFileManager: async (cwd) => {
           const error = await shell.openPath(cwd);
@@ -991,12 +1006,16 @@ export async function main(): Promise<void> {
         },
         resolveDroppedPaths: (cwd, paths) => resolveDroppedPaths(cwd, paths),
         openFile: async (cwd, target) => openAbsoluteFile(await resolveWorkspaceFileTarget(cwd, target)),
-        openFileWith: async (cwd, target, openerId) => openAbsoluteFileWith(await resolveWorkspaceFileTarget(cwd, target), target.kind, openerId),
+        openFileWith: async (cwd, target, openerId) => openAbsoluteFileWith(await resolveWorkspaceFileTarget(cwd, target), target.kind, openerId, wslDistro(target.targetId)),
         revealFileInFileManager: async (cwd, target) => revealAbsoluteFile(await resolveWorkspaceFileTarget(cwd, target), target.kind),
         systemFileOpen: async input => openAbsoluteFile((await resolveSystemShellTarget(input.path)).path),
         systemFileOpenWith: async input => { const target = await resolveSystemShellTarget(input.path); return openAbsoluteFileWith(target.path, target.kind, input.openerId); },
         systemFileReveal: async input => { const target = await resolveSystemShellTarget(input.path); return revealAbsoluteFile(target.path, target.kind); },
-        resolveFileAbsolutePath: (cwd, target) => resolveWorkspaceFileTarget(cwd, target),
+        resolveFileAbsolutePath: async (cwd, target) => {
+          const path = await resolveWorkspaceFileTarget(cwd, target);
+          const distro = wslDistro(target.targetId);
+          return distro ? wslLinuxPath(distro, path) : path;
+        },
         listFileOpeners,
         async pickPlanSavePath(cwd) {
           const picked = await dialog.showSaveDialog({

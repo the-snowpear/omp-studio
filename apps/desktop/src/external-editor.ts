@@ -12,6 +12,7 @@ import { existsSync } from "node:fs";
 import { homedir as osHomedir } from "node:os";
 import { basename, dirname, join, posix } from "node:path";
 
+import { wslLinuxPath } from "./remote/wsl-paths.js";
 import { resolveCommandOnPath } from "./platform/developer-tools.js";
 import { desktopText } from "./desktop-language-shared.js";
 
@@ -115,6 +116,7 @@ export function resolveExternalEditorCommand(options: ResolveExternalEditorOptio
 }
 
 export interface LaunchExternalEditorOptions {
+  readonly wslDistro?: string;
   readonly platform?: NodeJS.Platform;
 }
 
@@ -129,7 +131,8 @@ export function launchExternalEditor(
   targetPath: string,
   options: LaunchExternalEditorOptions = {},
 ): Promise<void> {
-  const child = spawn(command.file, [...command.argsFor(targetPath)], {
+  const args = options.wslDistro && command.id === "vscode" ? ["--remote", "wsl+" + options.wslDistro, wslLinuxPath(options.wslDistro, targetPath)] : [...command.argsFor(targetPath)];
+  const child = spawn(command.file, args, {
     cwd: dirname(targetPath),
     detached: true,
     stdio: "ignore",
