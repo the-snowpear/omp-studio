@@ -94,6 +94,24 @@ describe("bounded graphic parsers", () => {
       ),
     ).rejects.toThrow(/Missing/);
   });
+  it("opens an OBJ whose materials all share the same texture file", async () => {
+    class Bitmap { width = 1; height = 1; close() {} }
+    const decode = vi.fn(async () => new Bitmap());
+    vi.stubGlobal("ImageBitmap", Bitmap);
+    vi.stubGlobal("createImageBitmap", decode);
+    const materials = Array.from({ length: 33 }, (_, i) => `surface${i}`);
+    const obj = ["mtllib scene.mtl", "v 0 0 0", "v 1 0 0", "v 0 1 0",
+      ...materials.map(name => `usemtl ${name}\nf 1 2 3`)].join("\n");
+    const mtl = materials.map(name => `newmtl ${name}\nmap_Kd shared.png`).join("\n");
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WNalZkAAAAASUVORK5CYII=", "base64");
+    const bundle = zipSync({ "scene.obj": encode(obj), "scene.mtl": encode(mtl), "shared.png": png });
+    const result = await parseGraphic("scene.zip", Uint8Array.from(bundle).buffer);
+    expect(result.kind).toBe("scene");
+    if (result.kind !== "scene") return;
+    expect(result.images).toHaveLength(1);
+    expect(result.meshes.flatMap(mesh => mesh.materials.map(material => material.map))).toEqual(materials.map(() => 0));
+    expect(decode).toHaveBeenCalledTimes(1);
+  });
   it.each(["obj", "ply", "stl", "gltf", "glb", "usda"])(
     "rejects damaged %s instead of displaying success",
     async (extension) => {

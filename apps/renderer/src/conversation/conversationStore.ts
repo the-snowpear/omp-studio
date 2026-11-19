@@ -6,7 +6,8 @@ import type {
   ConversationTranscriptPage,
   OpaqueCursor,
 } from "@omp-studio/client-contract";
-import { tailUtf8, truncateUtf8, utf8ByteLength } from "@omp-studio/client-contract";
+import { truncateUtf8, utf8ByteLength } from "@omp-studio/client-contract";
+import { ToolOutputTail } from "./toolOutputTail";
 import type { ComposerDoc } from "../composer/types";
 import type { ConversationIdentity } from "./conversationHost";
 import { backgroundToolState, toolResultStatus, buildPersistedTimeline, buildPersistedTimelineRow, buildTransientTimeline, emptyConversationState, tagTimelineStructure, type ConversationNotice, type ConversationState, type LiveMessage, type LiveTool, type PendingUser, type TimelineRow, type TimelineRowCache } from "./conversationViewModel";
@@ -103,6 +104,7 @@ export class ConversationStore {
   private items: ConversationItem[] = [];
   private liveMessages = new Map<string, MutableMessage>();
   private liveTools = new Map<string, LiveTool>();
+  private readonly toolOutputTails = new Map<string, ToolOutputTail>();
   private liveToolsCache: { readonly [toolCallId: string]: LiveTool } | undefined;
   private liveOrder: string[] = [];
   private openTurnItems = new Map<string, string>();
@@ -165,9 +167,17 @@ export class ConversationStore {
 
   /** `liveTools` is projected into a plain object on every published frame.
    *  Route every write through these so the object is rebuilt only on change. */
-  private setLiveTool(toolCallId: string, tool: LiveTool): void { this.liveTools.set(toolCallId, tool); this.liveToolsCache = undefined; }
-  private deleteLiveTool(toolCallId: string): void { if (this.liveTools.delete(toolCallId)) this.liveToolsCache = undefined; }
-  private clearLiveTools(): void { this.liveTools.clear(); this.liveToolsCache = undefined; }
+  private setLiveTool(toolCallId: string, tool: LiveTool, tail?: ToolOutputTail): void {
+    this.liveTools.set(toolCallId, tool);
+    if (tail) this.toolOutputTails.set(toolCallId, tail);
+    else this.toolOutputTails.delete(toolCallId);
+    this.liveToolsCache = undefined;
+  }
+  private deleteLiveTool(toolCallId: string): void {
+    this.toolOutputTails.delete(toolCallId);
+    if (this.liveTools.delete(toolCallId)) this.liveToolsCache = undefined;
+  }
+  private clearLiveTools(): void { this.liveTools.clear(); this.toolOutputTails.clear(); this.liveToolsCache = undefined; }
   private liveToolsRecord(): { readonly [toolCallId: string]: LiveTool } {
     if (this.liveToolsCache === undefined) this.liveToolsCache = Object.fromEntries(this.liveTools);
     return this.liveToolsCache;
@@ -342,9 +352,16 @@ export class ConversationStore {
       case "conversation.tool.updated": {
         const tool = this.toolForEvent(update.toolCallId, update.turnId);
         if (tool === undefined || tool.turnId !== update.turnId) break;
-        const candidate = update.updateMode === "replace" ? update.output ?? tool.output ?? "" : `${tool.output ?? ""}${update.output ?? ""}`;
-        const tail = tailUtf8(candidate, TOOL_OUTPUT_MAX_BYTES);
-        this.setLiveTool(update.toolCallId, { ...tool, ...(update.presentation ? { presentation: update.presentation } : {}), ...(update.replies ? { replies: update.replies } : {}), output: tail.text, ...(update.truncated === true || tail.truncated ? { truncated: true } : {}), ...(update.progress === undefined ? {} : { progress: update.progress }) });
+        let tail = this.toolOutputTails.get(update.toolCallId);
+        let truncated: boolean;
+        if (tail && (update.updateMode === "append" || update.output === undefined)) {
+          truncated = tail.append(update.output ?? "");
+        } else {
+          tail ??= new ToolOutputTail(TOOL_OUTPUT_MAX_BYTES);
+          const output = update.updateMode === "replace" ? update.output ?? tool.output ?? "" : (tool.output ?? "") + (update.output ?? "");
+          truncated = tail.replace(output);
+        }
+        this.setLiveTool(update.toolCallId, { ...tool, ...(update.presentation ? { presentation: update.presentation } : {}), ...(update.replies ? { replies: update.replies } : {}), output: tail.text, ...(update.truncated === true || truncated ? { truncated: true } : {}), ...(update.progress === undefined ? {} : { progress: update.progress }) }, tail);
         if (this.hasItem(tool.messageId)) this.dirtyPersistedRows.add(tool.messageId);
         break;
       }

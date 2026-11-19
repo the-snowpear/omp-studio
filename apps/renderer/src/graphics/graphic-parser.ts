@@ -134,6 +134,7 @@ export async function parseGraphic(
   const urls = new Map<string, string>();
   const created = new Set<string>();
   const bitmaps = new Set<ImageBitmap>();
+  const imageReads = new Map<string, Promise<ImageBitmap>>();
   const warnings: string[] = [];
   const pending: Promise<unknown>[] = [];
   URL.createObjectURL = (blob: Blob) => {
@@ -168,16 +169,16 @@ export async function parseGraphic(
   };
   manager.setURLModifier((url) => {
     if (created.has(url)) return url;
-    const data = resource(url);
     let result = urls.get(url);
     if (!result) {
+      const data = resource(url);
       result = URL.createObjectURL(new Blob([arrayBuffer(data)]));
       urls.set(url, result);
       created.add(result);
     }
     return result;
   });
-  const decode = async (url: string): Promise<ImageBitmap> => {
+  const readBitmap = async (url: string): Promise<ImageBitmap> => {
     const data = created.has(url)
       ? new Uint8Array(await (await fetch(url)).arrayBuffer())
       : resource(url);
@@ -195,11 +196,15 @@ export async function parseGraphic(
       resizeWidth: Math.max(1, Math.round(meta.width * scale)),
       resizeHeight: Math.max(1, Math.round(meta.height * scale)),
     });
-    if (bitmaps.size >= 32) {
-      bitmap.close();
-      throw new Error("Texture count exceeds 32");
-    }
     bitmaps.add(bitmap);
+    return bitmap;
+  };
+  const decode = (url: string): Promise<ImageBitmap> => {
+    const existing = imageReads.get(url);
+    if (existing) return existing;
+    if (imageReads.size >= 32) return Promise.reject(new Error("Texture count exceeds 32"));
+    const bitmap = readBitmap(url);
+    imageReads.set(url, bitmap);
     return bitmap;
   };
   class BundleTextureLoader extends Loader<Texture<ImageBitmap>> {

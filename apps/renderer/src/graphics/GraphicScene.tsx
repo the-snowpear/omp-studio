@@ -17,6 +17,7 @@ import {
   PointsMaterial,
   Scene,
   Texture,
+  TextureSource,
   Vector3,
   WebGLRenderer,
 } from "three";
@@ -82,6 +83,9 @@ export default function GraphicScene({
       const light = new DirectionalLight(0xffffff, 2);
       light.position.set(3, 5, 4);
       scene.add(light);
+      // Three shares the WebGL allocation for a source and sampler settings.
+      // Each material can still use its own UV transform.
+      const textureSources = data.images.map(bitmap => new TextureSource(bitmap));
       for (const item of data.meshes) {
         const geometry = new BufferGeometry();
         geometries.push(geometry);
@@ -100,9 +104,8 @@ export default function GraphicScene({
         for (const part of item.groups)
           geometry.addGroup(part.start, part.count, part.materialIndex);
         const material = item.materials.map((value) => {
-          const bitmap =
-            value.map === undefined ? undefined : data.images[value.map];
-          const map = bitmap ? graphicTexture(bitmap, value) : undefined;
+          const source = value.map === undefined ? undefined : textureSources[value.map];
+          const map = item.kind === "mesh" && source ? graphicTexture(source, value) : undefined;
           if (map) textures.push(map);
           const shared = {
             color: value.color,

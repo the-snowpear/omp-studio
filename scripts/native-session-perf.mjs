@@ -25,7 +25,7 @@ await mkdir(outputRoot, { recursive: true });
 const output = await mkdtemp(join(outputRoot, smoke ? "smoke-" : "run-"));
 const profile = join(output, "profile"), home = join(profile, "home"), agent = join(profile, "agent");
 const roaming = join(home, "AppData/Roaming"), local = join(home, "AppData/Local");
-await Promise.all([home, roaming, local, ...["Downloads", "Documents", "Desktop"].map(name => join(home, name)), join(agent, "sessions"), join(profile, "workspace"), join(profile, "user-data")].map(path => mkdir(path, { recursive: true })));
+await Promise.all([home, roaming, local, ...["Downloads", "Documents", "Desktop", "Pictures"].map(name => join(home, name)), join(agent, "sessions"), join(profile, "workspace"), join(profile, "user-data")].map(path => mkdir(path, { recursive: true })));
 const workspace = await realpath(join(profile, "workspace"));
 await writeFile(join(workspace, "fixture.txt"), "Synthetic offline performance workspace. No user files.\n", { flag: "wx" });
 const env = { ...process.env, HOME: home, USERPROFILE: home, APPDATA: roaming, LOCALAPPDATA: local,
@@ -54,6 +54,7 @@ await writeFile(join(profile, "bootstrap.cjs"), [
   `app.setPath('appData', ${JSON.stringify(roaming)});`,
   `app.setPath('userData', ${JSON.stringify(join(profile, "user-data"))});`,
   `app.setPath('downloads', ${JSON.stringify(join(home, "Downloads"))});`,
+  `app.setPath('pictures', ${JSON.stringify(join(home, "Pictures"))});`,
   `dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [${JSON.stringify(workspace)}] });`,
   `import(${JSON.stringify(pathToFileURL(join(desktop, "dist/src/main.js")).href)});`,
 ].join("\n"), { flag: "wx" });

@@ -565,6 +565,12 @@ async function expandJitterContract(): Promise<ExpandPerfResult> {
   await afterPaint();
   scroller.scrollTop = scroller.scrollHeight;
   await settle(80);
+  // The seeded running card auto-opens. At high refresh rates its height can
+  // still be changing below the probe when we start measuring the manual click.
+  const opening = doc.getAnimations({ subtree: true }).filter(animation =>
+    animation instanceof CSSTransition && animation.transitionProperty === "grid-template-rows");
+  await Promise.allSettled(opening.map(animation => animation.finished));
+  await afterPaint();
   const target = pickExpandTarget();
   if (target === null) {
     return { clicked: null, grewPx: 0, maxShiftPx: 0, maxDocBottomShiftPx: 0, samples: 0, tailDistancePx: 0 };

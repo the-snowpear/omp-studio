@@ -45,7 +45,7 @@ type ReplaySession = {
   byteSize: number;
   readonly events: Map<string, StudioConversationForward>;
   readonly eventBytes: Map<string, number>;
-  readonly deltaChunks: Map<string, { totalBytes: number; lastKey: string; nextIndex: number }>;
+  readonly deltaChunks: Map<string, { totalBytes: number; lastChunkBytes: number; lastKey: string; nextIndex: number }>;
   readonly toolBuffers: Map<string, ReplayTextBuffer>;
 };
 
@@ -408,6 +408,7 @@ export class ConversationEventFanout {
     const blockKey = `${event.messageId}:${event.blockId}`;
     const meta = session.deltaChunks.get(blockKey) ?? {
       totalBytes: 0,
+      lastChunkBytes: 0,
       lastKey: `message-delta:${blockKey}:0`,
       nextIndex: 1,
     };
@@ -422,7 +423,12 @@ export class ConversationEventFanout {
     const previous = session.events.get(meta.lastKey);
     const previousEvent = previous?.envelope.event;
     if (previous !== undefined && previousEvent?.kind === "conversation.message.delta") {
-      const combined = truncateUtf8(previousEvent.delta + addition, CONVERSATION_LIMITS.DELTA_MAX_BYTES);
+      const text = previousEvent.delta + addition;
+      // Separately counted deltas give an upper bound even when two UTF-16
+      // halves join across updates. Only encode the accumulated text at a split.
+      const upperBytes = meta.lastChunkBytes + additionBytes;
+      const limit = CONVERSATION_LIMITS.DELTA_MAX_BYTES;
+      const combined = upperBytes <= limit ? { text, truncated: false } : truncateUtf8(text, limit);
       // Coalescing only appends, so the retained size grows by the appended
       // bytes; re-serializing the whole block per token is what we are avoiding
       // here. A truncated combine is not an append and must be measured.
@@ -440,8 +446,9 @@ export class ConversationEventFanout {
         combined.truncated || storedBytes === undefined ? undefined : storedBytes + additionBytes,
       );
       if (combined.truncated) {
-        const remainder = (previousEvent.delta + addition).slice(combined.text.length);
+        const remainder = text.slice(combined.text.length);
         if (remainder.length > 0) {
+          meta.lastChunkBytes = utf8ByteLength(remainder);
           meta.lastKey = `message-delta:${blockKey}:${meta.nextIndex}`;
           meta.nextIndex += 1;
           this.#store(session, meta.lastKey, {
@@ -449,8 +456,11 @@ export class ConversationEventFanout {
             envelope: { ...forward.envelope, event: { ...event, delta: remainder } },
           });
         }
+      } else {
+        meta.lastChunkBytes = upperBytes <= limit ? upperBytes : utf8ByteLength(text);
       }
     } else {
+      meta.lastChunkBytes = additionBytes;
       this.#store(session, meta.lastKey, structuredClone(forward));
     }
     if (session.events.size > 0) session.deltaChunks.set(blockKey, meta);

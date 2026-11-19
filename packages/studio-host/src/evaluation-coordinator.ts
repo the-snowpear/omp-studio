@@ -588,12 +588,16 @@ export class EvaluationCoordinator {
   }): Promise<EvaluationResultPage> {
     await this.read(input.id);
     const offset = input.offset ?? 0, limit = Math.min(input.limit ?? 50, 200);
-    const current = await this.#readRows(input.id);
-    const rows = current.slice(offset, offset + limit);
-    return { rows, offset, nextOffset: offset + rows.length, total: current.length };
+    return this.#readRows(input.id, offset, limit);
   }
-  async #readRows(id: string): Promise<EvaluationResultPage["rows"]> {
-    const current = new Map<string, EvaluationResultPage["rows"][number]>();
+  async #readRows(id: string, offset = 0, limit = Infinity): Promise<EvaluationResultPage> {
+    const start = Math.trunc(offset) || 0, end = Math.trunc(offset + limit) || 0;
+    // Relative slice positions need the final row count. Ordinary pages keep
+    // only the requested bodies while later updates replace a key in place.
+    const relative = start < 0 || end < 0;
+    const first = relative ? 0 : start, stop = relative ? Infinity : end;
+    const positions = new Map<string, number>();
+    const selected: EvaluationResultPage["rows"] = [];
     try {
       for await (const line of createInterface({
         input: createReadStream(this.#path(id, "rows.jsonl")),
@@ -601,13 +605,19 @@ export class EvaluationCoordinator {
       })) {
         if (line) {
           const row = JSON.parse(line) as EvaluationResultPage["rows"][number];
-          current.set(row.key, row);
+          let position = positions.get(row.key);
+          if (position === undefined) {
+            position = positions.size;
+            positions.set(row.key, position);
+          }
+          if (position >= first && position < stop) selected[position - first] = row;
         }
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    return [...current.values()];
+    const rows = relative ? selected.slice(start, end) : selected;
+    return { rows, offset, nextOffset: offset + rows.length, total: positions.size };
   }
   async control(input: EvaluationControlInput): Promise<EvaluationRecord> {
     const record = await this.read(input.id);
@@ -634,7 +644,7 @@ export class EvaluationCoordinator {
     if (record.spec.kind !== "judgment" || record.replayable === false)
       throw new Error("This report has no reusable judgment input");
     const failed = new Set<string>();
-    for (const row of await this.#readRows(id)) {
+    for (const row of (await this.#readRows(id)).rows) {
       const item = row.data as { key?: string | number; error?: string };
       if (item.error) failed.add(String(item.key ?? row.key));
     }
@@ -685,7 +695,7 @@ export class EvaluationCoordinator {
       bytes = await readFile(this.#path(record.id, "best.patch"));
       mimeType = "text/plain";
     } else {
-      const rows = await this.#readRows(record.id);
+      const { rows } = await this.#readRows(record.id);
       const text =
         input.format === "csv"
           ? "key,model,phase,result\r\n" +

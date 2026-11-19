@@ -721,6 +721,22 @@ test("PR-008 rejects an oversized frame before payload allocation", () => {
   assert.throws(() => new FrameDecoder(1024).push(prefix), FrameCodecError);
 });
 
+test("fragmented frames survive reused input buffers and an adjacent frame", () => {
+  const bodies = [{ text: "中🚀".repeat(3000) }, { text: "next" }];
+  const wire = Buffer.concat(bodies.map((body, i) => encodeFrame(`chunk-${i}`, 1 as RuntimeEpoch, body)));
+  const decoder = new FrameDecoder();
+  const scratch = new Uint8Array(127);
+  const decoded = [];
+  for (let offset = 0; offset < wire.length;) {
+    const count = Math.min(offset < 4 ? 1 : scratch.length, wire.length - offset);
+    scratch.set(wire.subarray(offset, offset + count));
+    decoded.push(...decoder.push(scratch.subarray(0, count)).map(frame => frame.body));
+    scratch.fill(0);
+    offset += count;
+  }
+  assert.deepEqual(decoded, bodies);
+});
+
 test("malformed frames poison the decoder and cannot accumulate more bytes", () => {
   const malformed = Buffer.alloc(8);
   malformed.writeUInt32BE(4, 0);

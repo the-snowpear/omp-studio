@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ConversationMessageItem, ConversationRuntimeEvent, SessionId } from "@omp-studio/client-contract";
+import { tailUtf8, type ConversationMessageItem, type ConversationRuntimeEvent, type SessionId } from "@omp-studio/client-contract";
 import { ConversationStore } from "./conversationStore";
 import { subagentTurnRunning } from "./subagentComposerGate";
 import { timelineStructureToken, tailInterrupted } from "./conversationViewModel";
@@ -341,6 +341,26 @@ describe("ConversationStore", () => {
     expect(tool.output!.length).toBeLessThan(output.length);
     expect(tool.output!.endsWith("国")).toBe(true);
     expect(elapsed).toBeLessThan(250);
+  });
+
+  it("keeps published tool output stable while Unicode appends cross the tail limit", () => {
+    const { store, sessionId, frames } = create();
+    const target = { sessionId, turnId: "turn", toolCallId: "tool" };
+    store.applyEvent({ ...target, kind: "conversation.tool.started", messageId: "live", toolName: "bash", startedAt: "now" });
+    const limit = 64 * 1024;
+    const prefix = "a".repeat(limit - 3);
+    store.applyEvent({ ...target, kind: "conversation.tool.updated", output: prefix, updateMode: "replace" });
+    frames.flush();
+    const first = store.getSnapshot().state.liveTools.tool!;
+    let expected = prefix;
+    for (const piece of ["中🚀", "日志".repeat(8000), "\ud83d", "\ude80", "\uFEFF", "b".repeat(limit - 4), "!", "🪐"]) {
+      store.applyEvent({ ...target, kind: "conversation.tool.updated", output: piece, updateMode: "append" });
+      expected = tailUtf8(expected + piece, limit).text;
+      frames.flush();
+      expect(store.getSnapshot().state.liveTools.tool?.output).toBe(expected);
+    }
+    expect(first.output).toBe(prefix);
+    store.dispose();
   });
 
   it("prunes liveOrder when a turn completes, not only when a message completes", () => {

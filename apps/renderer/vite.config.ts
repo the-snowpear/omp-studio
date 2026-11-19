@@ -51,10 +51,8 @@ export default defineConfig({
       input: { index: fileURLToPath(new URL("./index.html", import.meta.url)), graphic: fileURLToPath(new URL("./graphic-preview.html", import.meta.url)) },
       output: {
         onlyExplicitManualChunks: true,
-        // Keep the entry under the 500 kB warning: React, xterm, and the
-        // Studio client stay on their own cacheable vendor chunks.
-        // Mermaid is only imported lazily for fenced "mermaid" blocks, so its
-        // whole dependency tree rides its own chunk instead of inflating vendor.
+        // Keep the large, independently loaded engines cacheable. Rollup can
+        // then place their other dependencies with the entries that use them.
         manualChunks(id) {
           if (!id.includes("node_modules")) return;
           if (id.includes("/three/") || id.includes("\\three\\")) return "three";
@@ -92,7 +90,6 @@ export default defineConfig({
           if (mermaidPackages.some((name) => pkg.startsWith(name))) return "mermaid";
           if (id.includes("@omp-studio")) return "studio-client";
           if (/node_modules[/\\](?:react-dom|react|scheduler)[/\\]/.test(id)) return "react";
-          return "vendor";
         },
       },
     },
