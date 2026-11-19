@@ -74,8 +74,8 @@ export function FileBrowserDock({ targetId, targetName, workspaceId, actions }: 
   const { preview } = usePreviewMode(), { resolvedLanguage } = useI18n();
   const targets = useExecutionTargets(), view = useConversationView(), { store } = useDockEngine();
   const open = useOpenFile(), language: "zh" | "en" = resolvedLanguage === "zh" ? "zh" : "en";
-  const contextRef = useRef({ language, workspaceId, targetName });
-  contextRef.current = { language, workspaceId, targetName };
+  const contextRef = useRef({ language, workspaceId, targetId, targetName, targets });
+  contextRef.current = { language, workspaceId, targetId, targetName, targets };
   const [location, setLocation] = useState<{ revision: number; path?: string; error?: string; targetId: string | null }>();
   const browserTarget = location ? location.targetId : targetId;
   const source = useMemo(
@@ -83,13 +83,13 @@ export function FileBrowserDock({ targetId, targetName, workspaceId, actions }: 
       preview
         ? createDynamicPreviewSource(() => contextRef.current.language)
         : createHostFileBrowserSource({
-            client: () => targets.readyClient(browserTarget),
+            client: () => contextRef.current.targets.readyClient(browserTarget),
             targetId: browserTarget,
             workspaceId: () => contextRef.current.workspaceId,
             language: () => contextRef.current.language,
-            label: () => (browserTarget ? `SSH · ${(browserTarget === targetId ? contextRef.current.targetName : undefined) ?? browserTarget}` : contextRef.current.language === "zh" ? "本机" : "Local"),
+            label: () => (browserTarget ? `SSH · ${(browserTarget === contextRef.current.targetId ? contextRef.current.targetName : undefined) ?? browserTarget}` : contextRef.current.language === "zh" ? "本机" : "Local"),
           }),
-    [preview, targets, targetId, browserTarget],
+    [preview, browserTarget],
   );
   const scope = `${preview ? "preview" : "host"}:${browserTarget ?? "local"}`;
   useEffect(() => registerFileBrowser(view?.document.id ?? "standalone", intent => {
@@ -101,12 +101,12 @@ export function FileBrowserDock({ targetId, targetName, workspaceId, actions }: 
         const path = intent.workspaceId ? `${places.projects[0]?.root ?? places.home}${places.separator}${intent.path.replaceAll("/", places.separator)}` : intent.path;
         setLocation(previous => ({ revision: (previous?.revision ?? 0) + 1, path, targetId: openTarget }));
       } else {
-        const client = await targets.readyClient(openTarget);
+        const client = await contextRef.current.targets.readyClient(openTarget);
         const directory = await client.query("fs.list", intent.workspaceId ? { workspaceId: intent.workspaceId as WorkspaceId, path: intent.path } : { path: intent.path });
         setLocation(previous => ({ revision: (previous?.revision ?? 0) + 1, path: directory.path, targetId: openTarget }));
       }
     })().catch(error => setLocation(previous => ({ revision: (previous?.revision ?? 0) + 1, targetId: openTarget, error: hostErrorMessage(error, contextRef.current.language === "zh" ? "无法打开文件夹" : "Cannot open the folder") })));
-  }), [view?.document.id, store, source, targets, targetId, preview]);
+  }), [view?.document.id, store, source, targetId, preview]);
 
   const openFile = (entry: FsEntry) => {
     const intent = preview ? previewProjectFile(entry.path) ?? { source: "system" as const, path: entry.path } : systemFileReference(entry);
