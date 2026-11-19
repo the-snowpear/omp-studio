@@ -1,6 +1,6 @@
 # WSL 工作区
 
-在 Windows 11 桌面版打开「工作位置」，在 WSL 分组选择发行版。需要一个已安装并完成首次用户设置的 WSL 2 发行版。可在 Windows 终端用 `wsl -l -v` 核对名称和版本。WSL 1 会显示为禁用，Docker Desktop 和 Rancher Desktop 的内部发行版会隐藏。
+在 Windows 11 桌面版新建一个空白对话，在输入框上方打开「工作位置」，在 WSL 分组选择发行版。需要一个已安装并完成首次用户设置的 WSL 2 发行版。可在 Windows 终端用 `wsl -l -v` 核对名称和版本。WSL 1 会显示为禁用，Docker Desktop 和 Rancher Desktop 的内部发行版会隐藏。
 
 首次连接时，Studio 会显示安装位置和同步范围。确认后，Studio 将私有 Node、Headless Host 和签名 Runtime 安装到发行版中，默认数据根为 `~/.local/share/omp-studio/remote`。使用发行版默认用户。选择 Linux 项目目录后，文件、Git、Agent、底部终端和 tmux 均在该发行版运行。建议将项目放在 Linux 主目录，访问 `/mnt/c` 等 Windows 磁盘时，Git 和大量小文件操作通常较慢。
 

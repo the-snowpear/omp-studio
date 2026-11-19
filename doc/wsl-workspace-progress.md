@@ -36,7 +36,7 @@ Windows 11 x64（10.0.26300.9974），WSL 2.7.10.0，内核 6.18.33.2-2。初始
 | 场景 | 结果 |
 |---|---|
 | 桌面入口 | 真实 Electron 菜单列出 Ubuntu-24.04，未列出 Docker。保持菜单挂载执行中文 → 英文 → 中文，状态随语言切换。首次点击后出现「准备 WSL 工作区」，目标为 Ubuntu-24.04 · Linux · x64。 |
-| 预览与目录 | Playwright 验证选中 Debian 后按钮显示 `WSL · Debian`，`marks=on/off` 分别显示和隐藏演示标记。组件测试覆盖不调用真实发现或连接、切换语言时保留 `/mnt/c/test` 输入和显示 Windows 磁盘提示。 |
+| 预览与目录 | Playwright 验证选中 Debian 后按钮显示 `WSL · Debian`，`marks=on/off` 分别显示和隐藏演示标记。两种模式下均打开了「选择 WSL 项目目录」，输入 `/mnt/c/test` 后均见 Windows 磁盘提示。组件测试覆盖不调用真实发现或连接、切换语言时保留 `/mnt/c/test` 输入和显示 Windows 磁盘提示。 |
 | 安装、Git 与终端 | 桌面连接管理器完成体检、确认、上传、校验、Runtime 激活、握手与目录登记。Host 的 `git.repository.get` 识别出 Ubuntu 中创建的测试仓库。通过 RemoteTerminalManager 启动的终端标签为 `WSL · Ubuntu-24.04`，Shell 报告 Linux、35 行 101 列，Ctrl-C 返回 130。 |
 | 会话、工具和凭据 | 本机使用模拟凭据代理，测试模型在 Ubuntu 回环地址提供流式回复。通过真实联网通道轮换测试 API Key 后，新建会话成功，模型端收到带新 Key 的请求。Agent 调用 Bash 执行 `uname -s` 和 `command -v python3`，模拟模型收到 Linux 工具结果，会话记录包含最终回复。未使用真实模型账号。 |
 | 自动恢复 | 已连接状态执行 `wsl --shutdown`，管理器进入 recovering，验证已安装环境并重启 Host。连接代次从 1 变为 2，`hostRestarted` 为真。草稿保留由 Renderer 恢复回归覆盖。 |
