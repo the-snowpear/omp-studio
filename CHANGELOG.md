@@ -7,15 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-11-20
+
 ### Added
 
-- Windows 桌面端可在工作位置直接选择 WSL 2 发行版，在 Linux 中运行 Agent、Git 和终端，并从 Windows 资源管理器或外部编辑器打开项目。
+- Windows 桌面端可在空白对话的「工作位置」中选择 WSL 2 发行版和项目目录。Agent、Git 和终端在发行版内运行，可以从 Windows 资源管理器或支持 WSL 的 VS Code 打开项目。发行版重启后，Studio 会尝试恢复连接并提示 Host 实例是否更换。 [WSL 工作区](docs/wsl-workspaces.md)
+- 桌面设置新增「手机访问」。在同一局域网内信任证书并扫码配对后，可以打开所选本地项目中的已有会话，阅读消息、继续对话、停止当前回合或处理单次工具审批。 [手机访问](docs/mobile-access.md)
+
+### Changed
+
+- 内置 Runtime 更新为 `18.20.2-studio.15`，支持在会话中显示 Advisor 审阅意见。
 
 ### Fixed
 
 - 修复切换项目时会话行被搬到新选的项目下、同一个会话在两个项目里各显示一行、且在重启应用前不会消失的问题。
 - 修复对话和 Markdown 预览里的文件路径链接。确认缺失的路径显示为普通文字，目录在文件浏览器中定位，网络路径在点击后访问。
-- Advisor 的审阅意见现在按发生顺序显示在对话中，标明顾问名称和严重程度。重开已保存意见的旧会话、复制意见时也能看到来源。 [#46](https://github.com/the-snowpear/omp-studio/issues/46)
+- Advisor 审阅意见按发生顺序显示在桌面和手机对话中，包含已记录的顾问名称和严重程度。重开保存了意见的会话时仍可查看，桌面端复制时也会带上来源。 [#46](https://github.com/the-snowpear/omp-studio/issues/46) · [#47](https://github.com/the-snowpear/omp-studio/pull/47)
+- 恢复原生提问表单的分页，支持拖动调整提问卡片高度。
+- OpenCode Go 和 Zen 在「原生登录与凭据」中配置 API Key，并可核对授权模型目录。
 
 ## [0.2.4] - 2026-11-18
 
@@ -605,7 +614,8 @@ Agent 改代码改嗨了、或者聊到第五轮发现方向歪了，以前想�
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/the-snowpear/omp-studio/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/the-snowpear/omp-studio/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/the-snowpear/omp-studio/compare/v0.2.2...v0.2.3
 [0.2.0]: https://github.com/the-snowpear/omp-studio/compare/v0.1.17...v0.2.0

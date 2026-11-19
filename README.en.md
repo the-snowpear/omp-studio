@@ -47,7 +47,7 @@
 </p>
 
 > [!NOTE]
-> **0.2.4** makes session switching faster and fixes two bugs that hid custom models after saving provider settings and made links in user messages unreadable in the dark theme. It bundles Runtime `18.20.2-studio.14`. [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.4) · [Release notes](docs/releases/v0.2.4.md)
+> **0.2.5** brings WSL 2 workspaces to Windows, lets you continue chats from a paired phone on the local network, and restores Advisor notes in conversations. It fixes session placement, file links in chats, question form pagination, and OpenCode credential setup. It bundles Runtime `18.20.2-studio.15`. [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.5) · [Release notes](docs/releases/v0.2.5.md)
 
 <table>
 <tr>
@@ -251,6 +251,8 @@ Clearly categorized, searchable settings; Runtime config saves across global, pr
 | **Git / Changes** | Staging, diffs, commits, Fetch / Pull / Push, commit graph, and Worktrees; Changes lists file edits per turn | [feature-index.md](doc/feature-index.md) |
 | **File Viewer** | Text editing, Markdown, PDF, images, audio/video, Excel / CSV; Word / PPT via optional component | [file-viewer.md](docs/file-viewer.md) |
 | **SSH Workspaces** | Work locally or remotely with system keys or credentials, with bounded remote Runtime recovery (dev preview) | [ssh-workspaces.md](docs/ssh-workspaces.md) |
+| **WSL 2 Workspaces** | Pick a Linux distribution and folder from the Windows desktop to run agents, Git, and terminals there | [wsl-workspaces.md](docs/wsl-workspaces.md) |
+| **Mobile Access** | Pair a phone on the local network and continue chats from a selected local project | [mobile-access.md](docs/mobile-access.md) |
 | **BTW Aside** | Ask side questions without interrupting the main thread; supports images, branching, and subagent reuse | [btw.md](docs/btw.md) |
 | **Voice Dictation** | Click or hold Space to dictate at the cursor; recovers audio from memory if transcription fails | [dictation.md](docs/dictation.md) |
 | **Evaluation Workspace** | Native benchmarks, instruction-following evals, background runs, history comparison, and Ratchet best-run diff export | [evaluation.md](docs/evaluation.md) |
