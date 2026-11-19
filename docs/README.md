@@ -9,6 +9,7 @@ Public documentation for OMP Studio.
 | [getting-started.md](getting-started.md) | Run from source |
 | [linux.md](linux.md) | Linux AppImage / deb 安装、更新、沙箱、源码开发与原生包验收 |
 | [settings.md](settings.md) | 设置分类、搜索与 Runtime 保存范围 |
+| [mobile-access.md](mobile-access.md) | 手机访问的证书信任、扫码配对、会话与审批 / Mobile setup and pairing |
 | [time-travel.md](time-travel.md) | Time Travel 开启、检查点、代码/对话恢复、存储与限制 |
 | [ssh-workspaces.md](ssh-workspaces.md) | SSH 工作区开发预览：连接、远端 Runtime、终端与当前限制 |
 | [tmux.md](tmux.md) | SSH tmux 会话附加、窗口与分屏、隐藏与分离、恢复及限制 |

@@ -24,15 +24,22 @@
     "@omp-studio/runtime-installer": "0.2.4",
     "@omp-studio/studio-host": "0.2.4",
     "@omp-studio/transport-desktop": "0.2.4",
+    "@omp-studio/transport-web": "0.2.4",
+    "@peculiar/x509": "^3.1.0",
     "builder-util-runtime": "9.7.0",
     "electron-updater": "6.8.9",
     "node-pty": "^1.1.0",
-    "socks": "2.8.7"
+    "qrcode": "^1.5.4",
+    "reflect-metadata": "^0.2.2",
+    "socks": "2.8.7",
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
     "@omp-studio/testkit": "0.2.4",
     "@types/node": "^24.0.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/ws": "^8.18.2",
     "electron": "^43.8.8",
     "typescript": "^5.9.0"
   }

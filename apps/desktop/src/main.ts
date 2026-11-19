@@ -104,6 +104,7 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { createDesktopApplication } from "./composition.js";
 import { completeDesktopRuntimeTrial } from "./runtime-startup.js";
 import { registerDesktopIpc } from "./ipc.js";
+import { registerMobileAccessIpc } from "./mobile-access-ipc.js";
 import { screen } from "electron";
 import { registerFloatingWindows } from "./floating-windows.js";
 import {
@@ -611,6 +612,7 @@ export async function main(): Promise<void> {
   let closeToTrayEnabled = false;
   let rendererWindow: BrowserWindow | null = null;
   let graphicRendererDist: string | undefined;
+  let mobileAccess: ReturnType<typeof registerMobileAccessIpc> | undefined;
 
   const createWindow: DesktopWindowFactory = async (context) => {
     const windowStarted = performance.now();
@@ -721,6 +723,13 @@ export async function main(): Promise<void> {
     });
     window.webContents.once("render-process-gone", () => payloadHealth.failed());
     const ipc = registerDesktopIpc({ facade: context.transport, isTrustedSender });
+    const mobile = registerMobileAccessIpc({
+      host: context.transport,
+      isTrustedSender,
+      profileDirectory: join(app.getPath("userData"), "mobile-access"),
+      rendererDirectory: layout.rendererDist,
+    });
+    mobileAccess = mobile;
     const disposePerfProfile = registerPerfProfileIpc({
       ipcMain: {
         handle(channel, listener) {
@@ -1150,6 +1159,7 @@ export async function main(): Promise<void> {
         disposeLanguage();
         disposeChrome();
         remoteIpc.dispose();
+        mobile.dispose();
         ipc.dispose();
       },
     };
@@ -1162,7 +1172,7 @@ export async function main(): Promise<void> {
 
   const application = createDesktopApplication({
     confirmBeforeQuit: () => fileViewerIpc?.requestClose() ?? Promise.resolve(true),
-    beforeShutdown: async () => { await managedBrowser?.dispose(); remoteTerminals.disposeAll(); await tmux.disposeAll(); await remoteConnections.close(); remoteVault.close(); desktopSwap?.cleanExit(); stopAppNapGuard?.(); dictationAudio.dispose(); liveAudio.dispose(); browserObservation.dispose(); prediction.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
+    beforeShutdown: async () => { await mobileAccess?.stop(); await managedBrowser?.dispose(); remoteTerminals.disposeAll(); await tmux.disposeAll(); await remoteConnections.close(); remoteVault.close(); desktopSwap?.cleanExit(); stopAppNapGuard?.(); dictationAudio.dispose(); liveAudio.dispose(); browserObservation.dispose(); prediction.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
     hostFactory,
     createWindow,
     platform: process.platform,

@@ -338,6 +338,7 @@ macOS host 日志：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-
 
 | 主题 | 文件 |
 |---|---|
+| 局域网手机访问 | Desktop `mobile-access{,-ipc}.ts`、`mobile-certificate.ts`、`mobile-scope.ts`；`transport-web` HTTP/WS 传输；Renderer `mobile/`、`settings/MobileAccessSettings.tsx`；配对、会话与证书说明见 `docs/mobile-access.md` |
 | SSH 工作位置与连接管理 | `apps/renderer/src/workspaces/{ExecutionTargets,ExecutionTargetPicker,RemoteScopeNotice,SshPasswordDialog}.tsx`、`{remoteTransport,remoteStatus}.ts`；`apps/desktop/src/remote/{manager,ipc,shared,errors}.ts`；有界重连、健康检查、目标代次同步；用法见 `docs/ssh-workspaces.md` |
 | SSH Headless Host / 部署 / 安装 | `apps/desktop/src/remote/{main,host,server,transport,wire,platform,authority,deploy,install}.ts`；`scripts/bundle-remote-host.mjs`；阶段状态见 `doc/ssh-workspace-progress.md` |
 | SSH 账密认证 / 终端 | `apps/desktop/src/remote/{authentication,terminal}.ts`；`apps/desktop/ssh-askpass/`；`scripts/build-ssh-askpass.mjs`；Renderer `terminalSessions.tsx`；验收交接见 `doc/ssh-workspace-test-prompt.md` |

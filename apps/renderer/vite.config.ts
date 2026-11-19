@@ -48,7 +48,11 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
-      input: { index: fileURLToPath(new URL("./index.html", import.meta.url)), graphic: fileURLToPath(new URL("./graphic-preview.html", import.meta.url)) },
+      input: {
+        index: fileURLToPath(new URL("./index.html", import.meta.url)),
+        graphic: fileURLToPath(new URL("./graphic-preview.html", import.meta.url)),
+        mobile: fileURLToPath(new URL("./mobile.html", import.meta.url)),
+      },
       output: {
         onlyExplicitManualChunks: true,
         // Keep the entry under the 500 kB warning: React, xterm, and the

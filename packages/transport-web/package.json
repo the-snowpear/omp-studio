@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
+    },
+    "./browser": {
+      "types": "./dist/src/browser-client.d.ts",
+      "default": "./dist/src/browser-client.js"
     }
   },
   "files": [

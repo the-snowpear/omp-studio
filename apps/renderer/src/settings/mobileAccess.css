@@ -1,0 +1,262 @@
+/* 设置 → 常规与通知 → 手机访问。
+   一张卡：左边是「选项目 → 信任证书 → 扫码」三步，当前步展开、完成步收成一行摘要；
+   右边是二维码面板（锁定 / 等待扫码倒计时 / 过期 / 已配对）。窄于 600px 时上下排列。
+   动效只用 motion 令牌：步骤展开是 region（--dur-slow · --ease-out），
+   二维码出现是 hero，等待态的光点和扫描线是状态循环。 */
+.mas {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-14);
+  padding: var(--sp-14) var(--sp-16) var(--sp-16);
+  border: 1px solid var(--border);
+  border-radius: var(--r-10);
+  background: var(--surface);
+}
+.mas-bar { display: flex; align-items: center; gap: var(--sp-8); min-width: 0; }
+.mas-bar .switch { margin-left: auto; }
+.mas-pill {
+  display: inline-flex; align-items: center; gap: var(--sp-6); flex: none;
+  height: 22px; padding: 0 var(--sp-8);
+  border-radius: var(--r-full);
+  background: var(--surface-2); color: var(--text-3);
+  font-size: var(--fs-11); font-weight: var(--fw-semibold); white-space: nowrap;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.mas-pill > i { position: relative; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.mas-pill.wait { background: var(--accent-soft); color: var(--accent); }
+.mas-pill.ok { background: var(--green-soft); color: var(--green); }
+.mas-pill.warn { background: var(--amber-soft); color: var(--amber); }
+.mas-pill.wait > i::after,
+.mas-live::after {
+  content: ""; position: absolute; inset: -3px; border-radius: 50%;
+  border: 1.5px solid currentColor; opacity: 0;
+  animation: omp-ping var(--loop-pulse) var(--ease-out) infinite;
+}
+.mas-demo { font-size: var(--fs-11); color: var(--text-3); padding: 0 var(--sp-6); border-radius: var(--r-4); background: var(--surface-2); }
+.mas-origin {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 2px var(--sp-6); border-radius: var(--r-4);
+  background: var(--surface-2); color: var(--text-3);
+  font-family: var(--font-mono); font-size: var(--fs-11);
+}
+
+.mas-grid { display: grid; grid-template-columns: minmax(0, 1fr) 248px; gap: var(--sp-16); align-items: start; }
+@container (max-width: 600px) {
+  .mas-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---- 步骤 ---- */
+.mas-flow { margin: 0; padding: 0; list-style: none; }
+.mas-step { position: relative; padding-left: 40px; }
+.mas-bub {
+  position: absolute; left: 0; top: 12px;
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--surface-2); color: var(--text-3);
+  font-size: var(--fs-11); font-weight: var(--fw-bold);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.mas-step.is-current .mas-bub { background: var(--accent); color: var(--text-on-accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.mas-step.is-done .mas-bub { background: var(--accent-soft); color: var(--accent); }
+.mas-step.is-done .mas-bub svg { animation: omp-pop-in var(--dur-slow) var(--ease-spring) backwards; }
+.mas-conn { position: absolute; left: 12px; top: 44px; bottom: -8px; width: 2px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
+.mas-conn > i { display: block; width: 100%; height: 0; background: var(--accent); transition: height var(--dur-slow) var(--ease-out); }
+.mas-step.is-done .mas-conn > i { height: 100%; }
+.mas-head { display: flex; align-items: center; gap: var(--sp-10); min-height: 50px; padding: var(--sp-8) 0; }
+.mas-head-text { flex: 1; min-width: 0; }
+.mas-step-title { font-size: var(--fs-14); font-weight: var(--fw-semibold); transition: color var(--dur) var(--ease); }
+.mas-step.is-todo .mas-step-title { color: var(--text-3); }
+.mas-step-sub { margin-top: 1px; font-size: var(--fs-11); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mas-step.is-done .mas-step-sub { color: var(--text-2); }
+.mas-link {
+  flex: none; height: 26px; padding: 0 var(--sp-8); border: 0; border-radius: var(--r-4);
+  background: transparent; color: var(--accent); font-size: var(--fs-12); font-weight: var(--fw-semibold); cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.mas-link:hover { background: var(--accent-softer); }
+.mas-link:disabled { opacity: 0.5; cursor: default; }
+.mas-body {
+  display: grid; grid-template-rows: 0fr; opacity: 0;
+  transition: grid-template-rows var(--dur-slow) var(--ease-out), opacity var(--dur) var(--ease);
+}
+.mas-body.open { grid-template-rows: 1fr; opacity: 1; }
+.mas-body-in { min-height: 0; overflow: hidden; }
+.mas-pad { display: flex; flex-direction: column; gap: var(--sp-10); padding: 0 0 var(--sp-16); }
+.mas-body.open .mas-pad > * { animation: var(--motion-reveal); }
+.mas-body.open .mas-pad > :nth-child(2) { animation-delay: var(--stagger); }
+.mas-body.open .mas-pad > :nth-child(3) { animation-delay: calc(var(--stagger) * 2); }
+.mas-body.open .mas-pad > :nth-child(4) { animation-delay: calc(var(--stagger) * 3); }
+.mas-body.open .mas-pad > :nth-child(n + 5) { animation-delay: calc(var(--stagger) * 4); }
+
+.mas-label { font-size: var(--fs-11); font-weight: var(--fw-semibold); color: var(--text-3); }
+.mas-options { display: flex; flex-direction: column; gap: var(--sp-4); max-height: 196px; overflow-y: auto; }
+.mas-option,
+.mas-chip {
+  display: flex; align-items: center; gap: var(--sp-10);
+  min-height: 36px; padding: 0 var(--sp-12);
+  border: 0; border-radius: var(--r-6);
+  background: var(--surface-2); color: var(--text);
+  font-size: var(--fs-12); text-align: left; cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.mas-option:hover,
+.mas-chip:hover { background: var(--surface-3); }
+.mas-option.on,
+.mas-chip.on { background: var(--accent-softer); box-shadow: inset 0 0 0 1.5px var(--accent-border); }
+.mas-option:disabled,
+.mas-chip:disabled { cursor: default; opacity: 0.6; }
+.mas-radio { flex: none; display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--border-strong); }
+.mas-radio::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); scale: 0; transition: scale var(--dur) var(--ease-spring); }
+.mas-option.on .mas-radio { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.mas-option.on .mas-radio::after { scale: 1; }
+.mas-option-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--fw-medium); }
+.mas-chips { display: flex; flex-wrap: wrap; gap: var(--sp-6); }
+.mas-chip { display: inline-flex; gap: var(--sp-6); min-height: 32px; color: var(--text-3); }
+.mas-chip.on { color: var(--accent); }
+.mas-chip code { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text); }
+.mas-hint { margin: 0; font-size: var(--fs-11); color: var(--amber); }
+.mas-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-10); }
+.mas-actions .btn svg { margin-right: var(--sp-4); }
+.mas-note { display: inline-flex; align-items: center; gap: var(--sp-4); font-size: var(--fs-11); color: var(--text-3); }
+.mas-p { margin: 0; font-size: var(--fs-12); line-height: 1.6; color: var(--text-2); }
+
+.mas-cert { display: flex; align-items: center; gap: var(--sp-12); padding: var(--sp-10); border-radius: var(--r-8); background: var(--surface-2); }
+.mas-file { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: var(--r-6); background: var(--surface); color: var(--accent); }
+.mas-cert-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.mas-cert-name { font-family: var(--font-mono); font-size: var(--fs-12); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mas-cert-sub { font-size: var(--fs-11); color: var(--text-3); }
+.mas-fp { padding: var(--sp-10) var(--sp-12); border-radius: var(--r-8); background: var(--surface-2); }
+.mas-fp-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); margin-bottom: var(--sp-8); font-size: var(--fs-11); font-weight: var(--fw-semibold); color: var(--text-3); }
+.mas-fp-grid {
+  display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: var(--sp-6) var(--sp-8);
+  font-family: var(--font-mono); font-size: var(--fs-12); letter-spacing: 0.04em; color: var(--text);
+}
+.mas-fp-grid .edge { color: var(--accent); font-weight: var(--fw-semibold); }
+@container (max-width: 480px) {
+  .mas-fp-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+.mas-platform { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--sp-10) var(--sp-14); }
+.mas-seg { position: relative; display: inline-grid; grid-template-columns: 1fr 1fr; width: 160px; padding: 3px; border-radius: var(--r-6); background: var(--surface-2); }
+.mas-seg-thumb {
+  position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px);
+  border-radius: var(--r-4); background: var(--surface);
+  box-shadow: 0 1px 2px rgba(20, 16, 40, 0.1);
+  transition: translate var(--dur) var(--ease-spring);
+}
+.mas-seg[data-value="android"] .mas-seg-thumb { translate: 100% 0; }
+.mas-seg button {
+  position: relative; z-index: 1; height: 26px; border: 0; background: transparent; cursor: pointer;
+  font-size: var(--fs-12); font-weight: var(--fw-semibold); color: var(--text-3);
+  transition: color var(--dur-fast) var(--ease);
+}
+.mas-seg button[aria-checked="true"] { color: var(--text); }
+.mas-path { flex: 1; min-width: 220px; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--sp-6); animation: var(--motion-swap); }
+.mas-path li { display: flex; align-items: baseline; gap: var(--sp-8); font-size: var(--fs-12); line-height: 1.5; color: var(--text-2); }
+.mas-path li > span {
+  flex: none; min-width: 40px; padding: 0 var(--sp-6); border-radius: var(--r-4);
+  background: var(--accent-soft); color: var(--accent);
+  font-size: var(--fs-11); font-weight: var(--fw-semibold); text-align: center;
+}
+
+/* ---- 二维码面板 ---- */
+.mas-panel { display: flex; flex-direction: column; align-items: center; gap: var(--sp-10); padding: var(--sp-14) var(--sp-12) var(--sp-12); border-radius: var(--r-8); background: var(--surface-2); }
+.mas-stage { position: relative; display: grid; place-items: center; width: 100%; padding: var(--sp-4) 0 var(--sp-6); }
+.mas-stage::before {
+  content: ""; position: absolute; inset: 0;
+  background-image: radial-gradient(var(--border-strong) 1px, transparent 1.3px);
+  background-size: 12px 12px;
+  -webkit-mask-image: radial-gradient(closest-side, #000 30%, transparent 100%);
+  mask-image: radial-gradient(closest-side, #000 30%, transparent 100%);
+}
+.mas-qr { position: relative; display: grid; place-items: center; width: 220px; height: 220px; }
+.mas-ring { position: absolute; inset: 0; width: 220px; height: 220px; overflow: visible; }
+.mas-ring rect { fill: none; stroke: var(--surface-3); stroke-width: 3; }
+.mas-ring rect + rect {
+  stroke: var(--accent); stroke-linecap: round; stroke-dasharray: 100;
+  transition: stroke-dashoffset var(--dur-flash) linear, stroke var(--dur) var(--ease);
+}
+.mas-ring rect.warn { stroke: var(--amber); }
+.mas-qr-card {
+  position: relative; display: grid; place-items: center; overflow: hidden;
+  width: 200px; height: 200px; border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(20, 16, 40, 0.08), 0 14px 32px -16px rgba(40, 24, 110, 0.4);
+  animation: mas-code-in var(--dur-hero) var(--ease-emphasis) backwards;
+  transition: filter var(--dur-slow) var(--ease-out), opacity var(--dur-slow) var(--ease-out), scale var(--dur-slow) var(--ease-out);
+}
+.mas-qr-card img { display: block; width: 184px; height: 184px; image-rendering: pixelated; }
+.mas-qr.locked .mas-qr-card { filter: blur(6px) saturate(0.3); opacity: 0.45; scale: 0.94; }
+.mas-qr.expired .mas-qr-card { filter: blur(2px) grayscale(1); opacity: 0.35; }
+@keyframes mas-code-in {
+  from { opacity: 0; scale: 0.9; filter: blur(8px); }
+}
+.mas-demo-code { display: grid; grid-template-columns: repeat(25, 7px); grid-template-rows: repeat(25, 7px); }
+.mas-demo-code i { background: #17151f; border-radius: 1.5px; }
+.mas-demo-code b { border: 7px solid #17151f; border-radius: 10px; box-shadow: inset 0 0 0 7px #ffffff, inset 0 0 0 21px #17151f; }
+.mas-beam {
+  position: absolute; left: 10px; right: 10px; top: 0; height: 40px; pointer-events: none;
+  border-bottom: 2px solid #6e56cf;
+  background: linear-gradient(180deg, rgba(110, 86, 207, 0), rgba(110, 86, 207, 0.16));
+  opacity: 0;
+  animation: mas-scan var(--loop-drift) var(--ease-loop) infinite;
+}
+@keyframes mas-scan {
+  0% { opacity: 0; translate: 0 -12px; }
+  15%, 85% { opacity: 1; }
+  100% { opacity: 0; translate: 0 168px; }
+}
+.mas-over {
+  position: absolute; inset: 0; z-index: 2; margin: auto;
+  width: max-content; max-width: 184px; height: max-content;
+  display: flex; flex-direction: column; align-items: center; gap: var(--sp-8);
+  padding: var(--sp-12) var(--sp-14); border-radius: var(--r-8);
+  background: var(--surface); box-shadow: 0 0 0 1px var(--border), 0 12px 28px -14px rgba(40, 24, 110, 0.35);
+  font-size: var(--fs-12); font-weight: var(--fw-semibold); text-align: center;
+  animation: var(--motion-pop);
+}
+.mas-over:has(> .btn:only-child) { padding: var(--sp-8); }
+.mas-over-ic { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); }
+.mas-over-ic.warn { background: var(--amber-soft); color: var(--amber); }
+.mas-demo-scan {
+  position: absolute; left: 0; right: 0; bottom: -14px; z-index: 3; margin: 0 auto; width: max-content;
+  height: 24px; padding: 0 var(--sp-10); border: 1px dashed var(--accent-border); border-radius: var(--r-full);
+  background: var(--surface); color: var(--accent); font-size: var(--fs-11); cursor: pointer;
+}
+.mas-status { display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); min-height: 54px; text-align: center; animation: var(--motion-swap); }
+.mas-status strong { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-4) var(--sp-8); font-size: var(--fs-14); font-weight: var(--fw-semibold); }
+.mas-status strong.warn { color: var(--amber); }
+.mas-status strong.muted { color: var(--text-2); }
+.mas-status > span { max-width: 230px; font-size: var(--fs-11); line-height: 1.5; color: var(--text-3); }
+.mas-live { position: relative; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); color: var(--accent); }
+.mas-count {
+  padding: 0 var(--sp-6); border-radius: var(--r-4); background: var(--accent-soft); color: var(--accent);
+  font-family: var(--font-mono); font-size: var(--fs-11); font-variant-numeric: tabular-nums; white-space: nowrap;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.mas-count.warn { background: var(--amber-soft); color: var(--amber); }
+.mas-tips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-4); width: 100%; margin: 0; padding: var(--sp-4); list-style: none; border-radius: var(--r-6); background: var(--surface); }
+.mas-tips li {
+  display: flex; flex-direction: column; align-items: center; gap: var(--sp-4);
+  padding: var(--sp-6) var(--sp-4); border-radius: var(--r-4);
+  font-size: var(--fs-11); line-height: 1.35; color: var(--text-3); text-align: center;
+  transition: color var(--dur) var(--ease);
+}
+.mas-tips b {
+  display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--surface-2); color: var(--text-3); font-size: var(--fs-11);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.mas-tips.on li { color: var(--text); }
+.mas-tips.on b { background: var(--accent); color: var(--text-on-accent); }
+.mas-done { display: flex; flex-direction: column; align-items: center; gap: var(--sp-8); width: 100%; padding: var(--sp-16) var(--sp-4) var(--sp-4); text-align: center; animation: var(--motion-reveal); }
+.mas-check { display: grid; place-items: center; width: 60px; height: 60px; border-radius: 50%; background: var(--green-soft); color: var(--green); animation: omp-pop-in var(--dur-hero) var(--ease-spring) backwards; }
+.mas-done strong { margin-top: var(--sp-4); font-size: var(--fs-16); font-weight: var(--fw-semibold); }
+.mas-done-sub { max-width: 230px; font-size: var(--fs-11); line-height: 1.55; color: var(--text-3); }
+.mas-done-actions { display: flex; flex-direction: column; gap: var(--sp-6); width: 100%; margin-top: var(--sp-8); }
+.mas-done-actions .btn { width: 100%; justify-content: center; }
+
+.mas-foot { display: flex; flex-wrap: wrap; gap: var(--sp-6) var(--sp-16); margin: 0; padding: 0; list-style: none; font-size: var(--fs-11); color: var(--text-3); }
+.mas-foot li { display: inline-flex; align-items: center; gap: var(--sp-6); }
+.mas-foot svg { color: var(--accent); }
+.mas-error { margin: 0; font-size: var(--fs-12); color: var(--red); }
+.mas-unavailable { margin: 0; font-size: var(--fs-12); color: var(--text-3); }

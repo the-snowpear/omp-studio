@@ -1,9 +1,10 @@
 /// <reference types="vite/client" />
 
 import type { StudioClient } from "@omp-studio/client-contract";
-import type { OmpStudioDesktopApi } from "@omp-studio/transport-desktop";
+import type { OmpStudioDesktopApi, MobileAccessApi } from "@omp-studio/transport-desktop";
 
 declare global {
+  var ompStudioMobileAccess: MobileAccessApi | undefined;
   /**
    * Semantic client injected by the hosting shell (local WebUI bridge or a
    * test harness) before the renderer bundle runs. Optional at runtime:
