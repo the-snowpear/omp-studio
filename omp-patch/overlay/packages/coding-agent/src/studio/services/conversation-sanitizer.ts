@@ -7,7 +7,12 @@
  */
 import * as os from "node:os";
 import * as path from "node:path";
-import { CONVERSATION_LIMITS, conversationRedactKey, type JsonValue } from "../conversation-protocol";
+import {
+	CONVERSATION_LIMITS,
+	conversationRedactKey,
+	type ConversationContentBlock,
+	type JsonValue,
+} from "../conversation-protocol";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -46,6 +51,39 @@ export function sanitizePublicText(
 	homeDir = os.homedir(),
 ): { text: string; truncated: boolean } {
 	return truncateUtf8(shortenHomePath(text, homeDir), maxBytes);
+}
+
+/** Prefer the operator-facing notes over the advisory instructions sent to the model. */
+export function projectAdvisorContent(details: unknown, content: unknown): ConversationContentBlock[] {
+	const { notes } = (details ?? {}) as { notes?: unknown };
+	const blocks: Extract<ConversationContentBlock, { type: "text" }>[] = [];
+	if (Array.isArray(notes)) {
+		for (const note of notes) {
+			if (typeof note?.note !== "string") continue;
+			const { text, truncated } = sanitizePublicText(note.note, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
+			const block: (typeof blocks)[number] = { type: "text", text };
+			if (truncated) block.truncated = true;
+			if (typeof note.advisor === "string")
+				block.advisor = sanitizePublicText(note.advisor, CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS).text;
+			if (note.severity === "nit" || note.severity === "concern" || note.severity === "blocker")
+				block.severity = note.severity;
+			blocks.push(block);
+		}
+	}
+	if (blocks.length) return blocks;
+	// Older sessions may only carry a text body.
+	const body =
+		typeof content === "string"
+			? content
+			: Array.isArray(content)
+				? content
+						.filter(part => part?.type === "text")
+						.map(part => part.text)
+						.join("\n")
+				: "";
+	if (!body) return [];
+	const { text, truncated } = sanitizePublicText(body, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
+	return [{ type: "text", text, ...(truncated ? { truncated: true } : {}) }];
 }
 
 function isPlainObject(value: object): boolean {

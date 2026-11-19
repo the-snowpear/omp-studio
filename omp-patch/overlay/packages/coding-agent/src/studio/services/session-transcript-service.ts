@@ -18,6 +18,7 @@ import {
 	parseSessionTranscriptReadLimit,
 } from "../conversation-protocol";
 import {
+	projectAdvisorContent,
 	publicToolCallId,
 	sanitizePublicText,
 	sanitizeToolArguments,
@@ -156,7 +157,9 @@ function mapMessageEntry(entry: SessionEntry & { type: "message" }): Conversatio
 	const role = publicConversationRole(message.role, message);
 	if (role === undefined) return undefined;
 	const content: ConversationContentBlock[] = [];
-	if (typeof message.content === "string") {
+	if (role === "advisor") {
+		content.push(...projectAdvisorContent(message.details, message.content));
+	} else if (typeof message.content === "string") {
 		const text = sanitizePublicText(message.content, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
 		content.push({ type: "text", text: text.text, ...(text.truncated ? { truncated: true } : {}) });
 	} else if (Array.isArray(message.content)) {
@@ -205,10 +208,13 @@ function projectEntry(entry: SessionEntry): ConversationItem | undefined {
 		const role = publicConversationRole("custom", { ...entry, role: "custom" });
 		if (!role) return undefined;
 		const blocks = typeof entry.content === "string" ? [{ type: "text", text: entry.content }] : entry.content;
-		const content = blocks.flatMap(block => {
-			const mapped = mapContentBlock(block, `extension:${entry.id}`);
-			return mapped ? [mapped] : [];
-		});
+		const content =
+			role === "advisor"
+				? projectAdvisorContent(entry.details, entry.content)
+				: blocks.flatMap(block => {
+						const mapped = mapContentBlock(block, `extension:${entry.id}`);
+						return mapped ? [mapped] : [];
+					});
 		return {
 			kind: "message",
 			itemId: entry.id,

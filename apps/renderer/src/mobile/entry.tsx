@@ -578,7 +578,7 @@ function Transcript({ client, sessionId, runtimeEpoch, connected, keyboard }: {
   keyboard: boolean;
 }) {
   const { preview } = usePreviewMode();
-  const { resolvedLanguage } = useI18n();
+  const { resolvedLanguage, t } = useI18n();
   const zh = resolvedLanguage === "zh";
   const previewLocale = preview ? zh : undefined;
   const engine = useMemo(() => createConversationEngine({
@@ -603,6 +603,16 @@ function Transcript({ client, sessionId, runtimeEpoch, connected, keyboard }: {
       {!visibleRows.length && state.hydrateStatus === "error" ? <p className="m-thread-note">{zh ? "暂时无法读取对话。" : "This conversation could not be loaded."}</p> : null}
       {!visibleRows.length && state.hydrateStatus === "loading" ? <p className="m-thread-note"><span className="m-spin" aria-hidden="true" />{zh ? "正在读取对话…" : "Loading conversation…"}</p> : null}
       {visibleRows.map(row => row.type === "user" || row.type === "extension" ? <div key={timelineRowKey(row)} className="m-user">{row.text}</div>
+        : row.type === "advisor" ? <div key={timelineRowKey(row)} className="m-ai">
+          {row.notes.map((note, index) => {
+            const severity = note.severity && t(`conversation.advisorSeverity.${note.severity}`);
+            const label = [t("conversation.advisor"), note.advisor, severity].filter(Boolean).join(" · ");
+            return <aside key={index} className="m-advisor" aria-label={label}>
+              <strong>{label}</strong>
+              <p>{note.text}{note.truncated ? "…" : null}</p>
+            </aside>;
+          })}
+        </div>
         : row.type === "assistant" ? <article key={timelineRowKey(row)} className="m-ai">
           {row.segments.map(segment => segment.type === "text" ? <MarkdownText key={segment.key} text={segment.text} streaming={segment.streaming ?? false} />
             : segment.type === "batch" ? <ToolBatch key={segment.key} tools={segment.tools} /> : null)}

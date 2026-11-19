@@ -33,7 +33,7 @@ export function TimeTravelPane({
   entry?: SessionHistoryEntry | undefined;
   onOpen: () => void;
 }) {
-  const { resolvedLanguage } = useI18n();
+  const { resolvedLanguage, t } = useI18n();
   const zh = resolvedLanguage === "zh";
   const { preview, marks } = usePreviewMode();
   const target = useExecutionTarget();
@@ -362,7 +362,9 @@ export function TimeTravelPane({
                               ? zh
                                 ? "助手回复"
                                 : "Assistant"
-                              : row.event.title}
+                              : row.event.kind === "system" && row.event.title === "Advisor"
+                                ? t("conversation.advisor")
+                                : row.event.title}
                         </b>
                         <time className="tiny mono" dateTime={row.time}>
                           {formatTime(row.time)}

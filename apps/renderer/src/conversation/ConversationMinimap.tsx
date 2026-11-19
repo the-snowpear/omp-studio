@@ -50,6 +50,7 @@ function now(): number {
 export type MinimapMarkType =
   | "user"
   | "extension"
+  | "advisor"
   | "assistant"
   | "error"
   | "bash"
@@ -77,6 +78,7 @@ export type MinimapMark = {
 const MARK_LABEL_KEY: Record<MinimapMarkType, string> = {
   user: "conversation.minimapUser",
   extension: "conversation.minimapExtension",
+  advisor: "conversation.advisor",
   assistant: "conversation.minimapAssistant",
   error: "conversation.minimapError",
   bash: "conversation.minimapBash",
@@ -159,6 +161,7 @@ const markCacheByLang = {
 } as const;
 
 function buildMark(row: TimelineRow, turn: number, zh: boolean): MinimapMark {
+  if (row.type === "advisor") return { itemId: row.itemId, type: "advisor", labelKey: MARK_LABEL_KEY.advisor, preview: row.notes.map(note => note.text).join("\n"), turn };
   if (row.type === "extension") return { itemId: row.itemId, type: "extension", labelKey: MARK_LABEL_KEY.extension, preview: row.text, turn };
   if (row.type === "user") {
     const failed = row.pending === "failed" || row.error !== undefined;

@@ -183,6 +183,14 @@ body, #root { margin: 0; min-width: 0; height: 100dvh; }
 .m-ai pre, .m-ai table { max-width: 100%; overflow: auto; }
 .m-ai pre { border-radius: 14px; }
 .m-ai img { max-width: 100%; height: auto; }
+.m-advisor {
+  padding: 10px 12px;
+  border-inline-start: 2px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.m-advisor strong { font-size: 13px; color: var(--text-2); }
+.m-advisor p { margin: 3px 0 0; white-space: pre-wrap; }
 
 .m-tools { display: flex; flex-direction: column; align-items: flex-start; }
 .m-tools-chip {

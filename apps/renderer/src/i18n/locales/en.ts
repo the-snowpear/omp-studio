@@ -796,6 +796,8 @@ export const en: LocaleDictionary = {
     "minimapCompact": "Context compacted",
     "minimapCheckpoint": "Checkpoint",
     "minimapExtension": "Extension notice",
+    "advisor": "Advisor",
+    "advisorSeverity": { "nit": "Nit", "concern": "Concern", "blocker": "Blocker" },
     "minimapCompacting": "Compacting",
     "minimapCompactingPreview": "Compacting the current context",
     "minimapCheckpointPreview": "The session restarts here; earlier messages remain available through the session archive.",

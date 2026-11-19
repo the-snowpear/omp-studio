@@ -7,7 +7,7 @@ export class StudioConversationError extends Error {
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | readonly JsonValue[] | { readonly [key: string]: JsonValue };
-export type ConversationRole = "user" | "assistant" | "system" | "extension";
+export type ConversationRole = "user" | "assistant" | "system" | "extension" | "advisor";
 /** MCP `notifications/progress`: `progress` of an optional `total`, with an optional phase message. */
 export interface ConversationToolProgress {
 	progress: number;
@@ -16,7 +16,7 @@ export interface ConversationToolProgress {
 }
 
 export type ConversationContentBlock =
-	| { type: "text"; text: string; truncated?: boolean }
+	| { type: "text"; text: string; truncated?: boolean; advisor?: string; severity?: "nit" | "concern" | "blocker" }
 	| { type: "thinking"; text: string; truncated?: boolean }
 	| {
 			type: "toolCall";
@@ -314,7 +314,13 @@ export function parseSessionTranscriptReadLimit(value: unknown): number {
 }
 
 function parseRole(value: unknown): ConversationRole {
-	if (value !== "user" && value !== "assistant" && value !== "system" && value !== "extension") {
+	if (
+		value !== "user" &&
+		value !== "assistant" &&
+		value !== "system" &&
+		value !== "extension" &&
+		value !== "advisor"
+	) {
 		throw new StudioConversationError("Invalid conversation role");
 	}
 	return value;
@@ -323,7 +329,10 @@ function parseRole(value: unknown): ConversationRole {
 function parseBlock(value: unknown): ConversationContentBlock {
 	const input = record(value);
 	if (input.type === "text" || input.type === "thinking") {
-		exactKeys(input, ["type", "text", "truncated"]);
+		exactKeys(
+			input,
+			input.type === "text" ? ["type", "text", "truncated", "advisor", "severity"] : ["type", "text", "truncated"],
+		);
 		boundedUtf8(input.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
 		if (input.truncated !== undefined && typeof input.truncated !== "boolean") {
 			throw new StudioConversationError("Invalid truncated flag");

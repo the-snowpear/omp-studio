@@ -796,6 +796,8 @@ const zhRaw = {
     "minimapCompact": "历史压缩",
     "minimapCheckpoint": "检查点",
     "minimapExtension": "扩展通知",
+    "advisor": "审阅顾问",
+    "advisorSeverity": { "nit": "小建议", "concern": "需关注", "blocker": "阻断问题" },
     "minimapCompacting": "压缩中",
     "minimapCompactingPreview": "正在压缩当前上下文",
     "minimapCheckpointPreview": "会话在此处重置，更早的消息仍可通过会话归档查看。",

@@ -435,6 +435,7 @@ export class StudioSessionArchiveReader {
       if (projected.kind !== "message") return [{ ...base, kind: "system" as const, title: "Context reset", detail: "" }];
       if (projected.content.length === 0) return [];
       const text = projected.content.filter(block => block.type === "text").map(block => block.text).join("\n").slice(0, 500);
+      if (projected.role === "advisor") return [{ ...base, kind: "system" as const, title: "Advisor", detail: text }];
       const calls = projected.content.filter(block => block.type === "toolCall").map(block => block.toolName).join(", ");
       const kind = projected.role === "user" ? "user" as const : projected.role === "assistant" ? "assistant" as const : "system" as const;
       return [{ ...base, kind, title: calls || (kind === "user" ? "User" : kind === "assistant" ? "Assistant" : "System"), detail: text }];
@@ -1585,11 +1586,10 @@ function publicArchiveConversationRole(
     (role === "custom" || role === "hookMessage") &&
     message.display === true &&
     typeof message.customType === "string" &&
-    message.customType !== "advisor" &&
     message.customType !== "async-result" &&
     !message.customType.startsWith("irc:")
   ) {
-    return "extension";
+    return message.customType === "advisor" ? "advisor" : "extension";
   }
   return undefined;
 }
@@ -1605,7 +1605,7 @@ function projectEntry(entry: ArchiveEntry): ConversationItem | undefined {
       parentId: entry.parentId,
       createdAt,
       role,
-      content: projectContent(entry.content, `extension:${entry.id}`),
+      content: role === "advisor" ? projectAdvisorContent(entry.details, entry.content) : projectContent(entry.content, `extension:${entry.id}`),
     };
   }
   if (entry.type === "message") {
@@ -1622,7 +1622,7 @@ function projectEntry(entry: ArchiveEntry): ConversationItem | undefined {
       parentId: entry.parentId,
       createdAt,
       role,
-      content: projectContent(message.content, `tool:${entry.id}`),
+      content: role === "advisor" ? projectAdvisorContent(message.details, message.content) : projectContent(message.content, `tool:${entry.id}`),
     };
   }
   if (entry.type === "compaction" && typeof entry.summary === "string") {
@@ -1640,6 +1640,26 @@ function projectEntry(entry: ArchiveEntry): ConversationItem | undefined {
     return { kind: "resetBoundary", itemId: entry.id, parentId: entry.parentId, createdAt };
   }
   return undefined;
+}
+
+/** Mirrors the Runtime projection when the archived session has no live process. */
+function projectAdvisorContent(details: unknown, content: unknown): ConversationContentBlock[] {
+  const blocks: Extract<ConversationContentBlock, { type: "text" }>[] = [];
+  if (isRecord(details) && Array.isArray(details.notes)) {
+    for (const note of details.notes) {
+      if (!isRecord(note) || typeof note.note !== "string") continue;
+      const { text, truncated } = sanitizeText(note.note, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
+      const block: (typeof blocks)[number] = { type: "text", text };
+      if (truncated) block.truncated = true;
+      if (typeof note.advisor === "string") block.advisor = sanitizeText(note.advisor, CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS).text;
+      if (note.severity === "nit" || note.severity === "concern" || note.severity === "blocker") block.severity = note.severity;
+      blocks.push(block);
+    }
+  }
+  if (blocks.length) return blocks;
+  const body = typeof content === "string" ? content : Array.isArray(content)
+    ? content.filter(part => part?.type === "text").map(part => part.text).join("\n") : "";
+  return body ? projectContent(body, "") : [];
 }
 
 function projectContent(value: unknown, fallbackPrefix: string): ConversationContentBlock[] {

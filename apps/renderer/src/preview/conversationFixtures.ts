@@ -265,8 +265,18 @@ export function getPreviewConvoItems(zh = isZh()): readonly ConversationItem[] {
     },
     {
       kind: "message",
-      itemId: "preview-assistant-1",
+      itemId: "preview-advisor-1",
       parentId: "preview-user-1",
+      createdAt: at(3),
+      role: "advisor",
+      content: [{ type: "text", advisor: "upstream-sync", severity: "concern", text: zh
+        ? "请核对同步后的 Studio Bridge 路径，再运行类型检查。"
+        : "Check the Studio Bridge path after the sync, then run the type check." }],
+    },
+    {
+      kind: "message",
+      itemId: "preview-assistant-1",
+      parentId: "preview-advisor-1",
       createdAt: at(4),
       role: "assistant",
       content: [

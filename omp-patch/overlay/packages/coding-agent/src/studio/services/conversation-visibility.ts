@@ -24,11 +24,10 @@ export function publicConversationRole(role: unknown, message?: unknown): Conver
 		if (
 			custom.display === true &&
 			typeof custom.customType === "string" &&
-			custom.customType !== "advisor" &&
 			custom.customType !== "async-result" &&
 			!custom.customType.startsWith("irc:")
 		)
-			return "extension";
+			return custom.customType === "advisor" ? "advisor" : "extension";
 	}
 	return undefined;
 }

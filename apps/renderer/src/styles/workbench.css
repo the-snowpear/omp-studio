@@ -503,6 +503,18 @@
 .role-badge.u { background: var(--surface-3); color: var(--text-2); }
 .role-badge.a { background: var(--accent-soft); color: var(--accent); }
 
+.ev-advisor-group { display: grid; gap: var(--sp-6); }
+.ev-advisor {
+  padding: var(--sp-8) var(--sp-12);
+  border-inline-start: 3px solid var(--amber);
+  border-radius: var(--r-8);
+  background: var(--amber-soft);
+}
+.ev-advisor .ev-head { flex-wrap: wrap; }
+.ev-advisor .who { overflow-wrap: anywhere; }
+.ev-advisor .ev-msg-copy { margin-inline-start: auto; }
+.ev-advisor-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-14); color: var(--text); }
+
 /* 用户消息：聊天气泡（右对齐 + accent 实底 + 右下小角指向发送者）
    参照 Claude / Cursor 等 agent 客户端的惯例：用户消息用气泡，
    assistant 保持文档式正文。 */
@@ -2177,6 +2189,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .mm-mark.user { width: 40px; height: 3px; border-radius: 1px; background: rgba(128, 128, 128, 0.5); border-color: rgba(128, 128, 128, 0.85); }
 .mm-mark.assistant { width: 36px; height: 3px; border-radius: 1px; background: var(--purple); border-color: var(--purple); }
 .mm-mark.error { background: var(--red); border-color: var(--red); }
+.mm-mark.advisor { background: var(--amber); border-color: var(--amber); }
 .mm-mark.checkpoint { background: var(--accent); border-color: var(--accent); }
 .mm-mark.compact { background: var(--text-3); border-color: var(--text-3); width: 12px; height: 3px; border-radius: 1px; }
 .mm-mark.file { border-color: var(--green); background: var(--green-soft); }

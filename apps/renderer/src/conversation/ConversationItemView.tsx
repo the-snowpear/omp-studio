@@ -76,6 +76,24 @@ function MessageBody({
   );
 }
 
+function AdvisorMessage({ row }: { row: Extract<TimelineRow, { type: "advisor" }> }) {
+  const { t } = useI18n();
+  return <div className="ev ev-advisor-group" data-item-id={row.itemId}>
+    {row.notes.map((note, index) => {
+      const severity = note.severity && t(`conversation.advisorSeverity.${note.severity}`);
+      const label = [t("conversation.advisor"), note.advisor, severity].filter(Boolean).join(" · ");
+      return <aside className="ev-advisor" key={index} aria-label={label}>
+        <div className="ev-head">
+          <span className="who"><Icon name="alert" extra="sm" />{label}</span>
+          <span>{formatTime(row.createdAt)}</span>
+          <MessageCopyButton text={`${label}\n${note.text}`} />
+        </div>
+        <div className="ev-advisor-text">{note.text}{note.truncated && <TruncationMark />}</div>
+      </aside>;
+    })}
+  </div>;
+}
+
 function AssistantStatus({ status }: { status: Extract<TimelineRow, { type: "assistant" }>["status"] }) {
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
@@ -600,6 +618,7 @@ export const ConversationItemView = memo(function ConversationItemView({
 }) {
   const { settings: appSettings } = useAppSettings();
   const { resolvedLanguage } = useI18n();
+  if (row.type === "advisor") return <AdvisorMessage row={row} />;
   if (row.type === "extension") return <div className="ev ev-extension" data-item-id={row.itemId}>
     <div className="ev-head"><span className="who">{resolvedLanguage === "zh" ? "扩展通知" : "Extension notice"}</span><span>{formatTime(row.createdAt)}</span></div>
     <MessageBody text={row.text} copyText={row.text} />
