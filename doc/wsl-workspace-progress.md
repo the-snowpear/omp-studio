@@ -29,6 +29,19 @@ Windows 11 x64（10.0.26300.9974），WSL 2.7.10.0，内核 6.18.33.2-2。初始
 | UNC | Electron Main 的 `fs.realpath` 和 `fs.stat` 成功读取 `\\wsl.localhost\Ubuntu-24.04` 下的测试文件，`shell.openPath` 成功。调用 `shell.showItemInFolder` 后从资源管理器读回了已选中文件的完整 UNC 路径。 |
 | VS Code | 在独立的 VS Code 1.146.0 配置中安装官方 WSL 扩展 1.104.7，直接用 `Code.exe --remote wsl+Ubuntu-24.04 <Linux 项目路径>` 打开。窗口标题带有 `project [WSL: Ubuntu-24.04]`，工作区 URI 对应正确的 Linux 目录。首次下载 Server 后，远程解析器在 160 秒后返回 WebSocket，客户端收到服务端的重连宽限配置。 |
 
-### 待验项目
+## Studio 集成验收
 
-接下来在 Studio 中验证发行版选择、准备、运行和自动恢复，以及 SSH 回归。上述 Host 重启和 VS Code 唤起均为独立实测。
+使用工作区编译的桌面端、Renderer 和正式签名的 Linux x64 运行包 v0.2.4。发行包来自项目 Release，安装器校验签名与摘要；本机临时目录和 WSL 临时工作区保存测试数据。
+
+| 场景 | 结果 |
+|---|---|
+| 桌面入口 | 真实 Electron 菜单列出 Ubuntu-24.04，未列出 Docker。保持菜单挂载执行中文 → 英文 → 中文，状态随语言切换。首次点击后出现「准备 WSL 工作区」，目标为 Ubuntu-24.04 · Linux · x64。 |
+| 预览与目录 | Playwright 验证选中 Debian 后按钮显示 `WSL · Debian`，`marks=on/off` 分别显示和隐藏演示标记。组件测试覆盖不调用真实发现或连接、切换语言时保留 `/mnt/c/test` 输入和显示 Windows 磁盘提示。 |
+| 安装、Git 与终端 | 桌面连接管理器完成体检、确认、上传、校验、Runtime 激活、握手与目录登记。Host 的 `git.repository.get` 识别出 Ubuntu 中创建的测试仓库。通过 RemoteTerminalManager 启动的终端标签为 `WSL · Ubuntu-24.04`，Shell 报告 Linux、35 行 101 列，Ctrl-C 返回 130。 |
+| 会话、工具和凭据 | 本机使用模拟凭据代理，测试模型在 Ubuntu 回环地址提供流式回复。通过真实联网通道轮换测试 API Key 后，新建会话成功，模型端收到带新 Key 的请求。Agent 调用 Bash 执行 `uname -s` 和 `command -v python3`，模拟模型收到 Linux 工具结果，会话记录包含最终回复。未使用真实模型账号。 |
+| 自动恢复 | 已连接状态执行 `wsl --shutdown`，管理器进入 recovering，验证已安装环境并重启 Host。连接代次从 1 变为 2，`hostRestarted` 为真。草稿保留由 Renderer 恢复回归覆盖。 |
+| SSH | 运行既有连接、传输、认证、终端、部署、tmux、编辑器与模型同步测试，使用隔离夹具。没有登录用户配置的 SSH 服务器。 |
+
+验证命令 `npm run check -- --fast`、`npm run check -- --only desktop` 和 `npm run check -- --only renderer` 均通过。WSL、恢复、模型同步和文件 IPC 专项 43 项通过；工作位置与语言专项 19 项通过。SSH 等远程相关专项 97 项通过，1 项既有 Bun 代理用例跳过。以上名单有重叠。
+
+两个待补的环境场景为干净 Windows 上未安装 WSL，以及已安装 WSL 但完全没有注册任何发行版。

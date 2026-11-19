@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Windows 桌面端可在工作位置直接选择 WSL 2 发行版，在 Linux 中运行 Agent、Git 和终端，并从 Windows 资源管理器或外部编辑器打开项目。
+
 ### Fixed
 
 - 修复切换项目时会话行被搬到新选的项目下、同一个会话在两个项目里各显示一行、且在重启应用前不会消失的问题。
