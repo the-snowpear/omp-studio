@@ -69,6 +69,8 @@ const api = createDesktopIpcBridge(sender);
 
 contextBridge.exposeInMainWorld(DESKTOP_BRIDGE_GLOBAL, api);
 const remoteApi: RemoteApi = {
+  wslDistributions: () => ipcRenderer.invoke(REMOTE_CHANNELS.wslDistributions),
+  ensureWsl: distro => ipcRenderer.invoke(REMOTE_CHANNELS.ensureWsl, distro),
   list: () => ipcRenderer.invoke(REMOTE_CHANNELS.list),
   save: profile => ipcRenderer.invoke(REMOTE_CHANNELS.save, profile),
   remove: id => ipcRenderer.invoke(REMOTE_CHANNELS.remove, id),

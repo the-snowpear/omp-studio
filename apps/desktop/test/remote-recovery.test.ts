@@ -30,7 +30,7 @@ function channel(instanceId = "original-host") {
   transport.hello = { protocolVersion: REMOTE_PROTOCOL_VERSION, platform: "linux", arch: "x64", bundleVersion: "bundle", instanceId };
   return { transport, server, writes };
 }
-async function fixture(t: TestContext, overrides: Partial<RemoteRecoveryPolicy> = {}, password = false) {
+async function fixture(t: TestContext, overrides: Partial<RemoteRecoveryPolicy> = {}, password = false, wsl = false) {
   const root = await mkdtemp(join(tmpdir(), "omp-recovery-"));
   const channels: ReturnType<typeof channel>[] = [];
   const attachments: RemoteAttachment[] = [];
@@ -46,8 +46,8 @@ async function fixture(t: TestContext, overrides: Partial<RemoteRecoveryPolicy> 
     createPasswordAuthentication: async () => { calls.authentication++; return { request: () => ({ env: {}, dispose: () => {} }), close: async () => { calls.clearAuthentication++; } }; },
   };
   const policy = { maxAttempts: 3, budgetMs: 2_000, delaysMs: [2], stableMs: 60_000, random: () => 0.5, ...overrides };
-  const manager = new RemoteConnectionManager(join(root, "profiles.json"), root, services, root, policy);
-  const profile = await manager.save({ name: "Recovery test", host: "example.invalid", platform: "linux", ...(password ? { authMode: "password", user: "test" } : {}) });
+  const manager = new RemoteConnectionManager(join(root, "profiles.json"), root, services, root, policy, wsl ? { prepare: services.deployRemote } : {});
+  const profile = await manager.save({ ...(wsl ? { kind: "wsl" as const, distro: "Ubuntu" } : {}), name: "Recovery test", host: "example.invalid", platform: "linux", ...(password ? { authMode: "password", user: "test" } : {}) });
   t.after(async () => { await manager.close(); for (const c of channels) c.server.close(); await rm(root, { recursive: true, force: true }); });
   return { manager, profile, calls, channels, attachments, setAttach: (fn: typeof attach) => { attach = fn; }, setProbe: (fn: typeof probe) => { probe = fn; }, connect: () => manager.connect(profile.id, password ? { password: "test-only" } : undefined) };
 }
@@ -206,4 +206,18 @@ test("unresolved Windows SSH aliases and remote directory conflicts show actiona
   const conflict = sshFailure("Error: ENOTDIR: not a directory, mkdir '/home/ubuntu/.local/share/omp-studio/remote/versions/hash'", undefined, 1);
   assert.equal(conflict.connectionCode, "environment");
   assert.match(conflict.message, /blocked by an existing file/);
+});
+
+test("WSL starts a missing Host during recovery and reports the new instance", async t => {
+  const f = await fixture(t, {}, false, true);
+  await f.connect();
+  let missing = true;
+  f.setAttach(async () => {
+    if (missing) { missing = false; throw new RemoteConnectionError("host-unavailable", "Host stopped"); }
+    const next = channel("restarted"); f.channels.push(next); return next.transport;
+  });
+  f.manager.get(f.profile.id).transport.peer.close(network());
+  await status(f.manager, f.profile.id, row => row.state === "connected" && row.hostRestarted === true);
+  assert.equal(f.calls.deploy, 2);
+  assert.equal(f.calls.attach, 3);
 });

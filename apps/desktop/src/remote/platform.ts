@@ -32,6 +32,8 @@ export function systemSshExecutable(platform: NodeJS.Platform = process.platform
 }
 
 export interface SshConnection {
+  readonly kind?: import("./shared.js").RemoteTargetKind;
+  readonly distro?: string;
   readonly host: string;
   readonly authMode?: "agent" | "password";
   readonly user?: string;

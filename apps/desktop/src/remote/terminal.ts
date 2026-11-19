@@ -4,9 +4,11 @@ import { createNodePtySpawner, type PtyProcess, type PtySpawner, type TerminalSe
 import { TerminalOutputBatcher } from "../terminal-batch.js";
 import { TERMINAL_MAX_SESSIONS, type TerminalSessionInfo, type TerminalSize, type TerminalCommand } from "../terminal-shared.js";
 import { commandArguments } from "../terminal-command.js";
-import { sshArguments, systemSshExecutable, type RemotePlatform } from "./platform.js";
+import { type RemotePlatform } from "./platform.js";
 import type { RemoteConnectionManager } from "./manager.js";
-import { sshAuthenticationRequest } from "./authentication.js";
+import { remoteSpawn } from "./channel.js";
+import { desktopText } from "../desktop-language-shared.js";
+import { targetNoun } from "./shared.js";
 
 export function remoteTerminalCommand(platform: RemotePlatform, path: string, command?: TerminalCommand): string {
   const args = command ? commandArguments(command) : undefined;
@@ -67,7 +69,7 @@ export class RemoteTerminalManager {
     if (this.#closed) throw new Error("Terminal manager is closed");
     this.connections.assertWritable(targetId);
     const count = [...this.#sessions.values()].filter(value => value.windowId === windowId && !value.ended).length + (this.#pending.get(windowId) ?? 0);
-    if (count >= TERMINAL_MAX_SESSIONS) throw new Error("Too many SSH terminals");
+    if (count >= TERMINAL_MAX_SESSIONS) throw new Error(desktopText("远程终端数量已达上限", "Remote terminal limit reached"));
     const epoch = this.#windowEpochs.get(windowId) ?? 0;
     this.#pending.set(windowId, (this.#pending.get(windowId) ?? 0) + 1);
     try {
@@ -76,17 +78,14 @@ export class RemoteTerminalManager {
       const { path } = await remote.transport.peer.request<{ path: string }>("workspace.path", { workspaceId });
       if (this.#closed || epoch !== (this.#windowEpochs.get(windowId) ?? 0)) throw new Error("Terminal window has closed");
       this.connections.assertWritable(targetId);
-      if (this.connections.get(targetId) !== remote) throw new Error("SSH connection changed while opening the terminal");
-      const args = sshArguments(profile);
-      args[0] = "-tt";
-      args.push(remoteTerminalCommand(remote.environment.platform, path, size.command));
-      const name = `SSH · ${profile.name}`;
-      const authenticationRequest = sshAuthenticationRequest(profile, this.connections.authentication(targetId));
+      if (this.connections.get(targetId) !== remote) throw new Error(desktopText("打开终端时连接已改变", "Connection changed while opening the terminal"));
+      const launch = remoteSpawn(profile, remoteTerminalCommand(remote.environment.platform, path, size.command), this.connections.authentication(targetId), { tty: true });
+      const name = `${targetNoun(profile)} · ${profile.name}`;
       let process: PtyProcess;
-      try { process = this.pty.spawn({ file: systemSshExecutable(), args, name, cwd: homedir(), cols: size.cols, rows: size.rows, ...(authenticationRequest ? { env: authenticationRequest.env } : {}) }); }
-      catch (error) { authenticationRequest?.dispose(); throw error; }
+      try { process = this.pty.spawn({ file: launch.file, args: launch.args, name, cwd: homedir(), cols: size.cols, rows: size.rows, ...(launch.env ? { env: launch.env } : {}) }); }
+      catch (error) { launch.dispose(); throw error; }
       const id = randomBytes(16).toString("base64url");
-      const session: RemoteSession = { windowId, targetId, process, listeners, ended: false, cancelAuthentication: () => authenticationRequest?.dispose() };
+      const session: RemoteSession = { windowId, targetId, process, listeners, ended: false, cancelAuthentication: () => launch.dispose() };
       this.#sessions.set(id, session);
       this.#batcher.open(id, { flowControl: size.flowControl === true });
       if (size.command) this.#batcher.push(id, size.command.text.replace(/\r?\n/g, "\r\n") + "\r\n\r\n");
@@ -96,7 +95,7 @@ export class RemoteTerminalManager {
         this.#batcher.finish(id);
         const notify = !session.ended;
         session.ended = true;
-        authenticationRequest?.dispose();
+        launch.dispose();
         if (notify) listeners.onExit({ id });
       });
       return { id, name, cwd: path };

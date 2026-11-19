@@ -1,11 +1,14 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import type { ClientBootstrap, ClientCommandAccepted, ClientCommandRequest, ClientEvent, ClientQueryRequest, ClientQueryResponse, ClientTransport, CommandName, QueryName, SubscriptionScope, Unsubscribe, WorkspaceListReadModel } from "@omp-studio/client-contract";
 import { eventMatchesScope } from "@omp-studio/client";
-import { remoteLaunchCommand, sshArguments, systemSshExecutable, type RemotePlatform, type RemoteShell, type SshConnection } from "./platform.js";
+import { remoteLaunchCommand, type RemotePlatform, type RemoteShell, type SshConnection } from "./platform.js";
 import { RemotePeer, RemoteRequestTimeout, REMOTE_PROTOCOL_VERSION, type RemoteAttachment } from "./wire.js";
 import type { RemoteHello } from "./server.js";
-import { sshAuthenticationRequest, type SshAuthentication } from "./authentication.js";
-import { RemoteConnectionError, connectionCancelled, sshFailure } from "./errors.js";
+import { type SshAuthentication } from "./authentication.js";
+import { RemoteConnectionError, connectionCancelled, sshFailure, wslFailure } from "./errors.js";
+import { Transform } from "node:stream";
+import { remoteSpawn } from "./channel.js";
+import { targetNoun } from "./shared.js";
 import { desktopText, getDesktopLanguage, onDesktopLanguageChange, type DesktopLocale } from "../desktop-language-shared.js";
 
 export interface SshRemoteOptions {
@@ -41,7 +44,7 @@ export class SshRemoteTransport implements ClientTransport {
   #healthy = true;
   hello: RemoteHello | undefined;
 
-  constructor(readonly peer: RemotePeer, readonly terminate: () => void | Promise<void> = () => {}, private readonly languageSync = true) {
+  constructor(readonly peer: RemotePeer, readonly terminate: () => void | Promise<void> = () => {}, private readonly languageSync = true, private readonly noun = "SSH") {
     const offLanguage = onDesktopLanguageChange(locale => {
       void this.setLanguage(locale).catch(error => console.warn("Remote language sync failed", error));
     });
@@ -66,18 +69,35 @@ export class SshRemoteTransport implements ClientTransport {
 
   static async connect(options: SshRemoteOptions): Promise<SshRemoteTransport> {
     options.signal?.throwIfAborted();
-    const args = [...sshArguments(options.connection), options.launchCommand ?? remoteLaunchCommand(options.shell, options.executable, options.args)];
-    const authenticationRequest = sshAuthenticationRequest(options.connection, options.authentication);
+    const launch = remoteSpawn(options.connection, options.launchCommand ?? remoteLaunchCommand(options.shell, options.executable, options.args), options.authentication, { sshExecutable: options.sshExecutable });
+    const wsl = options.connection.kind === "wsl";
+    const noun = targetNoun(options.connection);
+    const failure = wsl ? wslFailure : sshFailure;
     let child: ChildProcessWithoutNullStreams;
-    try { child = (options.spawnProcess ?? spawn)(options.sshExecutable ?? systemSshExecutable(), args, { stdio: "pipe", windowsHide: true, shell: false, ...(authenticationRequest ? { env: authenticationRequest.env } : {}) }) as ChildProcessWithoutNullStreams; }
-    catch (error) { authenticationRequest?.dispose(); throw sshFailure("", error); }
+    try { child = (options.spawnProcess ?? spawn)(launch.file, launch.args, { stdio: "pipe", windowsHide: true, shell: false, env: launch.env }) as ChildProcessWithoutNullStreams; }
+    catch (error) { launch.dispose(); throw failure("", error); }
     let diagnostics = "";
     let exited = false;
     const exit = new Promise<void>(resolve => child.once("close", () => { exited = true; resolve(); }));
-    const peer = new RemotePeer(child.stdout, child.stdin, 30_000, () => sshFailure(diagnostics, new RemoteConnectionError("network", desktopText("SSH 通道已中断；已发送命令结果未知，未自动重发", "SSH channel interrupted; outcome of sent commands is unknown and they were not resent"))));
+    // wsl.exe writes launch diagnostics to stdout before the Linux process starts.
+    // A genuine wire frame starts with a bounded, big-endian length.
+    let input = child.stdout;
+    if (wsl) {
+      let diagnostic: boolean | undefined;
+      const frames = new Transform({
+        transform(chunk: Buffer, _encoding, done) {
+          diagnostic ??= chunk[0]! > 1;
+          if (diagnostic) diagnostics = (diagnostics + chunk.toString("utf8").replaceAll("\0", "")).slice(-4096);
+          done(null, diagnostic ? undefined : chunk);
+        },
+      });
+      child.stdout.once("error", error => frames.destroy(error));
+      input = child.stdout.pipe(frames);
+    }
+    const peer = new RemotePeer(input, child.stdin, 30_000, () => failure(diagnostics, new RemoteConnectionError("network", desktopText(`${noun} 通道已中断；已发送命令结果未知，未自动重发`, `${noun} channel interrupted; outcome of sent commands is unknown and they were not resent`))));
     child.stderr.on("data", (chunk: Buffer) => { diagnostics = (diagnostics + chunk.toString("utf8")).slice(-4096); });
-    child.once("error", error => peer.close(sshFailure(diagnostics, error)));
-    child.once("close", code => peer.close(sshFailure(diagnostics, undefined, code)));
+    child.once("error", error => peer.close(failure(diagnostics, error)));
+    child.once("close", code => peer.close(failure(diagnostics, undefined, code)));
     const transport = new SshRemoteTransport(peer, async () => {
       if (exited) return;
       child.kill();
@@ -85,10 +105,10 @@ export class SshRemoteTransport implements ClientTransport {
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try { await Promise.race([exit, new Promise<void>(resolve => { timeout = setTimeout(resolve, 2_000); })]); }
       finally { clearTimeout(force); clearTimeout(timeout); }
-    }, options.networkChannel !== true);
-    const cancel = (): void => peer.close(connectionCancelled());
+    }, options.networkChannel !== true, noun);
+    const cancel = (): void => peer.close(connectionCancelled(noun));
     options.signal?.addEventListener("abort", cancel, { once: true });
-    peer.onClose(() => { options.signal?.removeEventListener("abort", cancel); authenticationRequest?.dispose(); });
+    peer.onClose(() => { options.signal?.removeEventListener("abort", cancel); launch.dispose(); });
     if (options.signal?.aborted) cancel();
     try {
       const hello = await peer.request<RemoteHello>("hello", { ...(options.attachment ? { attachment: options.attachment } : {}), ...(options.networkChannel ? { networkChannel: true } : {}) });
@@ -100,8 +120,8 @@ export class SshRemoteTransport implements ClientTransport {
       return transport;
     } catch (error) {
       await transport.close();
-      if (options.signal?.aborted) throw connectionCancelled();
-      throw sshFailure(diagnostics, error instanceof RemoteRequestTimeout ? new RemoteConnectionError("network", desktopText("远端 Host 握手超时", "Remote Host handshake timed out")) : error, child.exitCode);
+      if (options.signal?.aborted) throw connectionCancelled(noun);
+      throw failure(diagnostics, error instanceof RemoteRequestTimeout ? new RemoteConnectionError("network", desktopText("远端 Host 握手超时", "Remote Host handshake timed out")) : error, child.exitCode);
     }
   }
 
@@ -143,7 +163,7 @@ export class SshRemoteTransport implements ClientTransport {
     } catch (error) {
       if (this.#closed) return;
       this.#setHealth(false);
-      if (!(error instanceof RemoteRequestTimeout)) { this.peer.close(sshFailure("", error)); return; }
+      if (!(error instanceof RemoteRequestTimeout)) { this.peer.close(this.noun === "WSL" ? wslFailure("", error) : sshFailure("", error)); return; }
       if (++this.#missed >= policy.missedChecks) this.peer.close(new RemoteConnectionError("network", desktopText("远端 Host 连续未响应健康检查，正在恢复通道；未停止远端任务", "Remote Host missed consecutive health checks; recovering channel without stopping remote tasks")));
     } finally {
       this.#checking = false;
@@ -181,7 +201,7 @@ export class SshRemoteTransport implements ClientTransport {
     this.#listeners.add(filtered);
     return () => { this.#listeners.delete(filtered); };
   }
-  async close(): Promise<void> { this.peer.close(connectionCancelled()); await this.#termination; }
+  async close(): Promise<void> { this.peer.close(connectionCancelled(this.noun)); await this.#termination; }
 
   #ensureSubscription(): Promise<unknown> {
     this.#subscription ??= this.peer.request("subscribe", { scope: "all" });

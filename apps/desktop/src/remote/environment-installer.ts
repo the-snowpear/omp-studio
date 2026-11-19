@@ -17,6 +17,7 @@ import { desktopText } from "../desktop-language-shared.js";
 export type PreparationProgress = (stage: RemotePreparationStage, message: string, receivedBytes?: number, totalBytes?: number) => void;
 export interface EnvironmentInstallerOptions {
   cache: string; repo: string; appVersion: string; keys: Readonly<Record<string, string | Buffer>>;
+  logEnvironmentFallback?(): void;
   fetcher?: typeof fetch; mirror?: () => Promise<string>;
   /** Local development and offline imports still authenticate this envelope. */
   localPackage?: { envelope: SignedRemoteEnvironment; archive: string };
@@ -112,7 +113,25 @@ export class RemoteEnvironmentInstaller {
     return installed;
   }
   private async start(profile: RemoteConnectionProfile, environment: RemoteEnvironment, installed: RemoteInstallation, authentication: SshAuthentication | undefined, signal: AbortSignal): Promise<void> {
-    const script = `const cp=require('node:child_process');try{cp.execFileSync(process.execPath,${JSON.stringify([installed.entry, "start", "--state", installed.state])},{timeout:90000,stdio:['ignore','pipe','pipe'],windowsHide:true});}catch(e){process.stderr.write(String(e.stderr||e.message));process.exitCode=1;}`;
-    await runSsh(profile, remoteNodeCommand(environment, script), undefined, 105_000, signal, authentication);
+    let input: Buffer | undefined;
+    if (profile.kind === "wsl") {
+      try {
+        const marker = "__OMP_ENV__\n";
+        const capture = await runSsh(profile, '"${SHELL:-/bin/sh}" -lic ' + quoteSh('printf "\\n__OMP_ENV__\\n"; env -0') + ' </dev/null 2>/dev/null', undefined, 10_000, signal);
+        const offset = capture.indexOf(marker);
+        if (offset === -1) throw new Error("Login environment marker missing");
+        const entries = capture.slice(offset + marker.length).split("\0").filter(Boolean).map(item => {
+          const separator = item.indexOf("=");
+          return [item.slice(0, separator), item.slice(separator + 1)] as const;
+        }).filter(([key]) => !/^(?:PWD|OLDPWD|SHLVL|_|PS1|PS2|PROMPT_COMMAND|TERM|COLUMNS|LINES|STY|WSL_INTEROP|HIST.*|TMUX.*)$/u.test(key));
+        input = Buffer.from(JSON.stringify(Object.fromEntries(entries)));
+      } catch {
+        signal.throwIfAborted();
+        this.options.logEnvironmentFallback?.();
+      }
+    }
+    const readEnvironment = input ? "Object.assign(process.env,JSON.parse(require('node:fs').readFileSync(0,'utf8')));" : "";
+    const script = `${readEnvironment}const cp=require('node:child_process');try{cp.execFileSync(process.execPath,${JSON.stringify([installed.entry, "start", "--state", installed.state])},{timeout:90000,stdio:['ignore','pipe','pipe'],windowsHide:true});}catch(e){process.stderr.write(String(e.stderr||e.message));process.exitCode=1;}`;
+    await runSsh(profile, remoteNodeCommand(environment, script), input, 105_000, signal, authentication);
   }
 }
