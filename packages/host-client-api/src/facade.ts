@@ -102,7 +102,7 @@ import type {
   GitOperationResult,
   GitHubOperationResult,
 } from "@omp-studio/client-contract";
-import { CLIENT_CONTRACT_VERSION } from "@omp-studio/client-contract";
+import { CLIENT_CONTRACT_VERSION, isSystemFilePath } from "@omp-studio/client-contract";
 import type {
   AgentTranscriptPage,
   CapabilityManifest,
@@ -191,8 +191,6 @@ const HOME_RECENT_WORKSPACES = 8;
 const DEFAULT_REGISTRY_CAPACITY = 512;
 /** Transcript path probes are bounded per request; the Renderer batches by frame. */
 const PATH_RESOLVE_LIMIT = 96;
-/** Shape test only: the owning file service still normalizes, validates and resolves. */
-const PATH_ABSOLUTE = /^(?:~[\\/]|[\\/]|[A-Za-z]:[\\/]|\\\\[^\\]+)/;
 /**
  * Retained "already emitted" fingerprints per facade. Two entries per command
  * (`#terminalEmitted` + `#ledgerReceiptKeys`) would otherwise grow for the
@@ -1074,13 +1072,14 @@ export class StudioHostClientFacade implements ClientTransport {
         const relative: string[] = [], absolute: string[] = [];
         for (const path of input.paths.slice(0, PATH_RESOLVE_LIMIT)) {
           if (typeof path !== "string" || path.length === 0) continue;
-          (PATH_ABSOLUTE.test(path) ? absolute : relative).push(path);
+          (isSystemFilePath(path) ? absolute : relative).push(path);
         }
-        const resolutions = [
-          ...(relative.length > 0 && workspaceFiles?.resolveAll !== undefined ? await workspaceFiles.resolveAll({ workspaceId: input.workspaceId, paths: relative }) : []),
-          ...(absolute.length > 0 && systemFiles?.resolveAll !== undefined ? await systemFiles.resolveAll({ paths: absolute }) : []),
-        ];
-        return { ok: true, queryName: request.queryName, result: { resolutions } } as ClientQueryResponse;
+        const explicit = input.explicit === true;
+        const [workspace, system] = await Promise.all([
+          relative.length > 0 ? workspaceFiles?.resolveAll?.({ workspaceId: input.workspaceId, paths: relative, explicit }) : undefined,
+          absolute.length > 0 ? systemFiles?.resolveAll?.({ paths: absolute, explicit }) : undefined,
+        ]);
+        return { ok: true, queryName: request.queryName, result: { resolutions: [...(workspace ?? []), ...(system ?? [])] } } as ClientQueryResponse;
       }
       case "workspace.fileTree": {
         const service = this.#options.workspaceFiles;

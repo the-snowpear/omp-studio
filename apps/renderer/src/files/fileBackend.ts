@@ -12,8 +12,8 @@ export async function inspectFileBackend(client: StudioClient, target: FileBacke
     : client.query("workspace.file.inspect", { workspaceId: target.workspaceId, path: target.path });
 }
 /** One batch classifies every path-like token a transcript stretch put forward. */
-export function resolveWorkspacePaths(client: StudioClient, workspaceId: WorkspaceId, paths: readonly string[]): Promise<WorkspacePathResolveResult> {
-  return client.query("workspace.paths.resolve", { workspaceId, paths });
+export function resolveWorkspacePaths(client: StudioClient, workspaceId: WorkspaceId, paths: readonly string[], explicit?: boolean): Promise<WorkspacePathResolveResult> {
+  return client.query("workspace.paths.resolve", { workspaceId, paths, ...(explicit ? { explicit } : {}) });
 }
 export async function readFileBackend(client: StudioClient, target: FileBackendTarget): Promise<DocumentFileText> {
   if (target.source !== "system") return client.query("workspace.file.readText", { workspaceId: target.workspaceId, path: target.path });

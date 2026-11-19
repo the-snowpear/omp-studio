@@ -23,7 +23,7 @@ function setup(path = "report.pdf") {
   vi.stubGlobal("ompStudioChrome", { files: { open, release } });
   const descriptor: FilePanelDescriptor = { targetId: null, workspaceId: "workspace", path: file.path, fileId: file.id, title: file.name, scope: "conversation" };
   const onViewState = vi.fn();
-  const pane = (visible: boolean) => <I18nProvider forcedLanguage="zh"><FilePane id="file-view:pdf" descriptor={descriptor} session={session} visible={visible} onSettings={() => {}} onOpen={() => {}} onViewState={onViewState} /></I18nProvider>;
+  const pane = (visible: boolean) => <I18nProvider forcedLanguage="zh"><FilePane id="file-view:pdf" descriptor={descriptor} session={session} visible={visible} onSettings={() => {}} onViewState={onViewState} /></I18nProvider>;
   return { pane, session, query, open, release, setVisible, onViewState, hideDocument: () => { visibility = "hidden"; document.dispatchEvent(new Event("visibilitychange")); } };
 }
 

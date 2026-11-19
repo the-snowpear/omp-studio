@@ -592,7 +592,7 @@ export interface HostSystemFileService {
   readText(input: import("@omp-studio/client-contract").SystemFileTarget): Promise<import("@omp-studio/client-contract").SystemFileText>;
   readChunk(input: import("@omp-studio/client-contract").SystemFileChunkInput): Promise<import("@omp-studio/client-contract").WorkspaceFileChunk>;
   /** Absolute-path counterpart of {@link HostWorkspaceFileService.resolveAll}; unclassifiable paths are skipped. */
-  resolveAll?(input: { readonly paths: readonly string[] }): Promise<readonly import("@omp-studio/client-contract").WorkspacePathResolution[]>;
+  resolveAll?(input: Omit<import("@omp-studio/client-contract").WorkspacePathResolveInput, "workspaceId">): Promise<readonly import("@omp-studio/client-contract").WorkspacePathResolution[]>;
   writeText(input: import("@omp-studio/client-contract").SystemFileWrite): Promise<import("@omp-studio/client-contract").SystemFileSaveResult>;
   createDirectory(input: { readonly parent: string; readonly name: string }): Promise<import("@omp-studio/client-contract").SystemFileMutationResult>;
   rename(input: { readonly path: string; readonly name: string }): Promise<import("@omp-studio/client-contract").SystemFileMutationResult>;

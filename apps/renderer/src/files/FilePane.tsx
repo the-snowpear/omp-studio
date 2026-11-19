@@ -13,8 +13,8 @@ import { fileManagerName } from "../platformCopy";
 import type { FileMenuAction } from "../menus";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { previewFile, previewFileBlob, previewFilePatch } from "../preview/filesPreview";
-import { FileReferenceContext, FileImageContext } from "./fileLinks";
-import { fileBadge, fileKind, formatBytes, relativeFileReference, textEditable, type FileReference } from "./fileTypes";
+import { FileDocumentContext } from "./fileLinks";
+import { fileBadge, fileKind, formatBytes, textEditable } from "./fileTypes";
 import type { FileDocument } from "./fileDocuments";
 import type { FileViewerActions } from "./fileActions";
 import { DEFAULT_EDITOR_PREFS, readEditorPrefs, saveEditorPrefs, subscribeEditorPrefs } from "./filePreferences";
@@ -29,7 +29,7 @@ const PdfPane = lazy(() => import("./PdfPane"));
 const SpreadsheetPane = lazy(() => import("./SpreadsheetPane"));
 const SPLIT_MIN_WIDTH = 640, NARROW_WIDTH = 560;
 
-export default function FilePane({ id, descriptor, session, visible, onSettings, onOpen, onViewState, actions }: { id: string; descriptor: FilePanelDescriptor; session: FileDocument; visible: boolean; onSettings: () => void; onOpen: (reference: FileReference) => void; onViewState: (patch: Partial<FilePanelDescriptor>) => void; actions?: FileViewerActions | undefined }) {
+export default function FilePane({ id, descriptor, session, visible, onSettings, onViewState, actions }: { id: string; descriptor: FilePanelDescriptor; session: FileDocument; visible: boolean; onSettings: () => void; onViewState: (patch: Partial<FilePanelDescriptor>) => void; actions?: FileViewerActions | undefined }) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot), { preview, marks } = usePreviewMode();
   const { t, resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh", surface = useSurfaceDocument();
   const kind = fileKind(descriptor.path), editable = textEditable(descriptor.path), badge = fileBadge(descriptor.path);
@@ -42,8 +42,6 @@ export default function FilePane({ id, descriptor, session, visible, onSettings,
   const [patch, setPatch] = useState(""), [splitDiff, setSplitDiff] = useState(false);
   const [notice, setNotice] = useState(""), [width, setWidth] = useState(900);
   const controller = useRef<EditorController | null>(null), pane = useRef<HTMLElement>(null), markdownRef = useRef<HTMLDivElement>(null), followingPreview = useRef(false);
-  const latestOnOpen = useRef(onOpen);
-  latestOnOpen.current = onOpen;
   useEffect(() => { session.setVisible(id, active); if (active) void session.refresh(); return () => session.setVisible(id, false); }, [id, session, active]);
   useEffect(() => { if (active && editable && !state.loaded) void session.load(); }, [session, editable, state.file.version, active]);
   useEffect(() => { if (preview && active && editable && state.loaded && !state.dirty) void session.load(); }, [preview, active, editable, resolvedLanguage]);
@@ -151,8 +149,7 @@ export default function FilePane({ id, descriptor, session, visible, onSettings,
     ...(showsEditor ? [{ kind: "sep", id: "s3" }, { kind: "zoom", id: "zoom", value: prefs.fontSize, onChange: setFont }] as FileMenuEntry[] : []),
   ];
 
-  const markdown = useMemo(() => <FileReferenceContext.Provider value={reference => latestOnOpen.current({ ...reference, path: relativeFileReference(descriptor.path, reference.path) })}><FileImageContext.Provider value={{ targetId: descriptor.targetId, workspaceId: descriptor.workspaceId, basePath: descriptor.path, preview, ...(descriptor.source ? { source: descriptor.source } : {}) }}><MarkdownText text={state.text} /></FileImageContext.Provider></FileReferenceContext.Provider>,
-    // latestOnOpen ref avoids rebuilding Markdown DOM while scrolling; links resolve against descriptor.path.
+  const markdown = useMemo(() => <FileDocumentContext.Provider value={{ targetId: descriptor.targetId, workspaceId: descriptor.workspaceId, basePath: descriptor.path, preview, ...(descriptor.source ? { source: descriptor.source } : {}) }}><MarkdownText text={state.text} /></FileDocumentContext.Provider>,
     [state.text, descriptor.path, descriptor.source, descriptor.targetId, descriptor.workspaceId, preview]);
   const editor = (onScrollRatio?: (ratio: number) => void) => state.loaded
     ? <TextEditor viewId={id} session={session} descriptor={descriptor} onViewState={onViewState} readOnly={!state.file.writable} wrap={prefs.wrap} fontSize={prefs.fontSize} gitMarks={gitMarks} commands={commands} onScrollRatio={onScrollRatio} />

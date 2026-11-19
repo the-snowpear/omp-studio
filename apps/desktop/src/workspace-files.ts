@@ -8,9 +8,10 @@ import type {
   WorkspaceFileTreeReadModel,
   WorkspaceId,
   WorkspaceFileInfo, WorkspaceFileTarget,
-  WorkspacePathResolveInput, WorkspacePathResolution,
+  WorkspacePathResolveInput,
 } from "@omp-studio/client-contract";
 import type { HostWorkspaceFileService } from "@omp-studio/host-client-api";
+import { probeFilePaths } from "./platform/path-probe.js";
 import type { WorkspaceRegistry } from "@omp-studio/studio-host";
 import { desktopText } from "./desktop-language-shared.js";
 
@@ -103,18 +104,16 @@ export function createWorkspaceFileService({ registry }: { readonly registry: Wo
     return { ...await inspectFile(target), workspaceId: input.workspaceId, path };
   }
 
-  /** Classifies path-like transcript text; anything unclassifiable reports itself missing. */
-  async function resolveAll(input: WorkspacePathResolveInput): Promise<readonly WorkspacePathResolution[]> {
-    const root = await realpath(storedRoot(input.workspaceId));
-    return Promise.all(input.paths.map(async path => {
-      try {
-        const target = await realTarget(candidatePath(root, path), path);
-        if (escapedFrom(root, target)) return { path, kind: "missing" as const };
-        return { path, kind: (await lstat(target)).isDirectory() ? "directory" as const : "file" as const };
-      } catch {
-        return { path, kind: "missing" as const };
-      }
-    }));
+  async function resolveAll({ workspaceId, paths, explicit }: WorkspacePathResolveInput) {
+    const root = storedRoot(workspaceId);
+    return probeFilePaths(paths, async path => {
+      const candidate = resolve(candidatePath(root, path));
+      if (escapedFrom(root, candidate)) throw new Error("File is outside the current workspace");
+      if (!explicit) return candidate;
+      const target = await realTarget(candidate, path);
+      if (escapedFrom(root, target)) throw new Error("File is outside the current workspace");
+      return target;
+    }, explicit);
   }
 
   async function directory(root: string, requestedPath?: string): Promise<WorkspaceFileNode[]> {

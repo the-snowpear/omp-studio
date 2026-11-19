@@ -148,6 +148,29 @@ test("path probes classify transcript candidates and a missing path reads as mis
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("path probes defer a linked directory until it is explicitly opened", async t => {
+  const root = await mkdtemp(join(tmpdir(), "omp-linked-directory-"));
+  try {
+    const folder = join(root, "content"), linked = join(root, "shortcut");
+    await mkdir(folder);
+    if (!await tryLink(folder, linked, process.platform === "win32" ? "junction" : "dir")) {
+      t.skip("links are unavailable on this host");
+      return;
+    }
+    await writeFile(join(folder, "note.txt"), "linked file");
+    const registry = new WorkspaceRegistry(join(root, "registry.json"));
+    const workspaceId = (await registry.upsertByPath(root)).workspaceId as WorkspaceId;
+    const service = createWorkspaceFileService({ registry });
+    const paths = ["shortcut", "shortcut/note.txt"];
+    assert.deepEqual(await service.resolveAll!({ workspaceId, paths }), []);
+    assert.deepEqual(await service.resolveAll!({ workspaceId, paths, explicit: true }), [
+      { path: paths[0], kind: "directory" },
+      { path: paths[1], kind: "file" },
+    ]);
+    assert.equal((await service.readText!({ workspaceId, path: paths[1]! })).text, "linked file");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("viewer saves UTF-16 and bounds media reads without loading the whole file", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-file-bytes-"));
   try {

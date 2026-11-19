@@ -1,3 +1,4 @@
+import { isSystemFilePath } from "@omp-studio/client-contract";
 import { isZh } from "../i18n";
 
 export type FileKind = "text" | "markdown" | "pdf" | "image" | "audio" | "video" | "spreadsheet" | "office";
@@ -77,10 +78,6 @@ function decodeFileUrlPath(rawUrl: string): string | null {
   }
 }
 
-export function isAbsoluteFileReference(path: string): boolean {
-  return /^(?:[A-Za-z]:[\\/]|[/\\]|file:)/i.test(path.trim());
-}
-
 function splitPathRoot(slashPath: string): { root: string; rest: string } {
   const unc = /^\/\/[^/]+\/[^/]+(?:\/|$)/.exec(slashPath);
   if (unc) return { root: unc[0].endsWith("/") ? unc[0] : `${unc[0]}/`, rest: slashPath.slice(unc[0].length) };
@@ -146,7 +143,9 @@ export function relativeFileReference(base: string, path: string): string {
     const decoded = decodeFileUrlPath(path);
     if (decoded) path = decoded;
   }
-  if (/^(?:[A-Za-z]:[\\/]|[/\\]|file:)/i.test(path)) {
+  if (isSystemFilePath(path)) {
+    // Keep home-relative segments for the Host to resolve after expanding ~.
+    if (path.startsWith("~")) return path;
     if (!/(?:^|[/\\])\.\.?(?:[/\\]|$)/.test(path)) return path;
     const { root, rest } = splitPathRoot(path.replaceAll("\\", "/"));
     return `${root}${reduceSegments(rest.split("/"), root.length > 0).join("/")}`;

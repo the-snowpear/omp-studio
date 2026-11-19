@@ -1,11 +1,13 @@
 import { lstat, mkdir, opendir, readdir, realpath, stat, statfs } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
-import type { SystemDirectory, SystemEntry, SystemFileTarget, SystemListInput, SystemPlaces, SystemQuickKind, WorkspaceId, WorkspacePathResolution } from "@omp-studio/client-contract";
+import type { SystemDirectory, SystemEntry, SystemFileTarget, SystemListInput, SystemPlaces, SystemQuickKind, WorkspaceId } from "@omp-studio/client-contract";
 import type { HostSystemFileService } from "@omp-studio/host-client-api";
 import type { WorkspaceRegistry } from "@omp-studio/studio-host";
+import { fileURLToPath } from "node:url";
 import { inspectFile, readFileChunk, readFileText, writeFileText } from "./file-io.js";
 import { renameWithoutOverwrite } from "./platform/file-rename.js";
+import { probeFilePaths } from "./platform/path-probe.js";
 import { desktopText } from "./desktop-language-shared.js";
 
 const DIRECTORY_LIMIT = 5_000;
@@ -17,6 +19,8 @@ const inside = (root: string, path: string) => { const suffix = relative(root, p
 /** Shared by the executing file service and the local shell actions, never by forwarding layers. */
 export function normalizeSystemPath(value: string): string {
   if (typeof value !== "string" || value.includes("\0")) throw new Error(desktopText("文件路径无效：不能包含 NUL", "Invalid file path: NUL is not allowed"));
+  if (/^file:/i.test(value)) value = fileURLToPath(value);
+  if (process.platform === "win32" && /^\/[A-Za-z]:[\\/]/.test(value)) value = value.slice(1);
   const expanded = value === "~" ? homedir() : /^~[\\/]/.test(value) ? join(homedir(), value.slice(2)) : value;
   if (!isAbsolute(expanded)) throw new Error(desktopText("文件路径必须是绝对路径", "File path must be absolute"));
   if (process.platform === "win32") {
@@ -63,18 +67,6 @@ export function createSystemFileService({ registry, knownFolders, trash }: Syste
     const path = normalizeSystemPath(input.path), file = await inspectFile(await fileTarget(input));
     return { ...file, path, writable: file.writable && !(await lstat(path)).isSymbolicLink() };
   };
-
-  /** Absolute-path twin of the workspace probe: an unreadable path simply reports itself missing. */
-  async function resolveAll(input: { readonly paths: readonly string[] }): Promise<readonly WorkspacePathResolution[]> {
-    return Promise.all(input.paths.map(async path => {
-      try {
-        const target = await realpath(normalizeSystemPath(path));
-        return { path, kind: (await lstat(target)).isDirectory() ? "directory" as const : "file" as const };
-      } catch {
-        return { path, kind: "missing" as const };
-      }
-    }));
-  }
 
   async function volume(path: string): Promise<SystemPlaces["volumes"][number] | undefined> {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -174,7 +166,8 @@ export function createSystemFileService({ registry, knownFolders, trash }: Syste
     return path;
   }
   return {
-    places, list, inspect, resolveAll,
+    places, list, inspect,
+    resolveAll: ({ paths, explicit }) => probeFilePaths(paths, normalizeSystemPath, explicit),
     async readText(input) { return readFileText(await fileTarget(input), () => inspect(input)); },
     async readChunk(input) { return readFileChunk(await fileTarget(input), input); },
     async writeText(input) { return writeFileText(await fileTarget(input, true), input, () => inspect(input)); },
