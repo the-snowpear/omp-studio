@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { StudioClientImpl } from "@omp-studio/client";
 import type { CommandInput, CommandName, SessionHistoryEntry, SessionId } from "@omp-studio/client-contract";
@@ -19,6 +19,7 @@ import "../styles/workbench.css";
 import "./mobile.css";
 
 type Thread = SessionHistoryEntry & { sessionId: SessionId };
+const isThread = (entry: SessionHistoryEntry): entry is Thread => entry.sessionId !== undefined;
 type Status = "loading" | "pairing" | "offline" | "ready";
 type SocketLost = { current: (() => void) | undefined };
 /** What a list row needs; real rows carry their thread, preview rows do not. */
@@ -66,6 +67,9 @@ function MobileApp() {
   const [status, setStatus] = useState<Status>("loading");
   const [session, setSession] = useState<MobileBrowserSession>();
   const [rows, setRows] = useState<Thread[]>([]);
+  const [nextOffset, setNextOffset] = useState<number>();
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [pageFailed, setPageFailed] = useState(false);
   const [selected, setSelected] = useState<Thread>();
   const [demoChat, setDemoChat] = useState<ChatRow>();
   const [attempt, setAttempt] = useState(0);
@@ -103,7 +107,10 @@ function MobileApp() {
         if (!result.ok) throw new Error("history_unavailable");
         if (!current) return;
         setSession(authenticated);
-        setRows(result.result.entries.filter((entry): entry is Thread => entry.sessionId !== undefined));
+        const { entries, total } = result.result;
+        setRows(entries.filter(isThread));
+        setNextOffset(entries.length > 0 && entries.length < total ? entries.length : undefined);
+        setPageFailed(false);
         setStatus("ready");
       } catch (error) {
         if (!current) return;
@@ -115,6 +122,27 @@ function MobileApp() {
     void load();
     return () => { current = false; };
   }, [attempt, pairCode, preview, transport]);
+
+  async function loadMore() {
+    if (loadingMore || refreshing || nextOffset === undefined) return;
+    setLoadingMore(true);
+    setPageFailed(false);
+    try {
+      const result = await transport.query({ queryName: "history.list", input: { offset: nextOffset } });
+      if (!result.ok) throw new Error("history_unavailable");
+      const { entries, total } = result.result;
+      setRows(previous => [...new Map([...previous, ...entries.filter(isThread)].map(row => [row.sessionId, row])).values()]);
+      const offset = nextOffset + entries.length;
+      setNextOffset(entries.length > 0 && offset < total ? offset : undefined);
+    } catch (error) {
+      if (error instanceof Error && /^(http_401|http_403)$/.test(error.message)) {
+        setSession(undefined);
+        setStatus("pairing");
+      } else setPageFailed(true);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   const toggleLanguage = <button className="m-round" type="button" aria-label={zh ? "切换到英文" : "Switch to Chinese"} onClick={() => setLanguage(zh ? "en" : "zh")}>{zh ? "EN" : "中文"}</button>;
   const retry = () => { setStatus("loading"); setAttempt(count => count + 1); };
@@ -133,6 +161,7 @@ function MobileApp() {
       onBack={() => setSelected(undefined)}
       onPairingRequired={() => { setSelected(undefined); setSession(undefined); setStatus("pairing"); }} />
       : status === "ready" && session ? <ChatList workspaceName={session.workspaceName} connection="connected" refreshing={refreshing}
+        loadingMore={loadingMore} pageFailed={pageFailed} onLoadMore={nextOffset === undefined ? undefined : () => void loadMore()}
         onRefresh={() => { setRefreshing(true); setAttempt(count => count + 1); }}
         rows={rows.map(row => ({ key: row.sessionId, title: row.title, summary: row.summary, lastActiveAt: row.lastActiveAt, messageCount: row.messageCount, pinned: row.pinned, thread: row }))}
         language={toggleLanguage} onOpen={row => row.thread && setSelected(row.thread)} />
@@ -165,15 +194,18 @@ function StatusScreen({ status, language, onRetry }: { status: Status; language:
   </main>;
 }
 
-function ChatList({ workspaceName, connection, rows, refreshing, demo, language, onOpen, onRefresh }: {
+function ChatList({ workspaceName, connection, rows, refreshing, loadingMore, pageFailed, demo, language, onOpen, onRefresh, onLoadMore }: {
   workspaceName: string;
   connection: "connected";
   rows: ChatRow[];
   refreshing?: boolean;
+  loadingMore?: boolean;
+  pageFailed?: boolean;
   demo?: boolean;
   language: ReactNode;
   onOpen: (row: ChatRow) => void;
   onRefresh?: () => void;
+  onLoadMore?: (() => void) | undefined;
 }) {
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
@@ -190,7 +222,7 @@ function ChatList({ workspaceName, connection, rows, refreshing, demo, language,
           <span className="m-ws-sub" role="status"><i className={`m-dot ${connection}`} aria-hidden="true" />{zh ? "已连接电脑" : "Connected to your computer"}{demo ? <em>{zh ? "演示" : "Demo"}</em> : null}</span>
         </span>
       </div>
-      {onRefresh ? <button className="m-round" type="button" aria-label={zh ? "刷新会话" : "Refresh chats"} disabled={refreshing} onClick={onRefresh}>
+      {onRefresh ? <button className="m-round" type="button" aria-label={zh ? "刷新会话" : "Refresh chats"} disabled={refreshing || loadingMore} onClick={onRefresh}>
         <span className={refreshing ? "m-spinning" : undefined}><RefreshIcon /></span>
       </button> : null}
       {language}
@@ -223,6 +255,12 @@ function ChatList({ workspaceName, connection, rows, refreshing, demo, language,
           </li>)}
         </ul>
       </section>)}
+      {onLoadMore ? <div className="m-foot">
+        <button className="m-older" type="button" disabled={refreshing || loadingMore} onClick={onLoadMore}>
+          {loadingMore ? (zh ? "正在加载…" : "Loading…") : (zh ? "加载更多会话" : "Load more chats")}
+        </button>
+        {pageFailed ? <p role="alert">{zh ? "无法加载更多会话，请重试。" : "Could not load more chats. Try again."}</p> : null}
+      </div> : null}
       <p className="m-foot">{zh ? `只显示 ${workspaceName} 中的会话。新建会话请在电脑上操作。` : `Showing chats in ${workspaceName} only. Start new chats on your computer.`}</p>
     </main>
   </>;
@@ -542,22 +580,29 @@ function Transcript({ client, sessionId, runtimeEpoch, connected, keyboard }: {
   const { preview } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
+  const previewLocale = preview ? zh : undefined;
   const engine = useMemo(() => createConversationEngine({
     preview, client: client ?? null, identity: sessionId ? { sessionId, ...(runtimeEpoch ? { runtimeEpoch } : {}) } : null,
-    canRead: !!client, runtimeConnected: connected, previewItems: preview ? previewConversationItems("t1", zh) : [],
-  }), [client, connected, preview, runtimeEpoch, sessionId, zh]);
+    canRead: !!client, runtimeConnected: connected, previewItems: previewLocale === undefined ? [] : previewConversationItems("t1", previewLocale),
+  }), [client, connected, preview, previewLocale, runtimeEpoch, sessionId]);
   useEffect(() => {
     engine.start();
     return () => engine.dispose();
   }, [engine]);
   const { rows, state, loadingOlder } = useSyncExternalStore(engine.subscribe, engine.getSnapshot);
-  const { scroll, onScroll } = useFollowBottom(keyboard, rows);
+  const ready = state.hydrateStatus === "ready";
+  const previousRows = useRef(rows);
+  useLayoutEffect(() => {
+    if (ready || rows.length > 0) previousRows.current = rows;
+  }, [ready, rows]);
+  const visibleRows = !preview && !ready && rows.length === 0 ? previousRows.current : rows;
+  const { scroll, onScroll } = useFollowBottom(keyboard, visibleRows);
   return <main className="m-transcript" ref={scroll} aria-label={zh ? "对话正文" : "Conversation transcript"} onScroll={event => onScroll(event.currentTarget)}>
     <div className="m-thread">
       {state.hasMoreBefore ? <button type="button" className="m-older" disabled={loadingOlder} onClick={() => void engine.loadOlder()}>{loadingOlder ? (zh ? "正在加载…" : "Loading…") : (zh ? "加载较早消息" : "Load earlier messages")}</button> : null}
-      {!rows.length && state.hydrateStatus === "error" ? <p className="m-thread-note">{zh ? "暂时无法读取对话。" : "This conversation could not be loaded."}</p> : null}
-      {!rows.length && state.hydrateStatus === "loading" ? <p className="m-thread-note"><span className="m-spin" aria-hidden="true" />{zh ? "正在读取对话…" : "Loading conversation…"}</p> : null}
-      {rows.map(row => row.type === "user" || row.type === "extension" ? <div key={timelineRowKey(row)} className="m-user">{row.text}</div>
+      {!visibleRows.length && state.hydrateStatus === "error" ? <p className="m-thread-note">{zh ? "暂时无法读取对话。" : "This conversation could not be loaded."}</p> : null}
+      {!visibleRows.length && state.hydrateStatus === "loading" ? <p className="m-thread-note"><span className="m-spin" aria-hidden="true" />{zh ? "正在读取对话…" : "Loading conversation…"}</p> : null}
+      {visibleRows.map(row => row.type === "user" || row.type === "extension" ? <div key={timelineRowKey(row)} className="m-user">{row.text}</div>
         : row.type === "assistant" ? <article key={timelineRowKey(row)} className="m-ai">
           {row.segments.map(segment => segment.type === "text" ? <MarkdownText key={segment.key} text={segment.text} streaming={segment.streaming ?? false} />
             : segment.type === "batch" ? <ToolBatch key={segment.key} tools={segment.tools} /> : null)}

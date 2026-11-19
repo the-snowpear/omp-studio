@@ -66,7 +66,7 @@ function scopedConversation(transport: ClientTransport, row: SessionHistoryEntry
         ...(pendingInteraction?.sessionId === sessionId ? { pendingInteraction } : {}),
       };
     },
-    query<TName extends QueryName>(request: ClientQueryRequest<TName>) {
+    async query<TName extends QueryName>(request: ClientQueryRequest<TName>) {
       if (request.queryName === "conversation.open") {
         const call = request as ClientQueryRequest<"conversation.open">;
         const { target } = call.input;
@@ -74,6 +74,9 @@ function scopedConversation(transport: ClientTransport, row: SessionHistoryEntry
       } else if (request.queryName === "session.transcript.readPage") {
         const call = request as ClientQueryRequest<"session.transcript.readPage">;
         if (call.input.sessionId !== sessionId || call.input.agentId !== undefined) denied();
+      } else if (request.queryName === "session.transcript.read") {
+        const state = await transport.bootstrap();
+        if (state.snapshot?.sessionId !== sessionId) denied();
       } else denied();
       return transport.query(request);
     },
@@ -102,15 +105,17 @@ function scopedConversation(transport: ClientTransport, row: SessionHistoryEntry
 }
 
 export function createMobileScope(host: WebAdapterHost, workspaceId: WorkspaceId): WebAdapterHost {
-  const history = () => host.query({ queryName: "history.list", input: { workspaceId, status: "active", limit: 500 } });
+  const history = (input: Pick<ClientQueryRequest<"history.list">["input"], "offset" | "sessionId">) =>
+    host.query({ queryName: "history.list", input: { ...input, workspaceId, status: "active", limit: 200 } });
   return {
     async query<TName extends QueryName>(request: ClientQueryRequest<TName>) {
       if (request.queryName !== "history.list") denied();
-      return await history() as ClientQueryResponse<TName>;
+      const { offset } = (request as ClientQueryRequest<"history.list">).input;
+      return await history(offset === undefined ? {} : { offset }) as ClientQueryResponse<TName>;
     },
     async openContext(scope: ClientContextScope) {
       if (!host.openContext || typeof scope.sessionId !== "string" || scope.workspaceId !== workspaceId) denied();
-      const catalog = await history();
+      const catalog = await history({ sessionId: scope.sessionId });
       const row = catalog.ok ? catalog.result.entries.find(entry => entry.sessionId === scope.sessionId) : undefined;
       if (!row?.sessionId) denied();
       const transport = await host.openContext({ workspaceId, sessionId: row.sessionId });

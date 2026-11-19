@@ -84,7 +84,6 @@ import type {
   ResidentsReadModel,
   SessionHistoryEntry,
   SessionHistoryReadModel,
-  SessionHistoryStatus,
   SessionId,
   StateVersion,
   SubscriptionScope,
@@ -947,11 +946,7 @@ export class StudioHostClientFacade implements ClientTransport {
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "history.list": {
-        const result = await this.#queryHistory(request.input as {
-          readonly limit?: number;
-          readonly status?: SessionHistoryStatus;
-          readonly workspaceId?: WorkspaceId;
-        });
+        const result = await this.#queryHistory(request.input as ClientQueryRequest<"history.list">["input"]);
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "residents.list": {
@@ -2315,14 +2310,14 @@ export class StudioHostClientFacade implements ClientTransport {
     return buildDiagnosticsReadModel(now, { ...this.#options.authority }, entries);
   }
 
-  async #queryHistory(input: {
-    readonly limit?: number;
-    readonly status?: SessionHistoryStatus;
-    readonly workspaceId?: WorkspaceId;
-  }): Promise<SessionHistoryReadModel> {
+  async #queryHistory(input: ClientQueryRequest<"history.list">["input"]): Promise<SessionHistoryReadModel> {
     const requested = input.limit ?? HISTORY_DEFAULT_LIMIT;
+    const offset = input.offset ?? 0;
     if (!Number.isSafeInteger(requested) || requested < 1) {
       throw clientError("INVALID_ARGUMENT", "history limit must be a positive integer");
+    }
+    if (!Number.isSafeInteger(offset) || offset < 0) {
+      throw clientError("INVALID_ARGUMENT", "history offset must be a non-negative integer");
     }
     if (input.status !== undefined && input.status !== "active" && input.status !== "archived" && input.status !== "closed") {
       throw clientError("INVALID_ARGUMENT", "history status must be active, archived or closed");
@@ -2331,7 +2326,10 @@ export class StudioHostClientFacade implements ClientTransport {
     const catalog = await this.#options.catalog.list(
       input.workspaceId === undefined ? undefined : { workspaceId: input.workspaceId },
     );
-    const visible = catalog.filter(entry => !this.#options.evaluations?.sessionIds().has(entry.sessionId));
+    const visible = catalog.filter(entry =>
+      (input.sessionId === undefined || input.sessionId === entry.sessionId) &&
+      !this.#options.evaluations?.sessionIds().has(entry.sessionId),
+    );
     const filtered = input.status === undefined ? visible : visible.filter((entry) => entry.status === input.status);
     const sorted = [...filtered].sort(
       (left, right) =>
@@ -2339,8 +2337,7 @@ export class StudioHostClientFacade implements ClientTransport {
         right.modifiedAt.localeCompare(left.modifiedAt) ||
         left.sessionId.localeCompare(right.sessionId),
     );
-    const entries = sorted.map((entry) => this.#mapHistoryEntry(entry));
-    return { entries: entries.slice(0, limit), total: entries.length };
+    return { entries: sorted.slice(offset, offset + limit).map(entry => this.#mapHistoryEntry(entry)), total: sorted.length };
   }
 
   #mapHistoryEntry(entry: HostCatalogEntry): SessionHistoryEntry {

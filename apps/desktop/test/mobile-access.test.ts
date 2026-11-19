@@ -25,6 +25,10 @@ function fakeHost() {
   };
   const context = {
     bootstrap: async () => ({ ...state, ...(pending ? { pendingInteraction: approval } : {}) }) as ClientBootstrap,
+    async query(call: { queryName: string }) {
+      assert.equal(call.queryName, "session.transcript.read");
+      return { ok: true, result: { sessionId, items: [] } };
+    },
     async command(command: { commandName: string }) {
       calls.push(command.commandName);
       return {};
@@ -33,9 +37,15 @@ function fakeHost() {
     close: async () => { calls.push("close"); },
   } as unknown as ClientTransport;
   const host = {
-    query: async (call: { input: { workspaceId: string } }) => {
+    query: async (call: { input: { workspaceId: string; status: string; offset?: number; sessionId?: string } }) => {
       assert.equal(call.input.workspaceId, workspaceId);
-      return { ok: true, result: { entries: [{ sessionId, threadId }] } };
+      assert.equal(call.input.status, "active");
+      const older = { sessionId, threadId };
+      const recent = { sessionId: "recent-session", threadId: "recent-thread" };
+      const entries = call.input.sessionId === undefined
+        ? [call.input.offset === 1 ? older : recent]
+        : [older, recent].filter(entry => entry.sessionId === call.input.sessionId);
+      return { ok: true, result: { entries, total: 2 } };
     },
     openContext: async (scope: { sessionId: string }) => { assert.equal(scope.sessionId, sessionId); return context; },
   } as unknown as WebAdapterHost;
@@ -92,11 +102,18 @@ test("the HTTPS phone can pair, stream and command only the selected conversatio
   assert.equal((await call("/api/v1/pair", { code })).status, 401);
   assert.equal((await call("/api/v1/context/open", { workspaceId: "another", sessionId })).status, 400);
   assert.equal((await call("/api/v1/context/open", { workspaceId, sessionId: "another" })).status, 400);
+  const recent = await call("/api/v1/query", { queryName: "history.list", input: {} });
+  const older = await call("/api/v1/query", { queryName: "history.list", input: { offset: 1 } });
+  assert.equal(recent.data.result.entries[0].sessionId, "recent-session");
+  assert.equal(older.data.result.entries[0].sessionId, sessionId);
   const opened = await call("/api/v1/context/open", { workspaceId, sessionId });
   assert.equal(opened.status, 200);
   contextId = opened.data.contextId as string;
   const prompt = { commandName: "core.prompt", input: { text: "Continue" } };
   assert.equal((await call("/api/v1/command", prompt)).status, 409);
+  const previousPage = await call("/api/v1/query", { queryName: "session.transcript.read", input: { cursor: "older" } });
+  assert.equal(previousPage.status, 200);
+  assert.equal(previousPage.data.result.sessionId, sessionId);
   const websocket = new WebSocket(`${access.origin.replace("https:", "wss:")}/api/v1/events?contextId=${contextId}`, {
     ca, origin: access.origin, headers: { cookie },
   });

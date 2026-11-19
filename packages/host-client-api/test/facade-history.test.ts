@@ -39,6 +39,17 @@ test("history.list stably puts pinned sessions first before applying the limit",
       assert.equal(response.result.entries[1]?.title, "Persisted title");
       assert.equal(response.result.total, 3);
     }
+    const next = await facade.query({ queryName: "history.list", input: { limit: 2, offset: 2 } });
+    assert.ok(next.ok);
+    assert.deepEqual(next.result.entries.map(entry => entry.sessionId), ["recent-unpinned"]);
+    assert.equal(next.result.total, 3);
+
+    const sessionId = next.result.entries[0]?.sessionId;
+    assert.ok(sessionId);
+    const selected = await facade.query({ queryName: "history.list", input: { limit: 1, sessionId } });
+    assert.ok(selected.ok);
+    assert.deepEqual(selected.result.entries.map(entry => entry.sessionId), [sessionId]);
+    assert.equal(selected.result.total, 1);
   } finally {
     await facade.close();
   }

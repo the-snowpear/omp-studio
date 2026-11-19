@@ -125,6 +125,8 @@ export interface QueryInputMap extends RuntimeViewQueryMap, ContextViewQueryMap,
   "diagnostics.get": EmptyInput;
   "history.list": {
     readonly limit?: number;
+    readonly offset?: number;
+    readonly sessionId?: SessionId;
     readonly status?: SessionHistoryStatus;
     readonly workspaceId?: WorkspaceId;
   };
