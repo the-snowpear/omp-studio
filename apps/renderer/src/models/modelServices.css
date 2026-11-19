@@ -9,6 +9,29 @@
 .model-native-status { display: inline-flex; align-items: center; gap: var(--sp-4); }
 .model-native-status .chip .icon { width: 10px; height: 10px; margin-right: 2px; }
 
+.model-native-key-picker { flex: 0 1 18rem; min-width: 0; }
+.model-native-key {
+  display: grid; gap: var(--sp-12); margin-top: var(--sp-12); padding: var(--sp-12);
+  border: 1px solid var(--border); border-radius: var(--r-8); background: var(--bg-subtle);
+  animation: var(--motion-reveal);
+}
+.model-native-key-heading, .model-native-key-controls { display: flex; flex-wrap: wrap; align-items: end; gap: var(--sp-10); }
+.model-native-key-heading > div { flex: 1 1 20rem; }
+.model-native-key-heading h4 { margin: 0 0 var(--sp-4); }
+.model-native-key p { margin: 0; font-size: var(--fs-12); }
+.model-native-key-heading p, .model-native-key-feedback { color: var(--text-2); }
+.model-native-key-controls { max-width: 44rem; }
+.model-native-key-controls .field { flex: 1 1 16rem; min-width: 0; }
+.model-native-key-controls .input { width: 100%; }
+.model-native-key-controls .btn { font-size: var(--fs-12); }
+.model-native-key-feedback { display: flex; flex-wrap: wrap; gap: var(--sp-6) var(--sp-12); }
+.model-native-key-feedback:empty { display: none; }
+.model-native-key-feedback p { display: inline-flex; align-items: center; gap: var(--sp-6); }
+.model-native-key-saved { color: var(--green); }
+.model-native-key-error { color: var(--red); overflow-wrap: anywhere; }
+.model-native-key-error small { display: block; margin-top: var(--sp-4); color: var(--text-2); }
+.model-native-key-check { justify-self: start; }
+
 /* Sign-in wait and pause notices share one row shape; the pause is amber, the wait neutral. */
 .model-native-login, .model-native-paused {
   position: relative; display: flex; align-items: center; gap: var(--sp-10); margin-top: var(--sp-10);

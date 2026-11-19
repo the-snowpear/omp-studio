@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import type { ModelAntigravityReadiness, ModelProviderRoster } from "@omp-studio/studio-protocol";
 import { AppSelect } from "../AppSelect";
 import { Icon } from "../icons";
@@ -11,6 +11,11 @@ import { ModelSystemTemplateInspector } from "./ModelSystemTemplates";
 import "./modelServices.css";
 
 const ANTIGRAVITY_CLI = "antigravity-cli";
+const OPENCODE_CONSOLE = "https://opencode.ai/auth";
+
+export function isOpenCodeProvider(id: string): boolean {
+  return id === "opencode-go" || id === "opencode-zen";
+}
 
 function clock(ms: number): string {
   const total = Math.max(0, Math.ceil(ms / 1000));
@@ -18,25 +23,31 @@ function clock(ms: number): string {
 }
 
 /** A focused native-provider workflow, not a static catalog pretending to be an authorized workspace roster. */
-export function NativeModelAccessPane({ context, auth, visible, onChanged, accounts = false }: {
+export function NativeModelAccessPane({ context, auth, visible, selected, onSelect, onChanged, accounts = false }: {
   context: ModelServiceContext; auth: ModelAuthController; visible: boolean; onChanged?: () => void; accounts?: boolean;
+  selected: string; onSelect: (id: string) => void;
 }) {
-  const { preview, marks } = usePreviewMode(), { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
+  const { preview, marks } = usePreviewMode(), { resolvedLanguage, t } = useI18n(), zh = resolvedLanguage === "zh";
   const tr = (zhText: string, enText: string) => zh ? zhText : enText;
-  const [selected, setSelected] = useState("");
   const [roster, setRoster] = useState<ModelProviderRoster>();
   const [inspected, setInspected] = useState("");
-  const [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [refreshError, setRefreshError] = useState<string>();
+  const [apiKey, setApiKey] = useState("");
+  const [keyStatus, setKeyStatus] = useState<"draft" | "saving" | "saved" | "unconfirmed">("draft");
+  const keyField = useId();
   const [risk, setRisk] = useState(false), [riskAnswer, setRiskAnswer] = useState("");
   const [resume, setResume] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const epoch = useRef(0), lock = useRef(false);
   const provider = auth.providers?.find(row => row.id === selected);
+  const openCode = isOpenCodeProvider(selected);
   useEffect(() => {
-    if (!selected && auth.providers?.length) setSelected(auth.providers[0]!.id);
-  }, [auth.providers, selected]);
+    if (visible && !selected && auth.providers?.length) onSelect(auth.providers[0]!.id);
+  }, [auth.providers, onSelect, selected, visible]);
   useEffect(() => {
-    epoch.current++; setRoster(undefined); setInspected(""); setError(""); setBusy(false); lock.current = false; setRisk(false); setRiskAnswer(""); setResume(false);
+    epoch.current++; setRoster(undefined); setInspected(""); setRefreshError(undefined); setBusy(false); lock.current = false; setRisk(false); setRiskAnswer(""); setResume(false);
+    setApiKey(""); setKeyStatus("draft");
     return () => { epoch.current++; };
   }, [visible, context.client, context.sessionId, preview, selected]);
   /* The countdown mirrors the native 600 s wait; it never decides the outcome. */
@@ -47,9 +58,16 @@ export function NativeModelAccessPane({ context, auth, visible, onChanged, accou
     return () => window.clearInterval(timer);
   }, [auth.loginStartedAt]);
   const canRefresh = preview || modelServiceAvailable(context, "models.provider.roster.refresh");
-  const refresh = async () => {
+  const keyAvailable = auth.canEdit && provider?.kind === "api-key" && provider.available;
+  const canSaveKey = keyAvailable && !auth.busyProvider && !busy;
+  const refresh = async (notify = true) => {
     if (!visible || !selected || !canRefresh || lock.current) return;
-    const generation = epoch.current; lock.current = true; setBusy(true); setError(""); setInspected("");
+    const generation = epoch.current;
+    lock.current = true;
+    setBusy(true);
+    setRefreshError(undefined);
+    setInspected("");
+    if (openCode) setRoster(undefined);
     try {
       let next: ModelProviderRoster;
       if (preview) next = previewProviderRoster(selected);
@@ -57,9 +75,30 @@ export function NativeModelAccessPane({ context, auth, visible, onChanged, accou
         const handle = await context.client!.command("models.provider.roster.refresh", { sessionId: context.sessionId!, providerId: selected });
         next = await waitReceipt<ModelProviderRoster>(context.client!, handle.requestId, 45000);
       }
-      if (generation === epoch.current) { setRoster(next); onChanged?.(); }
-    } catch (cause) { if (generation === epoch.current) setError(hostErrorMessage(cause, tr("无法读取原生目录", "Native roster unavailable"))); }
+      if (generation === epoch.current) {
+        setRoster(next);
+        if (notify && (!openCode || !preview)) onChanged?.();
+      }
+    } catch (cause) { if (generation === epoch.current) setRefreshError(hostErrorMessage(cause, "")); }
     finally { if (generation === epoch.current) { lock.current = false; setBusy(false); } }
+  };
+  const saveOpenCodeKey = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!canSaveKey || !apiKey.trim() || lock.current) return;
+    const generation = epoch.current;
+    lock.current = true;
+    setKeyStatus("saving");
+    setRefreshError(undefined);
+    setRoster(undefined);
+    setInspected("");
+    const saved = await auth.key(selected, apiKey);
+    if (generation !== epoch.current) return;
+    lock.current = false;
+    setKeyStatus(saved ? "saved" : "unconfirmed");
+    if (!saved) return;
+    setApiKey("");
+    if (!preview) onChanged?.();
+    await refresh(false);
   };
   const login = async () => {
     if (!provider || !visible) return;
@@ -76,11 +115,15 @@ export function NativeModelAccessPane({ context, auth, visible, onChanged, accou
   if (!visible) return null;
   const waiting = auth.loginPending && auth.busyProvider === selected && auth.loginStartedAt !== undefined;
   const left = waiting ? NATIVE_LOGIN_WAIT_MS - (now - auth.loginStartedAt!) : 0;
+  const catalogFailed = refreshError !== undefined || roster?.status === "error";
+  const catalogDetail = refreshError || roster?.error;
+  const canCheckOpenCode = canRefresh && (provider?.authenticated || keyStatus === "saved");
+  const panelError = !openCode && refreshError !== undefined ? refreshError || tr("无法读取原生目录", "Native roster unavailable") : auth.error;
   return <section className="model-native-access mp-sec">
     <h3>{accounts ? tr("原生登录与凭据", "Native sign-in and credentials") : tr("原生供应商目录", "Native provider roster")}{preview && marks ? tr(" · 演示", " · Demo") : ""}</h3>
-    <p className="sec-desc">{tr("登录、风险确认与模型发现沿用当前 Runtime。Otari 等授权目录只显示该凭据实际获得的模型，不导入其他工作区的缓存。", "Sign-in, risk challenges and discovery use this Runtime. Authorized rosters such as Otari show only models granted to this credential, never another workspace's cache.")}</p>
+    {!openCode ? <p className="sec-desc">{tr("登录、风险确认与模型发现沿用当前 Runtime。Otari 等授权目录只显示该凭据实际获得的模型，不导入其他工作区的缓存。", "Sign-in, risk challenges and discovery use this Runtime. Authorized rosters such as Otari show only models granted to this credential, never another workspace's cache.")}</p> : null}
     <div className="model-native-toolbar">
-      <AppSelect className="select" aria-label={tr("原生供应商", "Native provider")} value={selected} disabled={!auth.providers?.length || busy || !!auth.busyProvider} onChange={event => setSelected(event.target.value)}>
+      <AppSelect className={openCode ? "model-native-key-picker" : ""} aria-label={tr("原生供应商", "Native provider")} value={selected} disabled={!auth.providers?.length || busy || !!auth.busyProvider} onChange={event => onSelect(event.target.value)}>
         {!auth.providers?.length ? <option value="">{auth.supported ? tr("正在读取…", "Loading…") : tr("原生授权不可用", "Native auth unavailable")}</option> : null}
         {auth.providers?.map(row => <option key={row.id} value={row.id}>{row.name} · {row.id}{row.paused ? tr(" · 已暂停", " · paused") : ""}</option>)}
       </AppSelect>
@@ -88,9 +131,48 @@ export function NativeModelAccessPane({ context, auth, visible, onChanged, accou
         <span className={`chip xs ${provider.authenticated ? "green" : "gray"}`}>{provider.authenticated ? tr("凭据已配置", "Credential configured") : tr("未配置凭据", "No credential")}</span>
         {provider.paused ? <span className="chip xs amber"><Icon name="pause" extra="sm" />{tr("已暂停", "Paused")}</span> : null}
       </span> : <span className="small muted">{tr("状态未知", "Status unknown")}</span>}
-      <button className="btn small outline" disabled={!auth.canLogin || !provider?.available || !!auth.busyProvider || busy} onClick={() => void login()}><Icon name="key" extra="sm" />{tr("原生登录", "Native sign-in")}</button>
-      {!accounts ? <button className="btn small outline" disabled={!provider || !canRefresh || busy || !!auth.busyProvider} onClick={() => void refresh()}><Icon name="refresh" extra="sm" />{tr("刷新授权目录", "Refresh authorized roster")}</button> : null}
+      {!openCode ? <button className="btn small outline" disabled={!auth.canLogin || !provider?.available || !!auth.busyProvider || busy} onClick={() => void login()}><Icon name="key" extra="sm" />{tr("原生登录", "Native sign-in")}</button> : null}
+      {!openCode && !accounts ? <button className="btn small outline" disabled={!provider || !canRefresh || busy || !!auth.busyProvider} onClick={() => void refresh()}><Icon name="refresh" extra="sm" />{tr("刷新授权目录", "Refresh authorized roster")}</button> : null}
     </div>
+    {openCode && provider ? <form className="model-native-key" onSubmit={event => void saveOpenCodeKey(event)}>
+      <div className="model-native-key-heading">
+        <div>
+          <h4>{t("modelConfig.openCode.configure")}</h4>
+          <p>{t("modelConfig.openCode.instructions", { provider: provider.name })}</p>
+        </div>
+        <a className="btn outline" href={OPENCODE_CONSOLE} target="_blank" rel="noopener noreferrer">
+          {t("modelConfig.openCode.console")}<Icon name="external" extra="sm" />
+        </a>
+      </div>
+      <div className="model-native-key-controls">
+        <div className="field">
+          <label htmlFor={keyField}>API Key</label>
+          <input id={keyField} className="input mono" type="password" autoComplete="new-password" spellCheck={false}
+            value={apiKey} disabled={!canSaveKey} onChange={event => { setApiKey(event.target.value); setKeyStatus("draft"); }} />
+        </div>
+        <button className="btn lg primary" type="submit" disabled={!canSaveKey || !apiKey.trim()}>{t("modelConfig.openCode.save")}</button>
+      </div>
+      {!keyAvailable && !provider.paused ? <p className="small muted">{t("modelConfig.openCode.unavailable")}</p> : null}
+      {keyStatus === "unconfirmed" ? <p className="model-native-key-error" role="alert">
+        {t("modelConfig.openCode.unconfirmed")}{auth.error ? <small>{auth.error}</small> : null}
+      </p> : null}
+      <div className="model-native-key-feedback" role="status">
+        {keyStatus === "saving" ? <p><span className="spinner" aria-hidden="true" />{t("modelConfig.openCode.saving")}</p> : null}
+        {keyStatus === "saved" ? <p className="model-native-key-saved"><Icon name="check" extra="sm" />{t("modelConfig.openCode.saved")}</p> : null}
+        {busy ? <p>{t("modelConfig.openCode.catalogLoading")}</p> : null}
+        {keyStatus === "saved" && !canRefresh ? <p>{t("modelConfig.openCode.catalogUnavailable")}</p> : null}
+        {roster && !catalogFailed ? <p>{roster.models.length > 0
+          ? t("modelConfig.openCode.catalogReady", { count: roster.total ?? roster.models.length })
+          : t("modelConfig.openCode.catalogEmpty")}</p> : null}
+      </div>
+      {catalogFailed ? <p className="model-native-key-error" role="alert">
+        {t("modelConfig.openCode.catalogError")}{catalogDetail ? <small>{catalogDetail}</small> : null}
+      </p> : null}
+      {canCheckOpenCode ? <button className="btn small outline model-native-key-check" type="button" disabled={busy || !!auth.busyProvider} onClick={() => void refresh()}>
+        <Icon name="refresh" extra="sm" />{t("modelConfig.openCode.catalogCheck")}
+      </button> : null}
+    </form> : null}
+    {openCode && !provider && auth.providers?.length ? <p className="small muted">{t("modelConfig.openCode.unavailable")}</p> : null}
     {waiting ? <div className="model-native-login" role="status">
       <span className="spinner" aria-hidden="true" />
       <span><b>{tr("等待在浏览器中完成登录", "Waiting for sign-in in your browser")}</b><small>{tr(`Runtime 最多等待 10 分钟，剩余 ${clock(left)}。关闭本页或取消会同时结束后台登录。`, `The Runtime waits up to 10 minutes; ${clock(left)} left. Closing this page or cancelling ends the background sign-in too.`)}</small></span>
@@ -107,9 +189,9 @@ export function NativeModelAccessPane({ context, auth, visible, onChanged, accou
     {provider?.id === ANTIGRAVITY_CLI ? <AntigravityReadiness context={context} visible={visible} zh={zh} /> : null}
     {provider?.warning ? <p className="model-native-warning"><Icon name="alert" extra="sm" /><span>{provider.warning}</span></p> : null}
     {!auth.supported ? <p className="small muted">{tr("连接支持原生 GUI challenge 的 Runtime 后可操作；没有读取模型时保持空态。", "Connect a Runtime with the native GUI challenge channel to continue. No read model is substituted.")}</p> : null}
-    {auth.error || error ? <p role="alert">{error || auth.error}</p> : null}
-    {roster ? <div className="model-native-roster">
-      <p className="small muted">{roster.providerId} · {roster.authoritative ? tr("凭据授权的原生目录", "Native authoritative roster") : tr("当前原生目录", "Current native roster")}{roster.error ? ` · ${roster.error}` : ""}</p>
+    {panelError && keyStatus !== "unconfirmed" ? <p role="alert">{panelError}</p> : null}
+    {roster && (!openCode || (!catalogFailed && roster.models.length > 0)) ? <div className="model-native-roster">
+      {!openCode ? <p className="small muted">{roster.providerId} · {roster.authoritative ? tr("凭据授权的原生目录", "Native authoritative roster") : tr("当前原生目录", "Current native roster")}{roster.error ? ` · ${roster.error}` : ""}</p> : null}
       {roster.models.map(model => <div className="model-native-model" key={model.selector}>
         <span><b>{model.name}</b><code>{model.selector}</code></span><span className="chip gray xs">{model.kind}</span><code>{model.api}</code>
         <span className="small muted">{model.contextWindow === undefined ? tr("上下文未知", "Context unknown") : `${model.contextWindow.toLocaleString()} tokens`}</span>
