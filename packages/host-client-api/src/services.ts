@@ -576,6 +576,8 @@ export interface HostWorkspaceFileService {
   inspect?(input: import("@omp-studio/client-contract").WorkspaceFileTarget): Promise<import("@omp-studio/client-contract").WorkspaceFileInfo>;
   readText?(input: import("@omp-studio/client-contract").WorkspaceFileTarget): Promise<import("@omp-studio/client-contract").WorkspaceFileText>;
   readChunk?(input: import("@omp-studio/client-contract").WorkspaceFileChunkInput): Promise<import("@omp-studio/client-contract").WorkspaceFileChunk>;
+  /** Classifies path-like transcript text; paths it cannot classify are omitted from the result. */
+  resolveAll?(input: import("@omp-studio/client-contract").WorkspacePathResolveInput): Promise<readonly import("@omp-studio/client-contract").WorkspacePathResolution[]>;
   writeText?(input: import("@omp-studio/client-contract").WorkspaceFileWrite): Promise<import("@omp-studio/client-contract").WorkspaceFileSaveResult>;
   get(input: { readonly workspaceId: WorkspaceId; readonly path?: string }): WorkspaceFileTreeReadModel | Promise<WorkspaceFileTreeReadModel>;
   createFile(input: { readonly workspaceId: WorkspaceId; readonly path: string }): WorkspaceFileMutationResult | Promise<WorkspaceFileMutationResult>;
@@ -589,6 +591,8 @@ export interface HostSystemFileService {
   inspect(input: import("@omp-studio/client-contract").SystemFileTarget): Promise<import("@omp-studio/client-contract").SystemFileInfo>;
   readText(input: import("@omp-studio/client-contract").SystemFileTarget): Promise<import("@omp-studio/client-contract").SystemFileText>;
   readChunk(input: import("@omp-studio/client-contract").SystemFileChunkInput): Promise<import("@omp-studio/client-contract").WorkspaceFileChunk>;
+  /** Absolute-path counterpart of {@link HostWorkspaceFileService.resolveAll}; unclassifiable paths are skipped. */
+  resolveAll?(input: Omit<import("@omp-studio/client-contract").WorkspacePathResolveInput, "workspaceId">): Promise<readonly import("@omp-studio/client-contract").WorkspacePathResolution[]>;
   writeText(input: import("@omp-studio/client-contract").SystemFileWrite): Promise<import("@omp-studio/client-contract").SystemFileSaveResult>;
   createDirectory(input: { readonly parent: string; readonly name: string }): Promise<import("@omp-studio/client-contract").SystemFileMutationResult>;
   rename(input: { readonly path: string; readonly name: string }): Promise<import("@omp-studio/client-contract").SystemFileMutationResult>;

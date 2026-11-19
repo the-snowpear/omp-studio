@@ -76,6 +76,8 @@ export const CORE_RENDERER_SUITES = [
   "src/conversation/useConversation.test.ts",
   "src/InteractionDeck.test.tsx",
   "src/sessionLifecycle.test.ts",
+  // Sidebar rows stay bound to the workspace their session was created in.
+  "src/sidebar/provisionalThread.test.ts",
   "src/HistoryPage.test.tsx",
   "src/settings/DesktopUpdateRecovery.test.tsx",
   // Dock workbench: layout model, persistence, the stable host layer and the
@@ -87,6 +89,7 @@ export const CORE_RENDERER_SUITES = [
   "src/dock/browserPages.test.ts",
   "src/dock/fileViews.test.ts",
   "src/files/fileTypes.test.ts",
+  "src/files/fileLinks.test.tsx",
   "src/files/fileDocuments.test.ts",
   "src/browser/browserDockSync.test.ts",
   "src/dock/hosts.test.ts",

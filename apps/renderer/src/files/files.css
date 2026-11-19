@@ -124,6 +124,7 @@
 .file-split>.file-markdown{border-left:1px solid var(--border);padding:24px 28px 48px}
 .file-diff-body{flex:1;min-height:0;overflow:auto;font-family:var(--font-mono);font-size:12px;background:var(--surface)}
 .file-reference{color:var(--accent);cursor:pointer;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px}.chip-code .file-reference{color:inherit}
+.file-reference.is-directory{text-decoration-style:dotted;text-decoration-thickness:2px}
 .file-disk-comparison{flex:1;min-width:0;display:flex;flex-direction:column;border-left:1px solid var(--border);background:var(--surface)}
 .file-disk-comparison header{height:34px;padding:0 6px 0 12px;display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:var(--fs-11);color:var(--text-3);background:var(--surface-2);border-bottom:1px solid var(--border)}
 .file-disk-comparison header>span:first-child{display:inline-flex;align-items:center;gap:5px;font-weight:600}

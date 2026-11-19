@@ -1,6 +1,25 @@
 import type { WorkspaceId } from "./ids.js";
 
 export interface WorkspaceFileTarget { readonly workspaceId: WorkspaceId; readonly path: string }
+/**
+ * Batched existence probe for path-like text in transcripts. Relative paths
+ * resolve inside the workspace; absolute paths resolve through the system file
+ * service. Only paths a Host service actually classified are reported back —
+ * an unclassified path stays an ordinary link instead of a false negative.
+ */
+export interface WorkspacePathResolveInput {
+  readonly workspaceId: WorkspaceId;
+  readonly paths: readonly string[];
+  /** Follow deferred paths when the user activates a link. */
+  readonly explicit?: boolean;
+}
+export type WorkspacePathKind = "file" | "directory" | "missing";
+export interface WorkspacePathResolution { readonly path: string; readonly kind: WorkspacePathKind }
+export interface WorkspacePathResolveResult { readonly resolutions: readonly WorkspacePathResolution[] }
+/** System paths belong to the selected Host, including references relative to that Host's home. */
+export function isSystemFilePath(path: string): boolean {
+  return /^(?:[A-Za-z]:[\\/]|[\\/]|~(?:[\\/]|$)|file:)/i.test(path);
+}
 export type FileEncoding = "utf8" | "utf16le" | "utf16be";
 export interface WorkspaceFileInfo extends WorkspaceFileTarget {
   /** Canonical identity within this Host; qualify with the connection in the UI. */

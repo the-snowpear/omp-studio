@@ -102,7 +102,7 @@ import type {
   GitOperationResult,
   GitHubOperationResult,
 } from "@omp-studio/client-contract";
-import { CLIENT_CONTRACT_VERSION } from "@omp-studio/client-contract";
+import { CLIENT_CONTRACT_VERSION, isSystemFilePath } from "@omp-studio/client-contract";
 import type {
   AgentTranscriptPage,
   CapabilityManifest,
@@ -189,6 +189,8 @@ const HISTORY_MAX_LIMIT = 200;
 const HOME_RECENT_THREADS = 5;
 const HOME_RECENT_WORKSPACES = 8;
 const DEFAULT_REGISTRY_CAPACITY = 512;
+/** Transcript path probes are bounded per request; the Renderer batches by frame. */
+const PATH_RESOLVE_LIMIT = 96;
 /**
  * Retained "already emitted" fingerprints per facade. Two entries per command
  * (`#terminalEmitted` + `#ledgerReceiptKeys`) would otherwise grow for the
@@ -1060,6 +1062,24 @@ export class StudioHostClientFacade implements ClientTransport {
         const result = request.queryName === "workspace.file.inspect" ? await service.inspect(input)
           : request.queryName === "workspace.file.readText" ? await service.readText(input) : await service.readChunk(input);
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "workspace.paths.resolve": {
+        const input = request.input as import("@omp-studio/client-contract").WorkspacePathResolveInput;
+        const workspaceFiles = this.#options.workspaceFiles, systemFiles = this.#options.systemFiles;
+        if (!workspaceFiles?.resolveAll && !systemFiles?.resolveAll) {
+          throw clientError("CAPABILITY_UNAVAILABLE", hostText("此 Host 不能解析文件路径，请更新 Host", "This Host cannot resolve file paths; please update the Host"));
+        }
+        const relative: string[] = [], absolute: string[] = [];
+        for (const path of input.paths.slice(0, PATH_RESOLVE_LIMIT)) {
+          if (typeof path !== "string" || path.length === 0) continue;
+          (isSystemFilePath(path) ? absolute : relative).push(path);
+        }
+        const explicit = input.explicit === true;
+        const [workspace, system] = await Promise.all([
+          relative.length > 0 ? workspaceFiles?.resolveAll?.({ workspaceId: input.workspaceId, paths: relative, explicit }) : undefined,
+          absolute.length > 0 ? systemFiles?.resolveAll?.({ paths: absolute, explicit }) : undefined,
+        ]);
+        return { ok: true, queryName: request.queryName, result: { resolutions: [...(workspace ?? []), ...(system ?? [])] } } as ClientQueryResponse;
       }
       case "workspace.fileTree": {
         const service = this.#options.workspaceFiles;
