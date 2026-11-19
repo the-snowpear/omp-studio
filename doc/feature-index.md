@@ -22,7 +22,7 @@
 
 | 功能 | Renderer / 预览 | Runtime / 协议 |
 | --- | --- | --- |
-| 原生 HTML 表单 | `InteractionDeck.tsx`、`deck/{FormCard,FormFields,FormSession}`、`preview/{formPreview,PreviewDeck}` | overlay `remote-extension-ui.ts`、`services/{form-presentation,interaction-port,tree-service,studio-thread-service}`；`contracts/forms.ts`；正文瞬时 `interaction.form.read`，不进 snapshot / ledger |
+| 原生 HTML 表单 | `InteractionDeck.tsx`、`deck/{FormCard,FormFields,FormSession,formPages,QuestionHeightHandle}`、`preview/{formPreview,PreviewDeck}` | 按 OMP 原生问题标签分页，末页可核对答案；拖动顶边调整卡高。overlay `remote-extension-ui.ts`、`services/{form-presentation,interaction-port,tree-service,studio-thread-service}`；`contracts/forms.ts`；正文瞬时 `interaction.form.read`，不进 snapshot / ledger |
 | 有序步骤与委派策略 | `AgentHub.tsx`、`agents/{TaskAssignmentEditor,TaskStepsView}`、`settings/TaskDelegationSettings.tsx`、`preview/taskStepsPreview.ts` | 原生 `task/executor.ts` / `task/steps.ts`，overlay `services/{agent-hub,task-options}-service.ts`；`contracts/agents-jobs.ts`；一次 spawn、同一 Agent/job，最多四组原生提示 |
 | 同页浏览器与引擎选择 | `browser/{BrowserPane,BrowserStartPage,ManagedBrowserPane,NativeBrowserFrame,browserNativeBackend,useNativeBrowserObservation}`、`preview/browserPreview.ts` | overlay `services/browser-observation-{service,adapter}.ts`、`browser-tab-control.ts`；Desktop `browser-observation.ts` / `managed-browser-relay.ts`；`contracts/browser-observation.ts`；继承 CLI 时不传 `app`，embedded 显式选择 |
 | 系统模板与实际来源 | `ModelConfigPage.tsx`、`models/ModelSystemTemplates.tsx`、`preview/modelServicesPreview.ts` | overlay `services/model-system-templates-service.ts`；原生 `sdk.ts` / `system-prompt.ts`；`contracts/model-services.ts`；config.yml 关联、既有编辑器与原生重渲染 |

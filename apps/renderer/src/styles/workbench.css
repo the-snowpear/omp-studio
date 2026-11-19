@@ -2914,8 +2914,10 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 
 /* 预览与真实共用 .preview-queue：ver1 队列 1/N，同一窗口切换审批 / 提问，不并排两张卡 */
 .deck.preview-queue {
+  --deck-space: var(--deck-max-height, calc(100dvh - var(--sp-16)));
+  --deck-cap: max(0px, min(var(--deck-limit, min(420px, 72vh)), var(--deck-space)));
   height: auto;
-  max-height: min(420px, 72vh, var(--deck-max-height, 72vh));
+  max-height: var(--deck-cap);
   overflow: visible;
 }
 .deck.preview-queue .deck-card {
@@ -2924,7 +2926,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   left: auto;
   right: auto;
   bottom: auto;
-  max-height: min(420px, 72vh, var(--deck-max-height, 72vh));
+  max-height: var(--deck-cap);
   overflow-y: auto;
   border-radius: inherit;
 }
@@ -2954,12 +2956,11 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 /* 矮工作区（含打开底栏）以真实 convo-wrap 高度封顶，不仅看 window vh。
    只收紧舞台 / 正文的 flex 最小尺寸，保留原有变高和换题动画；标题与主动作不随正文滚走。 */
 .convo-wrap[data-reading-column] > .composer-region > .deck {
-  --reading-deck-cap: max(0px, min(420px, 72vh, var(--deck-max-height, 72vh), calc(var(--reading-height, 100dvh) - var(--sp-16) - var(--sp-8))));
-  max-height: var(--reading-deck-cap);
+  --deck-space: min(var(--deck-max-height, 100dvh), calc(var(--reading-height, 100dvh) - var(--sp-16) - var(--sp-8)));
 }
 .convo-wrap[data-reading-column] > .composer-region > .deck :is(.deck-card, .dk-stage) {
   min-height: 0;
-  max-height: var(--reading-deck-cap);
+  max-height: var(--deck-cap);
 }
 .convo-wrap[data-reading-column] > .composer-region > .deck :is(.deck-card, .dk-stage):not([hidden]),
 .convo-wrap[data-reading-column] > .composer-region > .deck :is(.deck-card, .dk-stage) > :is(.ask-card, .approval-card) {
@@ -2967,7 +2968,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  max-height: var(--reading-deck-cap);
+  max-height: var(--deck-cap);
   overflow: hidden;
 }
 .convo-wrap[data-reading-column] > .composer-region > .deck :is(.deck-card, .dk-stage) > :is(.ask-card, .approval-card) {
@@ -2977,7 +2978,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   flex: none;
 }
 .convo-wrap[data-reading-column] > .composer-region > .deck :is(.ask-card, .approval-card) > :is(.dk-swap, .ask-body, .approval-body) {
-  flex: 0 1 auto;
+  flex: var(--question-body-flex, 0 1 auto);
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -2985,6 +2986,24 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .convo-wrap[data-reading-column] > .composer-region > .deck :is(.ask-head, .approval-head) { flex-wrap: wrap; }
 .convo-wrap[data-reading-column] > .composer-region > .deck :is(.ask-body, .approval-body) { overflow-wrap: anywhere; }
 .convo-wrap[data-reading-column] > .composer-region > .deck .dk-opt-row { flex-wrap: wrap; }
+
+.ask-card:has(> .question-height-handle) { position: relative; }
+.question-height-handle {
+  position: absolute; z-index: 4; top: 0; inset-inline: var(--sp-8); height: 6px;
+  cursor: ns-resize; touch-action: none; user-select: none;
+}
+.question-height-handle::after {
+  content: ""; display: block; width: 40px; height: 3px; margin: 0 auto; border-radius: var(--r-full);
+}
+.question-height-handle:is(:hover, :focus-visible, :active)::after { background: var(--accent); }
+.deck.preview-queue.is-question-sized { --deck-limit: 100dvh; --question-body-flex: 1 1 0; }
+.deck.preview-queue.is-question-sized .ask-card, .ask-card.is-question-sized {
+  display: flex; flex-direction: column; height: min(var(--question-height), var(--deck-cap, 100dvh));
+}
+:is(.deck.preview-queue.is-question-sized .ask-card, .ask-card.is-question-sized) > :is(.ask-head, .dk-actions) { flex: none; }
+:is(.deck.preview-queue.is-question-sized .ask-card, .ask-card.is-question-sized) > :is(.ask-body, .dk-swap) {
+  flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+}
 /* ---------- Ask 紧凑卡 / Ask 卡：与子 Agent 检查卡相同的底边变形加载与退出。不作用于 Plan 卡。 */
 .deck.is-ask-enter,
 .deck.is-ask-leave {

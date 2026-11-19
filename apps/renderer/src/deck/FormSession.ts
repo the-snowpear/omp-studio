@@ -7,6 +7,7 @@ import type {
 import { choiceValue, fieldError, textValue } from "@oh-my-pi/pi-tui/html-form/data";
 import { spansText } from "@oh-my-pi/pi-tui/html-form/model";
 import { isZh, pickLocale, useI18n } from "../i18n";
+import { formPages } from "./formPages";
 
 export type FormInteraction = Extract<ClientInteraction, { kind: "form" }>;
 export type ReadInteractionForm = (interaction: FormInteraction, signal: AbortSignal) => Promise<InteractionForm>;
@@ -25,8 +26,8 @@ export interface FormFieldDraft {
 export interface FormViewState {
   readonly collapsed: boolean;
   readonly expanded: boolean;
-  readonly section: number;
-  readonly focusField?: string;
+  readonly page: number;
+  readonly focusField?: string | undefined;
   readonly focusVersion: number;
 }
 
@@ -53,7 +54,7 @@ export class FormSession {
   #viewListeners = new Set<Listener>();
   #metaListeners = new Set<Listener>();
   #surfaces = new Map<symbol, Surface>();
-  #view: FormViewState = { collapsed: false, expanded: false, section: 0, focusVersion: 0 };
+  #view: FormViewState = { collapsed: false, expanded: false, page: 0, focusVersion: 0 };
   #meta: FormMetaState;
   #deadline = 0;
   #tick: number | undefined;
@@ -193,10 +194,13 @@ export class FormSession {
 
   setCollapsed(collapsed: boolean): void { this.touch(); this.#setView({ ...this.#view, collapsed }); }
   setExpanded(expanded: boolean): void { this.touch(); this.#setView({ ...this.#view, expanded }); }
-  setSection(section: number): void { this.touch(); this.#setView({ ...this.#view, section }); }
+  showPage(page: number, focusField?: string): void {
+    this.touch();
+    this.#setView({ ...this.#view, collapsed: false, page, focusField, focusVersion: this.#view.focusVersion + 1 });
+  }
   focusField(id: string): void {
-    const section = this.form?.sections.findIndex(group => group.blocks.some(block => block.kind === "field" && block.fieldId === id)) ?? 0;
-    this.#setView({ ...this.#view, collapsed: false, section: Math.max(0, section), focusField: id, focusVersion: this.#view.focusVersion + 1 });
+    const page = this.form ? formPages(this.form).findIndex(group => group.fields.some(field => field.id === id)) : 0;
+    this.showPage(Math.max(0, page), id);
   }
 
   async submit(timedOut = this.#meta.timedOut === true): Promise<boolean> {

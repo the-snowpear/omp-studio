@@ -4,8 +4,9 @@ import { spansText } from "@oh-my-pi/pi-tui/html-form/model";
 import { OTHER_LABEL } from "@oh-my-pi/pi-tui/html-form/data";
 import { AppSelect } from "../AppSelect";
 import { SvgFigureImage } from "../graphics/SvgFigureImage";
-import { isZh, useI18n } from "../i18n";
+import { useI18n } from "../i18n";
 import { FormSession } from "./FormSession";
+import type { FormPage } from "./formPages";
 
 /** Render native inline spans as text and fixed semantic tags, never Host HTML. */
 export function FormSpans({ spans }: { spans: readonly FormSpan[] }) {
@@ -14,36 +15,22 @@ export function FormSpans({ spans }: { spans: readonly FormSpan[] }) {
     : span.style === "em" ? <em key={index}>{span.text}</em> : <span key={index}>{span.text}</span>)}</>;
 }
 
-export function formSectionLabel(form: InteractionForm, index: number, zh = isZh()): string {
-  const section = form.sections[index];
-  const first = section?.blocks.find(block => block.kind === "field");
-  return spansText(section?.title ?? []) || (first?.kind === "field" ? form.fields.find(field => field.id === first.fieldId)?.question : undefined) || (zh ? `题组 ${index + 1}` : `Section ${index + 1}`);
-}
-
-export function FormFields({ form, session, section, grouped, disabled }: {
-  form: InteractionForm; session: FormSession; section: number; grouped: boolean; disabled?: boolean | undefined;
+export function FormFields({ form, session, pages, current, disabled }: {
+  form: InteractionForm; session: FormSession; pages: FormPage[]; current: number; disabled?: boolean | undefined;
 }) {
-  const { resolvedLanguage } = useI18n();
-  const zh = resolvedLanguage === "zh";
   const fields = useMemo(() => new Map(form.fields.map(field => [field.id, field])), [form]);
   const locked = useSyncExternalStore(session.subscribeMeta, () => session.getMeta().phase !== "open", () => true);
-  const groups = form.sections.flatMap((group, index) => group.blocks.some(block => block.kind === "field") ? [index] : []);
-  const pos = groups.indexOf(section);
-  const start = (groups[pos - 1] ?? -1) + 1;
-  const end = pos === groups.length - 1 ? form.sections.length : section + 1;
-  return <>{form.sections.map((group, index) => {
+  return <>{pages.map((page, pageIndex) => <div className="form-page" key={pageIndex} hidden={pageIndex !== current}>{page.sections.map((group, index) => {
     const content = group.blocks.map((block, at) => block.kind === "field" ? (
       <FormFieldView key={at} field={fields.get(block.fieldId)!} session={session} disabled={disabled || locked} />
     ) : <FormContextBlock key={at} block={block} />);
-    const hidden = grouped && (index < start || index >= end);
-    // Native loose context rides with its next fieldset; trailing context stays with the last.
-    if (group.fieldset) return <fieldset key={index} className="form-section" hidden={hidden} aria-label={formSectionLabel(form, index, zh)}>
+    if (group.fieldset) return <fieldset key={index} className="form-section" aria-label={page.label}>
       {group.title.length ? <legend><FormSpans spans={group.title} /></legend> : null}{content}
     </fieldset>;
-    return <section key={index} className="form-section form-loose" hidden={hidden}>
+    return <section key={index} className="form-section form-loose">
       {group.title.length ? <h3><FormSpans spans={group.title} /></h3> : null}{content}
     </section>;
-  })}</>;
+  })}</div>)}</>;
 }
 
 const FormContextBlock = memo(function FormContextBlock({ block }: { block: Exclude<InteractionFormBlock, { kind: "field" }> }) {
