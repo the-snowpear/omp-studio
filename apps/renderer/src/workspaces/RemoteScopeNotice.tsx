@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useExecutionTarget } from "./ExecutionTargets";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { useI18n } from "../i18n";
-import { remoteConnectionPending, remoteStatusLabel } from "./remoteStatus";
+import { executionTargetLabel, remoteConnectionPending, remoteStatusLabel } from "./remoteStatus";
 
 export function RemoteScopeNotice() {
   const { resolvedLanguage } = useI18n();
@@ -14,7 +14,7 @@ export function RemoteScopeNotice() {
   if (!target.id || preview) return null;
   const status = target.inventory.statuses.find(value => value.id === target.id);
   const connected = status?.state === "connected";
-  if (connected && !status.operation && !status.hostRestarted) return <div className="remote-scope-label" role="status">SSH · {target.name}</div>;
+  if (connected && !status.operation && !status.hostRestarted) return <div className="remote-scope-label" role="status">{executionTargetLabel(target.kind, target.name)}</div>;
   const installing = status?.operation === "installing-runtime";
   const recovering = remoteConnectionPending(status);
   const run = async (action: () => Promise<void>) => {
@@ -23,7 +23,7 @@ export function RemoteScopeNotice() {
     finally { setBusy(false); }
   };
   return <div className={`remote-scope-notice${recovering || connected || installing ? "" : " disconnected"}`} role="status" aria-live="polite">
-    <span><strong>SSH · {target.name} · {remoteStatusLabel(status, zh)}</strong><br />
+    <span><strong>{executionTargetLabel(target.kind, target.name)} · {remoteStatusLabel(status, zh)}</strong><br />
       {status?.message ?? (zh ? "连接已断开，未确认的命令不会自动重发。" : "Disconnected. Unconfirmed commands will not be resent automatically.")}
       {status?.attempt ? <small className="remote-retry-count">{zh ? `恢复尝试 ${status.attempt} / ${status.maxAttempts}${status.retryAt ? " · 退避等待中" : ""}` : `Recovery attempt ${status.attempt} / ${status.maxAttempts}${status.retryAt ? " · backing off" : ""}`}</small> : null}
     </span>

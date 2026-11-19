@@ -12,6 +12,11 @@ import type { ShellEventLogEntry } from "../shellMemory";
 import type { LedgerCommandRow } from "../panels/types";
 import type { CommandName, EventCursor, WorkspaceListReadModel, WorkspaceId } from "@omp-studio/client-contract";
 
+export const PREVIEW_WSL_DIRECTORY = "/home/dev/project";
+export const PREVIEW_WSL_DISTROS: import("../../../desktop/src/remote/shared").WslDistribution[] = [
+  { name: "Ubuntu-24.04", version: 2, running: true, isDefault: true },
+  { name: "Debian", version: 2, running: false, isDefault: false },
+];
 export const PREVIEW_SSH_TARGETS = [
   { id: "demo-linux", name: "dev-linux", platform: "linux" as const },
   { id: "demo-windows", name: "build-windows", platform: "win32" as const },

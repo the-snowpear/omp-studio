@@ -3109,6 +3109,7 @@ const zhRaw = {
     "changes": "未提交改动",
     "local": "此计算机",
     "remote": "SSH · {name}",
+    "remoteWsl": "WSL · {name}",
     "noProject": "未选择项目",
     "noRepository": "非 Git 仓库",
     "detached": "游离 HEAD",

@@ -1,6 +1,10 @@
 import type { RemoteConnectionStatus } from "../../../desktop/src/remote/shared";
 import { isZh } from "../i18n";
 
+export function executionTargetLabel(kind: "local" | "ssh" | "wsl", name: string): string {
+  return kind === "local" ? name : `${kind === "wsl" ? "WSL" : "SSH"} · ${name}`;
+}
+
 export function remoteStatusLabel(status?: RemoteConnectionStatus, zh = isZh()): string {
   if (status?.operation) return zh ? "安装中" : "Installing";
   switch (status?.state) {

@@ -5,7 +5,7 @@ export interface FileViewerActions {
   contextWorkspaceId?: string | undefined;
   /** Installed editors for 「打开方式」; local files only. */
   openers: readonly FileOpenerOption[];
-  runShell(workspaceId: string, action: FileMenuAction, target: FileMenuTarget): void;
+  runShell(workspaceId: string, action: FileMenuAction, target: FileMenuTarget, targetId?: string | null): void;
   openProjectPath?(path: string, targetId: string | null): Promise<void>;
   revealInExplorer?(workspaceId: string, path: string): void;
   /** Inserts a file capsule into the main Composer; `lines` follows it as an inclusive `L3-L8` range. */

@@ -1,3 +1,4 @@
+import { useExecutionTarget } from "../workspaces/ExecutionTargets";
 import { useSurfaceDocument } from "../dock/SurfaceContext";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { WorkspaceId } from "@omp-studio/client-contract";
@@ -105,10 +106,12 @@ export default function FilePane({ id, descriptor, session, visible, onSettings,
       setNotice(lines ? (zh ? `已添加第 ${lines[0] === lines[1] ? lines[0] : `${lines[0]}–${lines[1]}`} 行到对话` : `Added ${lines[0] === lines[1] ? `line ${lines[0]}` : `lines ${lines[0]}–${lines[1]}`} to conversation`) : (zh ? "已添加到对话" : "Added to conversation"));
     } catch (error) { setNotice(error instanceof Error ? error.message : String(error)); }
   };
-  const desktopReason = preview ? (zh ? "预览演示中不可用" : "Unavailable in preview demo") : descriptor.targetId ? (zh ? "远程文件请先下载，再用本机应用打开" : "Download remote files before opening with a local app") : !actions || !globalThis.ompStudioChrome?.openFile ? (zh ? "仅桌面工作台可用" : "Available in desktop app only") : undefined;
+  const { inventory } = useExecutionTarget();
+  const wsl = inventory.profiles.some(profile => profile.id === descriptor.targetId && profile.kind === "wsl");
+  const desktopReason = preview ? (zh ? "预览演示中不可用" : "Unavailable in preview demo") : descriptor.targetId && (!wsl || descriptor.source === "system") ? (zh ? "远程文件请先下载，再用本机应用打开" : "Download remote files before opening with a local app") : !actions || !globalThis.ompStudioChrome?.openFile ? (zh ? "仅桌面工作台可用" : "Available in desktop app only") : undefined;
   const shell = (action: FileMenuAction) => {
     if (desktopReason) return;
-    if (descriptor.source !== "system") { actions?.runShell(descriptor.workspaceId, action, { path: relativePath, name, kind: "file" }); return; }
+    if (descriptor.source !== "system") { actions?.runShell(descriptor.workspaceId, action, { path: relativePath, name, kind: "file" }, descriptor.targetId ?? null); return; }
     const chrome = globalThis.ompStudioChrome!;
     const operation = action.type === "openSystem" ? chrome.systemFileOpen({ path: relativePath })
       : action.type === "openWith" ? chrome.systemFileOpenWith({ path: relativePath, openerId: action.openerId as "vscode" | "cursor" | "windsurf" | "choose" })

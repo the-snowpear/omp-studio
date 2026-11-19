@@ -3109,6 +3109,7 @@ export const en: LocaleDictionary = {
     "changes": "Uncommitted changes",
     "local": "This computer",
     "remote": "SSH · {name}",
+    "remoteWsl": "WSL · {name}",
     "noProject": "No project",
     "noRepository": "Not a Git repository",
     "detached": "Detached HEAD",

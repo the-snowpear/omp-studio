@@ -4,6 +4,7 @@
  * （App.tsx RealFileTree）与预览树（preview/surfaces.tsx）渲染同一份
  * FileMenuContent / FileRowMenu，预览态用 desktopActionsReason 禁用桌面依赖项。
  */
+import { useExecutionTarget } from "./workspaces/ExecutionTargets";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { AnnotationButton } from "./annotations/Annotations";
 import { createPortal } from "react-dom";
@@ -161,6 +162,7 @@ export function FileMenuContent({ target, openers, onRun, desktopActionsReason }
   desktopActionsReason?: string | undefined;
 }) {
   const { t, resolvedLanguage } = useI18n();
+  const { kind } = useExecutionTarget();
   const desktopOnly = desktopActionsReason === undefined
     ? {}
     : { disabled: true, title: desktopActionsReason };
@@ -182,7 +184,7 @@ export function FileMenuContent({ target, openers, onRun, desktopActionsReason }
         onPick={(openerId) => onRun({ type: "openWith", openerId })}
       />
       <div className="menu-sep" />
-      {target.kind==="file"&&(/\.(exe|dll|so|dylib|bin|elf|i64|idb|sys|o|a)$/i.test(target.path)||(PLATFORM==="darwin"&&!target.name.includes(".")))?<MenuItem icon="code" onClick={()=>onRun({type:"ida"})} {...desktopOnly}>IDA</MenuItem>:null}
+      {kind !== "wsl" && target.kind==="file"&&(/\.(exe|dll|so|dylib|bin|elf|i64|idb|sys|o|a)$/i.test(target.path)||(PLATFORM==="darwin"&&!target.name.includes(".")))?<MenuItem icon="code" onClick={()=>onRun({type:"ida"})} {...desktopOnly}>IDA</MenuItem>:null}
       <MenuItem icon="folder-open" onClick={() => onRun({ type: "reveal" })} {...desktopOnly}>
         {t("shell.fileRevealInExplorer", { fileManager: fileManagerName(t) })}
       </MenuItem>

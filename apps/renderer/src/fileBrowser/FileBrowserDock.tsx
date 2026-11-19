@@ -3,7 +3,8 @@ import type { WorkspaceId } from "@omp-studio/client-contract";
 import { PanelInstances } from "../dock/PanelRegistration";
 import { useDockEngine } from "../dock/DockContext";
 import { useConversationView } from "../conversationWorkspace/Context";
-import { useExecutionTargets } from "../workspaces/ExecutionTargets";
+import { executionTargetLabel } from "../workspaces/remoteStatus";
+import { useExecutionTarget, useExecutionTargets } from "../workspaces/ExecutionTargets";
 import { useI18n } from "../i18n";
 import { hostErrorMessage } from "../hostError";
 import { useOpenFile } from "../files/fileLinks";
@@ -74,8 +75,9 @@ export function FileBrowserDock({ targetId, targetName, workspaceId, actions }: 
   const { preview } = usePreviewMode(), { resolvedLanguage } = useI18n();
   const targets = useExecutionTargets(), view = useConversationView(), { store } = useDockEngine();
   const open = useOpenFile(), language: "zh" | "en" = resolvedLanguage === "zh" ? "zh" : "en";
-  const contextRef = useRef({ language, workspaceId, targetId, targetName, targets });
-  contextRef.current = { language, workspaceId, targetId, targetName, targets };
+  const { inventory } = useExecutionTarget();
+  const contextRef = useRef({ inventory, language, workspaceId, targetId, targetName, targets });
+  contextRef.current = { inventory, language, workspaceId, targetId, targetName, targets };
   const [location, setLocation] = useState<{ revision: number; path?: string; error?: string; targetId: string | null }>();
   const browserTarget = location ? location.targetId : targetId;
   const source = useMemo(
@@ -87,7 +89,13 @@ export function FileBrowserDock({ targetId, targetName, workspaceId, actions }: 
             targetId: browserTarget,
             workspaceId: () => contextRef.current.workspaceId,
             language: () => contextRef.current.language,
-            label: () => (browserTarget ? `SSH · ${(browserTarget === contextRef.current.targetId ? contextRef.current.targetName : undefined) ?? browserTarget}` : contextRef.current.language === "zh" ? "本机" : "Local"),
+            label: () => {
+              const context = contextRef.current;
+              if (!browserTarget) return context.language === "zh" ? "本机" : "Local";
+              const profile = context.inventory.profiles.find(item => item.id === browserTarget);
+              const name = profile?.name ?? (browserTarget === context.targetId ? context.targetName : undefined) ?? browserTarget;
+              return executionTargetLabel(profile?.kind ?? "ssh", name);
+            },
           }),
     [preview, browserTarget],
   );
