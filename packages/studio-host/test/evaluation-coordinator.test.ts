@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EvaluationCoordinator, type EvaluationWorker } from "../src/evaluation-coordinator.js";
@@ -42,6 +42,42 @@ function completedWorker(overrides: Partial<EvaluationWorker> = {}): EvaluationW
     ...overrides,
   };
 }
+
+test("pages saved results in first-key order across updates, file replacement, and restart", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "studio-evaluation-paged-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const evaluations = join(directory, "evaluations");
+  const library = new ArtifactLibrary({ profileDirectory: directory });
+  const workers = { open: async () => completedWorker() };
+  const coordinator = new EvaluationCoordinator(evaluations, workers, library);
+  const { id } = await coordinator.start(benchmarkInput);
+  const path = join(evaluations, `${id}.rows.jsonl`);
+  const first = { data: { key: "nested", value: "中🚀".repeat(20_000) }, key: "first" };
+  const second = { key: "second", data: { value: 2 } };
+  await writeFile(path, JSON.stringify(first) + "\r\n\r\n" + JSON.stringify(second));
+  assert.deepEqual(await Promise.all([
+    coordinator.rows({ id, limit: 1 }), coordinator.rows({ id, offset: 1, limit: 1 }),
+  ]), [
+    { rows: [first], offset: 0, nextOffset: 1, total: 2 },
+    { rows: [second], offset: 1, nextOffset: 2, total: 2 },
+  ]);
+
+  const updated = { ...first, data: { value: "更新" } };
+  await appendFile(path, "\n" + JSON.stringify(updated) + "\n");
+  assert.deepEqual((await coordinator.rows({ id })).rows, [updated, second]);
+  const replacement = { ...updated, data: { value: "replacement" } };
+  await writeFile(path + ".next", [second, replacement].map(row => JSON.stringify(row)).join("\r\n"));
+  await rename(path + ".next", path);
+  assert.deepEqual((await coordinator.rows({ id })).rows, [second, replacement]);
+  const artifact = await coordinator.export({ id, format: "csv" });
+  const exported = await library.readText(artifact.artifactId);
+  assert.match(exported.text, /second[^\r\n]+\r\n"first"[^\r\n]+replacement/);
+  await coordinator.shutdown();
+
+  const restarted = new EvaluationCoordinator(evaluations, workers, library);
+  assert.deepEqual((await restarted.rows({ id, offset: 1, limit: 1 })).rows, [replacement]);
+  await restarted.shutdown();
+});
 
 test("concurrent evaluation surfaces reuse one prepared Worker and release it when the run ends", async t => {
   const directory = await mkdtemp(join(tmpdir(), "studio-evaluation-shared-"));

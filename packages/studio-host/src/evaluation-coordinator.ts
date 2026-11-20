@@ -21,6 +21,7 @@ import {
   type EvaluationExportResult,
 } from "@omp-studio/studio-protocol";
 import type { ArtifactLibrary } from "./artifact-library.js";
+import { EvaluationRowIndex } from "./evaluation-row-index.js";
 
 export interface EvaluationWorker {
   sessionId: string;
@@ -68,6 +69,7 @@ export class EvaluationCoordinator {
   readonly #sessions = new Set<string>();
   readonly #writes = new Map<string, Promise<void>>();
   readonly #rowVersions = new Map<string, Map<string, string>>();
+  readonly #rowIndex = new EvaluationRowIndex();
   #sessionWrite = Promise.resolve();
   #closed = false;
   constructor(
@@ -586,8 +588,15 @@ export class EvaluationCoordinator {
     offset?: number;
     limit?: number;
   }): Promise<EvaluationResultPage> {
-    await this.read(input.id);
+    const record = await this.read(input.id);
     const offset = input.offset ?? 0, limit = Math.min(input.limit ?? 50, 200);
+    if (
+      evaluationTerminal(record.state) && !this.#residents.has(input.id) &&
+      Number.isSafeInteger(offset) && offset >= 0 && Number.isSafeInteger(limit) && limit >= 0
+    ) {
+      const indexed = await this.#rowIndex.page(this.#path(input.id, "rows.jsonl"), offset, limit);
+      if (indexed) return indexed;
+    }
     return this.#readRows(input.id, offset, limit);
   }
   async #readRows(id: string, offset = 0, limit = Infinity): Promise<EvaluationResultPage> {
