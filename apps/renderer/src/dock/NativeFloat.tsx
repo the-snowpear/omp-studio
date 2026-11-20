@@ -138,7 +138,10 @@ export function NativeFloat({ group, namespace, onError }: { group: DockFloat; n
     onFocus={() => windows?.activate(`tool:${store.documentId ?? "standalone"}:${group.id}`, store.documentId ?? null)}
     onClose={() => closePanels(store, definitions, group.panels)}
     onError={message => { store.setPin(group.id, group.pin?.returnMode ?? "application"); onError(message); }}
-    focusEvent="omp:dock-open" acceptsFocus={event => group.panels.includes((event as CustomEvent).detail.panel)}>
+    focusEvent="omp:dock-open" acceptsFocus={event => {
+      const { panel, documentId } = (event as CustomEvent).detail;
+      return documentId === store.documentId && group.panels.includes(panel);
+    }}>
     {({ bounds, key }) => <FloatWindow group={group} order={0} bounds={bounds} nativeKey={key} />}
   </NativeWindowHost>;
 }

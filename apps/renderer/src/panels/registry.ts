@@ -5,11 +5,14 @@ const PANEL_ZH_LABELS: Record<string, { title?: string; menuTitle?: string }> = 
   "git-quick": { menuTitle: "Git 快捷卡" },
   commit: { title: "提交", menuTitle: "选择性提交" },
   disassembler: { title: "反汇编器", menuTitle: "反汇编器" },
+  "disassembler-quick": { title: "反汇编", menuTitle: "反汇编快捷卡" },
   computer: { menuTitle: "电脑 · Computer" },
   jobs: { menuTitle: "后台任务 · Background tasks" },
   "agent-detail": { title: "子 Agent" },
   "context-viewer": { title: "上下文查看器" },
   annotations: { title: "标注" },
+  "local-files": { title: "会话本地文件" },
+  "spill-output": { title: "完整输出" },
   "token-counter": { title: "Token 计数", menuTitle: "离线 Token 计数" },
 };
 
@@ -20,7 +23,8 @@ export function localizePanelDefinition(definition: PanelDefinition, zh: boolean
 }
 
 export const WORKBENCH_PANELS: readonly PanelDefinition[] = [
-  { id: "disassembler", title: "Disassembler", icon: "cpu", minHeight: 320, initialHeight: 540 },
+  { id: "disassembler", title: "Disassembler", icon: "cpu", minHeight: 200, initialHeight: 360 },
+  { id: "disassembler-quick", title: "Disassembler", menuTitle: "Disassembler Quick Card", icon: "cpu", minHeight: 78, initialHeight: 220 },
   { id: "files", title: "Explorer", icon: "file-tree" },
   { id: "file-browser", title: "File Browser", icon: "drive", minHeight: 260, initialHeight: 420 },
   { id: "changes", title: "Changes", icon: "diff", meter: true },
@@ -36,6 +40,8 @@ export const WORKBENCH_PANELS: readonly PanelDefinition[] = [
   { id: "context", title: "Context", icon: "layers", meter: true, initialHeight: 320 },
   { id: "context-viewer", title: "Context Inspector", icon: "layers", minHeight: 260, initialHeight: 500 },
   { id: "annotations", title: "Annotations", icon: "pencil", minHeight: 380, initialHeight: 500 },
+  { id: "local-files", title: "Session-local files", icon: "folder-open", minHeight: 260, initialHeight: 500 },
+  { id: "spill-output", title: "Full output", icon: "console", minHeight: 200, initialHeight: 460 },
   { id: "token-counter", title: "Token Counter", menuTitle: "Offline Token Counter", icon: "code", minHeight: 260, initialHeight: 420 },
   { id: "terminal", title: "Terminal", icon: "terminal", minHeight: 240, initialHeight: 280 },
   { id: "problems", title: "Problems", icon: "alert-c" },

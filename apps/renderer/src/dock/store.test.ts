@@ -71,7 +71,7 @@ describe("dock persistence and session scope", () => {
     expect(restored.getSnapshot().modalPanel).toBe(panel);
   });
 
-  it.each(["context-viewer", "annotations"] as const)("removes the %s mask on docking, minimizing or pinning", panel => {
+  it.each(["context-viewer", "annotations", "local-files", "spill-output"] as const)("removes the %s mask on docking, minimizing or pinning", panel => {
     for (const action of ["dock", "minimize", "pin"] as const) {
       const { store } = setup();
       store.dispatch({ type: "open", panel });

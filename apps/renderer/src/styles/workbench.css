@@ -2945,7 +2945,8 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 .composer-region:has(> .composer .composer-mode-hint) > .deck.is-ask {
   bottom: calc(100% - var(--sp-4));
-  --deck-limit: min(420px, 46dvh);
+  /* 手动拖高时沿用 QuestionHeightHandle 的上界，默认高度只限制自动布局。 */
+  --deck-limit: var(--question-height, min(420px, 46dvh));
 }
 .deck.preview-queue .deck-card {
   position: relative;

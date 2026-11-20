@@ -9,13 +9,15 @@ function heightBounds(handle: HTMLElement, surface: HTMLElement) {
   const top = surface.closest(".convo-wrap")?.getBoundingClientRect().top ?? 0;
   const max = Math.max(0, Math.floor(surface.getBoundingClientRect().bottom - top - 8));
   const card = handle.parentElement!;
-  const header = card.querySelector(".form-head, .ask-head")?.getBoundingClientRect().height ?? 0;
+  const header = card.querySelector(".form-head, .ask-head, .approval-head")?.getBoundingClientRect().height ?? 0;
   const footer = card.querySelector(".dk-actions")?.getBoundingClientRect().height ?? 0;
-  return { min: Math.min(max, Math.ceil(header + footer + 48)), max };
+  const controls = Array.from(card.querySelectorAll<HTMLElement>(":scope > .plan-compact-editor, :scope > .plan-execution-lock, :scope > .plan-operation-error"))
+    .reduce((height, element) => height + element.getBoundingClientRect().height, 0);
+  return { min: Math.min(max, Math.ceil(header + footer + controls + 48)), max };
 }
 
-/** The bottom of the deck stays anchored. Only the active question owns its height. */
-export function QuestionHeightHandle({ visible = true }: { visible?: boolean }) {
+/** The bottom of the deck stays anchored. Only the active card owns its height. */
+export function QuestionHeightHandle({ visible = true, kind = "question" }: { visible?: boolean; kind?: "question" | "plan" }) {
   const zh = useI18n().resolvedLanguage === "zh";
   const handle = useRef<HTMLDivElement>(null);
   const height = useRef<number | null>(null);
@@ -50,7 +52,7 @@ export function QuestionHeightHandle({ visible = true }: { visible?: boolean }) 
     };
   }, [visible]);
 
-  const label = zh ? "调整提问卡高度" : "Resize question card";
+  const label = kind === "plan" ? (zh ? "调整计划卡高度" : "Resize plan card") : (zh ? "调整提问卡高度" : "Resize question card");
   return <div ref={handle} hidden={!visible} className="question-height-handle" role="separator" tabIndex={0}
     aria-orientation="horizontal" aria-label={label} title={zh ? "上下拖动调整高度，双击恢复自动高度" : "Drag to resize. Double-click for automatic height."}
     onPointerDown={event => {

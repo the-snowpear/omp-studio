@@ -8,16 +8,20 @@
 .disassembler-page-heading h2 { display: flex; align-items: center; gap: var(--sp-8); font-size: var(--fs-18); font-weight: var(--fw-semibold); }
 .disassembler-page-heading p { margin-top: var(--sp-4); color: var(--text-3); font-size: var(--fs-12); line-height: 1.6; }
 .disassembler-pane .btn, .disassembler-browser .btn, .disassembler-edit-form .btn { white-space: nowrap; flex-shrink: 0; }
-.disassembler-environment { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-10) var(--sp-12); border: 1px solid var(--border); border-radius: var(--r-6); background: var(--surface-2); font-size: var(--fs-11); }
+.disassembler-environment { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-8); padding: var(--sp-10) var(--sp-12); border: 1px solid var(--border); border-radius: var(--r-6); background: var(--surface-2); font-size: var(--fs-11); }
 .disassembler-environment > .icon { flex: none; color: var(--text-3); }
 .disassembler-environment.is-ready > .icon { color: var(--green); }
 .disassembler-environment strong { color: var(--text-2); font-weight: var(--fw-medium); white-space: nowrap; }
-.disassembler-environment > span { flex: 1; min-width: 0; color: var(--text-3); overflow-wrap: anywhere; }
-.disassembler-open-row { display: flex; align-items: end; gap: var(--sp-12); }
-.disassembler-open-row > label { display: grid; gap: var(--sp-8); flex: 1; min-width: 0; color: var(--text-2); font-size: var(--fs-12); }
+.disassembler-file-controls { display: grid; gap: var(--sp-12); min-width: 0; }
+.disassembler-open-row { display: flex; flex-wrap: wrap; align-items: end; gap: var(--sp-12); }
+.disassembler-open-row > label { display: grid; gap: var(--sp-8); flex: 1 1 14rem; min-width: 0; color: var(--text-2); font-size: var(--fs-12); }
+.disassembler-open-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-8); }
+.disassembler-open-actions > .btn, .disassembler-query-toolbar > .btn { height: 32px; }
 .disassembler-path-input { position: relative; }
 .disassembler-path-input > .icon { position: absolute; left: var(--sp-12); top: 50%; transform: translateY(-50%); color: var(--text-3); }
 .disassembler-path-input .input { width: 100%; padding-left: 36px; }
+.disassembler-file-metadata { min-width: 0; border: 1px solid var(--border); border-radius: var(--r-6); background: var(--code-bg); overflow: hidden; }
+.disassembler-file-metadata > h3 { justify-content: flex-start; margin: 0; font-weight: var(--fw-medium); }
 .disassembler-workbench { display: grid; grid-template-columns: 200px minmax(0, 1fr); min-height: 510px; border: 1px solid var(--border); border-radius: var(--r-8); overflow: hidden; background: var(--surface); }
 .disassembler-databases { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--surface-2); }
 .disassembler-list-heading { display: flex; justify-content: space-between; gap: var(--sp-8); padding: var(--sp-16) var(--sp-14) var(--sp-12); font-size: var(--fs-12); color: var(--text-2); }
@@ -42,30 +46,32 @@
 .disassembler-list-foot p { font-size: var(--fs-11); line-height: 1.7; white-space: pre-line; }
 .disassembler-database-main { min-width: 0; }
 .disassembler-database-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--sp-12); padding: var(--sp-20) var(--sp-20) var(--sp-12); }
+.disassembler-database-title { min-width: 0; }
 .disassembler-database-heading h3 { font-size: var(--fs-16); font-weight: var(--fw-semibold); overflow-wrap: anywhere; }
 .disassembler-db-meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-12); margin-top: var(--sp-8); font-size: var(--fs-11); color: var(--text-3); }
 .disassembler-db-meta > span:nth-child(2) { font-family: var(--font-mono); }
 .disassembler-db-meta .disassembler-unsaved { color: var(--text-2); }
-.disassembler-db-actions { display: flex; gap: var(--sp-6); }
+.disassembler-db-actions { display: flex; gap: var(--sp-6); flex: none; }
 .disassembler-database-main > .workspace-tabbar { position: static; margin: 0; padding: var(--sp-8) var(--sp-20) var(--sp-12); background: var(--surface); }
 .disassembler-database-main > .workspace-panel { padding: var(--sp-16) var(--sp-20) var(--sp-20); }
-.disassembler-browser { display: grid; gap: var(--sp-12); min-width: 0; }
+.disassembler-browser { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-12); min-width: 0; }
 .disassembler-standalone-head { display: grid; gap: var(--sp-12); }
 .disassembler-standalone-head h3 { font-size: var(--fs-16); }
 .disassembler-standalone-head p { color: var(--text-3); font-size: var(--fs-12); line-height: 1.7; }
 .disassembler-browser-toolbar { display: flex; align-items: end; gap: var(--sp-8); min-width: 0; }
 .disassembler-browser-toolbar > label { display: grid; gap: var(--sp-6); font-size: var(--fs-11); color: var(--text-3); min-width: 0; }
-.disassembler-view-field { flex: 0 0 136px; }
-.disassembler-target-field { flex: 1; }
+.disassembler-query-toolbar { display: grid; grid-template-columns: minmax(0, 9rem) minmax(0, 1fr) auto; }
 .disassembler-target-field .input, .disassembler-view-field .select { width: 100%; font-size: var(--fs-12); }
 .disassembler-view-surface, .disassembler-python { min-width: 0; border: 1px solid var(--border); border-radius: var(--r-6); overflow: hidden; }
 .disassembler-surface-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); min-height: 38px; padding: var(--sp-6) var(--sp-12); background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: var(--fs-12); color: var(--text-2); }
 .disassembler-surface-bar > span:first-child { display: flex; align-items: center; gap: var(--sp-8); min-width: 0; }
-.disassembler-surface-bar code { color: var(--text-3); font-size: var(--fs-11); overflow-wrap: anywhere; }
+.disassembler-surface-bar .icon { flex: none; }
+.disassembler-surface-bar code { min-width: 0; color: var(--text-3); font-size: var(--fs-11); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .disassembler-view-surface .capability-editor .cm-editor { height: clamp(220px, 30dvh, 300px); }
 .disassembler-view-surface > .workspace-empty { min-height: clamp(220px, 30dvh, 300px); }
-.disassembler-view-footer { display: flex; align-items: center; gap: var(--sp-8); border-top: 1px solid var(--border); min-height: 36px; padding: var(--sp-4) var(--sp-10); color: var(--text-3); font-size: var(--fs-11); }
+.disassembler-view-footer { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-4) var(--sp-8); border-top: 1px solid var(--border); min-height: 36px; padding: var(--sp-4) var(--sp-10); color: var(--text-3); font-size: var(--fs-11); }
 .disassembler-view-footer > span:first-child { font-family: var(--font-mono); }
+.disassembler-page-actions { display: flex; flex: none; margin-inline-start: auto; }
 .disassembler-python .capability-editor .cm-editor { height: 250px; }
 .disassembler-python-actions { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--sp-12); padding: var(--sp-12); border-top: 1px solid var(--border); }
 .disassembler-python-actions p { display: flex; gap: var(--sp-6); align-items: center; color: var(--text-3); font-size: var(--fs-11); }
@@ -84,8 +90,8 @@
 .disassembler-notice > span { flex: 1; overflow-wrap: anywhere; min-width: 0; }
 .disassembler-notice.is-error { background: var(--red-soft); border-color: color-mix(in srgb, var(--red) 30%, var(--border)); color: var(--text); }
 .disassembler-notice.is-error > .icon { color: var(--red); }
-.disassembler-activity, .disassembler-cancel-row { display: flex; align-items: center; gap: var(--sp-12); color: var(--text-3); font-size: var(--fs-12); }
-.disassembler-activity > span:nth-child(2), .disassembler-cancel-row > span { flex: 1; }
+.disassembler-activity, .disassembler-cancel-row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-8); color: var(--text-3); font-size: var(--fs-12); }
+.disassembler-activity > span:nth-child(2), .disassembler-cancel-row > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .disassembler-facts { display: grid; gap: var(--sp-16); margin: 0; }
 .disassembler-facts > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: var(--sp-12); font-size: var(--fs-12); line-height: 1.7; }
 .disassembler-facts dt { color: var(--text-3); }
@@ -99,7 +105,7 @@
 .disassembler-edit-form .capability-editor .cm-editor { height: 210px; }
 .disassembler-edit-form > .disassembler-checkbox { display: flex; align-items: center; }
 .disassembler-checkbox input { accent-color: var(--accent); width: 16px; height: 16px; }
-.disassembler-dialog-actions { display: flex; justify-content: flex-end; gap: var(--sp-8); padding-top: var(--sp-8); }
+.disassembler-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--sp-8); padding-top: var(--sp-8); }
 .disassembler-review-heading { display: flex; gap: var(--sp-12); align-items: center; }
 .disassembler-review-heading > .icon { width: 24px; height: 24px; color: var(--accent); flex: none; }
 .disassembler-review-heading strong { font-size: var(--fs-16); }
@@ -110,31 +116,23 @@
   .disassembler-database-heading { padding: var(--sp-16); }
   .disassembler-database-main > .workspace-panel { padding: var(--sp-12); }
   .disassembler-database-main > .workspace-tabbar { padding-inline: var(--sp-12); }
-  .disassembler-browser-toolbar { flex-wrap: wrap; }
-  .disassembler-view-field { flex: 0 0 125px; }
-  .disassembler-target-field { flex: 1 1 150px; }
 }
 @container disassembler-workspace (max-width: 560px) {
   .disassembler-heading-icon { display: none; }
   .disassembler-page-heading { align-items: start; flex-wrap: wrap; }
   .disassembler-page-heading p { max-width: 34em; }
-  .disassembler-environment { flex-wrap: wrap; }
-  .disassembler-environment > span { flex-basis: 60%; }
   .disassembler-workbench { grid-template-columns: minmax(0, 1fr); }
   .disassembler-databases { border-right: 0; border-bottom: 1px solid var(--border); }
   .disassembler-database-list { display: flex; padding: 0 var(--sp-8) var(--sp-8); overflow-x: auto; }
   .disassembler-database-row { flex: 0 0 160px; }
   .disassembler-list-foot, .disassembler-list-search { display: none; }
   .disassembler-list-heading { padding: var(--sp-10) var(--sp-12); }
-  .disassembler-open-row { flex-wrap: wrap; }
-  .disassembler-open-row > label { flex-basis: 100%; }
   .disassembler-facts > div { grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); }
-  .disassembler-activity, .disassembler-cancel-row { flex-wrap: wrap; }
 }
 
 /* 引擎条：左侧选后端，中间每个引擎一枚状态胶囊（点色 = 检测结果，accent 描边 = 当前在用），
    右侧刷新。Auto 时「使用中」那一枚就是自动命中的后端。 */
-.disassembler-engine-select { display: inline-flex; align-items: center; gap: var(--sp-8); flex: none; padding-inline-end: var(--sp-10); border-inline-end: 1px solid var(--border); }
+.disassembler-engine-select { display: inline-flex; align-items: center; gap: var(--sp-8); min-width: 0; max-width: 100%; }
 .disassembler-engine-select > .icon { color: var(--text-3); }
 .disassembler-environment.is-ready .disassembler-engine-select > .icon { color: var(--green); }
 .disassembler-engines { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--sp-6); flex: 0 1 auto; min-width: 0; }
@@ -166,4 +164,176 @@
 .disassembler-backend-tag[data-backend="ida"] { background: var(--blue-soft); color: var(--blue); }
 .disassembler-backend-tag[data-backend="ghidra"] { background: var(--amber-soft); color: var(--amber); }
 .disassembler-database-row[aria-pressed="true"] .disassembler-backend-tag { background: var(--accent-soft); color: var(--accent); }
-@media (max-width: 660px) { .disassembler-environment { flex-wrap: wrap; } .disassembler-engine-select { border-inline-end: 0; } }
+
+/* The dock gives this surface a bounded box. Keep navigation above the tab
+   content and give the reader the remaining height within that box. */
+.dock-panel-content[data-dock-base="disassembler"] { overflow: hidden; }
+.disassembler-pane.is-docked {
+  --disassembler-inset: var(--sp-14);
+  container-type: size;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  background: var(--surface);
+}
+.is-docked > .disassembler-dock-toolbar {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: var(--sp-6);
+  min-width: 0;
+  padding: var(--sp-6) var(--disassembler-inset);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.disassembler-db-picker { display: none; min-width: 0; flex: 1; align-items: center; gap: var(--sp-6); }
+.disassembler-db-picker > .icon { flex: none; color: var(--accent); }
+.disassembler-db-picker > .app-select { min-width: 0; height: 28px; font-size: var(--fs-12); }
+.disassembler-picker-dirty { display: none; }
+.disassembler-dock-toolbar > .chip { flex: none; margin-inline-start: auto; }
+.is-docked > .disassembler-notice { flex: none; margin: var(--sp-8) var(--disassembler-inset) 0; }
+.is-docked > .disassembler-activity { flex: none; border-top: 1px solid var(--border); padding: var(--sp-6) var(--disassembler-inset); }
+.is-docked > .disassembler-workbench {
+  grid-template-rows: minmax(0, 1fr);
+  flex: 1 0 220px;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+}
+.is-docked > .disassembler-workbench.is-empty { grid-template-columns: minmax(0, 1fr); }
+.is-docked .is-empty > .disassembler-databases { display: none; }
+.is-docked .disassembler-databases { min-height: 0; }
+.is-docked .disassembler-database-list { max-height: none; min-height: 0; padding-bottom: var(--sp-6); }
+.is-docked .disassembler-database-main { display: flex; flex-direction: column; min-height: 0; }
+.is-docked .disassembler-database-main > .workspace-empty { flex: 1; min-height: 0; overflow: auto; justify-content: safe center; }
+.is-docked .disassembler-database-heading { padding: var(--sp-10) var(--disassembler-inset) var(--sp-8); gap: var(--sp-6) var(--sp-12); }
+.is-docked .disassembler-database-heading h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.is-docked .disassembler-db-meta { gap: var(--sp-4) var(--sp-8); margin-top: var(--sp-4); }
+.is-docked .disassembler-db-meta > span { overflow-wrap: anywhere; }
+.is-docked .disassembler-database-main > .workspace-tabbar {
+  --tab-height: 26px;
+  flex: none;
+  flex-wrap: nowrap;
+  gap: var(--sp-6);
+  padding: var(--sp-4) var(--disassembler-inset) var(--sp-8);
+}
+.is-docked .workspace-tabs button { padding-inline: var(--sp-10); }
+.is-docked .workspace-tab-actions { flex: none; }
+.is-docked .disassembler-database-main > .workspace-panel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  padding: var(--sp-8) var(--disassembler-inset) var(--disassembler-inset);
+}
+.is-docked .disassembler-browser { display: flex; flex-direction: column; min-height: 100%; gap: var(--sp-8); }
+.is-docked .disassembler-view-surface { display: grid; grid-template-rows: auto minmax(100px, 1fr) auto; flex: 1 0 166px; }
+.is-docked .disassembler-view-surface .cm-editor { height: 100%; }
+.is-docked .capability-editor .cm-scroller { overscroll-behavior-y: auto; }
+.is-docked .disassembler-view-surface > .workspace-empty { min-height: 0; padding: var(--sp-8); gap: var(--sp-6); overflow: auto; justify-content: safe center; }
+.is-docked .disassembler-surface-bar { min-height: 32px; padding: var(--sp-4) var(--sp-8); }
+.is-docked .disassembler-view-footer { min-height: 28px; padding: var(--sp-2) var(--sp-8); }
+.is-docked .disassembler-python .capability-editor .cm-editor { height: clamp(100px, 36cqh, 420px); }
+.is-docked .disassembler-python-actions { gap: var(--sp-8); padding: var(--sp-8); }
+.is-docked .disassembler-python-actions p .icon { flex: none; }
+
+@container disassembler-workspace (max-width: 660px) {
+  .is-docked > .disassembler-workbench { grid-template-columns: minmax(0, 1fr); }
+  .is-docked .disassembler-databases, .is-docked .disassembler-database-title > h3 { display: none; }
+  .is-docked .disassembler-db-picker { display: flex; }
+  .is-docked .disassembler-db-meta { margin-top: 0; }
+}
+@container disassembler-workspace (max-width: 440px) {
+  .is-docked :is(.disassembler-dock-toolbar, .disassembler-database-heading, .workspace-tabbar, .workspace-panel) { --disassembler-inset: var(--sp-8); }
+  .disassembler-pane .disassembler-icon-action { justify-content: center; width: 28px; padding-inline: 0; }
+  .disassembler-pane .disassembler-icon-action > span { display: none; }
+  .disassembler-query-toolbar { grid-template-columns: minmax(0, 4fr) minmax(0, 5fr) auto; gap: var(--sp-6); }
+  .is-docked .disassembler-db-actions { gap: var(--sp-4); }
+  .is-docked .disassembler-db-meta { gap: var(--sp-2) var(--sp-6); }
+  .is-docked .disassembler-python-actions kbd { display: none; }
+}
+@container disassembler-workspace (max-width: 270px) {
+  .disassembler-db-picker > .icon { display: none; }
+  .is-docked .workspace-tabs button { padding-inline: var(--sp-6); }
+  .is-docked .workspace-tabs button > .icon { display: none; }
+}
+@container disassembler-workspace (max-width: 660px) and (max-height: 440px) {
+  .is-docked .disassembler-database-main:not([data-view="info"]) > .disassembler-database-heading { display: none; }
+  .is-docked .disassembler-picker-dirty { display: block; }
+  .is-docked .disassembler-field-label { display: none; }
+}
+@container disassembler-workspace (max-height: 300px) {
+  .is-docked > .disassembler-workbench { flex: 1 0 auto; grid-template-rows: auto; overflow: visible; }
+  .is-docked .disassembler-database-main > .workspace-panel { flex: 1 0 auto; overflow: visible; }
+  .is-docked .disassembler-browser { min-height: 0; }
+}
+
+.disassembler-quick {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-4);
+  max-width: 460px;
+  margin-inline: auto;
+  padding: var(--sp-6) var(--sp-10) var(--sp-8);
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.disassembler-quick-head { display: flex; align-items: center; flex: none; gap: var(--sp-6); min-width: 0; padding-inline-start: var(--sp-4); }
+.disassembler-quick-engine {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  gap: var(--sp-6);
+  min-width: 0;
+  color: var(--text-2);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
+}
+.disassembler-quick-engine::before { content: ""; width: 6px; height: 6px; flex: none; border-radius: var(--r-full); background: var(--text-faint); }
+.disassembler-quick-engine[data-ready]::before { background: var(--green); }
+.disassembler-quick-actions { display: flex; align-items: center; flex: none; }
+.disassembler-quick-list { list-style: none; flex: none; margin: 0; padding: 0; }
+.disassembler-quick-list > li + li { border-top: 1px solid var(--border); }
+.disassembler-quick-db {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  width: 100%;
+  min-width: 0;
+  padding: var(--sp-6);
+  border-radius: var(--r-4);
+  color: var(--text-2);
+  text-align: start;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.disassembler-quick-db:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
+.disassembler-quick-db:disabled { opacity: .65; cursor: default; }
+.disassembler-quick-db[aria-current="true"] { background: var(--accent-softer); color: var(--text); }
+.disassembler-quick-db:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.disassembler-quick-db-icon { display: grid; place-items: center; flex: 0 0 26px; height: 26px; border-radius: var(--r-4); background: var(--surface-2); color: var(--text-3); }
+.disassembler-quick-db[aria-current="true"] .disassembler-quick-db-icon { background: var(--accent-soft); color: var(--accent); }
+.disassembler-quick-db-name { flex: 1; min-width: 0; }
+.disassembler-quick-db-name :is(strong, small) { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.disassembler-quick-db-name strong { font-size: var(--fs-12); font-weight: var(--fw-medium); }
+.disassembler-quick-db-name small { margin-top: var(--sp-2); color: var(--text-3); font: var(--fs-11)/1.4 var(--font-mono); }
+.disassembler-quick-arrow, .disassembler-quick-running { flex: none; color: var(--text-3); }
+.disassembler-quick-running { display: flex; color: var(--accent); }
+.disassembler-quick-more { align-self: start; }
+.disassembler-quick-message {
+  display: -webkit-box;
+  flex: none;
+  margin: 0;
+  padding: var(--sp-6) var(--sp-4);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 1.5;
+}
+.disassembler-quick-message.is-error { color: var(--red); }

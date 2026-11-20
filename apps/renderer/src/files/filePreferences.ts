@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+
 export type FileScope = "conversation" | "workspace";
 const KEY = "omp.file-viewer.scope";
 let demo: FileScope = "conversation";
@@ -29,3 +31,12 @@ export function saveEditorPrefs(patch: Partial<EditorPrefs>, preview = false): v
   for (const listener of editorListeners) listener();
 }
 export function subscribeEditorPrefs(listener: () => void) { editorListeners.add(listener); return () => { editorListeners.delete(listener); }; }
+
+export function useEditorDisplayPrefs(preview: boolean) {
+  const prefs = useSyncExternalStore(subscribeEditorPrefs, () => readEditorPrefs(preview));
+  return {
+    prefs,
+    setFont: (delta: number | null) => saveEditorPrefs({ fontSize: delta === null ? DEFAULT_EDITOR_PREFS.fontSize : prefs.fontSize + delta }, preview),
+    toggleWrap: () => saveEditorPrefs({ wrap: !prefs.wrap }, preview),
+  };
+}

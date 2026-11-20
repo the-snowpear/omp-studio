@@ -16,6 +16,14 @@ export type FileMenuEntry =
 export interface FileTool { id: string; icon: IconName; tip: string; run: () => void; active?: boolean; disabled?: boolean }
 export interface FileModeOption { id: FileViewMode; label: string; icon: IconName }
 
+export function FileModeSwitch({ modes, mode, onMode }: { modes: FileModeOption[]; mode: FileViewMode; onMode: (mode: FileViewMode) => void }) {
+  const zh = useI18n().resolvedLanguage === "zh";
+  return <span className="seg file-modes" role="radiogroup" aria-label={zh ? "视图" : "View"}>{modes.map(option =>
+    <button key={option.id} type="button" role="radio" aria-label={option.label} aria-checked={mode === option.id} className={mode === option.id ? "active" : ""} data-tip={option.label} onClick={() => onMode(option.id)}>
+      <Icon name={option.icon} extra="sm" /><span className="file-mode-label">{option.label}</span>
+    </button>)}</span>;
+}
+
 /** Breadcrumb, state badges, view switch, tool icons, Save and the ⋯ menu. */
 export function FileHeader({ outsideProject = false, path, badge, dirty, readOnly, demo, git, modes, mode, onMode, tools, save, menu, onCopyPath }: {
   outsideProject?: boolean; path: string; badge: { badge: string; tone: string; label: string }; dirty: boolean; readOnly: boolean; demo: boolean;
@@ -39,7 +47,7 @@ export function FileHeader({ outsideProject = false, path, badge, dirty, readOnl
       {demo ? <span className="file-tag">{zh ? "演示" : "Demo"}</span> : null}
     </div>
     <div className="file-header-actions">
-      {modes && modes.length > 1 ? <span className="seg file-modes" role="radiogroup" aria-label={zh ? "视图" : "View"}>{modes.map(option => <button key={option.id} type="button" role="radio" aria-checked={mode === option.id} className={mode === option.id ? "active" : ""} data-tip={option.label} onClick={() => onMode(option.id)}><Icon name={option.icon} extra="sm" /><span className="file-mode-label">{option.label}</span></button>)}</span> : null}
+      {modes && modes.length > 1 && <FileModeSwitch modes={modes} mode={mode} onMode={onMode} />}
       {tools.map(tool => <button key={tool.id} type="button" className={`icon-btn file-tool${tool.active ? " is-active" : ""}`} aria-pressed={tool.active} aria-label={tool.tip} data-tip={tool.tip} disabled={tool.disabled} onClick={tool.run}><Icon name={tool.icon} extra="sm" /></button>)}
       {save ? <button type="button" className="file-save" disabled={save.disabled} onClick={save.run} data-tip={zh ? `保存（${MOD_KEY} S）` : `Save (${MOD_KEY} S)`}>{save.saving ? <span className="file-spinner" aria-hidden="true" /> : <Icon name="save" extra="sm" />}{save.saving ? (zh ? "保存中" : "Saving") : (zh ? "保存" : "Save")}</button> : null}
       <FileMoreMenu entries={menu} />

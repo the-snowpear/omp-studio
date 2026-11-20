@@ -226,6 +226,8 @@ function onOffStatus(extra: string): readonly SlashSubcommand[] {
   ];
 }
 
+const LOCAL_FILES_COMMAND = cmd("local", "Edit native session files", "context", { ui: "local-files", allowArgs: true, hint: "[file]" });
+
 /** Full OMP builtin catalog for the composer `/` menu. Hidden entries stay resolvable by alias. */
 export const BUILTIN_SLASH_CATALOG: readonly StudioSlashCommand[] = [
   cmd("help", "List available slash commands", "help", { select: "native-ui", ui: "command-palette" }),
@@ -419,7 +421,7 @@ export const BUILTIN_SLASH_CATALOG: readonly StudioSlashCommand[] = [
   cmd("jobs", "Background jobs", "capability", { select: "run-now", invokeId: "builtin.jobs" }),
   cmd("usage", "Provider usage", "help", { select: "run-now", invokeId: "builtin.usage" }),
   cmd("stats", "Open usage dashboard", "help", { select: "run-now", invokeId: "builtin.stats" }),
-  cmd("local", "Edit native session files", "context", { ui: "local-files", allowArgs: true }),
+  LOCAL_FILES_COMMAND,
   cmd("context", "Inspect context body and token estimate", "context", { ui: "context-viewer" }),
   cmd("changelog", "Changelog", "help", { select: "run-now", invokeId: "builtin.changelog" }),
   cmd("hotkeys", "Open command palette", "help", { select: "native-ui", ui: "command-palette" }),
@@ -677,6 +679,13 @@ export function visibleSlashCatalog(zh = isZh()): StudioSlashCommand[] {
   return BUILTIN_SLASH_CATALOG.filter((command) => command.availability !== "hidden").map((command) => localizeSlashCommand(command, zh));
 }
 
+/** /local belongs to the workbench and is available before the Runtime catalog arrives. */
+export function composerSlashCatalog(manifest?: OperatorCommandManifest, zh = isZh()): StudioSlashCommand[] {
+  if (manifest === undefined) return visibleSlashCatalog(zh);
+  const projected = mergeSlashCatalogWithManifest(manifest, zh);
+  return [localizeSlashCommand(LOCAL_FILES_COMMAND, zh), ...projected.filter(command => normalizedSlashName(command.name) !== LOCAL_FILES_COMMAND.name)];
+}
+
 function scoreCommand(command: StudioSlashCommand, needle: string): number {
   if (command.name === needle) return 0;
   if (command.aliases.some((alias) => alias === needle)) return 1;
@@ -905,7 +914,7 @@ export function planComposerSend(snapshot: ComposerSnapshot, catalog?: readonly 
   const chipApplies = appliesOf(peeled.names, catalog);
 
   if (command !== undefined && draft !== null) {
-    if (command.name === "btw") return { kind: "execute", command, args: draft.args };
+    if (command.name === "btw" || command.ui === "local-files") return { kind: "execute", command, args: draft.args };
     if (command.select === "chip") {
       if (isModeControlArgs(command, draft.args)) {
         return { kind: "execute", command, args: draft.args };

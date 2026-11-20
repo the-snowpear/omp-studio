@@ -21,7 +21,7 @@ function floatTool(dock: DockStore, panel: "changes" | "terminal") {
 }
 
 describe("unified workbench windows", () => {
-  it.each(["context-viewer", "annotations"] as const)("recenters %s and restores its backdrop after its managed window closes", panel => {
+  it.each(["context-viewer", "annotations", "local-files", "spill-output"] as const)("recenters %s and restores its backdrop after its managed window closes", panel => {
     const { dock, manager } = setup();
     dock.dispatch({ type: "open", panel });
     const initial = dock.getSnapshot().layout.floats.find(group => group.panels.includes(panel))!;

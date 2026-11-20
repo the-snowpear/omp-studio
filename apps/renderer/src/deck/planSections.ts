@@ -13,6 +13,10 @@ export type PlanSection = {
   readonly title: string;
   /** Exact source slice, including trailing newlines. */
   readonly raw: string;
+  /** UTF-16 offsets into the complete Markdown document. */
+  readonly from: number;
+  readonly to: number;
+  readonly bodyFrom: number;
 };
 
 export function stripInlineMarkdown(text: string): string {
@@ -56,7 +60,7 @@ export function parsePlanSections(text: string): PlanSection[] {
       }
       continue;
     }
-    const heading = HEADING_RE.exec(line);
+    const heading = HEADING_RE.exec(line.replace(/\r$/, ""));
     if (heading) {
       heads.push({ line: i, level: heading[1]!.length, title: stripInlineMarkdown(heading[2]!) });
     }
@@ -72,12 +76,15 @@ export function parsePlanSections(text: string): PlanSection[] {
   const firstHeadLine = heads.length > 0 ? heads[0]!.line : lines.length;
   if (firstHeadLine > 0) {
     const raw = sliceRaw(0, firstHeadLine);
-    if (raw.length > 0) sections.push({ level: 0, title: "", raw });
+    if (raw.length > 0) sections.push({ level: 0, title: "", raw, from: 0, to: raw.length, bodyFrom: 0 });
   }
   for (let h = 0; h < heads.length; h++) {
     const head = heads[h]!;
     const endLine = h + 1 < heads.length ? heads[h + 1]!.line : lines.length;
-    sections.push({ level: head.level, title: head.title, raw: sliceRaw(head.line, endLine) });
+    const raw = sliceRaw(head.line, endLine);
+    const from = offsets[head.line]!;
+    sections.push({ level: head.level, title: head.title, raw, from, to: from + raw.length,
+      bodyFrom: from + (raw.includes("\n") ? raw.indexOf("\n") + 1 : raw.length) });
   }
   return sections;
 }

@@ -213,7 +213,7 @@ function buildCommands(zh: boolean): readonly ConversationItem[] {
 }
 
 function buildRecovery(zh: boolean): readonly ConversationItem[] {
-  return conversation("recovery", zh ? [
+  const turns = conversation("recovery", zh ? [
     {
       user: "检查 MermaidBlock 的类型错误，展示定位、失败输出和修复后的复查结果。",
       answer: [
@@ -304,6 +304,12 @@ function buildRecovery(zh: boolean): readonly ConversationItem[] {
       ],
     },
   ]);
+  return [...turns, {
+    kind: "message", itemId: "preview-recovery-build-log", parentId: turns.at(-1)!.itemId,
+    createdAt: new Date(Date.UTC(2026, 10, 9, 6, 6)).toISOString(),
+    role: "extension", asyncNotify: true, excludeFromContext: true,
+    content: [text(zh ? "后台构建已完成。完整输出见 `local://1.log`。" : "The background build finished. Full output is in `local://1.log`.")],
+  }];
 }
 
 function buildArchive(zh: boolean): readonly ConversationItem[] {

@@ -1,6 +1,6 @@
 import { planScroll, readChain, scrollChain } from "./scrollChain";
 import type { PanelId, PanelVisibility } from "./types";
-import { panelBaseId } from "./types";
+import { isFocusWindowPanel, panelBaseId } from "./types";
 
 type PendingScrollEntry = { ref: WeakRef<Element>; top: number; left: number };
 type Host = { element: HTMLDivElement; surface: Document; surfaceSnapshot: () => Document; visibility: PanelVisibility; toolbar: HTMLElement | null; listeners: Set<() => void>; subscribe: (listener: () => void) => () => void; snapshot: () => PanelVisibility; toolbarSnapshot: () => HTMLElement | null; signature: string; pendingScroll?: PendingScrollEntry[] };
@@ -8,6 +8,7 @@ type MoveTarget = HTMLElement & { moveBefore?: (node: Node, before: Node | null)
 const EMPTY: PanelVisibility = { visible: false, width: 0, height: 0 };
 const BODY = "dock-panel-content";
 const BODY_SELECTOR = ".dock-panel-content";
+let nextContentId = 0;
 const NON_SCROLLABLE_TAGS = new Set(["SPAN", "CODE", "A", "I", "B", "EM", "STRONG", "SMALL", "MARK", "TIME", "KBD", "ABBR", "BR", "HR", "IMG", "SVG", "PATH", "CIRCLE", "RECT", "LINE", "POLYLINE", "POLYGON", "G", "DEFS", "USE"]);
 
 function capturePanelScroll(root: Element): PendingScrollEntry[] {
@@ -83,7 +84,7 @@ export class PanelHosts {
       element.className = BODY;
       element.dataset.panel = id;
       element.dataset.dockBase = panelBaseId(id);
-      if (id === "context-viewer" || id === "annotations") element.id = `dock-${id}-content`;
+      if (isFocusWindowPanel(id)) element.id = `dock-${id}-content-${++nextContentId}`;
       element.inert = true;
       element.hidden = true;
       host = { element, surface: document, surfaceSnapshot: () => host!.surface, visibility: EMPTY, toolbar: null, listeners: new Set(), subscribe: listener => { host!.listeners.add(listener); return () => { host!.listeners.delete(listener); }; }, snapshot: () => host!.visibility, toolbarSnapshot: () => this.previewToolbars.has(id) ? this.previewToolbars.get(id)!.node : host!.toolbar, signature: "0|" };

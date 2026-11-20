@@ -28,7 +28,7 @@ const listWidth = (list: HTMLElement, rect = list.getBoundingClientRect()) => re
 
 export const usesNaturalHeight = (id: PanelId) => {
   const base = panelBaseId(id);
-  return base !== "terminal" && base !== "browser" && base !== "computer" && base !== "agent-detail" && !isInstancePanelId(id);
+  return base !== "terminal" && base !== "browser" && base !== "computer" && base !== "agent-detail" && base !== "disassembler" && !isInstancePanelId(id);
 };
 
 export function contextCardGeometry(host: HTMLElement) {

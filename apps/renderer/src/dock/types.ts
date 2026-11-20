@@ -1,8 +1,10 @@
 import type { ReactNode, PointerEvent } from "react";
 import type { IconName } from "../icons";
 
-export const PANEL_IDS = ["files", "file-browser", "changes", "git", "git-quick", "commit", "browser", "disassembler", "computer", "agents", "agent-detail", "environment", "context", "context-viewer", "annotations", "token-counter", "terminal", "jobs", "problems", "tests", "output", "logs", "pvlogs", "btw"] as const;
+export const PANEL_IDS = ["files", "file-browser", "changes", "git", "git-quick", "commit", "browser", "disassembler", "disassembler-quick", "computer", "agents", "agent-detail", "environment", "context", "context-viewer", "annotations", "local-files", "spill-output", "token-counter", "terminal", "jobs", "problems", "tests", "output", "logs", "pvlogs", "btw"] as const;
 export type FixedPanelId = typeof PANEL_IDS[number];
+/** Tools opened from the conversation first appear in a centered, focused window. */
+export const isFocusWindowPanel = (id: PanelId) => id === "context-viewer" || id === "annotations" || id === "local-files" || id === "spill-output";
 /** Tools that may be open once per dock region; a second region gets its own instance. */
 export const REPEATABLE_PANEL_IDS = ["files", "file-browser", "changes", "git", "agents", "jobs", "environment", "token-counter", "problems", "tests", "output", "logs", "pvlogs"] as const;
 export type RepeatablePanelId = typeof REPEATABLE_PANEL_IDS[number];

@@ -1,8 +1,8 @@
 import { previewHintCompression } from "../preview/runtimeQueuePreview";
 import "../composer/composerModes.css";
-import { WorkspaceDialog } from "../workspaces/Workspace";
+import { WorkspaceEmpty } from "../workspaces/Workspace";
 import { SpillViewer } from "../conversation/SpillLink";
-import { DisassemblerPane } from "../capabilities/DisassemblerPane";
+import { DisassemblerDock } from "../capabilities/DisassemblerPane";
 import { useWorkbenchResizers } from "../layout/useWorkbenchResizers";
 import { useWorkbenchBranches } from "../git/useWorkbenchBranches";
 import { FileDockInstances } from "../files/FileDockInstances";
@@ -14,12 +14,12 @@ import { ContextDockPanel } from "../conversation/ContextCard";
 import { PanelRegistration } from "../dock/PanelRegistration";
 import { FileBrowserDock } from "../fileBrowser/FileBrowserDock";
 import { revealMainWindow } from "../dock/SurfaceContext";
-import { DockPanel, useAgentDockLayout, useDockEngine } from "../dock/DockContext";
+import { DockPanel, useAgentDockLayout, useDockEngine, usePanelOpened } from "../dock/DockContext";
 import { DockGroupRegion, DockRail, DockCapsules, DockKeyboard } from "../dock/DockRegions";
 import { useBottomToggleClearance } from "../dock/revealClearance";
 import { locatePanel } from "../dock/model";
 import { agentPanelId, panelBaseId, type AgentPanelId, type PanelId } from "../dock/types";
-import { DeferredPanel, lazyPanel } from "../DeferredPanel";
+import { lazyPanel } from "../DeferredPanel";
 import { DictationControl } from "../composer/DictationControl";
 import { PromptHistoryButton } from "../composer/PromptHistory";
 import { executionTargetLabel } from "../workspaces/remoteStatus";
@@ -37,7 +37,7 @@ import { SelectiveCommitPane, selectiveCommitHandoff, type SelectiveCommitIntent
 import { SelectiveCommitLauncherProvider } from "../commit/SelectiveCommitLauncher";
 import { setHubIntent, setModelConfigIntent, setSettingsIntent } from "../pageIntents";
 import { conversationViewLeases } from "../conversation/conversationViews";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useConversationWidth } from "../settings/ConversationWidthContext";
 import { useReadingColumn } from "../layout/useReadingColumn";
 import type { ClientInteraction, CommandName, CommandState, CommandInput, InteractionResponseValue, OperatorInvokeOutcome, SessionHistoryEntry, SessionId, SessionTreeCommandOutcome, ThreadId, StudioPlanSaveAndQuitResult, Unsubscribe, WorkspaceId, WorkspaceListReadModel, PromptImageInput, ContinueTurnOutcome } from "@omp-studio/client-contract";
@@ -55,7 +55,7 @@ import { ServiceTierPicker } from "../composer/ServiceTierPicker";
 import { RuntimeQueue } from "../composer/RuntimeQueue";
 import { ComposerModePicker } from "../ComposerModePicker";
 import { ChipComposer, type ChipComposerHandle } from "../composer/ChipComposer";
-import { bindSlashTypedCommand, composerSlashExecute, isDestructiveMemoryClear, mergeSlashCatalogWithManifest, planComposerSend, resolveSlashExecute, type SlashNativeUi, type StudioSlashCommand } from "../composer/commands";
+import { bindSlashTypedCommand, composerSlashCatalog, composerSlashExecute, isDestructiveMemoryClear, planComposerSend, resolveSlashExecute, type SlashNativeUi, type StudioSlashCommand } from "../composer/commands";
 import { LuxOrbit } from "../lux/LuxOrbit";
 import { composerFollowUpEnabled, composerOwnerSessionId, composerOwnsLiveSnapshot, composerPromptEnabled, composerQueueEnabled, composerRunningForTarget, createComposerDispatchGate, promptTargetChanged, visibleQueuedMessages } from "../composer/dispatch";
 import { beginQueueEdit, cancelQueueEdit, commitQueueEdit, parkQueueEdit, snapshotOfQueued, switchQueueEdit, type QueueEditState } from "../composer/queueEdit";
@@ -123,7 +123,7 @@ import { partialFormResponse, useFormInteractionLifecycle } from "../deck/FormSe
 import { ASK_GENIE_HOLD_MS, isAskDeckInteraction } from "../deck/askGenie";
 import { motionReduced } from "../motion";
 import { interactionDeckDisabled, planReviewDeckDisabled, usableCapabilityManifest } from "../deck/interactionGate";
-import { PlanReviewDeck, PlanViewDialog } from "../deck/PlanCard";
+import { PlanReviewDeck, PlanViewDialog, type PlanOperationResult } from "../deck/PlanCard";
 import { type PlanActionDetail, type PlanActionId } from "../deck/types";
 import { residentForSession } from "../sidebar/threadRunning";
 import { sidebarProjectOrder } from "../sidebar/projectOrder";
@@ -380,11 +380,12 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   const { preview, marks } = usePreviewMode();
   const treeConfirm = useUserMessageTreeConfirm(preview);
   const agentViewBook = sharedSubagentViewBook;
-  const contextInspectorOpened = useSyncExternalStore(dock.store.subscribe, () => !!locatePanel(dock.store.getSnapshot().layout, "context-viewer"));
+  const contextInspectorOpened = usePanelOpened("context-viewer");
   const openContextInspector = () => dock.store.dispatch({ type: "open", panel: "context-viewer" });
-  const [spill, setSpill] = useState<{ uri: string; scope: string }>();
-  const [localFilesOpen, setLocalFilesOpen] = useState(false);
-  const [localFileName, setLocalFileName] = useState("");
+  const localFilesOpened = usePanelOpened("local-files");
+  const spillOpened = usePanelOpened("spill-output");
+  const [spill, setSpill] = useState<{ uri: string; scope: string; serial: number }>();
+  const [localRequest, setLocalRequest] = useState<{ name: string; scope: string; serial: number }>();
   const [planDialogOpen, setPlanDialogOpen] = useState(false);
   const [rememberedPlan, setRememberedPlan] = useState<{ title: string; body: string } | undefined>(undefined);
   const [selectedPlanDoc, setSelectedPlanDoc] = useState<{ title: string; body: string } | undefined>(undefined);
@@ -541,7 +542,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   );
   const commandManifest = state.model.commandManifest;
   const slashCatalog = useMemo(
-    () => mergeSlashCatalogWithManifest(preview ? undefined : commandManifest, resolvedLanguage === "zh"),
+    () => composerSlashCatalog(preview ? undefined : commandManifest, resolvedLanguage === "zh"),
     [commandManifest, preview, resolvedLanguage],
   );
   const capabilityById = useMemo(() => new Map((capabilities?.capabilities ?? []).map((capability) => [capability.id, capability])), [capabilities]);
@@ -812,7 +813,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   }, [convo.engine, optimisticPrompt?.pending.requestId]);
   const selectedTargetRef = useRef({ selectedSessionId, selectedThreadId });
   selectedTargetRef.current = { selectedSessionId, selectedThreadId };
-  const run = useCallback(async <T extends CommandName>(name: T, input: CommandInput<T>): Promise<boolean> => {
+  const run = useCallback(async <T extends CommandName>(name: T, input: CommandInput<T>, reportInPlan = false): Promise<boolean> => {
     const concurrent = isLiveSessionPreferenceCommand(name) || name === "interaction.respond";
     if (busy && !concurrent) return false;
     if (!concurrent) setBusy(true);
@@ -826,6 +827,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       setComposerError(undefined);
       return true;
     } catch (error) {
+      if (reportInPlan) throw new Error(hostErrorMessage(error, zhRef.current ? "计划操作失败" : "Plan operation failed"));
       const message = hostErrorMessage(error, zhRef.current ? "操作失败" : "Operation failed");
       if (isTransientStatusNotice(message)) {
         const claimed = claimTransientToast(transientStatusFamily(message), lastStatusToast.current);
@@ -853,7 +855,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   const nativePlanEnabled = !preview && runtimeConnected && can("mode.plan.review.details") && can("mode.plan.review.resolve");
   const planExecution = useNativePlanReview(client, snapshot?.sessionId, nativePlanEnabled, snapshot?.plan?.status === "review", snapshot?.stateVersion);
   const submitPlanDecision = useCallback((decision: "execute" | "compact" | "keep" | "refine" | "dismiss", feedback?: string): Promise<boolean> => {
-    if (!nativePlanEnabled) return run("mode.plan.review.respond", { decision, ...(feedback ? { feedback } : {}) });
+    if (!nativePlanEnabled) return run("mode.plan.review.respond", { decision, ...(feedback ? { feedback } : {}) }, true);
     const reviewId = planExecution.details?.reviewId;
     if (!snapshot?.sessionId || !reviewId || !planExecution.details?.available || planExecution.loading) {
       setStatusToast(planExecution.error || (zhRef.current ? "计划评审已变化，请稍后重试" : "Plan review changed; please try again shortly"));
@@ -861,7 +863,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     }
     return run("mode.plan.review.resolve", { sessionId: snapshot.sessionId, reviewId, decision,
       ...(["execute", "compact", "keep"].includes(decision) && planExecution.role ? { role: planExecution.role } : {}),
-      ...(feedback ? { feedback } : {}) });
+      ...(feedback ? { feedback } : {}) }, true);
   }, [nativePlanEnabled, planExecution.details, planExecution.role, planExecution.loading, planExecution.error, snapshot?.sessionId, run]);
   const respondPlanReview = useCallback(async (id: PlanActionId, detail?: PlanActionDetail): Promise<boolean> => {
     if (id === "refine") {
@@ -925,13 +927,13 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     }
     return null;
   }, [activeWorkspace, executionTarget.id]);
-  const savePlanAndQuit = useCallback(async (): Promise<void> => {
-    if (!canStartPlanSaveAndQuit(can("mode.plan.review.saveAndQuit"), planSaveBusyRef.current)) return;
+  const savePlanAndQuit = useCallback(async (): Promise<PlanOperationResult> => {
+    if (!canStartPlanSaveAndQuit(can("mode.plan.review.saveAndQuit"), planSaveBusyRef.current)) return false;
     planSaveBusyRef.current = true;
     setPlanSaveBusy(true);
     try {
       const path = await pickPlanSaveTarget();
-      if (path === null) return;
+      if (path === null) return { ok: false, cancelled: true };
       const handle = await client.command("mode.plan.review.saveAndQuit", { path });
       const result = await waitReceipt<StudioPlanSaveAndQuitResult>(client, handle.requestId);
       let selected = false;
@@ -948,8 +950,9 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
         onSessionTitleMaybeChanged?.();
       }
       setStatusToast(planSaveAndQuitNotice(result, selected, zhRef.current));
+      return true;
     } catch (error) {
-      setStatusToast(hostErrorMessage(error, zhRef.current ? "保存计划并退出失败" : "Failed to save plan and quit"));
+      return { ok: false, error: hostErrorMessage(error, zhRef.current ? "保存计划并退出失败" : "Failed to save plan and quit") };
     } finally {
       planSaveBusyRef.current = false;
       setPlanSaveBusy(false);
@@ -1223,7 +1226,19 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     [activityRetry, awaitingTurn, convo.state, executionMatches, optimisticPrompt, preview, previewThreadId, sessionStreaming, snapshot?.pendingMessages, snapshot?.awaitingAsyncWork, snapshot?.pause, zh],
   );
   const runWindowKey = preview ? `preview:${previewThreadId ?? ""}` : convo.identityKey;
-  const openSpill = useCallback((uri: string) => setSpill({ uri, scope: runWindowKey }), [runWindowKey]);
+  const resourceSessionId = preview ? previewThreadId : composerOwner;
+  const resourceScope = JSON.stringify([executionTarget.id, preview, preview ? previewProjectId : workspaceId, resourceSessionId]);
+  const resourceAvailable = preview || (runtimeConnected && executionMatches && !connection?.resyncRequired);
+  const localTarget = localRequest?.scope === resourceScope ? localRequest : undefined;
+  const spillTarget = spill?.scope === resourceScope ? spill : undefined;
+  const openSpill = useCallback((uri: string) => {
+    setSpill(previous => ({ uri, scope: resourceScope, serial: (previous?.serial ?? 0) + 1 }));
+    dock.store.dispatch({ type: "open", panel: "spill-output" });
+  }, [dock.store, resourceScope]);
+  function openLocalFiles(name = "") {
+    setLocalRequest(previous => ({ name, scope: resourceScope, serial: (previous?.serial ?? 0) + 1 }));
+    dock.store.dispatch({ type: "open", panel: "local-files" });
+  }
   const runWindow = useRunWindow(activityStatus !== null, runWindowKey);
   const activity = activityStatus === null
     ? undefined
@@ -1819,6 +1834,13 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     if (promptDispatchGate.busy && !composerRunning) return;
     if (await composerInputRef.current?.waitForAttachments?.() === false) return;
     const payload = composerInputRef.current?.getSnapshot() ?? draftLive.current;
+    const slash = composerSlashExecute(payload, slashCatalog);
+    // Opening the file window is local UI, including while the Runtime is awaiting an answer.
+    if (slash?.command.ui === "local-files") {
+      replaceDraft(emptySnapshot());
+      openLocalFiles(slash.args);
+      return;
+    }
     if (payload.text.startsWith("?")) {
       const question = payload.text.slice(1).trim();
       if (!question) return;
@@ -1850,17 +1872,17 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       pendingInteraction?.kind === "approval" &&
       steerNowEnabled &&
       !snapshotIsEmpty(payload) &&
-      composerSlashExecute(payload, slashCatalog) === undefined
+      slash === undefined
     ) {
       void steerPastApproval(payload);
       return;
     }
-    if (composerRunning && composerSlashExecute(payload, slashCatalog) === undefined) {
+    if (composerRunning && slash === undefined) {
       enqueueDraft();
       return;
     }
     const ready = composerPromptEnabled({ textReady: !snapshotIsEmpty(payload), sending, running: composerRunning, pendingInteraction: pendingInteraction !== null, promptChannelReady, sessionCreating, newConversation: !preview && isNewConversation });
-    if (!ready && composerSlashExecute(payload, slashCatalog) === undefined) return;
+    if (!ready && slash === undefined) return;
     setComposerError(undefined);
     replaceDraft(emptySnapshot());
     if (!preview && selectedSessionId === undefined && snapshot === undefined) {
@@ -2087,7 +2109,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   }
   function openSlashUi(ui: SlashNativeUi): void {
     if (ui === "context-viewer") { openContextInspector(); return; }
-    if (ui === "local-files") { setLocalFilesOpen(true); return; }
+    if (ui === "local-files") { openLocalFiles(); return; }
     if (ui === "model-picker") {
       setModelMenuNonce((value) => value + 1);
       return;
@@ -2142,7 +2164,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     return () => window.removeEventListener("omp-studio-slash-ui", receive);
   }, [mdi?.active, window]);
   async function runSlashCommand(command: StudioSlashCommand, args: string, images?: readonly PromptImageInput[]): Promise<boolean> {
-    if (command.name === "local") { setLocalFileName(args.trim()); setLocalFilesOpen(true); return true; }
+    if (command.ui === "local-files") { openLocalFiles(args.trim()); return true; }
     if (command.availability === "disabled") {
       setComposerError(command.disabledReason ?? (zhRef.current ? `/${command.name} 暂不可用` : `/${command.name} is unavailable`));
       return false;
@@ -2290,8 +2312,6 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
           </form>
         </section>
       </div> : null}
-      {spill?.scope === runWindowKey && <WorkspaceDialog title={`${zh ? "完整输出" : "Full output"} · ${spill.uri}`} onClose={() => setSpill(undefined)}><DeferredPanel><SpillReader key={spill.uri} client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches} initialUri={spill.uri} /></DeferredPanel></WorkspaceDialog>}
-      {localFilesOpen ? <WorkspaceDialog title={zh ? "会话本地文件 · local://" : "Session-local files · local://"} onClose={() => setLocalFilesOpen(false)}><DeferredPanel><LocalFilesPane client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches} initialName={localFileName} /></DeferredPanel></WorkspaceDialog> : null}
       <WorktreeLaunchGate client={client} context={{ sessionId: snapshot?.sessionId, available: runtimeConnected && executionMatches && !connection?.resyncRequired, capabilities }} visible={state.route === "workbench"} onGateChange={changeWorktreeGate} onOpenWorkspace={onOpenWorktree} />
       <div className={`workbench${!mdi && sideOpen ? " split-right" : ""}`} id="workbench">
         <div ref={readingColumnRef} className={`convo-wrap${surfaceWelcome ? " is-empty" : ""}`} inert={state.loading}>
@@ -2365,7 +2385,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
               <PlanReviewDeck key={planExecution.details?.reviewId ?? snapshot?.sessionId}
                 options={planExecution.details?.options}
                 onSaveMarkdown={!preview && snapshot?.sessionId && planExecution.details?.reviewId && can("mode.plan.review.save")
-                  ? markdown => run("mode.plan.review.save", { sessionId: snapshot.sessionId, reviewId: planExecution.details!.reviewId!, markdown }) : undefined}
+                  ? markdown => run("mode.plan.review.save", { sessionId: snapshot.sessionId, reviewId: planExecution.details!.reviewId!, markdown }, true) : undefined}
                 executionControl={nativePlanEnabled ? <PlanExecutionPicker details={planExecution.details} role={planExecution.role} onChange={planExecution.setRole} loading={planExecution.loading} error={planExecution.error} disabled={planSaveBusy || !planExecution.details?.available} /> : undefined}
                 title={planReview.title ?? "Plan"}
                 body={planReview.body ?? ""}
@@ -2373,7 +2393,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
                 onExpandedChange={setPlanDialogOpen}
                 originRef={planDialogOriginRef}
                 {...(planReviewDisabled || planSaveBusy || nativePlanEnabled && (planExecution.loading || !planExecution.details?.available) ? { disabled: true } : {})}
-                onAction={(id, detail) => { void respondPlanReview(id, detail); }}
+                onAction={respondPlanReview}
                 {...(can("mode.plan.review.saveAndQuit") ? { onSaveAndQuit: savePlanAndQuit } : {})}
               />
             ) : preview && previewThreadId === "t3" ? (
@@ -3112,7 +3132,12 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
         queueInstead={snapshot?.isStreaming === true && can("session.compaction.enqueue")}
         compactDisabled={!runtimeConnected || !snapshot || connection?.resyncRequired === true || snapshot.isStreaming && !can("session.compaction.enqueue") || sessionCreating === true} />
       <GitWorkbenchPanels capabilities={capabilities} gitScope={gitScope} client={client} gitSharedWorkspaceId={gitSharedWorkspaceId} composerOwner={composerOwner} activeWorkspace={activeWorkspace} onOpenWorktree={onOpenWorktree} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} onRoute={onRoute} composerInputRef={composerInputRef} onOpenGit={onOpenGit} />
+      <DisassemblerDock client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} capabilities={capabilities} />
       <PanelRegistration panels={{
+        "local-files": localFilesOpened && <LocalFilesPane key={resourceScope} client={client} sessionId={resourceSessionId} available={resourceAvailable} windowed initialName={localTarget?.name} requestId={localTarget?.serial} />,
+        "spill-output": spillOpened && (spillTarget
+          ? <SpillReader key={spillTarget.serial} client={client} sessionId={resourceSessionId} available={resourceAvailable} initialUri={spillTarget.uri} />
+          : <WorkspaceEmpty icon="console" title={zh ? "尚未选择日志" : "No log selected"}>{zh ? "点击当前对话中的日志链接，查看完整输出。" : "Open a log link in this conversation to read its full output."}</WorkspaceEmpty>),
         "context-viewer": visibility => <ContextInspector client={client} sessionId={selectedSessionId ?? snapshot?.sessionId} sessionName={viewedSessionName} sourceKey={preview ? previewThreadId : selectedSessionId} opened={contextInspectorOpened} available={runtimeConnected && executionMatches && !connection?.resyncRequired} width={visibility.width} height={visibility.height} />,
         "token-counter": <TokenCounterPane key={String(preview)} client={client} />,
         commit: visibility => <SelectiveCommitPane client={client} sessionId={snapshot?.sessionId} runtimeEpoch={connection?.runtimeEpoch ?? undefined}
@@ -3131,7 +3156,6 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
               repository: realGit,
             })} />,
         browser: visibility => <BrowserPane client={client} sessionId={snapshot?.sessionId} chatId={browserChatId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} visible={visibility.visible} capabilities={capabilities} />,
-        disassembler: visibility => <DisassemblerPane client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} visible={visibility.visible} capabilities={capabilities} />,
         computer: visibility => <ComputerDockPane client={client} sessionId={computerSessionId} sessionName={viewedSessionName}
           scopeKey={computerScopeKey} available={runtimeConnected && executionMatches && !connection?.resyncRequired}
           visible={visibility.visible} width={visibility.width} height={visibility.height} capabilities={capabilities}

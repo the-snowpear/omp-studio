@@ -53,11 +53,11 @@
 }
 
 /* Compact deck card above composer hides subtitle to stay sleek. */
-.approval-card > .plan-execution .plan-exec-sub {
+.approval-card > :is(.plan-execution, .plan-execution-lock) .plan-exec-sub {
   display: none;
 }
 
-.approval-card > .plan-execution .plan-exec-kicker-ic {
+.approval-card > :is(.plan-execution, .plan-execution-lock) .plan-exec-kicker-ic {
   width: 22px;
   height: 22px;
 }
@@ -105,7 +105,7 @@
     box-shadow var(--dur-fast) var(--ease);
 }
 
-.approval-card > .plan-execution .plan-exec-trigger {
+.approval-card > :is(.plan-execution, .plan-execution-lock) .plan-exec-trigger {
   min-height: 38px;
   min-width: min(280px, 100%);
 }

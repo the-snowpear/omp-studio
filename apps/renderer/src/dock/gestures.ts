@@ -223,7 +223,7 @@ export function beginDockDrag(event: ReactPointerEvent<HTMLElement>, store: Dock
     hosts, panels, rect: sourceRect, snapped: !source.closest('[data-dock-float]'),
     cards: Object.fromEntries(sourceCards.map(card => [card.dataset.dockCard, card.getBoundingClientRect()])),
   };
-  const possiblePanels = panels.includes("git") ? [...panels, "git-quick" as PanelId] : panels;
+  const possiblePanels = new Set([...panels, ...panelsAtDockTarget(panels, { region: "rail" })]);
   const scope = store.getSnapshot().scope;
   const previewMode = store.getSnapshot().preview;
   const start = { x: event.clientX, y: event.clientY };

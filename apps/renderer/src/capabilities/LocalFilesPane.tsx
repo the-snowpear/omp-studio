@@ -9,6 +9,7 @@ import { useExecutionTarget } from "../workspaces/ExecutionTargets";
 import { Icon } from "../icons";
 import { WorkspaceDialog, WorkspaceEmpty } from "../workspaces/Workspace";
 import { CapabilityEditor } from "./CapabilityEditor";
+import { ResourceTextView } from "./ResourceTextView";
 import "./resources.css";
 
 const MAX_TEXT_BYTES = 512 * 1024;
@@ -19,13 +20,15 @@ function fileSize(bytes: number): string {
   return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toLocaleString(undefined, { maximumFractionDigits: 1 })} KiB`;
 }
 
+const localFileUri = (name: string) => name.startsWith("local://") ? name : `local://${name}`;
+
 export function resourceLanguage(uri: string): "python" | "markdown" | "cpp" | "text" {
   return /\.md$/i.test(uri) ? "markdown" : /\.py$/i.test(uri) ? "python" : /\.(?:c|cpp|cc|h|hpp)$/i.test(uri) ? "cpp" : "text";
 }
 
-/** Also used on its own by the conversation's /local dialog. */
-export function LocalFilesPane({ client, sessionId, available, initialName }: {
-  client: StudioClient; sessionId?: string | undefined; available: boolean; initialName?: string;
+/** The capability workspace and the conversation's /local window share one editor. */
+export function LocalFilesPane({ client, sessionId, available, initialName, requestId, windowed = false }: {
+  client: StudioClient; sessionId?: string | undefined; available: boolean; initialName?: string | undefined; requestId?: number | undefined; windowed?: boolean;
 }) {
   const target = useExecutionTarget();
   const { preview, marks } = usePreviewMode();
@@ -45,12 +48,15 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
   const [saveFailed, setSaveFailed] = useState(false);
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState<PendingNavigation>();
+  const [narrowView, setNarrowView] = useState<"files" | "editor">(initialName ? "editor" : "files");
   const epoch = useRef(0);
   const lock = useRef(false);
   const previewFiles = useRef(createPreviewLocalFiles(zh));
-  const initial = useRef(initialName);
-  const handledInitial = useRef(initialName);
-  initial.current = initialName;
+  const previewEdits = useRef(new Map<string, (typeof previewFiles.current)[number]>());
+  const request = useMemo(() => ({ name: initialName, requestId }), [initialName, requestId]);
+  const initial = useRef(request);
+  const handledInitial = useRef(request);
+  initial.current = request;
   const dirty = !!document && draft !== document.text;
   const draftBytes = useMemo(() => new TextEncoder().encode(draft).byteLength, [draft]);
   const tooLarge = draftBytes > MAX_TEXT_BYTES;
@@ -82,6 +88,7 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
     const generation = ++epoch.current;
     setLocalRoot(""); setDirectoryMessage(""); setDirectorySupported(false);
     lock.current = true;
+    previewEdits.current.clear();
     previewFiles.current = createPreviewLocalFiles(zh);
     handledInitial.current = initial.current;
     setFiles([]); setTruncated(false); acceptDocument(undefined); setSearch(""); setError(""); setPending(undefined); setSupported(false);
@@ -101,12 +108,12 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
         if (generation !== epoch.current) return;
         setLocalRoot(result.localRootPath ?? ""); setFiles(result.files); setTruncated(result.truncated);
         handledInitial.current = initial.current;
-        const selected = initial.current
-          ? result.files.find(file => file.name === initial.current || file.uri === initial.current)
-          : result.files.find(file => file.bytes <= MAX_TEXT_BYTES);
-        if (selected && selected.bytes <= MAX_TEXT_BYTES) {
+        const name = initial.current.name;
+        const uri = name ? localFileUri(name) : result.files.find(file => file.bytes <= MAX_TEXT_BYTES)?.uri;
+        setNarrowView(name ? "editor" : "files");
+        if (uri) {
           setBusy("opening");
-          const value = await readDocument(selected.uri);
+          const value = await readDocument(uri);
           if (generation === epoch.current) acceptDocument(value);
         }
       } catch (cause) {
@@ -125,7 +132,7 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
 
   useEffect(() => {
     if (!preview) return;
-    previewFiles.current = createPreviewLocalFiles(zh);
+    previewFiles.current = createPreviewLocalFiles(zh).map(file => previewEdits.current.get(file.uri) ?? file);
     setFiles(previewFiles.current.map(({ text: _text, version: _version, ...file }) => file));
     const current = documentRef.current;
     if (!current) return;
@@ -147,8 +154,8 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
       } else {
         const result = await listFiles();
         if (generation !== epoch.current) return;
-        setFiles(result.files); setTruncated(result.truncated);
-        const selected = result.files.find(file => file.uri === document?.uri);
+        setLocalRoot(result.localRootPath ?? ""); setFiles(result.files); setTruncated(result.truncated);
+        const selected = result.files.find(file => file.uri === document?.uri) ?? result.files.find(file => file.bytes <= MAX_TEXT_BYTES);
         if (selected && selected.bytes <= MAX_TEXT_BYTES) {
           setBusy("opening");
           const value = await readDocument(selected.uri);
@@ -170,13 +177,11 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
 
   // Changing the /local target is navigation, not a reason to silently reset a draft.
   useEffect(() => {
-    if (!initialName || initialName === handledInitial.current || busy || pending) return;
-    const selected = files.find(file => file.name === initialName || file.uri === initialName);
-    if (selected && selected.bytes <= MAX_TEXT_BYTES) {
-      handledInitial.current = initialName;
-      if (selected.uri !== document?.uri) requestNavigation({ kind: "open", uri: selected.uri });
-    }
-  }, [initialName, files, busy, pending]);
+    if (request === handledInitial.current || busy || pending || !supported) return;
+    handledInitial.current = request;
+    setNarrowView(request.name ? "editor" : "files");
+    requestNavigation(request.name ? { kind: "open", uri: localFileUri(request.name) } : { kind: "refresh" });
+  }, [request, busy, pending, supported]);
 
   async function save() {
     if (lock.current || pending || !document || !dirty || tooLarge || !supported) return;
@@ -194,7 +199,12 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
       if (generation !== epoch.current) return;
       setDocument({ uri: result.uri, version: result.version, text }); setSaved(true);
       if (preview) {
-        previewFiles.current = previewFiles.current.map(file => file.uri === result.uri ? { ...file, text, version: result.version, bytes: draftBytes, modifiedAt: Date.now() } : file);
+        previewFiles.current = previewFiles.current.map(file => {
+          if (file.uri !== result.uri) return file;
+          const updated = { ...file, text, version: result.version, bytes: draftBytes, modifiedAt: Date.now() };
+          previewEdits.current.set(file.uri, updated);
+          return updated;
+        });
         setFiles(previewFiles.current);
       } else {
         // The save receipt has no mtime: don't present the renderer's clock as Host truth.
@@ -243,8 +253,23 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
     }
   }
 
-  return <section className="resources-local" aria-label={zh ? "本地会话文件" : "Session-local files"}>
-    <div className="resources-local-intro"><Icon name="folder" /><p>{zh ? "原位编辑会话文件" : "Edit session files in place"}<span>{zh ? "UTF-8 文本 · 最大 512 KiB · 保存校验版本" : "UTF-8 text · up to 512 KiB · version-checked saves"}</span></p>{preview && marks ? <span className="resources-demo">{zh ? "演示" : "Demo"}</span> : null}</div>
+  const discardTitle = zh ? "放弃未保存的修改？" : "Discard unsaved changes?";
+  const editorProps = {
+    label: zh ? "本地文件正文" : "Local file content",
+    readOnly: !!busy || !!pending || !supported,
+    onChange: (value: string) => { if (!lock.current && !pending) { setDraft(value); setSaved(false); } },
+  };
+  const discardActions = pending && <>
+    <p className="resources-confirm-copy">{zh ? "继续后将重新读取文件，当前草稿会被替换。" : "Continuing reloads the file and replaces your current draft."}</p>
+    <code className="resources-confirm-uri">{document?.uri}</code>
+    <div className="resources-confirm-actions">
+      <button type="button" className="btn ghost" autoFocus={windowed} onClick={() => setPending(undefined)}>{zh ? "继续编辑" : "Keep editing"}</button>
+      <button type="button" className="btn primary" onClick={() => void navigate(pending)}>{zh ? "放弃草稿并继续" : "Discard and continue"}</button>
+    </div>
+  </>;
+  return <section className={`resources-local${windowed ? " resources-window" : ""}`} aria-label={zh ? "本地会话文件" : "Session-local files"} data-view={narrowView}
+    onKeyDown={event => { if (windowed && pending && event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setPending(undefined); } }}>
+    {!windowed && <div className="resources-local-intro"><Icon name="folder" /><p>{zh ? "原位编辑会话文件" : "Edit session files in place"}<span>{zh ? "UTF-8 文本 · 最大 512 KiB · 保存校验版本" : "UTF-8 text · up to 512 KiB · version-checked saves"}</span></p>{preview && marks ? <span className="resources-demo">{zh ? "演示" : "Demo"}</span> : null}</div>}
     {supported && directorySupported && <div className="resources-root">
       <Icon name="folder" extra="sm" />
       <span className="resources-root-label">{zh ? "会话目录" : "Session folder"}</span>
@@ -256,12 +281,17 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
       <button type="button" className="icon-btn" aria-label={zh ? "复制目录路径" : "Copy local path"} data-tip={zh ? "复制目录路径" : "Copy local path"} onClick={() => void directoryAction("copy")}><Icon name="copy" /></button>
       <button type="button" className="icon-btn" aria-label={zh ? "打开目录" : "Open folder"} data-tip={target.kind !== "local" && !preview ? (zh ? "目录位于远端运行环境" : "The directory is on the remote runtime") : (zh ? "在文件管理器中打开" : "Open in file manager")} disabled={!preview && (target.kind !== "local" || !globalThis.ompStudioChrome?.systemFileOpen)} onClick={() => void directoryAction("open")}><Icon name="external" /></button>
     </div>}
+    {windowed && <div className="resources-view-switch" role="group" aria-label={zh ? "文件视图" : "File view"}>
+      <button type="button" aria-pressed={narrowView === "files"} onClick={() => setNarrowView("files")}><Icon name="folder" extra="sm" />{zh ? "文件列表" : "File list"}</button>
+      <button type="button" aria-pressed={narrowView === "editor"} onClick={() => setNarrowView("editor")}><Icon name="file-code" extra="sm" />{zh ? "编辑器" : "Editor"}</button>
+    </div>}
+    {windowed && pending && <aside className="resources-inline-confirm" role="group" aria-label={discardTitle}><strong>{discardTitle}</strong>{discardActions}</aside>}
     <div className="resources-split">
       <aside className="resources-sidebar" aria-label={zh ? "文件导航" : "File navigation"}>
-        <header className="resources-sidebar-head"><h3>{zh ? "本地文件" : "Local files"}</h3><button type="button" className="icon-btn" aria-label={zh ? "刷新本地文件" : "Refresh local files"} data-tip={zh ? "刷新本地文件" : "Refresh local files"} disabled={!!busy || !supported || !!pending} onClick={() => requestNavigation({ kind: "refresh" })}><Icon name="refresh" /></button></header>
+        <header className="resources-sidebar-head"><h3>{zh ? "本地文件" : "Local files"}</h3>{windowed && preview && marks && <span className="resources-demo">{zh ? "演示" : "Demo"}</span>}<button type="button" className="icon-btn" aria-label={zh ? "刷新本地文件" : "Refresh local files"} data-tip={zh ? "刷新本地文件" : "Refresh local files"} disabled={!!busy || !supported || !!pending} onClick={() => requestNavigation({ kind: "refresh" })}><Icon name="refresh" /></button></header>
         <div className="resources-search"><Icon name="search" /><input aria-label={zh ? "搜索本地文件" : "Search local files"} placeholder={zh ? "搜索文件名…" : "Search filenames…"} value={search} onChange={event => setSearch(event.target.value)} /></div>
         <nav className="resources-file-list" aria-label={zh ? "本地文件列表" : "Local file list"}>
-          {visibleFiles.map(file => <button type="button" className={`resources-file${document?.uri === file.uri ? " is-selected" : ""}`} key={file.uri} aria-current={document?.uri === file.uri ? "true" : undefined} disabled={!!busy || !!pending || file.bytes > MAX_TEXT_BYTES} data-tip={file.bytes > MAX_TEXT_BYTES ? (zh ? "超出 512 KiB 文本编辑上限" : "Exceeds the 512 KiB editing limit") : file.uri} onClick={() => { if (document?.uri !== file.uri) requestNavigation({ kind: "open", uri: file.uri }); }}>
+          {visibleFiles.map(file => <button type="button" className={`resources-file${document?.uri === file.uri ? " is-selected" : ""}`} key={file.uri} aria-current={document?.uri === file.uri ? "true" : undefined} disabled={!!busy || !!pending || file.bytes > MAX_TEXT_BYTES} data-tip={file.bytes > MAX_TEXT_BYTES ? (zh ? "超出 512 KiB 文本编辑上限" : "Exceeds the 512 KiB editing limit") : file.uri} onClick={() => { setNarrowView("editor"); if (document?.uri !== file.uri) requestNavigation({ kind: "open", uri: file.uri }); }}>
             <Icon name="file-code" /><span className="resources-file-info"><strong>{file.name}</strong><span>{fileSize(file.bytes)}<span aria-hidden="true"> · </span><time dateTime={new Date(file.modifiedAt).toISOString()}>{new Date(file.modifiedAt).toLocaleDateString(zh ? "zh-CN" : "en-US", { month: "short", day: "numeric" })}</time></span></span>{document?.uri === file.uri && dirty ? <span className="resources-dirty-dot" aria-label={zh ? "未保存" : "Unsaved"} /> : null}
           </button>)}
           {!visibleFiles.length ? <p className="resources-list-empty" role="status">{busy ? (zh ? "正在读取文件…" : "Loading files…") : search ? (zh ? "没有匹配的文件" : "No matching files") : supported ? (zh ? "没有 local:// 文件" : "No local:// files") : emptyReason}</p> : null}
@@ -272,7 +302,9 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
         {document ? <>
           <header className="resources-document-head"><div className="resources-document-title"><Icon name="file-code" /><h3>{chosen?.name ?? document.uri.slice("local://".length)}</h3><span className={`resources-state${dirty ? " is-dirty" : ""}`} role="status">{busy === "saving" ? (zh ? "保存中…" : "Saving…") : dirty ? (zh ? "未保存" : "Unsaved") : saved ? (zh ? "已保存到原文件" : "Saved in place") : (zh ? "已打开" : "Opened")}</span></div><code className="resources-uri">{document.uri}</code></header>
           {error ? <div className="resources-notice is-error" role="alert"><Icon name="alert-c" /><div><strong>{saveFailed ? (zh ? "保存未完成，草稿已保留" : "Not saved. Your draft is preserved.") : (zh ? "读取未完成" : "Read failed")}</strong><p>{error}</p>{saveFailed ? <p>{zh ? "若文件已被外部修改，请先复制需要保留的草稿，再重新打开最新文件；不会覆盖外部版本。" : "If the file changed externally, copy any draft you need before reopening the latest file. The external version has not been overwritten."}</p> : null}</div></div> : null}
-          <CapabilityEditor key={document.uri} value={draft} label={zh ? "本地文件正文" : "Local file content"} language={resourceLanguage(document.uri)} readOnly={!!busy || !!pending || !supported} onChange={value => { if (!lock.current && !pending) { setDraft(value); setSaved(false); } }} onSubmit={() => void save()} className="resources-text-editor" />
+          {windowed
+            ? <ResourceTextView key={document.uri} uri={document.uri} text={draft} {...editorProps} onSave={() => void save()} />
+            : <CapabilityEditor key={document.uri} value={draft} language={resourceLanguage(document.uri)} {...editorProps} onSubmit={() => void save()} className="resources-text-editor" />}
           {tooLarge ? <p className="resources-limit" role="alert">{zh ? "草稿超过 512 KiB，请缩短后保存。" : "This draft exceeds 512 KiB. Shorten it before saving."}</p> : null}
           <div className="resources-editor-actions"><button type="button" className="btn primary" disabled={!!busy || !!pending || !dirty || tooLarge || !supported} onClick={() => void save()}><Icon name="check" />{zh ? "保存到原文件" : "Save in place"}</button><button type="button" className="btn ghost" disabled={!!busy || !!pending || !dirty} onClick={() => { setDraft(document.text); setSaved(false); }}>{zh ? "撤销草稿" : "Revert draft"}</button><button type="button" className="btn ghost" disabled={!!busy || !!pending || !supported} onClick={() => requestNavigation({ kind: "open", uri: document.uri })}><Icon name="refresh" />{zh ? "重新打开" : "Reopen"}</button></div>
           <footer className="resources-document-foot"><span>UTF-8 <span aria-hidden="true">·</span> {fileSize(draftBytes)}</span><span>{zh ? "版本" : "Version"} <code data-tip={document.version}>{document.version.slice(0, 8)}</code></span>{chosen ? <time dateTime={new Date(chosen.modifiedAt).toISOString()}>{zh ? "修改于 " : "Modified "}{new Date(chosen.modifiedAt).toLocaleString(zh ? "zh-CN" : "en-US")}</time> : null}</footer>
@@ -282,6 +314,6 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
         </>}
       </div>
     </div>
-    {pending ? <WorkspaceDialog title={zh ? "放弃未保存的修改？" : "Discard unsaved changes?"} onClose={() => setPending(undefined)}><p className="resources-confirm-copy">{zh ? "当前文件有未保存的草稿。继续后将读取文件内容，草稿会被替换；原文件不会被修改。" : "This file has an unsaved draft. Continuing replaces it with file contents without modifying the original file."}</p><code className="resources-confirm-uri">{document?.uri}</code><div className="resources-confirm-actions"><button type="button" className="btn ghost" onClick={() => setPending(undefined)}>{zh ? "继续编辑" : "Keep editing"}</button><button type="button" className="btn primary" onClick={() => void navigate(pending)}>{zh ? "放弃草稿并继续" : "Discard and continue"}</button></div></WorkspaceDialog> : null}
+    {!windowed && pending && <WorkspaceDialog title={discardTitle} onClose={() => setPending(undefined)}>{discardActions}</WorkspaceDialog>}
   </section>;
 }

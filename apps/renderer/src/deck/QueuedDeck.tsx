@@ -245,7 +245,9 @@ export function QueuedDeck({
     const anchor = deck?.parentElement;
     if (!current || !deck || !area || !anchor) return;
     const update = () => {
-      const available = anchor.getBoundingClientRect().bottom - area.getBoundingClientRect().top - 16;
+      // Use the positioned bottom edge, including the offset above an active composer.
+      const bottom = anchor.getBoundingClientRect().bottom - Number.parseFloat(getComputedStyle(deck).bottom);
+      const available = bottom - area.getBoundingClientRect().top - 8;
       deck.style.setProperty("--deck-max-height", `${Math.max(64, available)}px`);
     };
     update();
@@ -459,6 +461,7 @@ export function QueuedDeck({
         <div ref={stageRef} className={`dk-stage${lockSmooth("stage")}`} style={lockStyle("stage")}>
           {current.kind === "plan" ? (
             <PlanCard
+              key={current.id}
               title={current.title}
               body={current.body}
               {...(demo === true ? { demo: true } : {})}

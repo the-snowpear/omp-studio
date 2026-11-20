@@ -1,9 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { EditorView } from "@codemirror/view";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StudioClient } from "@omp-studio/client-contract";
 import { I18nProvider } from "../i18n";
 import { PreviewModeProvider, PreviewSurface } from "../preview/PreviewContext";
-import { ResourcesPane } from "./ResourcesPane";
+import { ResourceReader, ResourcesPane } from "./ResourcesPane";
 import { LocalFilesPane } from "./LocalFilesPane";
 
 const receipts = vi.hoisted(() => ({ serial: 0, values: new Map<string, () => unknown>() }));
@@ -50,7 +51,7 @@ async function reader() { fireEvent.click(screen.getByRole("tab", { name: "按 U
 function address(value: string) { fireEvent.change(screen.getByRole("textbox", { name: "Resource URI" }), { target: { value } }); }
 
 beforeEach(() => { receipts.values.clear(); localStorage.clear(); window.history.replaceState({}, "", "/"); });
-afterEach(() => { cleanup(); window.history.replaceState({}, "", "/"); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState({}, "", "/"); });
 
 describe("local resource workspace", () => {
   it("opens the caller's target, searches real files, and saves to the original URI with its version", async () => {
@@ -140,6 +141,35 @@ describe("local resource workspace", () => {
 });
 
 describe("URI resources", () => {
+  it("shows ANSI colors across log pages and replaces decorations when rereading", async () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    let replaced = false;
+    const uri = "local://1.log";
+    const client = clientWith((_kind, input) => {
+      if (replaced) return { uri, version: NEXT_VERSION, offset: 0, total: 1, text: "OK", truncated: false };
+      return input.offset === 2
+        ? { uri, version: VERSION, offset: 2, total: 4, text: "still green\x1b[0m\r\n2026-11-20T08:00:00Z WARN slow cache", truncated: false }
+        : { uri, version: VERSION, offset: 0, total: 4, nextOffset: 2, text: "\x1b[38;5;46mstarted\r\nrenderer", truncated: false };
+    });
+    render(<I18nProvider forcedLanguage="zh"><ResourceReader client={client} sessionId="s" available initialUri={uri} /></I18nProvider>);
+    const first = await screen.findByText("started");
+    expect(first.style.color).toBe("rgb(0, 255, 0)");
+    const log = () => EditorView.findFromDOM(screen.getByRole("textbox", { name: "资源正文" }))!;
+    expect(log().state.doc.toString()).toBe("started\nrenderer");
+    expect(log().state.readOnly).toBe(true);
+    fireEvent.click(button("下一页"));
+    expect((await screen.findByText("still green")).style.color).toBe("rgb(0, 255, 0)");
+    expect(screen.getByText("WARN").style.color).toBe("var(--amber)");
+    fireEvent.click(button("上一页"));
+    await screen.findByText("started");
+    const editor = log();
+    replaced = true;
+    fireEvent.click(button("重新读取"));
+    await screen.findByText("OK");
+    expect(log()).toBe(editor);
+    expect(log().state.doc.toString()).toBe("OK");
+  });
+
   it("pages backward and forward against the loaded URI/version, not the edited address", async () => {
     const client = clientWith(); render(surface(client)); await reader();
     address("omp://docs"); fireEvent.click(button("读取"));

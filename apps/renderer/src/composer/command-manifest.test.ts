@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { OperatorCommandManifest, OperatorCommandManifestEntry } from "@omp-studio/studio-protocol";
 import {
+  composerSlashCatalog,
   composerSlashExecute,
   mergeSlashCatalogWithManifest,
   planComposerSend,
@@ -136,4 +137,12 @@ it("bare /btw is executable so it opens history without a model prompt", () => {
   const command = visibleSlashCatalog().find(item => item.name === "btw")!;
   expect(command.select).toBe("run-now");
   expect(resolveSlashExecute(command, "")).toEqual({ kind: "typed", name: "btw.ask", input: { question: "" } });
+});
+
+it("opens session files even when the Runtime advertises no local command", () => {
+  const catalog = composerSlashCatalog(manifest([entry()]));
+  expect(catalog.map(command => command.name)).toEqual(["local", "test"]);
+  expect(composerSlashExecute(snapshotFromText("/local"), catalog)?.command.ui).toBe("local-files");
+  expect(composerSlashExecute(snapshotFromText("/local review notes.md"), catalog))
+    .toMatchObject({ kind: "execute", command: { name: "local", ui: "local-files" }, args: "review notes.md" });
 });

@@ -134,6 +134,7 @@ const PATHS = {
   tablet: '<rect x="3" y="1.5" width="10" height="13" rx="1.2"/><path d="M7 12.5h2"/>',
   test: '<path d="M6.5 1.5h3M7.5 1.5v5l-4 7a1.5 1.5 0 0 0 1.3 2h6.4a1.5 1.5 0 0 0 1.3-2l-4-7v-5z"/><path d="M5.5 10h5"/>',
   save: '<path d="M3 2.5h8l2.5 2.5v8.5H3z"/><path d="M5.5 2.5V6h5V2.5M5.5 13.5V9.5h5v4"/>',
+  "save-exit": '<path d="M6.5 13.5h-4v-11h7l2 2V7M5 2.5V6h4V2.5M5 13.5v-4h1.5"/><path d="M8.5 11h6M12 8.5l2.5 2.5-2.5 2.5"/>',
   unlock: '<rect x="3" y="7" width="10" height="6.5" rx="1.2"/><path d="M5.5 7V4.8a2.5 2.5 0 0 1 5-.6"/>',
   lock: '<rect x="3" y="7" width="10" height="6.5" rx="1.2"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/>',
   drive: '<rect x="1.8" y="4" width="12.4" height="8" rx="1.6"/><path d="M1.8 9h12.4M11.2 10.6h.4M9.2 10.6h.4"/>',

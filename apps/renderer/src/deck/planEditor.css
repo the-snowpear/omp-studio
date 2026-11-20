@@ -1,47 +1,133 @@
-/* ---------------- Plan 原位编辑 ----------------
-   收起时是一行工具条；编辑时是一块带标题栏的编辑面，未保存的改动在标题栏亮一个点。 */
-.plan-inline-editor { padding: var(--sp-6) var(--sp-12) 0; }
-.plan-inline-editor-bar { display: flex; align-items: center; gap: var(--sp-8); color: var(--text-3); font-size: var(--fs-11); }
-.plan-inline-editor-bar > .btn { margin-inline-start: auto; }
-.plan-inline-editor-saved { display: inline-flex; align-items: center; gap: var(--sp-4); color: var(--green); animation: var(--motion-reveal); }
-.plan-inline-editor-surface {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--accent-border);
-  border-radius: var(--r-6);
-  background: var(--surface);
-  box-shadow: 0 0 0 3px var(--accent-softer);
-  overflow: hidden;
-  animation: var(--motion-unfold);
+/* Plan editing is one document surface. Both panes share the review's available height. */
+.plan-card { position: relative; }
+.plan-card[data-expanded="true"] > .question-height-handle { visibility: hidden; }
+:is(.deck.preview-queue.is-question-sized .plan-card, .plan-card.is-question-sized) {
+  display: flex; flex-direction: column; min-height: 0;
+  height: min(var(--question-height), var(--deck-cap, 100dvh));
 }
-.plan-inline-editor-head {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-8);
-  min-height: 32px;
-  padding: 0 var(--sp-6) 0 var(--sp-10);
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text-2);
-  font-size: var(--fs-11);
+:is(.deck.preview-queue.is-question-sized .plan-card, .plan-card.is-question-sized) > :is(.approval-head, .dk-actions, .plan-compact-editor, .plan-execution-lock, .plan-operation-error) { flex: none; }
+:is(.deck.preview-queue.is-question-sized .plan-card, .plan-card.is-question-sized) > .approval-body {
+  position: relative; display: flex; flex-direction: column; flex: 1 1 0; min-height: 0;
+  padding: 0;
 }
-.plan-inline-editor-head > .icon { color: var(--accent); }
-.plan-inline-editor-head > strong { font-weight: var(--fw-semibold); color: var(--text); }
-.plan-inline-editor-dirty { display: inline-flex; align-items: center; gap: var(--sp-4); color: var(--amber); }
-.plan-inline-editor-dirty::before { content: ""; width: 6px; height: 6px; border-radius: var(--r-full); background: currentColor; }
-.plan-inline-editor-surface textarea {
-  display: block;
-  width: 100%;
-  min-height: 180px;
-  max-height: 46vh;
-  padding: var(--sp-10) var(--sp-12);
-  border: 0;
-  border-radius: 0;
-  outline: 0;
-  background: var(--code-bg);
-  color: var(--text);
-  font: var(--fs-12)/1.7 var(--font-mono);
-  resize: vertical;
+:is(.deck.preview-queue.is-question-sized .plan-card, .plan-card.is-question-sized) .plan-preview-content {
+  flex: 1 1 0; min-height: 0; padding: var(--sp-12) var(--sp-14); overflow-y: auto; overscroll-behavior: contain;
 }
-.plan-inline-editor-foot { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-6); padding: var(--sp-6) var(--sp-8); border-top: 1px solid var(--border); }
-.plan-inline-editor-foot > .plan-inline-editor-hint { margin-inline-end: auto; color: var(--text-3); font-size: var(--fs-11); }
+:is(.deck.preview-queue.is-question-sized .plan-card, .plan-card.is-question-sized) .plan-md-preview { max-height: none; overflow: visible; }
+:is(.deck.preview-queue.is-question-sized .plan-card, .plan-card.is-question-sized) .plan-md-preview::after { display: none; }
+:is(.deck.preview-queue.is-question-sized .plan-card, .plan-card.is-question-sized) > .approval-body::after {
+  content: ""; position: absolute; inset-inline: 0; bottom: 0; height: 2.5em;
+  background: linear-gradient(to bottom, transparent, var(--surface)); pointer-events: none;
+}
+.plan-editor-toolbar, .plan-compact-editor {
+  display: flex; align-items: center; gap: var(--sp-12); flex: none;
+  padding: var(--sp-8) var(--sp-20); color: var(--text-3); font-size: var(--fs-12);
+}
+.plan-editor-toolbar { border-bottom: 1px solid var(--border); }
+.plan-compact-editor { padding: var(--sp-6) var(--sp-12) 0; }
+.plan-compact-editor > .btn { margin-inline-start: auto; }
+.plan-execution-lock { flex: none; min-width: 0; margin: 0; padding: 0; border: 0; }
+.plan-view-switch {
+  display: inline-flex; gap: var(--sp-2); padding: var(--sp-2);
+  border: 1px solid var(--border); border-radius: var(--r-6); background: var(--surface-2);
+}
+.plan-view-switch > button {
+  display: inline-flex; align-items: center; gap: var(--sp-6); min-height: 28px;
+  padding: var(--sp-4) var(--sp-10); border: 0; border-radius: var(--r-4);
+  background: transparent; color: var(--text-3); font: inherit; cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.plan-view-switch > button:hover { color: var(--text); }
+.plan-view-switch > button[aria-pressed="true"] { background: var(--surface); color: var(--accent); box-shadow: var(--shadow-sm); }
+.plan-view-switch > button:focus-visible, .plan-splitter:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.plan-save-status { display: inline-flex; align-items: center; gap: var(--sp-6); }
+.plan-save-status.is-dirty { color: var(--amber); }
+.plan-save-status.is-dirty::before { content: ""; width: 5px; height: 5px; border-radius: var(--r-full); background: currentColor; }
+.plan-save-shortcut { margin-inline-start: auto; color: var(--text-3); font: var(--fs-11) var(--font-mono); }
+.plan-operation-error {
+  display: flex; align-items: flex-start; gap: var(--sp-8); flex: none;
+  padding: var(--sp-8) var(--sp-20); color: var(--red); font-size: var(--fs-12);
+  background: var(--surface-2); border-bottom: 1px solid var(--border); overflow-wrap: anywhere;
+}
+.plan-workspace { display: flex; flex: 1 1 0; min-height: 220px; overflow: hidden; }
+.plan-workspace.is-editing { display: grid; grid-template-rows: minmax(0, var(--plan-source-share)) 9px minmax(0, 1fr); }
+.plan-source-pane, .plan-render-pane { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.plan-render-pane { flex: 1; }
+.plan-pane-badges {
+  position: absolute; inset: var(--sp-8) var(--sp-12) auto; z-index: 2;
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-12);
+  pointer-events: none;
+}
+.plan-pane-badge {
+  display: inline-flex; align-items: center; gap: var(--sp-6); min-height: 23px;
+  padding: var(--sp-2) var(--sp-8); border: 1px solid var(--border); border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(8px);
+  box-shadow: 0 1px 3px var(--border); color: var(--text-3); font-size: var(--fs-11); white-space: nowrap;
+}
+.plan-pane-badge > strong { color: var(--text-2); font-weight: var(--fw-medium); }
+.plan-location-label, .plan-live-label { margin-inline-start: auto; font-size: var(--fs-11); }
+.plan-location-label { font-family: var(--font-mono); }
+.plan-live-label { display: inline-flex; align-items: center; gap: var(--sp-6); }
+.plan-live-label > i { width: 5px; height: 5px; border-radius: var(--r-full); background: var(--green); }
+.plan-source-editor { flex: 1; min-height: 0; overflow: hidden; background: var(--code-bg); }
+.plan-source-editor .cm-editor { height: 100%; background: transparent; }
+.plan-source-editor .cm-scroller { overflow: auto; font: var(--fs-12)/1.75 var(--font-mono); overscroll-behavior: contain; }
+.plan-source-editor .cm-content { padding-top: 38px; padding-bottom: var(--sp-12); }
+.plan-source-editor .cm-line { padding-inline: var(--sp-12); }
+.plan-source-editor .cm-gutters { background: transparent; color: var(--text-3); border-right: 1px solid var(--border); }
+.plan-source-editor .cm-focused { outline: none; }
+.plan-source-editor .cm-line.plan-source-linked { background: var(--accent-soft); box-shadow: inset 2px 0 var(--accent); }
+.plan-splitter {
+  display: flex; align-items: center; justify-content: center; z-index: 1;
+  background: var(--surface); border-block: 1px solid var(--border); cursor: row-resize; touch-action: none;
+  transition: background var(--dur-fast) var(--ease);
+}
+.plan-splitter > span { width: 34px; height: 2px; border-radius: var(--r-full); background: var(--border-strong); }
+.plan-splitter:hover, .plan-splitter:focus-visible { background: var(--accent-soft); }
+.plan-splitter:hover > span, .plan-splitter:focus-visible > span { background: var(--accent); }
+.plan-preview-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--sp-20) var(--sp-24); }
+.plan-workspace.is-editing .plan-preview-scroll { padding-top: 38px; }
+.plan-preview-scroll .ev-body { font-size: var(--fs-14); line-height: 1.75; color: var(--text); overflow-wrap: anywhere; }
+.plan-preview-scroll [data-source-start] { transition: background-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease); }
+.plan-preview-scroll .plan-render-linked { background: var(--accent-soft); box-shadow: -3px 0 var(--accent); border-radius: 2px; }
+.plan-locate {
+  position: absolute; left: 50%; transform: translateX(-50%); z-index: 2;
+  display: inline-flex; align-items: center; gap: var(--sp-6); white-space: nowrap;
+  padding: var(--sp-4) var(--sp-10); min-height: 26px; border: 1px solid var(--accent-border);
+  border-radius: var(--r-full); background: var(--surface); box-shadow: var(--shadow-sm);
+  color: var(--accent); font: var(--fs-11) var(--font-ui); cursor: pointer; animation: var(--motion-reveal);
+}
+.plan-locate.is-above { top: var(--sp-8); }
+.plan-locate.is-below { bottom: var(--sp-8); }
+.plan-annotate-button { position: relative; width: 30px; height: 30px; flex: none; }
+.plan-annotate-button.has-notes { color: var(--accent); background: var(--accent-softer); }
+.plan-note-count { position: absolute; top: -3px; right: -3px; min-width: 14px; padding-inline: 3px; border-radius: var(--r-full); color: var(--surface); background: var(--accent); font-size: 10px; line-height: 14px; }
+.plan-section-notes:empty { display: none; }
+.plan-section-notes { display: flex; flex-direction: column; gap: var(--sp-8); }
+.plan-orphan-note { border-left: 2px solid var(--amber); padding-inline-start: var(--sp-12); }
+.plan-orphan-title { display: flex; align-items: center; gap: var(--sp-8); font-size: var(--fs-12); }
+.plan-orphan-title > span { margin-inline-start: auto; color: var(--amber); }
+.plan-orphan-note details { color: var(--text-3); font-size: var(--fs-12); }
+.plan-orphan-note summary { cursor: pointer; }
+.plan-orphan-note pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); }
+.plan-empty { color: var(--text-3); font-size: var(--fs-14); line-height: 1.7; }
+.plan-review-dialog { overflow-y: auto; }
+.plan-review-dialog .plan-review-overall { padding-block: var(--sp-8); gap: var(--sp-4); }
+.plan-review-dialog .plan-review-overall textarea.input { min-height: 52px; height: 52px; max-height: 120px; font-size: var(--fs-12); }
+.plan-review-dialog .plan-review-overall textarea.input[hidden] { display: none; }
+.plan-overall-toggle {
+  display: flex; align-items: center; gap: var(--sp-8); width: 100%; min-height: 28px;
+  padding: 0; border: 0; color: var(--text-2); background: transparent; cursor: pointer;
+  font: var(--fw-medium) var(--fs-12) var(--font-ui); text-align: start;
+  transition: color var(--dur-fast) var(--ease);
+}
+.plan-overall-toggle:hover { color: var(--accent); }
+.plan-overall-filled { color: var(--accent); font-size: var(--fs-11); }
+.plan-overall-chevron { margin-inline-start: auto; transition: transform var(--dur-fast) var(--ease); }
+.plan-overall-chevron.is-open { transform: rotate(180deg); }
+@media (max-width: 640px) {
+  .plan-editor-toolbar { gap: var(--sp-6); padding-inline: var(--sp-12); }
+  .plan-save-shortcut { visibility: hidden; width: 0; }
+  .plan-preview-scroll { padding: var(--sp-12) var(--sp-16); }
+  .plan-review-dialog .dk-actions { flex-wrap: wrap; }
+}

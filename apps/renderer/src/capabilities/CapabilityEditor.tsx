@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { Annotation, Compartment, EditorState, Prec, Transaction } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, keymap, placeholder as editorPlaceholder } from "@codemirror/view";
 import { languages } from "@codemirror/language-data";
+import { useSurfaceDocument } from "../dock/SurfaceContext";
 import { coreEditorExtensions } from "../structured-editor/extensions";
 import "./capabilityEditor.css";
 
@@ -22,8 +23,10 @@ export function CapabilityEditor({
 }) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView | null>(null);
+  const surface = useSurfaceDocument();
   const languageConfig = useRef(new Compartment());
   const accessConfig = useRef(new Compartment());
+  const placeholderConfig = useRef(new Compartment());
   const callbacks = useRef({ onChange, onSubmit });
   callbacks.current = { onChange, onSubmit };
 
@@ -34,9 +37,10 @@ export function CapabilityEditor({
       state: EditorState.create({
         doc: value,
         extensions: [
-          ...coreEditorExtensions(placeholder ? { placeholder } : {}),
+          ...coreEditorExtensions({}),
           languageConfig.current.of([]),
           accessConfig.current.of([]),
+          placeholderConfig.current.of([]),
           Prec.highest(keymap.of([{ key: "Mod-Enter", run: () => {
             if (!callbacks.current.onSubmit) return false;
             callbacks.current.onSubmit();
@@ -56,6 +60,14 @@ export function CapabilityEditor({
     return () => { observer.disconnect(); editor.current = null; view.destroy(); };
   }, []);
 
+  useLayoutEffect(() => {
+    const view = editor.current;
+    if (view && view.root !== surface) {
+      view.setRoot(surface);
+      view.requestMeasure();
+    }
+  }, [surface]);
+
   useEffect(() => {
     const view = editor.current;
     if (view && view.state.doc.toString() !== value) view.dispatch({
@@ -70,6 +82,10 @@ export function CapabilityEditor({
       EditorView.contentAttributes.of({ "aria-label": label, "aria-readonly": String(readOnly), role: "textbox", "aria-multiline": "true", spellcheck: "false" }),
     ]) });
   }, [readOnly, label]);
+
+  useEffect(() => {
+    editor.current?.dispatch({ effects: placeholderConfig.current.reconfigure(placeholder ? editorPlaceholder(placeholder) : []) });
+  }, [placeholder]);
 
   useEffect(() => {
     let active = true;

@@ -101,6 +101,22 @@ describe("dock layouts", () => {
     expect(locatePanel(dockReducer(restored, { type: "open", panel: "git" }), "git")?.region).toBe("right");
   });
 
+  it("restores an old IDA rail placement as a quick card with an independently opened workspace", () => {
+    const layout = createDefaultLayout();
+    const saved = {
+      ...layout,
+      rail: { ...layout.rail, panels: ["environment", "ida", "context"] },
+      cards: { ...layout.cards, disassembler: undefined, ida: { collapsed: true, height: 180 } },
+    };
+    const restored = normalizeLayout(saved);
+    expect(restored.rail.panels).toContain("disassembler-quick");
+    expect(restored.cards["disassembler-quick"]).toEqual({ collapsed: true, height: 180 });
+    const opened = dockReducer(restored, { type: "open", panel: "disassembler" });
+    expect(locatePanel(opened, "disassembler")?.region).toBe("right");
+    expect(locatePanel(opened, "disassembler-quick")?.region).toBe("rail");
+    expect(normalizeLayout(opened)).toEqual(opened);
+  });
+
   it("introduces agent detail hidden and opens it in the existing right group without rearranging tools", () => {
     const legacy = createDefaultLayout();
     delete legacy.hidden["agent-detail"];

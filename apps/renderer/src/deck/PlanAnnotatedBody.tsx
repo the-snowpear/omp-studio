@@ -1,188 +1,95 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import { isPrimaryModifier } from "../keyboard/shortcuts";
 import { MarkdownText } from "../conversation/markdown";
 import { Icon } from "../icons";
 import { useI18n } from "../i18n";
-import { mergePlanDraft, type PlanNotesBySection } from "./planFeedback";
+import { PlanDocument, notesForSection, type PlanNote } from "./planDocument";
 import { parsePlanSections, sectionBodyMarkdown } from "./planSections";
 
-const PREAMBLE_LABEL_ZH = "计划前言";
-const PREAMBLE_LABEL_EN = "Plan preamble";
-
-function headingTag(level: number): "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" {
-  if (level <= 0) return "p";
-  if (level === 1) return "h1";
-  if (level === 2) return "h2";
-  if (level === 3) return "h3";
-  if (level === 4) return "h4";
-  if (level === 5) return "h5";
-  return "h6";
-}
-
-export type PlanAnnotatedBodyHandle = {
-  flushDraft: () => Record<number, string[]>;
-};
-
-export const PlanAnnotatedBody = forwardRef<PlanAnnotatedBodyHandle, {
-  body: string;
-  notes: PlanNotesBySection;
-  disabled?: boolean;
-  onNotesChange: (notes: Record<number, string[]>) => void;
-}>(function PlanAnnotatedBody({
-  body,
-  notes,
-  disabled,
-  onNotesChange,
-}, ref) {
-  const { resolvedLanguage } = useI18n();
-  const zh = resolvedLanguage === "zh";
-  const sections = parsePlanSections(body);
-  const [draftIndex, setDraftIndex] = useState<number | undefined>(undefined);
-  const [draft, setDraft] = useState("");
+export const PlanAnnotatedBody = memo(function PlanAnnotatedBody({
+  document, markdown, notes, disabled,
+}: {
+  document: PlanDocument;
+  markdown: string;
+  notes: readonly PlanNote[];
+  disabled: boolean;
+}) {
+  const zh = useI18n().resolvedLanguage === "zh";
+  const sections = useMemo(() => parsePlanSections(markdown), [markdown]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const draftId = notes.find(note => note.draft !== undefined)?.id;
+  useEffect(() => { if (draftId !== undefined) textareaRef.current?.focus(); }, [draftId]);
 
-  const flushDraft = () => {
-    const next = mergePlanDraft(notes, draftIndex === undefined ? undefined : { index: draftIndex, text: draft });
-    if (draftIndex !== undefined && draft.trim().length > 0) {
-      onNotesChange(next);
-      setDraftIndex(undefined);
-      setDraft("");
-    }
-    return next;
-  };
+  const noteContent = (note: PlanNote, title: string) => <div key={note.id} className="plan-section-notes">
+    {note.notes.map((text, index) => <div key={index} className="plan-note">
+      <p className="plan-note-text">{text}</p>
+      <button type="button" className="icon-btn small" disabled={disabled}
+        aria-label={zh ? `删除批注 ${title} ${index + 1}` : `Delete annotation ${title} ${index + 1}`}
+        onClick={() => document.editNote(note.id, { notes: note.notes.filter((_, i) => i !== index) })}>
+        <Icon name="x" extra="sm" />
+      </button>
+    </div>)}
+    {note.draft !== undefined ? <div className="plan-note-draft">
+      <textarea ref={textareaRef} className="input" rows={3} value={note.draft} disabled={disabled}
+        aria-label={zh ? `批注内容 ${title}` : `Annotation text ${title}`}
+        placeholder={zh ? "写下对这一段的修改意见…" : "Write suggested edits for this section…"}
+        onChange={event => document.editNote(note.id, { draft: event.target.value })}
+        onKeyDown={event => {
+          if (event.nativeEvent.isComposing) return;
+          if (event.key === "Escape") {
+            event.preventDefault(); event.stopPropagation(); document.editNote(note.id, { draft: undefined });
+          } else if (event.key === "Enter" && isPrimaryModifier(event)) {
+            event.preventDefault(); event.stopPropagation(); document.flushNotes();
+          }
+        }} />
+      <div className="plan-note-draft-actions">
+        <button type="button" className="btn small outline" disabled={disabled}
+          onClick={() => document.editNote(note.id, { draft: undefined })}>{zh ? "取消" : "Cancel"}</button>
+        <button type="button" className="btn small primary" disabled={disabled || !note.draft.trim()}
+          onClick={() => document.flushNotes()}>{zh ? "保存批注" : "Save annotation"}</button>
+      </div>
+    </div> : null}
+  </div>;
 
-  useImperativeHandle(ref, () => ({ flushDraft }), [draft, draftIndex, notes, onNotesChange]);
-
-  useEffect(() => {
-    if (draftIndex === undefined) return;
-    textareaRef.current?.focus();
-  }, [draftIndex]);
-
-  useEffect(() => {
-    if (draftIndex === undefined) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      setDraftIndex(undefined);
-      setDraft("");
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [draftIndex]);
-
-  const setSectionNotes = (index: number, next: string[]) => {
-    const copy: Record<number, string[]> = {};
-    for (const [key, value] of Object.entries(notes)) {
-      copy[Number(key)] = [...value];
-    }
-    if (next.length === 0) delete copy[index];
-    else copy[index] = next;
-    onNotesChange(copy);
-  };
-
-  const startDraft = (index: number, quote = "") => {
-    setDraftIndex(index);
-    setDraft(quote ? quote.split("\n").map(line => `> ${line}`).join("\n") + "\n\n" : "");
-  };
-
-  const saveDraft = () => {
-    if (draftIndex === undefined) return;
-    const note = draft.trim();
-    if (!note) return;
-    setSectionNotes(draftIndex, [...(notes[draftIndex] ?? []), note]);
-    setDraftIndex(undefined);
-    setDraft("");
-  };
-
-  const cancelDraft = () => {
-    setDraftIndex(undefined);
-    setDraft("");
-  };
-
-  return (
-    <div className="plan-annotate">
-      {sections.map((section, index) => {
-        const title = section.title || (zh ? PREAMBLE_LABEL_ZH : PREAMBLE_LABEL_EN);
-        const Heading = headingTag(section.level);
-        const markdown = sectionBodyMarkdown(section).trim();
-        const saved = notes[index] ?? [];
-        const drafting = draftIndex === index;
-        return (
-          <section key={`${index}:${section.title}`} className="plan-section">
-            <div className="plan-section-head">
-              <Heading className="plan-section-title">{title}</Heading>
-              <button
-                type="button"
-                className="btn small outline"
-                disabled={disabled === true || drafting}
-                aria-label={zh ? `批注 ${title}` : `Annotate ${title}`}
-                onMouseDown={event => event.preventDefault()}
-                onClick={event => {
-                  const selection = event.currentTarget.ownerDocument.getSelection();
-                  const section = event.currentTarget.closest("section");
-                  const quote = selection?.rangeCount && section?.contains(selection.getRangeAt(0).commonAncestorContainer) ? selection.toString().trim() : "";
-                  startDraft(index, quote);
-                }}
-              >
-                {zh ? "批注" : "Annotate"}
-              </button>
-            </div>
-            {markdown.length > 0 ? (
-              <div className="plan-section-body">
-                <MarkdownText text={markdown} />
-              </div>
-            ) : null}
-            {saved.map((note, noteIndex) => (
-              <div key={`${noteIndex}:${note}`} className="plan-note">
-                <p className="plan-note-text">{note}</p>
-                <button
-                  type="button"
-                  className="icon-btn small"
-                  disabled={disabled === true}
-                  aria-label={zh ? `删除批注 ${title} ${noteIndex + 1}` : `Delete annotation ${title} ${noteIndex + 1}`}
-                  onClick={() => setSectionNotes(index, saved.filter((_, i) => i !== noteIndex))}
-                >
-                  <Icon name="x" extra="sm" />
-                </button>
-              </div>
-            ))}
-            {drafting ? (
-              <div className="plan-note-draft">
-                <textarea
-                  ref={textareaRef}
-                  className="input"
-                  rows={3}
-                  value={draft}
-                  disabled={disabled === true}
-                  aria-label={zh ? `批注内容 ${title}` : `Annotation text ${title}`}
-                  placeholder={zh ? "写下对这一段的修改意见…" : "Write suggested edits for this section…"}
-                  onChange={(event) => setDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && isPrimaryModifier(event)) {
-                      event.preventDefault();
-                      saveDraft();
-                    }
-                  }}
-                />
-                <div className="plan-note-draft-actions">
-                  <button type="button" className="btn small outline" disabled={disabled === true} onClick={cancelDraft}>
-                    {zh ? "取消" : "Cancel"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn small primary"
-                    disabled={disabled === true || draft.trim().length === 0}
-                    onClick={saveDraft}
-                  >
-                    {zh ? "保存" : "Save"}
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </section>
-        );
-      })}
-    </div>
-  );
+  const orphaned = notes.filter(note => (note.notes.length || note.draft !== undefined)
+    && (note.deleted || !sections.some(section => notesForSection([note], section).length > 0)));
+  return <div className="plan-annotate">
+    {sections.map((section, index) => {
+      const title = section.title || (zh ? "计划前言" : "Plan preamble");
+      const Heading = section.level === 0 ? "p" : `h${section.level}` as "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
+      const saved = notesForSection(notes, section);
+      const count = saved.reduce((total, note) => total + note.notes.length, 0);
+      const drafting = saved.some(note => note.draft !== undefined);
+      const text = sectionBodyMarkdown(section);
+      return <section key={index} className="plan-section">
+        <div className="plan-section-head">
+          <Heading className="plan-section-title"
+            {...(section.level > 0 ? { "data-source-start": section.from,
+              "data-source-end": section.from + section.raw.split("\n", 1)[0]!.replace(/\r$/, "").length } : {})}>{title}</Heading>
+          <button type="button" className={`icon-btn plan-annotate-button${count ? " has-notes" : ""}`}
+            disabled={disabled || drafting} aria-label={zh ? `批注 ${title}` : `Annotate ${title}`}
+            data-tip={zh ? "添加批注" : "Add annotation"}
+            onMouseDown={event => event.preventDefault()}
+            onClick={event => {
+              const selection = event.currentTarget.ownerDocument.getSelection();
+              const container = event.currentTarget.closest("section");
+              const quote = selection?.rangeCount && container?.contains(selection.getRangeAt(0).commonAncestorContainer)
+                ? selection.toString().trim() : "";
+              document.startNote(section, quote);
+            }}>
+            <Icon name="message" extra="sm" />
+            {count ? <span className="plan-note-count" aria-hidden="true">{count}</span> : null}
+          </button>
+        </div>
+        {text.trim() ? <div className="plan-section-body"><MarkdownText text={text} sourceOffset={section.bodyFrom} /></div> : null}
+        {saved.map(note => noteContent(note, title))}
+      </section>;
+    })}
+    {!markdown.trim() ? <p className="plan-empty">{zh ? "在上方开始编写计划，预览会实时显示在这里。" : "Start writing above. Your plan will appear here as you type."}</p> : null}
+    {orphaned.map(note => <section key={note.id} className="plan-section plan-orphan-note">
+      <div className="plan-orphan-title"><Icon name="message" extra="sm" /><strong>{note.title || (zh ? "计划前言" : "Plan preamble")}</strong><span>{zh ? "原章节已删除" : "Original section deleted"}</span></div>
+      <details><summary>{zh ? "查看原文" : "View original text"}</summary><pre>{note.source}</pre></details>
+      {noteContent(note, note.title)}
+    </section>)}
+  </div>;
 });

@@ -101,6 +101,11 @@ export function useDockEngine() {
   if (!value) throw new Error("DockProvider is required");
   return value;
 }
+/** Minimized windows and inactive tabs are still open and retain their document. */
+export function usePanelOpened(id: PanelId): boolean {
+  const { store } = useDockEngine();
+  return useSyncExternalStore(store.subscribe, () => !!locatePanel(store.getSnapshot().layout, id));
+}
 const noSubscribe = () => () => {};
 const noSnapshot = () => null;
 export function useOptionalDock() {

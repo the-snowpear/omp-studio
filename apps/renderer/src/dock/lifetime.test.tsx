@@ -29,7 +29,7 @@ function geometry() {
 }
 
 describe("dock content lifetime", () => {
-  it.each(["context-viewer", "annotations"] as const)("removes the %s backdrop as soon as a title drag starts", panel => {
+  it.each(["context-viewer", "annotations", "local-files", "spill-output"] as const)("removes the %s backdrop as soon as a title drag starts", panel => {
     geometry();
     const store = new DockStore(null);
     render(<DockProvider definitions={WORKBENCH_PANELS} store={store}>
@@ -62,7 +62,7 @@ describe("dock content lifetime", () => {
     expect(document.querySelector('[aria-label="context draft"]')).toBe(input);
   });
 
-  it.each(["context-viewer", "annotations"] as const)("keeps focus in the first %s and returns it when Esc closes the window", panel => {
+  it.each(["context-viewer", "annotations", "local-files", "spill-output"] as const)("keeps focus in the first %s and returns it when Esc closes the window", panel => {
     geometry();
     const store = new DockStore(null);
     const view = render(<DockProvider definitions={WORKBENCH_PANELS} store={store}>

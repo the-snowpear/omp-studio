@@ -160,6 +160,7 @@ export function DisassemblerDatabaseTools({ client, sessionId, available, initia
     });
   };
   const requiresTarget = ["pseudocode", "asm", "xrefs"].includes(view);
+  const addressLabel = zh ? "地址 / 符号" : "Address / symbol";
   const validEdit = ["save", "close"].includes(action) || (action === "exec" ? !!value.trim() : !!target.trim() && (action === "make_function" || action === "comment" || !!value.trim()));
 
   return <section className={`disassembler-browser ${databaseId ? "is-embedded" : ""}`} aria-label={zh ? "数据库视图与编辑" : "Database views and edits"}>
@@ -173,22 +174,27 @@ export function DisassemblerDatabaseTools({ client, sessionId, available, initia
     {error && !editing ? <div className="disassembler-notice is-error" role="alert"><Icon name="alert-c" /><span>{error}</span><button className="btn small ghost" disabled={busy || !can("disassembler.status")} onClick={() => void run(refresh)}>{zh ? "刷新状态" : "Refresh"}</button></div> : null}
     {state?.reason ? <p className="disassembler-hint" role="status">{state.reason}</p> : null}
     {!can("disassembler.query") ? <WorkspaceEmpty icon="plug" title={zh ? "当前 Runtime 未提供数据库视图" : "Database views are unavailable"}>{zh ? "连接支持反汇编分页查看的 Runtime 后使用。" : "Connect a Runtime with disassembler view support."}</WorkspaceEmpty> : <>
-      <div className="disassembler-browser-toolbar">
-        <label className="disassembler-view-field">{zh ? "查看内容" : "View"}<AppSelect className="select" aria-label={zh ? "IDA 视图" : "IDA view"} value={view} disabled={busy} onChange={event => { setView(event.target.value as DisassemblerView); setPage(undefined); }}>
+      <div className="disassembler-browser-toolbar disassembler-query-toolbar">
+        <label className="disassembler-view-field"><span className="disassembler-field-label">{zh ? "查看内容" : "View"}</span><AppSelect className="select" aria-label={zh ? "查看内容" : "View"} value={view} disabled={busy} onChange={event => { setView(event.target.value as DisassemblerView); setPage(undefined); }}>
           {DISASSEMBLER_VIEWS.map(id => <option key={id} value={id}>{label(id)}</option>)}
         </AppSelect></label>
-        <label className="disassembler-target-field">{zh ? "地址 / 符号" : "Address / symbol"}<input className="input mono" value={target} disabled={busy} onChange={event => setTarget(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && canView && !busy && (!requiresTarget || target.trim())) read(); }} placeholder={requiresTarget ? "main / 0x140001000" : (zh ? "可选，输入符号或地址" : "Optional symbol or address")} /></label>
-        <button className="btn outline" aria-label={zh ? "读取" : "Read"} disabled={!canView || busy || requiresTarget && !target.trim()} onClick={() => read()}><Icon name="search" />{busy ? (zh ? "读取中…" : "Reading…") : (zh ? "读取" : "Read")}</button>
+        <label className="disassembler-target-field"><span className="disassembler-field-label">{addressLabel}</span><input className="input mono" aria-label={addressLabel} value={target} disabled={busy} onChange={event => setTarget(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && canView && !busy && (!requiresTarget || target.trim())) read(); }} placeholder={requiresTarget ? "main / 0x140001000" : addressLabel} /></label>
+        <button type="button" className="btn outline disassembler-icon-action" aria-label={zh ? "读取" : "Read"} data-tip={zh ? "读取" : "Read"} disabled={!canView || busy || requiresTarget && !target.trim()} onClick={() => read()}><Icon name="search" /><span>{busy ? (zh ? "读取中…" : "Reading…") : (zh ? "读取" : "Read")}</span></button>
       </div>
       <div className="disassembler-view-surface" aria-busy={busy}>
-        <div className="disassembler-surface-bar"><span><Icon name="file-code" />{label(page?.binding.view ?? view)}{page?.binding.target ? <code>{page.binding.target}</code> : null}</span><button className="btn small ghost" disabled={!canEdit || busy} onClick={() => { setError(""); setEditing(true); }}><Icon name="pencil" />{zh ? "修改数据库" : "Edit database"}</button></div>
+        <div className="disassembler-surface-bar">
+          <span><Icon name="file-code" />{label(page?.binding.view ?? view)}{page?.binding.target ? <code data-tip={page.binding.target}>{page.binding.target}</code> : null}</span>
+          <button type="button" className="btn small ghost disassembler-icon-action" aria-label={zh ? "修改数据库" : "Edit database"} data-tip={zh ? "修改数据库" : "Edit database"} disabled={!canEdit || busy} onClick={() => { setError(""); setEditing(true); }}><Icon name="pencil" /><span>{zh ? "修改数据库" : "Edit database"}</span></button>
+        </div>
         {page ? <CapabilityEditor key={`${page.binding.dbId}:${page.binding.view}:${page.offset}`} label={zh ? "数据库视图内容" : "Database view content"} value={page.text} language={page.binding.view === "pseudocode" ? "cpp" : "text"} readOnly /> : <WorkspaceEmpty icon="file-code" title={busy ? (zh ? "正在读取数据库" : "Reading database") : (zh ? "选择视图，查看数据库" : "Choose a database view")}>
           {!fenced && db ? (zh ? "此数据库未提供身份和版本，暂时不能安全读取或修改。" : "This database has no identity or version for safe reads and edits.") : (zh ? "浏览函数、字符串和导入导出；输入地址或符号查看伪代码与交叉引用。" : "Browse functions, strings, imports and exports. Use a symbol or address for pseudocode and cross-references.")}
         </WorkspaceEmpty>}
         <footer className="disassembler-view-footer"><span>{page ? `${page.offset + (page.total ? 1 : 0)}-${Math.min(page.offset + 100, page.total)} / ${page.total}` : (zh ? "只读视图" : "Read-only view")}{page ? ` · v${page.binding.version}` : ""}</span>
-          {page?.truncated ? <span>{zh ? "部分内容已截断" : "Content truncated"}</span> : null}<span className="spacer" />
-          <button className="icon-btn" aria-label={zh ? "上一页" : "Previous page"} disabled={busy || !page?.previous.length} onClick={() => { if (page) read(page.previous.at(-1)!, page.previous.slice(0, -1)); }}><Icon name="chevron-l" /></button>
-          <button className="icon-btn" aria-label={zh ? "下一页" : "Next page"} disabled={busy || page?.nextOffset === undefined} onClick={() => { if (page) read(page.nextOffset!, [...page.previous, page.offset]); }}><Icon name="chevron-r" /></button>
+          {page?.truncated ? <span>{zh ? "部分内容已截断" : "Content truncated"}</span> : null}
+          <div className="disassembler-page-actions">
+            <button type="button" className="icon-btn" aria-label={zh ? "上一页" : "Previous page"} disabled={busy || !page?.previous.length} onClick={() => { if (page) read(page.previous.at(-1)!, page.previous.slice(0, -1)); }}><Icon name="chevron-l" /></button>
+            <button type="button" className="icon-btn" aria-label={zh ? "下一页" : "Next page"} disabled={busy || page?.nextOffset === undefined} onClick={() => { if (page) read(page.nextOffset!, [...page.previous, page.offset]); }}><Icon name="chevron-r" /></button>
+          </div>
         </footer>
       </div>
     </>}

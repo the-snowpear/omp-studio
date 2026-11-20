@@ -18,7 +18,7 @@ export function createDefaultLayout(): DockLayout {
     right: { visible: false, size: 480, ratio: 0.5, groups: [] },
     bottom: { visible: false, expanded: false, size: 240, ratio: 0.5, groups: [{ id: "bottom-main", panels: ["terminal", "problems", "tests", "output", "logs", "pvlogs"], active: "logs" }] },
     floats: [],
-    hidden: { changes: { region: "right", groupId: "right-main", index: 0 }, git: { region: "right", groupId: "right-main", index: 1 }, browser: { region: "right", groupId: "right-main", index: 2 }, computer: { region: "right", groupId: "right-main", index: 3 }, commit: { region: "right", groupId: "right-main", index: 4 }, disassembler: { region: "right" }, btw: { region: "float", rect: { ...FLOAT_RECT } }, "agent-detail": { region: "right" }, "context-viewer": { region: "float" }, annotations: { region: "float" }, "token-counter": { region: "float", rect: { x: 120, y: 90, width: 420, height: 460 } }, "file-browser": { region: "float", rect: { x: 96, y: 64, width: 960, height: 600 } } },
+    hidden: { changes: { region: "right", groupId: "right-main", index: 0 }, git: { region: "right", groupId: "right-main", index: 1 }, browser: { region: "right", groupId: "right-main", index: 2 }, computer: { region: "right", groupId: "right-main", index: 3 }, commit: { region: "right", groupId: "right-main", index: 4 }, disassembler: { region: "right" }, "disassembler-quick": { region: "rail" }, btw: { region: "float", rect: { ...FLOAT_RECT } }, "agent-detail": { region: "right" }, "context-viewer": { region: "float" }, annotations: { region: "float" }, "local-files": { region: "float" }, "spill-output": { region: "float" }, "token-counter": { region: "float", rect: { x: 120, y: 90, width: 420, height: 460 } }, "file-browser": { region: "float", rect: { x: 96, y: 64, width: 960, height: 600 } } },
     cards: Object.fromEntries(PANEL_IDS.map(id => [id, { collapsed: id === "context" || id === "git-quick" || id === "agents", height: id === "browser" || id === "computer" ? 320 : id === "terminal" ? 240 : null }])) as DockLayout["cards"],
     agentPanels: {},
     browserPages: {},
@@ -331,9 +331,11 @@ function move(layout: DockLayout, requested: PanelId[], target: DockTarget, pres
   return panels;
 }
 
-/** Git uses a separate compact surface when dropped in the conversation rail. */
+const RAIL_CARDS = [["git", "git-quick"], ["disassembler", "disassembler-quick"]] as const;
+
+/** Tools with their own quick card leave the full workbench in place. */
 export function panelsAtDockTarget(panels: readonly PanelId[], target: DockTarget): PanelId[] {
-  return target.region === "rail" ? [...new Set(panels.map(panel => panel === "git" ? "git-quick" : panel))] : [...panels];
+  return target.region === "rail" ? [...new Set(panels.map(panel => RAIL_CARDS.find(([full]) => full === panel)?.[1] ?? panel))] : [...panels];
 }
 
 export function dockReducer(layout: DockLayout, action: DockAction, locked = false): DockLayout {
@@ -342,16 +344,17 @@ export function dockReducer(layout: DockLayout, action: DockAction, locked = fal
   const next = copy(layout);
   switch (action.type) {
     case "move": {
-      // The conversation rail presents Git as the compact card. Keep the full
-      // Git panel at its existing location so the card can open it separately.
+      // A quick card can reopen its full workspace in the original location.
       let moved: PanelId[];
-      if (action.target.region === "rail" && action.panels.includes("git")) {
-        const old = locatePanel(next, "git");
+      const cards = action.target.region === "rail" ? RAIL_CARDS.filter(([full]) => action.panels.includes(full)) : [];
+      if (cards.length) {
         let target = action.target;
-        if (old?.region === "rail") {
-          remove(next, ["git"]);
-          next.hidden.git = { region: "right", ...(next.right.groups[0] ? { groupId: next.right.groups[0].id } : {}) };
-          next.cards["git-quick"] = { ...next.cards.git! };
+        for (const [full, quick] of cards) {
+          const old = locatePanel(next, full);
+          if (old?.region !== "rail") continue;
+          remove(next, [full]);
+          next.hidden[full] = { region: "right", ...(next.right.groups[0] ? { groupId: next.right.groups[0].id } : {}) };
+          next.cards[quick] = { ...next.cards[full]! };
           if (target.index !== undefined && old.index !== undefined && old.index < target.index) target = { ...target, index: target.index - 1 };
         }
         moved = move(next, panelsAtDockTarget(action.panels, target), target, true);
@@ -751,19 +754,20 @@ export function normalizeLayout(value: unknown): DockLayout {
   layout.left.panels = uniqueInstances(layout.left.panels);
   layout.rail.panels = uniqueInstances(layout.rail.panels);
   for (const group of [...layout.right.groups, ...layout.bottom.groups, ...layout.floats]) group.panels = uniqueInstances(group.panels);
-  // Migrate both original layouts and layouts saved by versions which introduced
-  // git-quick but still allowed the full Git panel to remain in the rail.
-  const migrateGitCard = layout.rail.panels.includes("git");
-  const quickWasPlaced = seen.has("git-quick");
-  const quickAlreadyInRail = layout.rail.panels.includes("git-quick");
-  if (migrateGitCard) {
-    if (quickAlreadyInRail) layout.rail.panels.splice(layout.rail.panels.indexOf("git"), 1);
+  const migratedFullPanels = new Set<PanelId>();
+  const migratedPreferences = new Map<PanelId, PanelId>();
+  for (const [full, quick] of RAIL_CARDS) {
+    const index = layout.rail.panels.indexOf(full);
+    if (index < 0) continue;
+    if (!seen.has(quick)) migratedPreferences.set(quick, full);
+    if (layout.rail.panels.includes(quick)) layout.rail.panels.splice(index, 1);
     else {
-      remove(layout, ["git-quick"]);
-      layout.rail.panels[layout.rail.panels.indexOf("git")] = "git-quick";
+      remove(layout, [quick]);
+      layout.rail.panels[index] = quick;
     }
-    seen.delete("git");
-    seen.add("git-quick");
+    seen.delete(full);
+    seen.add(quick);
+    migratedFullPanels.add(full);
   }
   // Introduce Context beside Environment once; an explicitly hidden/moved card stays put.
   if (!seen.has("context") && !("context" in record(raw.hidden))) {
@@ -782,12 +786,13 @@ export function normalizeLayout(value: unknown): DockLayout {
   for (const id of Object.keys(record(raw.cards))) if (isScopedPanelId(id)) scoped.add(id);
   for (const id of [...PANEL_IDS, ...scoped, ...Object.keys(layout.agentPanels) as AgentPanelId[], ...new Set([...Object.keys(record(raw.cards)), ...seen].filter(isConversationPanelId))]) {
     const base = panelBaseId(id);
-    const card = record(record(raw.cards)[migrateGitCard && !quickWasPlaced && id === "git-quick" ? "git" : id] ?? (id === "disassembler" ? record(raw.cards).ida : undefined));
+    const cardId = migratedPreferences.get(id) ?? id;
+    const card = record(record(raw.cards)[cardId] ?? (cardId === "disassembler" ? record(raw.cards).ida : undefined));
     layout.cards[id] = { collapsed: bool(card.collapsed, false), height: card.height === null ? null : typeof card.height === "number" && Number.isFinite(card.height) ? Math.max(base === "terminal" ? 240 : 80, card.height) : defaults.cards[base]?.height ?? null };
     if (seen.has(id)) continue;
     const old = record(hidden[id] ?? (id === "disassembler" ? hidden.ida : undefined));
     const fallback = locatePanel(defaults, id) ?? defaults.hidden[id] ?? { region: "right" as const };
-    if (id === "git" && (migrateGitCard || old.region === "rail")) layout.hidden[id] = { region: "right", ...(layout.right.groups[0] ? { groupId: layout.right.groups[0].id } : {}) };
+    if (RAIL_CARDS.some(([full]) => full === id) && (migratedFullPanels.has(id) || old.region === "rail")) layout.hidden[id] = { region: "right", ...(layout.right.groups[0] ? { groupId: layout.right.groups[0].id } : {}) };
     else if (!["left", "rail", "right", "bottom", "float"].includes(String(old!.region))) layout.hidden[id] = fallback;
     else layout.hidden[id] = {
       region: old!.region as DockLocation["region"],

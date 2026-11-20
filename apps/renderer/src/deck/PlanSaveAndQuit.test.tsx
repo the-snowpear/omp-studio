@@ -1,5 +1,5 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 
 import type { ConversationMessageItem } from "@omp-studio/client-contract";
@@ -10,9 +10,11 @@ import { PlanReviewDeck, PlanViewDialog } from "./PlanCard";
 import { PlanExecutionPicker } from "./PlanExecutionPicker";
 import { QueuedDeck } from "./QueuedDeck";
 
+beforeEach(() => { vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} }); });
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 function planView(props: ComponentProps<typeof PlanReviewDeck>) {
@@ -24,22 +26,25 @@ function planView(props: ComponentProps<typeof PlanReviewDeck>) {
 }
 
 describe("Plan Save & Quit", () => {
-  it("renders on the small card head and triggers the no-arg callback", () => {
+  it("renders on the small card head and triggers the no-arg callback", async () => {
     const onSaveAndQuit = vi.fn();
     planView({ title: "Plan", body: "## Goal", onAction: vi.fn(), onSaveAndQuit });
 
     const compactCard = screen.getByRole("region", { name: "待审核的计划" });
     const saveButton = within(compactCard).getByRole("button", { name: "保存并退出" });
+    expect(saveButton.textContent).toBe("");
+    expect(saveButton.getAttribute("data-tip")).toBe("保存并退出");
+    expect(saveButton.querySelector("svg")).not.toBeNull();
     expect(saveButton.closest(".approval-head")).not.toBeNull();
     const footer = compactCard.querySelector<HTMLElement>(".dk-actions");
     expect(footer ? within(footer).queryByRole("button", { name: "保存并退出" }) : null).toBeNull();
     fireEvent.click(saveButton);
 
-    expect(onSaveAndQuit).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onSaveAndQuit).toHaveBeenCalledTimes(1));
     expect(onSaveAndQuit).toHaveBeenCalledWith();
   });
 
-  it("keeps the button wired in the large review dialog head", () => {
+  it("keeps the button wired in the large review dialog head", async () => {
     const onSaveAndQuit = vi.fn();
     planView({ title: "Plan", body: "## Goal", expanded: true, onAction: vi.fn(), onSaveAndQuit });
     const dialog = screen.getByRole("dialog", { name: "Plan Review · Plan" });
@@ -49,10 +54,10 @@ describe("Plan Save & Quit", () => {
     expect(footer ? within(footer).queryByRole("button", { name: "保存并退出" }) : null).toBeNull();
 
     fireEvent.click(dialogButton);
-    expect(onSaveAndQuit).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onSaveAndQuit).toHaveBeenCalledTimes(1));
   });
 
-  it("does not render a fake action without the callback and QueuedDeck forwards the item", () => {
+  it("does not render a fake action without the callback and QueuedDeck forwards the item", async () => {
     planView({ title: "Preview", body: "## Goal", onAction: vi.fn() });
     expect(screen.queryByRole("button", { name: "保存并退出" })).toBeNull();
     cleanup();
@@ -69,7 +74,7 @@ describe("Plan Save & Quit", () => {
       </I18nProvider>,
     );
     fireEvent.click(screen.getByRole("button", { name: "保存并退出" }));
-    expect(onSaveAndQuit).toHaveBeenCalledWith(item);
+    await waitFor(() => expect(onSaveAndQuit).toHaveBeenCalledWith(item));
   });
 });
 

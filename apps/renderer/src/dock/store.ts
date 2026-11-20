@@ -8,7 +8,7 @@ import type { DockFloat, DockPinMode, DockRect } from "./types";
 import { WorkbenchWindows, toolWindowId, type WorkbenchWindow } from "./windows";
 import { WINDOW_MINIMUM } from "./snap";
 import { WORKBENCH_PANELS, localizePanelDefinition } from "../panels/registry";
-import { isFilePanelId, PANEL_IDS, conversationPanelId, isConversationPanelId, isAgentPanelId, isBrowserPagePanelId, panelBaseId, type DockAction, type DockLayout, type DockPreferences, type DockPreset, type DockScope, type DockSnapshot, type DockTarget, type PanelId } from "./types";
+import { isFilePanelId, isFocusWindowPanel, PANEL_IDS, conversationPanelId, isConversationPanelId, isAgentPanelId, isBrowserPagePanelId, panelBaseId, type DockAction, type DockLayout, type DockPreferences, type DockPreset, type DockScope, type DockSnapshot, type DockTarget, type PanelId } from "./types";
 
 const STORAGE_KEY = "omp.dock.v1";
 /** One manual-recovery snapshot of the last good payload; never rewritten. */
@@ -552,7 +552,7 @@ export class DockStore {
       const group = this.snapshot.layout.floats.find(value => value.panels.includes(action.panel));
       if (group) manager.activate(this.windowId(group.id));
     }
-    if (action.type === "open" && (action.panel === "context-viewer" || action.panel === "annotations")
+    if (action.type === "open" && isFocusWindowPanel(action.panel)
       && !locatePanel(this.snapshot.layout, action.panel)) {
       this.save(this.scope, { ...this.layout, hidden: { ...this.layout.hidden, [action.panel]: { region: "float", rect: centeredFocusRect() } } });
       this.modalPanel = action.panel;

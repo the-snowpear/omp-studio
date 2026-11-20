@@ -19,6 +19,7 @@ import { ExtensionAwareLink } from "./ExtensionLinks";
 import { CommandBlock, commandShell } from "./CommandBlock";
 import { Icon } from "../icons";
 import { useI18n } from "../i18n";
+import { withMarkdownSource } from "./markdownSource";
 
 const REMARK: Options["remarkPlugins"] = [remarkGfm];
 const HIGHLIGHT: Options["rehypePlugins"] = [[rehypeHighlight, { detect: false, plainText: ["mermaid"], languages: commandLanguages, aliases: { powershell: ["pwsh", "ps1"] } }]];
@@ -96,8 +97,8 @@ function componentsFor(streaming: boolean, magic: boolean, highlightEligible = f
   if (cached !== undefined) return cached;
   const prose = (children: ReactNode) => magic ? withMagicKeywordChildren(children) : children;
   const components: Components = {
-    p: ({ children }) => <p>{prose(linkSpillText(children))}</p>,
-    li: ({ children }) => <li>{prose(linkSpillText(children))}</li>,
+    p: ({ children, node: _node, ...props }) => <p {...props}>{prose(linkSpillText(children))}</p>,
+    li: ({ children, node: _node, ...props }) => <li {...props}>{prose(linkSpillText(children))}</li>,
     a: ({ href, children }) => {
       const url = typeof href === "string" ? href.trim() : "";
       if (isSpillUri(url)) return <SpillLink uri={url}>{children}</SpillLink>;
@@ -121,7 +122,7 @@ function componentsFor(streaming: boolean, magic: boolean, highlightEligible = f
       const language = /language-([\w+#.-]+)/.exec(props.className ?? "")?.[1] ?? "";
       const text = nodeText(props.children).replace(/\n$/, "");
       if (language !== "mermaid" && graphicFormat("graphic."+language) && (!streaming || language === "svg")) return <GraphicPreview name={"graphic."+language} text={text}/>;
-      if (language === "mermaid" && !streaming) return performanceOptions.boundedMermaid ? <LazyMermaid code={text} /> : <LegacyMermaid code={text} />;
+      if (language === "mermaid" && !streaming) return performanceOptions.boundedMermaid ? <LazyMermaid code={text} /> : <LegacyMermaid key={text} code={text} />;
       if (performanceOptions.highlightWorker && highlightEligible && language && language !== "mermaid") {
         return <CodeFrame language={language} text={text} streaming={streaming}>
           <HighlightedCode language={language} code={nodeText(props.children)} />
@@ -134,10 +135,14 @@ function componentsFor(streaming: boolean, magic: boolean, highlightEligible = f
   return components;
 }
 
-const MarkdownBlock = memo(function MarkdownBlock({ text, streaming, magic }: { text: string; streaming: boolean; magic: boolean }) {
+const MarkdownBlock = memo(function MarkdownBlock({ text, streaming, magic, sourceOffset }: { text: string; streaming: boolean; magic: boolean; sourceOffset?: number | undefined }) {
   const highlightEligible = !streaming && text.length <= MAX_HIGHLIGHT_CHARS;
   const plugins = highlightEligible && !performanceOptions.highlightWorker ? HIGHLIGHT : undefined;
-  return <ReactMarkdown urlTransform={(url, key) => key === "href" || parseFileReference(url, true) ? url : defaultUrlTransform(url)} remarkPlugins={REMARK} rehypePlugins={plugins} components={componentsFor(streaming, magic, highlightEligible)}>{text}</ReactMarkdown>;
+  const components = useMemo(() => {
+    const base = componentsFor(streaming, magic, highlightEligible);
+    return sourceOffset === undefined ? base : withMarkdownSource(base, sourceOffset);
+  }, [streaming, magic, highlightEligible, sourceOffset]);
+  return <ReactMarkdown urlTransform={(url, key) => key === "href" || parseFileReference(url, true) ? url : defaultUrlTransform(url)} remarkPlugins={REMARK} rehypePlugins={plugins} components={components}>{text}</ReactMarkdown>;
 });
 
 const NO_CLOSED_BLOCKS: readonly string[] = [];
@@ -158,8 +163,8 @@ type MarkdownRenderParts = {
   readonly openFence?: StreamingCodeFence;
 };
 
-export const MarkdownText = memo(function MarkdownText({ text, streaming = false, truncated = false, mark, magicKeywords = false }: {
-  text: string; streaming?: boolean; truncated?: boolean; mark?: ReactNode; magicKeywords?: boolean;
+export const MarkdownText = memo(function MarkdownText({ text, streaming = false, truncated = false, mark, magicKeywords = false, sourceOffset }: {
+  text: string; streaming?: boolean; truncated?: boolean; mark?: ReactNode; magicKeywords?: boolean; sourceOffset?: number | undefined;
 }) {
   /* 续扫状态。流式期间正文只在尾部追加，把上一帧的扫描结果传回去，分块代价就只跟
      「这一帧新增的字符」有关，而不是跟已经产出的全文有关。 */
@@ -177,7 +182,7 @@ export const MarkdownText = memo(function MarkdownText({ text, streaming = false
     <div className={`convo-md${streaming ? " is-streaming" : ""}`}>
       <MarkdownBlockList blocks={parts.frozen} magic={magicKeywords} scope="frozen" />
       <MarkdownBlockList blocks={parts.pending} magic={magicKeywords} scope="pending" />
-      {parts.tail.length > 0 ? <MarkdownBlock text={parts.tail} streaming={streaming} magic={magicKeywords} /> : null}
+      {parts.tail.length > 0 ? <MarkdownBlock text={parts.tail} streaming={streaming} magic={magicKeywords} sourceOffset={sourceOffset} /> : null}
       {parts.openFence?.language.toLowerCase() === "svg" ? <SvgFigureImage source={parts.openFence.code} alt="SVG" streaming/> : parts.openFence !== undefined ? (
         <CodeFrame language={parts.openFence.language} text={parts.openFence.code} streaming>
           <code className={parts.openFence.language ? `language-${parts.openFence.language}` : undefined}>{parts.openFence.code}</code>

@@ -40,11 +40,11 @@ const BADGE_LABEL_ZH: Record<string, string> = {
   Spreadsheet: "表格",
 };
 /** Short colored badge and human language name for headers and status bars. */
-export function fileBadge(name: string): { label: string; badge: string; tone: string } {
+export function fileBadge(name: string, zh = isZh()): { label: string; badge: string; tone: string } {
   const base = name.split(/[\\/]/).pop() ?? name;
   const named = /^(Dockerfile|Makefile)$/i.test(base) ? [base, base === "Makefile" ? "MK" : "DKR", "blue"] as const : /^\.git(ignore|attributes)$/.test(base) ? ["Git", "GIT", "red"] as const : undefined;
   const [rawLabel, badge, tone] = named ?? LANGUAGES[extension(base)] ?? KIND_BADGE[fileKind(base)];
-  const label = isZh() ? (BADGE_LABEL_ZH[rawLabel] ?? rawLabel) : rawLabel;
+  const label = zh ? (BADGE_LABEL_ZH[rawLabel] ?? rawLabel) : rawLabel;
   return { label, badge, tone };
 }
 export function formatBytes(size: number | undefined): string {
