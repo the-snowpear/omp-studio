@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import { getAgentDir, withFileLock, logger } from "@oh-my-pi/pi-utils";
 import type { AgentSession } from "../../session/agent-session";
+import type { SessionWorktree } from "../../worktree/backend";
+import { readOvnfsRecords } from "../../worktree/ovnfs-records";
 import { cfgSessionWorktreeScope } from "../../session/settings";
 import { resolveResumeTarget, sessionDisplayName } from "../../session/session-listing";
 import { SessionManager } from "../../session/session-manager";
@@ -15,7 +17,6 @@ import {
 	inspectSessionWorktree,
 	planWorktreeExit,
 	removeExitWorktrees,
-	type SessionWorktree,
 	type WorktreeExitPlan,
 } from "../../session/session-worktree";
 import { cfgWorktreeOnStart, cfgWorktreeOnExit } from "../../task/settings";
@@ -143,6 +144,8 @@ export class StudioSessionWorktreesService {
 			id: owned.id,
 			branch: owned.worktree.branch,
 			directory: owned.worktree.path,
+			backend: owned.worktree.ovnfs ? ("ovnfs" as const) : ("git" as const),
+			sourceDirectory: owned.worktree.sourceCwd,
 			sessionId: owned.sessionId,
 			current: await equalPath(owned.worktree.path, this.session.sessionManager.getCwd()),
 		};
@@ -159,9 +162,10 @@ export class StudioSessionWorktreesService {
 		const repository = vcs.git(owned.worktree.sourceCwd);
 		if (
 			!repository ||
-			!(await Promise.all((await repository.worktrees()).map(row => equalPath(row.path, owned.worktree.path)))).some(
-				Boolean,
-			)
+			(!owned.worktree.ovnfs &&
+				!(
+					await Promise.all((await repository.worktrees()).map(row => equalPath(row.path, owned.worktree.path)))
+				).some(Boolean))
 		)
 			throw Error("Worktree is no longer registered in its source repository");
 		const sessions = await SessionManager.list(owned.worktree.path),
@@ -188,7 +192,8 @@ export class StudioSessionWorktreesService {
 			const listing = await SessionManager.listForPicker(cwd, undefined, new FileSessionStorage(), scope);
 			const sessions = await listing.complete;
 			this.#check(operation.sessionId);
-			if (operation.kind === "worktrees.session.resume.list")
+			if (operation.kind === "worktrees.session.resume.list") {
+				const ovnfs = await readOvnfsRecords();
 				return {
 					scope,
 					sessions: sessions.slice(0, 200).map(info => {
@@ -203,6 +208,10 @@ export class StudioSessionWorktreesService {
 							modifiedAt: info.modified.toISOString(),
 							currentDirectory: path.resolve(info.cwd) === path.resolve(cwd),
 							directoryName: path.basename(info.cwd),
+							...(() => {
+								const record = ovnfs.find(row => path.resolve(row.root) === path.resolve(info.cwd));
+								return record ? { backend: "ovnfs" as const, sourceDirectory: record.source } : {};
+							})(),
 							messageCount: info.messageCount,
 							...(info.status ? { status: info.status } : {}),
 							...(first ? { firstMessage: first.length > 1200 ? `${first.slice(0, 1200)}…` : first } : {}),
@@ -212,6 +221,7 @@ export class StudioSessionWorktreesService {
 					}),
 					truncated: sessions.length > 200,
 				};
+			}
 			const selected = sessions.find(info => info.id === operation.targetSessionId);
 			if (!selected)
 				throw new SessionControlError("INVALID_ARGUMENT", "Session is outside the selected resume scope");

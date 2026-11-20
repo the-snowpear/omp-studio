@@ -151,6 +151,7 @@ export function ResumeScopePane({ client, context, onOpen, onPreviewOpen }: {
                 <h3>{selected.title}</h3>
                 <div className="session-picker-meta">{metadata(selected)}{selected.status ? <WorkspaceStatus state={selected.status} /> : null}</div>
                 <div className="session-picker-meta"><span>{location(selected)}</span>{selected.continuationOf ? <span><Icon name="fork" extra="sm" />{zh ? "继续副本" : "Continuing copy"}</span> : null}</div>
+                {selected.backend === "ovnfs" && <p className="feature-status"><b>ovnfs</b> · {zh ? "可从源仓库恢复会话" : "Resume from the source repository"} {selected.sourceDirectory && <code>{selected.sourceDirectory}</code>}</p>}
                 {selected.firstMessage ? <><h4>{zh ? "首条请求" : "First request"}</h4><div className="session-picker-prompt"><MarkdownText text={selected.firstMessage} /></div></> : null}
                 {selected.conversationExcerpt ? <><h4>{zh ? "对话摘录" : "Conversation excerpt"}</h4><MarkdownText text={selected.conversationExcerpt} /></> : null}
                 {!selected.firstMessage && !selected.conversationExcerpt ? <p className="tiny muted">{zh ? "这条记录暂未提供对话摘要，可直接恢复后查看。" : "This record has no conversation excerpt. Resume it to read the conversation."}</p> : null}

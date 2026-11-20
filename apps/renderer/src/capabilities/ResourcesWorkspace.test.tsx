@@ -58,6 +58,7 @@ describe("local resource workspace", () => {
     render(surface(client, "s", false, true, "notes.md"));
     await ready();
     expect(editor().value).toBe("Original local://notes.md");
+    expect(screen.queryByRole("button", { name: "复制目录路径" })).toBeNull();
     fireEvent.change(screen.getByRole("textbox", { name: "搜索本地文件" }), { target: { value: "notes" } });
     expect(within(screen.getByRole("navigation", { name: "本地文件列表" })).queryByRole("button", { name: /PLAN.md/ })).toBeNull();
     fireEvent.change(editor(), { target: { value: "Updated notes" } });

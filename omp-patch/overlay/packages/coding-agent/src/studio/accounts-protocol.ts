@@ -67,6 +67,9 @@ export interface AccountRoutingPolicy {
 }
 export interface StudioAccountStatus {
 	policy?: AccountRoutingPolicy;
+	subscriptionPlan?: string;
+	credentialId?: number;
+	activeCredential?: boolean;
 	resetPolicies?: AccountResetPolicy[];
 	id: string;
 	provider: string;

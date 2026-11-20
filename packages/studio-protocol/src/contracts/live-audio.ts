@@ -1,6 +1,8 @@
 export const LIVE_AUDIO_VOICES = ["arbor", "breeze", "cove", "ember", "juniper", "maple", "sol", "spruce", "vale"] as const;
 export interface LiveAudioState {
   available: boolean; audioId?: string; attached: boolean; voice: string;
+  endpoint?: string;
+  apiKeyConfigured?: boolean;
   phase: "off" | "prepared" | "connecting" | "listening" | "speaking" | "working" | "muted" | "error";
   muted: boolean; inputLevel: number; outputLevel: number;
   transcripts: Array<{ role: "user" | "assistant"; turn: number; text: string; final: boolean }>;

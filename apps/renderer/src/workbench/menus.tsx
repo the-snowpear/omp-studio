@@ -297,8 +297,8 @@ export function ThreadActionMenuItems({ live, busy, compacting, forkBusy = compa
       >{t("shell.forkThread")}</MenuItem>
       <MenuItem
         icon="handoff"
-        disabled={!live || busy}
-        {...(live && !busy ? {} : { title: reason })}
+        disabled={!live || compacting}
+        {...(live && !compacting ? {} : { title: reason })}
         onClick={onHandoff}
       >{t("shell.handoffThread")}</MenuItem>
       <div className="menu-sep" />

@@ -231,6 +231,8 @@ export function createPreviewModelConfig(zh = isZh()): ModelConfigReadModel {
         provider: item.id,
         id: model.id,
         selector: model.selector,
+        ...(model.id.startsWith("gpt-5.2") ? { thinkingConfig: {mode:"effort" as const, efforts:["low","medium","high","xhigh"] as const, unverified:false} } :
+          item.local ? { thinkingConfig: {mode:"effort" as const, efforts:[], unverified:true} } : {}),
         name: model.name,
         reasoning: model.reasoning,
         ...(model.kind === undefined ? {} : { kind: model.kind }),

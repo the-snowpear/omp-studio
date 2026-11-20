@@ -24,8 +24,13 @@ export function buildModelCatalog(models, upstreamCommit, aliases = {}, nativePr
       if (nativeContext) delete values.maxContextWindow;
       if (typeof model.reasoning === "boolean" && !model.thinking?.unverified) values.reasoning = model.reasoning;
       const nativeOnly = model.thinking && (runtimeThinkingFields.some(field => model.thinking[field]) || (model.requestModelId && model.requestModelId !== model.id));
-      if (model.thinking && !nativeOnly) {
+      if (model.thinking && (!nativeOnly || model.thinking.unverified === true)) {
         values.thinkingConfig = Object.fromEntries(thinkingFields.filter(field => model.thinking[field] !== undefined).map(field => [field, model.thinking[field]]));
+        if (model.thinking.unverified === true) values.thinkingConfig.unverified = true;
+      }
+      if (typeof model.snapcompactShape?.variant === "string") {
+        values.snapcompactShape = { variant: model.snapcompactShape.variant,
+          ...(model.snapcompactShape.frameSize === undefined ? {} : { frameSize: model.snapcompactShape.frameSize }) };
       }
       const key = `${provider}/${model.api}/${model.id}`;
       entries.push({

@@ -21,11 +21,7 @@ import { cfgCodexResetsAutoRedeem5h, cfgCodexResetsAutoRedeemWeekly } from "../.
 import { cfgCodexResetsMinBlockedMinutes } from "../../session/settings";
 import { cfgCodexResetsKeepCredits } from "../../session/settings";
 import { cfgCodexResetsSalvageHorizonHours } from "../../session/settings";
-import { cfgIdaEnabled } from "../../ida/settings";
-import { cfgIdaPython } from "../../ida/settings";
-import { cfgIdaInstallDir } from "../../ida/settings";
-import { cfgIdaMaxOpen } from "../../ida/settings";
-import { cfgIdaIdleCloseSec } from "../../ida/settings";
+import { cfgDisassembler, cfgDisasmMaxOpen, cfgDisasmIdleCloseSec } from "../../disasm/settings";
 import { cfgSpellingAutocomplete } from "../../modes/settings";
 import {
 	cfgCompactionAsyncEnabled,
@@ -207,11 +203,9 @@ const GUI_SETTING_HANDLES = {
 	"codexResets.minBlockedMinutes": cfgCodexResetsMinBlockedMinutes,
 	"codexResets.keepCredits": cfgCodexResetsKeepCredits,
 	"codexResets.salvageHorizonHours": cfgCodexResetsSalvageHorizonHours,
-	"ida.enabled": cfgIdaEnabled,
-	"ida.python": cfgIdaPython,
-	"ida.installDir": cfgIdaInstallDir,
-	"ida.maxOpen": cfgIdaMaxOpen,
-	"ida.idleCloseSec": cfgIdaIdleCloseSec,
+	"disassembler.backend": cfgDisassembler,
+	"disassembler.maxOpen": cfgDisasmMaxOpen,
+	"disassembler.idleCloseSec": cfgDisasmIdleCloseSec,
 	"spelling.autocomplete": cfgSpellingAutocomplete,
 
 	"claudeResets.autoRedeem5h": cfgClaudeResetsAutoRedeem5h,

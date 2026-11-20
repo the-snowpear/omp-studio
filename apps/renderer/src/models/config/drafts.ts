@@ -70,6 +70,8 @@ export function blankOverrideForm(from?: DraftOverride): DraftOverrideForm {
     premiumMultiplier: from?.premiumMultiplier !== undefined ? String(from.premiumMultiplier) : "",
     imageCountBudget: from?.imageCountBudget !== undefined ? String(from.imageCountBudget) : "",
     headersText: headersTextFrom(from?.headers),
+    snapcompactVariant: from?.snapcompactShape?.variant ?? "",
+    snapcompactFrame: from?.snapcompactShape?.frameSize?.toString() ?? "",
     contextPromotionTarget: from?.contextPromotionTarget ?? "",
     compactionModel: from?.compactionModel ?? "",
     rcEnabled: from?.remoteCompaction?.enabled === undefined ? "" : from.remoteCompaction.enabled ? "true" : "false",
@@ -99,6 +101,8 @@ export function blankCustomForm(from?: ModelCatalogEntry): CustomModelForm {
     premiumMultiplier: from?.premiumMultiplier !== undefined ? String(from.premiumMultiplier) : "",
     imageCountBudget: from?.imageCountBudget !== undefined ? String(from.imageCountBudget) : "",
     headersText: headersTextFrom(from?.headers),
+    snapcompactVariant: from?.snapcompactShape?.variant ?? "",
+    snapcompactFrame: from?.snapcompactShape?.frameSize?.toString() ?? "",
     contextPromotionTarget: from?.contextPromotionTarget ?? "",
     compactionModel: from?.compactionModel ?? "",
     baseUrl: from?.baseUrl ?? "",
@@ -142,6 +146,7 @@ function overrideFromForm(form: DraftOverrideForm): DraftOverride | null {
   if (imageBudget !== undefined) next.imageCountBudget = imageBudget;
   const headers = parseHeaders(form.headersText);
   if (Object.keys(headers).length > 0) next.headers = headers;
+  if (form.snapcompactVariant.trim()) next.snapcompactShape = { variant: form.snapcompactVariant.trim(), ...(form.snapcompactFrame.trim() ? { frameSize: Number(form.snapcompactFrame) } : {}) };
   if (form.contextPromotionTarget.trim()) next.contextPromotionTarget = form.contextPromotionTarget.trim();
   if (form.compactionModel.trim()) next.compactionModel = form.compactionModel.trim();
   const rc = rcFromParts(triState(form.rcEnabled), form.rcEndpoint, form.rcModel);
@@ -208,6 +213,7 @@ export function entryFromCustomForm(providerId: string, form: CustomModelForm): 
     ...(premium === undefined ? {} : { premiumMultiplier: premium }),
     ...(imageBudget === undefined ? {} : { imageCountBudget: imageBudget }),
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    ...(form.snapcompactVariant.trim() ? { snapcompactShape: { variant: form.snapcompactVariant.trim(), ...(form.snapcompactFrame.trim() ? { frameSize: Number(form.snapcompactFrame) } : {}) } } : {}),
     ...(form.contextPromotionTarget.trim() ? { contextPromotionTarget: form.contextPromotionTarget.trim() } : {}),
     ...(form.compactionModel.trim() ? { compactionModel: form.compactionModel.trim() } : {}),
     ...(rc ? { remoteCompaction: rc } : {}),
@@ -334,6 +340,7 @@ function catalogDraftEqual(left: ModelCatalogEntry, right: ModelCatalogEntry): b
     && left.preferWebsockets === right.preferWebsockets
     && left.premiumMultiplier === right.premiumMultiplier
     && left.imageCountBudget === right.imageCountBudget
+    && left.snapcompactShape?.variant === right.snapcompactShape?.variant && left.snapcompactShape?.frameSize === right.snapcompactShape?.frameSize
     && (left.contextPromotionTarget || undefined) === (right.contextPromotionTarget || undefined)
     && (left.compactionModel || undefined) === (right.compactionModel || undefined)
     && sameHeaders(left.headers, right.headers)
@@ -368,6 +375,7 @@ function overrideDraftEqual(left: DraftOverride | undefined, right: DraftOverrid
     && left.omitMaxOutputTokens === right.omitMaxOutputTokens
     && left.premiumMultiplier === right.premiumMultiplier
     && left.imageCountBudget === right.imageCountBudget
+    && left.snapcompactShape?.variant === right.snapcompactShape?.variant && left.snapcompactShape?.frameSize === right.snapcompactShape?.frameSize
     && left.contextPromotionTarget === right.contextPromotionTarget
     && left.compactionModel === right.compactionModel
     && sameHeaders(left.headers, right.headers)
@@ -495,6 +503,7 @@ export function providerUpsertFromDraft(editor: Draft, contentHash?: string): Mo
       ...(model.premiumMultiplier === undefined ? {} : { premiumMultiplier: model.premiumMultiplier }),
       ...(model.imageCountBudget === undefined ? {} : { imageCountBudget: model.imageCountBudget }),
       ...(model.headers ? { headers: model.headers } : {}),
+      ...(model.snapcompactShape ? { snapcompactShape: model.snapcompactShape } : {}),
       ...(model.contextPromotionTarget ? { contextPromotionTarget: model.contextPromotionTarget } : {}),
       ...(model.compactionModel ? { compactionModel: model.compactionModel } : {}),
       ...(model.remoteCompaction ? { remoteCompaction: model.remoteCompaction } : {}),

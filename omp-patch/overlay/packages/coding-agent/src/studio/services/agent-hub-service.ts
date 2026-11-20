@@ -1,3 +1,4 @@
+import { agentMesh } from "../../irc/mesh";
 import { isAgentViewSession } from "../../session/agent-session-handle";
 /**
  * StudioAgentHubService - presentation-neutral agent roster and control
@@ -75,6 +76,9 @@ export interface StudioAgentUsage {
 }
 
 export interface StudioAgentSnapshot {
+	waitingOn?: string[];
+	waiters?: Array<{ waiter: string; since: number; via: string[] }>;
+	peer?: boolean;
 	agentId: string;
 	generation: number;
 	parentAgentId?: string;
@@ -169,6 +173,7 @@ export interface StudioLiveAgentPort {
  * StudioLiveAgentPort surface by the service.
  */
 export interface StudioAgentRegistryPort {
+	awaits?: Pick<import("../../registry/agent-awaits").AgentAwaitsApi, "blockedVia" | "waitersOn">;
 	get(id: string): AgentRef | undefined;
 	list(): AgentRef[];
 	onChange(listener: (event: RegistryEvent) => void): () => void;
@@ -330,6 +335,7 @@ export class StudioAgentHubService {
 	readonly #cursorSecret: Buffer;
 	readonly #generations = new Map<string, number>();
 	readonly #terminals = new Map<string, StudioTerminalRecord>();
+	readonly #peers = new Map<number, StudioAgentSnapshot>();
 	readonly #pendingSpawns = new Map<string, StudioPendingSpawn>();
 	readonly #reviving = new Set<string>();
 	readonly #listeners = new Set<(snapshot: StudioAgentSnapshot) => void>();
@@ -410,6 +416,31 @@ export class StudioAgentHubService {
 				snapshots.push(this.#terminalSnapshot(terminal));
 			}
 		}
+		const activePeers = new Set<number>();
+		for (const peer of agentMesh()?.peers() ?? []) {
+			activePeers.add(peer.pid);
+			const status = peer.status === "unknown" ? "idle" : mapNativeStatus(peer.status);
+			let snapshot = this.#peers.get(peer.pid);
+			if (!snapshot || snapshot.status !== status || snapshot.hasTranscript !== !!peer.sessionFile) {
+				snapshot = {
+					agentId: String(peer.pid),
+					generation: 1,
+					kind: "main",
+					displayName: "agent://" + peer.pid,
+					status,
+					updatedAt: new Date().toISOString(),
+					hasLiveSession: true,
+					hasTranscript: !!peer.sessionFile,
+					unreadCount: 0,
+					activeJobIds: [],
+					readOnly: true,
+					peer: true,
+				};
+				this.#peers.set(peer.pid, snapshot);
+			}
+			snapshots.push(snapshot);
+		}
+		for (const pid of this.#peers.keys()) if (!activePeers.has(pid)) this.#peers.delete(pid);
 		snapshots.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
 		return snapshots.slice(0, limit);
 	}
@@ -847,12 +878,22 @@ export class StudioAgentHubService {
 		const liveModel = this.#telemetry?.liveModel(agentId);
 		const resolvedModel = liveModel ?? history?.resolvedModel;
 		const summary = ref.activity === undefined ? this.#telemetry?.liveSummary(agentId) : undefined;
+		const awaits = this.#registry.awaits;
+		const waitingOn = awaits
+			? this.#registry
+					.list()
+					.filter(candidate => awaits.blockedVia(agentId, candidate.id, Date.now()) !== undefined)
+					.map(candidate => candidate.id)
+			: [];
+		const waiters = awaits?.waitersOn(agentId).map(row => ({ ...row, via: [...row.via] })) ?? [];
 		return {
 			agentId,
 			generation: this.#generations.get(agentId) ?? 1,
 			...(ref.parentId !== undefined ? { parentAgentId: ref.parentId } : {}),
 			kind: ref.kind,
 			displayName: ref.displayName,
+			...(waitingOn.length ? { waitingOn } : {}),
+			...(waiters.length ? { waiters } : {}),
 			status: this.#reviving.has(agentId) ? "reviving" : mapNativeStatus(ref.status),
 			...(ref.activity !== undefined ? { assignment: ref.activity } : {}),
 			...(summary !== undefined && summary.length > 0 ? { summary } : {}),

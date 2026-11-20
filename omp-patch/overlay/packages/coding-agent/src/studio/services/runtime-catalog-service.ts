@@ -48,18 +48,29 @@ export class StudioRuntimeCatalogService {
 			// A one-millisecond bounded observation waits for no new discovery and never changes policy.
 			const status = await manager.waitForStartup(1);
 			const pending = new Set(status.pending);
+			const drops = manager.getBuiltinDrops?.() ?? new Map();
 			const failed = new Map(status.failed.map(server => [server.name, server.error]));
 			const names = [
-				...new Set([...manager.getAllServerNames(), ...status.connected, ...status.pending, ...failed.keys()]),
+				...new Set([
+					...manager.getAllServerNames(),
+					...status.connected,
+					...status.pending,
+					...failed.keys(),
+					...drops.keys(),
+				]),
 			].sort();
 			const servers: McpRuntimeStatus["servers"] = names.slice(0, 500).map(name => {
 				const connection = manager.getConnection(name);
 				const config = manager.getServerConfig(name);
-				const source = manager.getSource(name);
+				const dropped = drops.get(name);
+				const source = manager.getSource(name) ?? dropped?.source;
+				const namespace = this.session.mcpEvalNamespaceForServer(name);
 				const transport = config ? (config.type ?? "stdio") : undefined;
 				const failure = failed.get(name);
 				return {
 					name: clean(name),
+					replacedByBuiltin: dropped?.reason,
+					evalNamespaceUri: namespace ? "xd://eval/" + namespace : undefined,
 					state: pending.has(name)
 						? "pending"
 						: failed.has(name)
@@ -102,7 +113,7 @@ export class StudioRuntimeCatalogService {
 				ready:
 					status.pending.length === 0 &&
 					status.failed.length === 0 &&
-					names.every(name => manager.getConnection(name)?.tools !== undefined),
+					names.every(name => drops.has(name) || manager.getConnection(name)?.tools !== undefined),
 				settled:
 					status.pending.length === 0 && !names.some(name => manager.getConnectionStatus(name) === "connecting"),
 				servers,

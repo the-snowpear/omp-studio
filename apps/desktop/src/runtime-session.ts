@@ -1642,7 +1642,7 @@ function createSingleDesktopRuntimeSessionPort(
         containment,
         // Catalog/plugin discovery is part of cold startup. Match the 30-second
         // compatibility probe and honor explicit deadlines in both wait layers.
-        readyTimeoutMs: options.handshakeTimeoutMs ?? 30_000,
+        readyTimeoutMs: options.handshakeTimeoutMs ?? 40_000,
         waitUntilReady: async (child) => {
           attachRuntimeOutput(child, log);
           child.once("exit", (code, signal) => {
@@ -1661,7 +1661,7 @@ function createSingleDesktopRuntimeSessionPort(
             }
           });
           hello = await client.connectUntilReady({
-            deadline: Date.now() + (options.handshakeTimeoutMs ?? 30_000),
+            deadline: Date.now() + (options.handshakeTimeoutMs ?? 40_000),
             hasExited: () => child.exitCode !== null || child.signalCode !== null,
           });
           log?.write(

@@ -49,7 +49,6 @@ export * from "./contracts/skillshare.js";
 
 export * from "./contracts/session-options.js";
 
-export * from "./contracts/ida.js";
 
 export * from "./contracts/browser-observation.js";
 
@@ -78,11 +77,10 @@ export * from "./contracts/gui-settings.js";
 export * from "./contracts/session-gui.js";
 export * from "./contracts/prediction.js";
 export * from "./contracts/agent-btw.js";
-export * from "./contracts/ida.js";
 export * from "./contracts/ask-attachments.js";
 export * from "./contracts/resources.js";
 
-export * from "./contracts/ida-details.js";
+export * from "./contracts/disassembler.js";
 export * from "./contracts/prediction-channel.js";
 
 export * from "./contracts/feature-settings.js";

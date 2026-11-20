@@ -55,6 +55,7 @@ export class StudioModelAuthService {
 				const pauseReason = providerPauseReason(provider.id);
 				return {
 					id: provider.id,
+					loginBehavior: storageProvider === "kiro" ? ("add-account" as const) : ("replace" as const),
 					name: provider.name,
 					available: provider.available && pauseReason === undefined,
 					paused: pauseReason !== undefined,
@@ -124,6 +125,7 @@ export class StudioModelAuthService {
 						title: prompt.message,
 						...(prompt.placeholder ? { placeholder: prompt.placeholder } : {}),
 						secret: prompt.secret === true,
+						riskAcknowledgement: prompt.riskAcknowledgement,
 					});
 					if (value === undefined || (!prompt.allowEmpty && !value.trim())) throw new LoginCancelledError();
 					return value;

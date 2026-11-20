@@ -5,9 +5,9 @@ import { useI18n } from "../i18n";
 import type { IconName } from "../icons";
 import { PLATFORM } from "../platform";
 
-export function useWorkspaceFileActions({ workspace, remote, targetId, onNotice, onOpenIda }: {
+export function useWorkspaceFileActions({ workspace, remote, targetId, onNotice, onOpenDisassembler }: {
   workspace: WorkspaceListReadModel["workspaces"][number] | undefined; remote: false | "ssh" | "wsl"; targetId: string | null;
-  onNotice(notice: { text: string; icon: IconName }): void; onOpenIda(path: string): void;
+  onNotice(notice: { text: string; icon: IconName }): void; onOpenDisassembler(path: string): void;
 }) {
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
@@ -51,10 +51,10 @@ export function useWorkspaceFileActions({ workspace, remote, targetId, onNotice,
       return;
     }
     const input = { workspaceId, ...(ownerId ? { targetId: ownerId } : {}), path: target.path, kind: target.kind };
-    if(action.type==="ida"){
+    if(action.type==="disassembler"){
       if (ownerId) return;
       const resolve=desktop?.resolveFileAbsolutePath;if(!resolve)return;
-      void resolve(input).then(absolute=>{onOpenIda(absolute);}).catch(cause=>notice(`IDA: ${messageOf(cause)}`,"alert"));return;
+      void resolve(input).then(absolute=>{onOpenDisassembler(absolute);}).catch(cause=>notice(`${zh ? "反汇编器" : "Disassembler"}: ${messageOf(cause)}`,"alert"));return;
     }
     if (action.type === "copyAbsolute") {
       const resolve = desktop?.resolveFileAbsolutePath;

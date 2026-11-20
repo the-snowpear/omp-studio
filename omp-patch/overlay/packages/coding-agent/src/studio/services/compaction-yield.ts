@@ -16,7 +16,7 @@ export async function waitForCompactionYield(
 		await submissions?.wait();
 		await session.waitForAdmittedSubmissions();
 		if (session.isSessionTransitioning) await session.waitForSessionTransition();
-		if (session.hasPendingAsyncWork()) await session.settleAsyncWork();
+		await session.waitForRunEnd();
 		if (!isCurrent()) return false;
 		if (
 			!session.isStreaming &&
@@ -24,7 +24,7 @@ export async function waitForCompactionYield(
 			!session.isSessionTransitioning &&
 			!session.agent.isPaused &&
 			!session.hasAdmittedSubmission &&
-			!session.hasPendingAsyncWork() &&
+			!session.isRunActive &&
 			session.queuedMessageCount === 0 &&
 			!submissions?.pending()
 		)

@@ -1,3 +1,4 @@
+import { useI18n } from "../../i18n";
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "../../icons";
 import { subagentDurationMs } from "../../conversation/SubagentMetrics";
@@ -55,7 +56,11 @@ export function AgentInspector({ row, rows, lane, now, actions, marks = true, on
     [d("inspector.cost"), row.cost === undefined ? "—" : formatCost(row.cost)],
     [d("inspector.rate"), row.tps === undefined || row.tone !== "running" ? "—" : `${formatTps(row.tps)} t/s`],
   ];
+  const zh = useI18n().resolvedLanguage === "zh";
   const facts = ([
+    [zh ? "正在等待" : "Waiting for", row.agent.waitingOn?.join(" → ")],
+    [zh ? "等待此代理" : "Waiters", row.agent.waiters?.map(waiter => [waiter.waiter, ...waiter.via].join(" → ")).join(", ")],
+    [zh ? "来源" : "Source", row.agent.peer ? "agent://peers" : undefined],
     [d("inspector.branch"), row.agent.branchName],
     [d("inspector.output"), row.agent.outputPath],
     [d("inspector.patch"), row.agent.patchPath],

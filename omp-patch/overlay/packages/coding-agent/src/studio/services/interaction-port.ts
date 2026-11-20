@@ -18,6 +18,7 @@ import {
 import { spansText, type ChoiceOption } from "@oh-my-pi/pi-tui/html-form/parse";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import type { FormSubmitValue, InteractionForm, InteractionFormField } from "../form-protocol";
+import { validateAskImages } from "../ask-attachments-protocol";
 import { truncateUtf8 } from "./conversation-sanitizer";
 
 const FORM_SUMMARY_MAX_BYTES = 480;
@@ -80,6 +81,7 @@ export interface StudioInteractionPort {
 		title: string;
 		placeholder?: string;
 		secret?: boolean;
+		riskAcknowledgement?: boolean;
 	}): Promise<string | undefined>;
 	editor(input: {
 		commandId: string;
@@ -110,7 +112,7 @@ export interface StudioInteractionPort {
 }
 
 /** One executing-service check, before resolving the interaction; a failed submission leaves the card open. */
-export function formResultFromValue(value: unknown, form: InteractionForm): FormSubmitValue {
+export function formResultFromValue(value: unknown, form: InteractionForm, abandoned = false): FormSubmitValue {
 	if (!isRecord(value) || !isRecord(value.data)) {
 		throw new StudioInteractionError("INVALID_ARGUMENT", "Form interaction requires submitted data");
 	}
@@ -126,7 +128,7 @@ export function formResultFromValue(value: unknown, form: InteractionForm): Form
 	for (const [name, fields] of byName) {
 		const raw = Object.hasOwn(value.data, name) ? value.data[name] : undefined;
 		if (raw === undefined) {
-			const error = !timedOut && fields.length === 1 ? fieldError(fields[0]!, undefined) : undefined;
+			const error = !timedOut && !abandoned && fields.length === 1 ? fieldError(fields[0]!, undefined) : undefined;
 			if (error) throw new StudioInteractionError("INVALID_ARGUMENT", `${fields[0]!.question}: ${error}`);
 			continue; // Unchecked controls contribute nothing: hidden/earlier values are not erased.
 		}
@@ -160,11 +162,15 @@ export function formResultFromValue(value: unknown, form: InteractionForm): Form
 		// be revalidated from that record; do not reinterpret one field's final value as every field's answer.
 		const normalized = field?.kind === "text" ? textValue(field, String(submitted)) : submitted;
 		const error =
-			!timedOut && fields.length === 1 ? fieldError(fields[0]!, field ? normalized : undefined) : undefined;
+			!timedOut && !abandoned && fields.length === 1
+				? fieldError(fields[0]!, field ? normalized : undefined)
+				: undefined;
 		if (error) throw new StudioInteractionError("INVALID_ARGUMENT", `${fields[0]!.question}: ${error}`);
 		Object.defineProperty(data, name, { value: normalized, enumerable: true, configurable: true, writable: true });
 	}
 	const notes: OptionNote[] = [];
+	let imageCount = 0;
+	let imageBytes = 0;
 	if (Array.isArray(value.notes)) {
 		for (const note of value.notes) {
 			if (
@@ -194,16 +200,39 @@ export function formResultFromValue(value: unknown, form: InteractionForm): Form
 				!note.text.trim()
 			)
 				continue;
+			const images = note.images;
+			if (images !== undefined) {
+				if (!form.acceptImages)
+					throw new StudioInteractionError("INVALID_ARGUMENT", "This form does not accept images");
+				try {
+					validateAskImages(images);
+				} catch (error) {
+					throw new StudioInteractionError(
+						"INVALID_ARGUMENT",
+						error instanceof Error ? error.message : String(error),
+					);
+				}
+				imageCount += images.length;
+				imageBytes += images.reduce((sum, image) => sum + image.data.length, 0);
+				if (imageCount > 8 || imageBytes > 512 * 1024)
+					throw new StudioInteractionError("INVALID_ARGUMENT", "Form attachments exceed the response budget");
+			}
 			notes.push({
 				name: field.name,
 				question: field.question,
 				option: spansText(option.label).replace(/\s+/g, " ").trim() || option.value,
 				value: option.value,
 				text: note.text.trim(),
+				...(images?.length ? { images } : {}),
 			});
 		}
 	}
-	return { data, ...(notes.length ? { notes } : {}), ...(timedOut ? { timedOut: true } : {}) };
+	return {
+		data,
+		...(notes.length ? { notes } : {}),
+		...(timedOut ? { timedOut: true } : {}),
+		...(abandoned ? { abandoned: true } : {}),
+	};
 }
 
 interface PendingInteraction {
@@ -297,6 +326,7 @@ export class StudioInteractionGateway implements StudioInteractionPort {
 		title: string;
 		placeholder?: string;
 		secret?: boolean;
+		riskAcknowledgement?: boolean;
 	}): Promise<string | undefined> {
 		return this.#requirePort().input(input);
 	}
@@ -416,6 +446,7 @@ export class StudioRemoteInteractionPort implements StudioInteractionPort {
 		title: string;
 		placeholder?: string;
 		secret?: boolean;
+		riskAcknowledgement?: boolean;
 	}): Promise<string | undefined> {
 		return await this.#stringRequest({ kind: "input", ...input });
 	}
@@ -522,10 +553,10 @@ export class StudioRemoteInteractionPort implements StudioInteractionPort {
 			throw new StudioInteractionError("INTERACTION_STALE", "Interaction lease is stale");
 		}
 		const value =
-			operation.decision === "cancel"
-				? undefined
-				: pending.request.kind === "form"
-					? formResultFromValue(operation.value, pending.form!)
+			pending.request.kind === "form" && operation.value !== undefined
+				? formResultFromValue(operation.value, pending.form!, operation.decision === "cancel")
+				: operation.decision === "cancel" && pending.request.kind !== "ask"
+					? undefined
 					: operation.value;
 		this.arbiter.completeInteraction(operation.interactionId, operation.commandId, owner, pending.leaseGeneration);
 		delete pending.form;
@@ -613,7 +644,14 @@ export class StudioRemoteInteractionPort implements StudioInteractionPort {
 
 	async #stringRequest(
 		input:
-			| { kind: "input"; commandId: string; title: string; placeholder?: string; secret?: boolean }
+			| {
+					kind: "input";
+					commandId: string;
+					title: string;
+					placeholder?: string;
+					secret?: boolean;
+					riskAcknowledgement?: boolean;
+			  }
 			| {
 					kind: "editor";
 					commandId: string;
@@ -700,6 +738,7 @@ export class StudioScriptedInteractionPort implements StudioInteractionPort {
 		title: string;
 		placeholder?: string;
 		secret?: boolean;
+		riskAcknowledgement?: boolean;
 	}): Promise<string | undefined> {
 		return Promise.resolve(this.responses.shift() as string | undefined);
 	}

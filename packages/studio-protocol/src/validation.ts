@@ -455,6 +455,8 @@ export function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapsho
       "sessionTitleSource",
       "isStreaming",
       "isCompacting",
+      "compactionMode",
+      "hintCompression",
       "activeMode",
       "approvalMode",
       "plan",
@@ -891,7 +893,7 @@ function validateRemoteInteractionRequest(request: Record<string, unknown>, path
       return;
     }
     case "input":
-      exactKeys(request, [...baseKeys, "placeholder", "secret"], path);
+      exactKeys(request, [...baseKeys, "placeholder", "secret", "riskAcknowledgement"], path);
       if (request.placeholder !== undefined) boundedOptionalInteractionString(request.placeholder, `${path}.placeholder`, INTERACTION_LIMITS.OPTION_TEXT_MAX_CHARS);
       if (request.secret !== undefined && typeof request.secret !== "boolean") {
         throw new ContractValidationError("expected a boolean", `${path}.secret`);

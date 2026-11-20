@@ -46,7 +46,7 @@ export class StudioMessagePrediction {
 				event.type === "manual_compaction_start"
 			)
 				this.#controller.cancel();
-			if (event.type === "agent_end" && event.isTerminal !== false) {
+			if (event.type === "agent_end") {
 				void session
 					.waitForIdle()
 					.then(() => this.#request())

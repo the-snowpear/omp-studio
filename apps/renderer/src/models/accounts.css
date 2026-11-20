@@ -68,3 +68,9 @@
 .account-policy-help > summary { display: inline-flex; align-items: center; gap: var(--sp-4); cursor: pointer; }
 .account-policy-help > summary:hover { color: var(--text-2); }
 .account-policy-help p { margin: var(--sp-6) 0 0; line-height: 1.6; }
+
+/* 账号身份胶囊：订阅档位（Max 20x / Pro…）、当前会话正在使用的凭据、凭据编号。 */
+.account-plan { gap: var(--sp-4); font-weight: var(--fw-semibold); letter-spacing: 0.01em; }
+.account-live { gap: var(--sp-4); }
+.account-live > .dot { width: 6px; height: 6px; }
+.account-credential { font-family: var(--font-mono); color: var(--text-3); }

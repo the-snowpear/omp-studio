@@ -1,6 +1,6 @@
 /**
  * OMP 18.11–18.12 Runtime features surfaced to Studio: remembered approvals,
- * job inspection and widgets, MCP re-authorization and read-only Seance.
+ * job inspection and widgets, and MCP re-authorization.
  * Validation stays at shape level; the overlay services enforce semantics.
  */
 
@@ -54,18 +54,6 @@ export interface McpAuthResult {
   message?: string;
 }
 
-export interface SeanceResult {
-  /** The answer text of the read-only consult. */
-  text: string;
-  sourceSessionId: string;
-  /** Agent id to send follow-up questions to, when the consult stays addressable. */
-  agentId?: string;
-  model?: string;
-  /** `running` when `async.enabled` detached the consult into a background job (`text` is then a notice). */
-  state: "completed" | "running";
-  jobId?: string;
-}
-
 export type RuntimeFeatureOperation =
   | { kind: "agent.spawn.options"; sessionId: string; definition: string }
   | { kind: "btw.inject"; sessionId: string; injectId: string }
@@ -76,8 +64,7 @@ export type RuntimeFeatureOperation =
   | { kind: "jobs.inspect"; sessionId: string; jobId: string }
   | { kind: "mcp.auth.reauth"; sessionId: string; name: string }
   | { kind: "mcp.auth.unauth"; sessionId: string; name: string }
-  | { kind: "mcp.auth.reconnect"; sessionId: string; name: string }
-  | { kind: "seance.ask"; sessionId: string; source: string; task: string; model?: string };
+  | { kind: "mcp.auth.reconnect"; sessionId: string; name: string };
 export interface RuntimeFeatureResultMap {
   "agent.spawn.options": { stepsAdvertised: boolean; autoParallel: "off" | "suggest" | "on"; effortSelection: boolean; modelSelection: boolean; maxEffort: string; models: Array<{ selector: string; name: string; thinkingLevels: readonly string[] }> };
   "btw.inject": { sent: true };
@@ -89,8 +76,7 @@ export interface RuntimeFeatureResultMap {
   "mcp.auth.reauth": McpAuthResult;
   "mcp.auth.unauth": McpAuthResult;
   "mcp.auth.reconnect": McpAuthResult;
-  "seance.ask": SeanceResult;
 }
-export const RUNTIME_FEATURE_KINDS = ["agent.spawn.options", "btw.inject", "session.history.rename", "session.history.pin", "session.lease.inspect", "approvals.forget", "jobs.inspect", "mcp.auth.reauth", "mcp.auth.unauth", "mcp.auth.reconnect", "seance.ask"] as const;
+export const RUNTIME_FEATURE_KINDS = ["agent.spawn.options", "btw.inject", "session.history.rename", "session.history.pin", "session.lease.inspect", "approvals.forget", "jobs.inspect", "mcp.auth.reauth", "mcp.auth.unauth", "mcp.auth.reconnect"] as const;
 export const RUNTIME_FEATURE_READ_KINDS = ["agent.spawn.options", "btw.inject", "session.history.rename", "session.history.pin", "session.lease.inspect", "jobs.inspect"] as const;
 export function isRuntimeFeatureKind(kind: string): kind is RuntimeFeatureOperation["kind"] { return (RUNTIME_FEATURE_KINDS as readonly string[]).includes(kind); }

@@ -34,7 +34,7 @@ export function ResourcesPane({ client, sessionId, available }: ResourceProps) {
   </section>;
 }
 
-function ResourceReader({ client, sessionId, available }: ResourceProps) {
+export function ResourceReader({ client, sessionId, available, initialUri }: ResourceProps & { initialUri?: string }) {
   const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
@@ -64,6 +64,10 @@ function ResourceReader({ client, sessionId, available }: ResourceProps) {
     }).finally(() => { if (generation === epoch.current) setChecking(false); });
     return () => { epoch.current++; };
   }, [client, sessionId, available, preview]);
+
+  useEffect(() => {
+    if (supported && initialUri) { setUri(initialUri); void read(initialUri); }
+  }, [initialUri, supported]);
 
   async function read(targetUri: string, cursor?: { offset: number; version: string; previous: number[] }) {
     if (lock.current || !supported || !targetUri.trim()) return;

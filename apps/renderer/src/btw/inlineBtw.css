@@ -1,0 +1,155 @@
+/* ---------------- 主时间线里的 BTW 便签 ----------------
+   旁路提问是挂在对话边上的一张便签，不是一条消息：收起时一行（BTW 标 + 问题 +
+   回答摘要），展开后是一段小线程。配色与图标沿用 BTW 面板（sparkles + accent），
+   正文直接用主对话的 Markdown 排版。 */
+.btw-inline {
+  margin: calc(-1 * var(--sp-8)) 0 var(--sp-20);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--surface);
+  box-shadow: inset 2px 0 0 var(--accent-border);
+  overflow: hidden;
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.btw-inline:hover,
+.btw-inline[data-open] { border-color: var(--accent-border); }
+.btw-inline[data-open] { box-shadow: inset 2px 0 0 var(--accent); }
+.btw-inline[data-status="failed"] { box-shadow: inset 2px 0 0 var(--red); }
+
+.btw-inline-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  width: 100%;
+  min-height: 40px;
+  padding: var(--sp-8) var(--sp-10) var(--sp-8) var(--sp-12);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.btw-inline-summary:hover { background: var(--accent-softer); }
+.btw-inline-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.btw-inline-glyph {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-4);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.btw-inline[data-status="running"] .btw-inline-glyph .icon {
+  animation: omp-spin calc(var(--loop-drift) * 1.5) linear infinite;
+}
+.btw-inline-copy { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.btw-inline-line { display: flex; align-items: baseline; gap: var(--sp-8); min-width: 0; }
+.btw-inline-eyebrow {
+  flex: none;
+  color: var(--accent);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.06em;
+}
+.btw-inline-question,
+.btw-inline-snippet {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.btw-inline-question { font-size: var(--fs-12); font-weight: var(--fw-medium); }
+.btw-inline-snippet { color: var(--text-3); font-size: var(--fs-11); }
+.btw-inline-state { flex: none; color: var(--text-3); font-size: var(--fs-11); }
+.btw-inline[data-status="running"] .btw-inline-state {
+  background: linear-gradient(90deg, var(--text-3) 30%, var(--text) 50%, var(--text-3) 70%);
+  background-size: 240% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: al-sweep var(--loop-drift) linear infinite;
+}
+.btw-inline[data-status="failed"] .btw-inline-state { color: var(--red); }
+.btw-inline-chevron { flex: none; color: var(--text-3); transition: rotate var(--dur) var(--ease-out); }
+.btw-inline-summary[aria-expanded="true"] .btw-inline-chevron { rotate: 90deg; }
+
+.btw-inline-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-10);
+  padding: var(--sp-4) var(--sp-14) var(--sp-10) calc(var(--sp-12) + 24px + var(--sp-10));
+  border-top: 1px solid var(--border);
+  animation: var(--motion-unfold);
+}
+.btw-inline-body > :first-child { margin-top: var(--sp-8); }
+.btw-inline-turn { display: flex; flex-direction: column; gap: var(--sp-4); padding-bottom: var(--sp-10); border-bottom: 1px dashed var(--border); }
+.btw-inline-ask { margin: 0; color: var(--text-2); font-size: var(--fs-12); font-weight: var(--fw-semibold); overflow-wrap: anywhere; }
+.btw-inline-answer { min-width: 0; color: var(--text); font-size: var(--fs-14); line-height: 1.7; overflow-wrap: anywhere; }
+.btw-inline-answer > :first-child { margin-top: 0; }
+.btw-inline-answer > :last-child { margin-bottom: 0; }
+
+.btw-inline-follow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-10);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-6);
+  background: var(--bg);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.btw-inline-follow:focus-within { border-color: var(--accent-border); box-shadow: 0 0 0 2px var(--accent-softer); }
+.btw-inline-follow input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-12);
+}
+.btw-inline-follow input::placeholder { color: var(--text-faint); }
+.btw-inline-send {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--r-4);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease);
+}
+.btw-inline-send:hover:not(:disabled) { background: var(--accent-hover); }
+.btw-inline-send:disabled { background: var(--surface-3); color: var(--text-faint); cursor: default; }
+
+.btw-inline-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin: 0 calc(-1 * var(--sp-6)); }
+.btw-inline-actions > button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-height: var(--tap-min);
+  padding: 0 var(--sp-6);
+  border: 0;
+  border-radius: var(--r-4);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-11);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.btw-inline-actions > button:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
+.btw-inline-actions > button:disabled { color: var(--text-faint); cursor: default; }
+.btw-inline-actions > button.is-danger:hover:not(:disabled) { background: var(--red-soft); color: var(--red); }
+.btw-inline-actions > button.is-link { margin-inline-start: auto; color: var(--accent); }
+.btw-inline-actions > button.is-link:hover { background: var(--accent-softer); color: var(--accent-hover); }
+.btw-inline-actions > button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

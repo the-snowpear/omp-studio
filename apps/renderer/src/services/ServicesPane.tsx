@@ -24,6 +24,7 @@ import {
 import { hostErrorMessage } from "../hostError";
 import { invokeServiceCommand, type ServiceCommandKind } from "./serviceCommands";
 import { useI18n } from "../i18n";
+import { Icon } from "../icons";
 import "./services.css";
 
 type Definition = {
@@ -75,6 +76,7 @@ export function ServicesPane({
         ? label("失败时重启", "Restart on failure")
         : label("不自动重启", "No automatic restart");
   const [open, setOpen] = useState(standalone);
+  const [scope, setScope] = useState("all");
   const [rows, setRows] = useState<StudioServiceRow[]>([]);
   const [definitions, setDefinitions] = useState<Definition[]>([]);
   const [editing, setEditing] = useState<Definition>();
@@ -464,8 +466,18 @@ export function ServicesPane({
               {error}
             </p>
           ) : null}
+          {rows.some(row => row.scope) ? <div className="service-scope">
+            <span className="seg" role="tablist" aria-label={label("范围", "Scope")}>
+              {([["all", label("全部", "All")], ["session", label("当前会话", "Session")], ["project", label("当前项目", "Project")], ["global", label("全局守护进程", "Global daemon")]] as const).map(([id, text]) => {
+                const count = id === "all" ? rows.length : rows.filter(row => row.scope === id).length;
+                return <button key={id} type="button" role="tab" aria-selected={scope === id} className={scope === id ? "active" : undefined} disabled={id !== "all" && count === 0} onClick={() => setScope(id)}>
+                  {text}<span className="service-scope-count">{count}</span>
+                </button>;
+              })}
+            </span>
+          </div> : null}
           <div className="service-table" role="list">
-            {rows.map((row) => (
+            {rows.filter(row => scope === "all" || row.scope === scope).map((row) => (
               <div
                 role="listitem"
                 className={`service-row${selected?.name === row.name ? " selected" : ""}`}
@@ -475,7 +487,7 @@ export function ServicesPane({
                   className="service-name"
                   onClick={() => setSelected(row)}
                 >
-                  <b>{row.name}</b>
+                  <span className="service-name-line"><b>{row.name}</b>{row.scope && <span className={`chip xs ${row.scope === "global" ? "purple" : row.scope === "project" ? "blue" : "gray"}`}>{{session:label("会话", "Session"), project:label("项目", "Project"), global:label("全局", "Global")}[row.scope]}</span>}{row.manageable === false ? <span className="chip xs outline" data-tip={label("由其他进程管理，这里只读", "Managed elsewhere. Read-only here.")}><Icon name="lock" extra="xs" />{label("只读", "Read-only")}</span> : null}</span>
                   <span className="small muted">
                     <WorkspaceStatus state={row.state} /> ·{" "}
                     {lifetimeLabel(row.mode)} · {label("重启", "restarts")}{" "}
@@ -489,7 +501,7 @@ export function ServicesPane({
                   value={row.mode}
                   disabled={
                     busy ||
-                    !canControl ||
+                    row.manageable === false || !canControl ||
                     ["exited", "failed"].includes(row.state)
                   }
                   onChange={(event) =>
@@ -510,7 +522,7 @@ export function ServicesPane({
                 </AppSelect>
                 <button
                   className="btn small outline"
-                  disabled={busy || !canControl}
+                  disabled={busy || row.manageable === false || !canControl}
                   onClick={() => setConfirm({ kind: "services.restart", row })}
                 >
                   {label("重启", "Restart")}
@@ -519,7 +531,7 @@ export function ServicesPane({
                   className="btn small outline"
                   disabled={
                     busy ||
-                    !canControl ||
+                    row.manageable === false || !canControl ||
                     ["exited", "failed"].includes(row.state)
                   }
                   onClick={() => setConfirm({ kind: "services.stop", row })}
@@ -607,7 +619,7 @@ export function ServicesPane({
                 />
                 <button
                   className="btn small"
-                  disabled={busy || !canControl || !input}
+                  disabled={busy || selected?.manageable === false || !canControl || !input}
                 >
                   {label("发送输入", "Send input")}
                 </button>

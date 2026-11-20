@@ -107,3 +107,33 @@
   .resources-pagination > span { flex-basis: 100%; }
   .resources-state { white-space: normal; }
 }
+
+/* 会话目录路径栏：一个只读路径框 + 复制 / 打开两个图标按钮，反馈落在框内右侧。 */
+.resources-root {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  min-width: 0;
+  margin: 0 0 var(--sp-12);
+  padding: var(--sp-4) var(--sp-4) var(--sp-4) var(--sp-10);
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  background: var(--surface-2);
+}
+.resources-root > .icon { flex: none; color: var(--text-3); }
+.resources-root-label { flex: none; color: var(--text-3); font-size: var(--fs-11); }
+.resources-root code {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font: var(--fs-12)/1.6 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.resources-root code > bdi { direction: ltr; unicode-bidi: plaintext; }
+.resources-root-status { flex: none; display: inline-flex; align-items: center; gap: var(--sp-4); color: var(--green); font-size: var(--fs-11); animation: var(--motion-reveal); }
+.resources-root-status.is-error { color: var(--red); }
+.resources-root .icon-btn { flex: none; }

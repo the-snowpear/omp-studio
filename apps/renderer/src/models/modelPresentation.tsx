@@ -16,6 +16,7 @@ export const ROLE_TINTS: Record<string, string> = {
 };
 
 export type ModelPickItem = {
+  readonly thinkingConfig?: AvailableModelRecord["thinkingConfig"];
   readonly execution?: import("@omp-studio/client-contract").ModelExecutionMetadata;
   readonly provider: string;
   readonly id: string;
@@ -38,6 +39,7 @@ function toPickItem(model: AvailableModelRecord, entry?: ModelCatalogEntry): Mod
   const contextWindow = entry?.contextWindow ?? model.contextWindow;
   return {
     execution: { ...model, ...entry },
+    thinkingConfig: entry?.thinkingConfig ?? model.thinkingConfig,
     provider: model.provider,
     id: model.id,
     selector: model.selector,
@@ -82,13 +84,23 @@ export function groupModelsByProvider(
   return groups;
 }
 
+export function ThinkingProbe({ config }: { config: AvailableModelRecord["thinkingConfig"] }) {
+  const zh = useI18n().resolvedLanguage === "zh";
+  if (!config) return null;
+  const levels = [...(config.requiresEffort ? [] : [zh ? "关闭" : "Off"]), ...config.efforts].join(" · ");
+  const pending = config.unverified === true;
+  return <span className={`chip xs ${pending ? "gray" : "purple"}`} data-tip={pending ? (zh ? "运行时将在首次使用时探测思考档位" : "The runtime will probe thinking levels on first use") : levels}>
+    <Icon name="brain" extra="xs" />{pending ? (zh ? "待探测" : "Awaiting probe") : levels}
+  </span>;
+}
+
 export function ModelPickCaps({ model }: { model: ModelPickItem }) {
   const { t, resolvedLanguage } = useI18n();
   const metadata = model.execution;
   const modelInfo = [t("modelConfig.tipContext"), metadata?.serviceTiers ? `${resolvedLanguage === "zh" ? "公布的服务档位" : "Advertised service tiers"}: ${metadata.serviceTiers.join(", ") || "—"}` : "", metadata?.promptCache ? `${resolvedLanguage === "zh" ? "缓存时长（秒）" : "Cache lifetime (seconds)"}: ${Object.entries(metadata.promptCache).map(([tier, seconds]) => `${tier} ${seconds}`).join(", ") || "—"}` : ""].filter(Boolean).join("\n");
   return (
     <span className="rms-option-caps">
-      {model.reasoning ? <span className="chip purple xs chip-icon" data-tip={t("modelConfig.tipThinking")}><Icon name="brain" extra="sm" /></span> : null}
+      {model.thinkingConfig ? <ThinkingProbe config={model.thinkingConfig} /> : model.reasoning ? <span className="chip purple xs chip-icon" data-tip={t("modelConfig.tipThinking")}><Icon name="brain" extra="sm" /></span> : null}
       {model.image ? <span className="chip blue xs chip-icon" data-tip={t("modelConfig.tipMultimodal")}><Icon name="image" extra="sm" /></span> : null}
       {model.tools ? <span className="chip gray xs chip-icon" data-tip={t("modelConfig.tipTools")}><Icon name="wrench" extra="sm" /></span> : null}
       <span className="chip gray xs" data-tip={modelInfo}>{fmtK(model.contextWindow)}</span>

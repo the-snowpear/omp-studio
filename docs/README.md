@@ -34,6 +34,7 @@ Public documentation for OMP Studio.
 | [releases/v0.1.11.md](releases/v0.1.11.md) | 0.1.11 发布页文案、三平台下载与升级说明 |
 | [releases/v0.1.10.md](releases/v0.1.10.md) | 0.1.10 发布页文案、三平台下载与升级说明 |
 | [migrations/omp-18.13.2.md](migrations/omp-18.13.2.md) | 18.12.6 → 18.13.2 正式版本变化、完整 Runtime / GUI 迁移与无付费验收 |
+| [migrations/omp-19.0.1.md](migrations/omp-19.0.1.md) | OMP 19.0.1 Runtime、协议、工作台交互与验证记录 |
 | [migrations/omp-18.20.2.md](migrations/omp-18.20.2.md) | 18.19.0 → 18.20.2 分阶段迁移、同源 Runtime 与隔离验证范围 |
 | [migrations/omp-18.20.2-frontend-handoff.md](migrations/omp-18.20.2-frontend-handoff.md) | 前端接续阶段记录、typed API 与修复后的调用约定 |
 | [reviews/omp-18.20.2-frontend-fixes-2026-11-16.md](reviews/omp-18.20.2-frontend-fixes-2026-11-16.md) | 15 项前端复核修复、studio.5 canary、最终门禁与未验证边界 |

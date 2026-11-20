@@ -1,0 +1,169 @@
+/* Reuse Studio tokens and editor theme for a compact database workbench. */
+.disassembler-pane { min-width: 0; display: grid; gap: var(--sp-16); container: disassembler-workspace / inline-size; padding-bottom: var(--sp-16); }
+.disassembler-pane h2, .disassembler-pane h3, .disassembler-pane p { margin: 0; }
+.disassembler-page-heading { display: flex; align-items: center; gap: var(--sp-12); }
+.disassembler-heading-icon { display: grid; place-items: center; width: 40px; height: 40px; flex: none; color: var(--accent); background: var(--accent-softer); border: 1px solid var(--accent-border); border-radius: var(--r-8); }
+.disassembler-heading-icon .icon { width: 22px; height: 22px; }
+.disassembler-page-heading > div:nth-child(2) { flex: 1; min-width: 0; }
+.disassembler-page-heading h2 { display: flex; align-items: center; gap: var(--sp-8); font-size: var(--fs-18); font-weight: var(--fw-semibold); }
+.disassembler-page-heading p { margin-top: var(--sp-4); color: var(--text-3); font-size: var(--fs-12); line-height: 1.6; }
+.disassembler-pane .btn, .disassembler-browser .btn, .disassembler-edit-form .btn { white-space: nowrap; flex-shrink: 0; }
+.disassembler-environment { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-10) var(--sp-12); border: 1px solid var(--border); border-radius: var(--r-6); background: var(--surface-2); font-size: var(--fs-11); }
+.disassembler-environment > .icon { flex: none; color: var(--text-3); }
+.disassembler-environment.is-ready > .icon { color: var(--green); }
+.disassembler-environment strong { color: var(--text-2); font-weight: var(--fw-medium); white-space: nowrap; }
+.disassembler-environment > span { flex: 1; min-width: 0; color: var(--text-3); overflow-wrap: anywhere; }
+.disassembler-open-row { display: flex; align-items: end; gap: var(--sp-12); }
+.disassembler-open-row > label { display: grid; gap: var(--sp-8); flex: 1; min-width: 0; color: var(--text-2); font-size: var(--fs-12); }
+.disassembler-path-input { position: relative; }
+.disassembler-path-input > .icon { position: absolute; left: var(--sp-12); top: 50%; transform: translateY(-50%); color: var(--text-3); }
+.disassembler-path-input .input { width: 100%; padding-left: 36px; }
+.disassembler-workbench { display: grid; grid-template-columns: 200px minmax(0, 1fr); min-height: 510px; border: 1px solid var(--border); border-radius: var(--r-8); overflow: hidden; background: var(--surface); }
+.disassembler-databases { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--surface-2); }
+.disassembler-list-heading { display: flex; justify-content: space-between; gap: var(--sp-8); padding: var(--sp-16) var(--sp-14) var(--sp-12); font-size: var(--fs-12); color: var(--text-2); }
+.disassembler-list-heading strong { font-weight: var(--fw-medium); }
+.disassembler-list-heading > span { color: var(--text-3); font: var(--fs-11) var(--font-mono); }
+.disassembler-list-search { display: flex; align-items: center; gap: var(--sp-6); margin: 0 var(--sp-10) var(--sp-12); padding: var(--sp-6) var(--sp-8); border: 1px solid var(--border); background: var(--surface); border-radius: var(--r-6); }
+.disassembler-list-search .icon { flex: none; color: var(--text-3); }
+.disassembler-list-search input { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: var(--text); font: var(--fs-12)/1.6 var(--font-ui); }
+.disassembler-list-search:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.disassembler-list-search input::placeholder { color: var(--text-faint); }
+.disassembler-database-list { display: grid; align-content: start; gap: var(--sp-4); padding: 0 var(--sp-6); flex: 1; max-height: 500px; overflow-y: auto; }
+.disassembler-database-row { display: flex; align-items: center; gap: var(--sp-10); min-width: 0; text-align: left; padding: var(--sp-12) var(--sp-8); border: 1px solid transparent; border-radius: var(--r-6); color: var(--text-2); background: transparent; cursor: pointer; transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease); }
+.disassembler-database-row:hover { background: var(--surface-hover); }
+.disassembler-database-row[aria-pressed="true"] { background: var(--accent-softer); border-color: var(--accent-border); color: var(--accent); }
+.disassembler-database-row > .icon { flex: none; }
+.disassembler-database-row > span:not(.disassembler-dirty) { min-width: 0; flex: 1; }
+.disassembler-database-row strong { display: block; font-size: var(--fs-12); font-weight: var(--fw-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.disassembler-database-row small { display: block; margin-top: var(--sp-4); color: var(--text-3); font: var(--fs-11)/1.5 var(--font-mono); }
+.disassembler-dirty { width: 6px; height: 6px; border-radius: var(--r-full); background: var(--amber); flex: none; }
+.disassembler-list-foot { display: flex; align-items: start; gap: var(--sp-8); padding: var(--sp-16) var(--sp-12); border-top: 1px solid var(--border); color: var(--text-3); }
+.disassembler-list-foot .icon { flex: none; margin-top: 2px; }
+.disassembler-list-foot p { font-size: var(--fs-11); line-height: 1.7; white-space: pre-line; }
+.disassembler-database-main { min-width: 0; }
+.disassembler-database-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--sp-12); padding: var(--sp-20) var(--sp-20) var(--sp-12); }
+.disassembler-database-heading h3 { font-size: var(--fs-16); font-weight: var(--fw-semibold); overflow-wrap: anywhere; }
+.disassembler-db-meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-12); margin-top: var(--sp-8); font-size: var(--fs-11); color: var(--text-3); }
+.disassembler-db-meta > span:nth-child(2) { font-family: var(--font-mono); }
+.disassembler-db-meta .disassembler-unsaved { color: var(--text-2); }
+.disassembler-db-actions { display: flex; gap: var(--sp-6); }
+.disassembler-database-main > .workspace-tabbar { position: static; margin: 0; padding: var(--sp-8) var(--sp-20) var(--sp-12); background: var(--surface); }
+.disassembler-database-main > .workspace-panel { padding: var(--sp-16) var(--sp-20) var(--sp-20); }
+.disassembler-browser { display: grid; gap: var(--sp-12); min-width: 0; }
+.disassembler-standalone-head { display: grid; gap: var(--sp-12); }
+.disassembler-standalone-head h3 { font-size: var(--fs-16); }
+.disassembler-standalone-head p { color: var(--text-3); font-size: var(--fs-12); line-height: 1.7; }
+.disassembler-browser-toolbar { display: flex; align-items: end; gap: var(--sp-8); min-width: 0; }
+.disassembler-browser-toolbar > label { display: grid; gap: var(--sp-6); font-size: var(--fs-11); color: var(--text-3); min-width: 0; }
+.disassembler-view-field { flex: 0 0 136px; }
+.disassembler-target-field { flex: 1; }
+.disassembler-target-field .input, .disassembler-view-field .select { width: 100%; font-size: var(--fs-12); }
+.disassembler-view-surface, .disassembler-python { min-width: 0; border: 1px solid var(--border); border-radius: var(--r-6); overflow: hidden; }
+.disassembler-surface-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); min-height: 38px; padding: var(--sp-6) var(--sp-12); background: var(--surface-2); border-bottom: 1px solid var(--border); font-size: var(--fs-12); color: var(--text-2); }
+.disassembler-surface-bar > span:first-child { display: flex; align-items: center; gap: var(--sp-8); min-width: 0; }
+.disassembler-surface-bar code { color: var(--text-3); font-size: var(--fs-11); overflow-wrap: anywhere; }
+.disassembler-view-surface .capability-editor .cm-editor { height: clamp(220px, 30dvh, 300px); }
+.disassembler-view-surface > .workspace-empty { min-height: clamp(220px, 30dvh, 300px); }
+.disassembler-view-footer { display: flex; align-items: center; gap: var(--sp-8); border-top: 1px solid var(--border); min-height: 36px; padding: var(--sp-4) var(--sp-10); color: var(--text-3); font-size: var(--fs-11); }
+.disassembler-view-footer > span:first-child { font-family: var(--font-mono); }
+.disassembler-python .capability-editor .cm-editor { height: 250px; }
+.disassembler-python-actions { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--sp-12); padding: var(--sp-12); border-top: 1px solid var(--border); }
+.disassembler-python-actions p { display: flex; gap: var(--sp-6); align-items: center; color: var(--text-3); font-size: var(--fs-11); }
+.disassembler-python-actions kbd { margin-left: var(--sp-6); font-size: var(--fs-11); font-family: var(--font-ui); opacity: .8; }
+.disassembler-python-result { border-top: 1px solid var(--border); }
+.disassembler-result-placeholder { padding: var(--sp-20) var(--sp-12); color: var(--text-3); font-size: var(--fs-12); }
+.disassembler-result-text, .disassembler-operation-result { margin: 0; padding: var(--sp-12); font: var(--fs-12)/1.7 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; }
+.disassembler-operation-result { border-left: 2px solid var(--accent); background: var(--accent-softer); border-radius: var(--r-4); }
+.disassembler-output { margin: 0; max-height: 300px; overflow: auto; padding: var(--sp-12); border: 1px solid var(--border); border-radius: var(--r-6); background: var(--code-bg); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; font: var(--fs-12)/1.7 var(--font-mono); }
+.disassembler-disclosure { padding: var(--sp-12); font-size: var(--fs-12); }
+.disassembler-disclosure summary { color: var(--text-3); cursor: pointer; }
+.disassembler-disclosure[open] > summary { margin-bottom: var(--sp-12); }
+.disassembler-hint { margin: 0; color: var(--text-3); font-size: var(--fs-12); line-height: 1.7; overflow-wrap: anywhere; }
+.disassembler-notice { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-10) var(--sp-12); border: 1px solid var(--border); border-radius: var(--r-6); background: var(--surface-2); color: var(--text-2); font-size: var(--fs-12); line-height: 1.6; }
+.disassembler-notice > .icon { flex: none; }
+.disassembler-notice > span { flex: 1; overflow-wrap: anywhere; min-width: 0; }
+.disassembler-notice.is-error { background: var(--red-soft); border-color: color-mix(in srgb, var(--red) 30%, var(--border)); color: var(--text); }
+.disassembler-notice.is-error > .icon { color: var(--red); }
+.disassembler-activity, .disassembler-cancel-row { display: flex; align-items: center; gap: var(--sp-12); color: var(--text-3); font-size: var(--fs-12); }
+.disassembler-activity > span:nth-child(2), .disassembler-cancel-row > span { flex: 1; }
+.disassembler-facts { display: grid; gap: var(--sp-16); margin: 0; }
+.disassembler-facts > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: var(--sp-12); font-size: var(--fs-12); line-height: 1.7; }
+.disassembler-facts dt { color: var(--text-3); }
+.disassembler-facts dd { margin: 0; color: var(--text-2); overflow-wrap: anywhere; font-family: var(--font-mono); }
+.disassembler-info-note { display: flex; gap: var(--sp-10); padding-top: var(--sp-24); margin-top: var(--sp-24); border-top: 1px solid var(--border); color: var(--text-3); font-size: var(--fs-12); line-height: 1.7; }
+.disassembler-info-note .icon { flex: none; margin-top: 2px; }
+.disassembler-edit-form { display: grid; gap: var(--sp-16); }
+.disassembler-edit-form > label { display: grid; gap: var(--sp-8); font-size: var(--fs-12); color: var(--text-2); }
+.disassembler-edit-form > label .input { width: 100%; }
+.disassembler-edit-form .capability-editor { border: 1px solid var(--border); border-radius: var(--r-6); }
+.disassembler-edit-form .capability-editor .cm-editor { height: 210px; }
+.disassembler-edit-form > .disassembler-checkbox { display: flex; align-items: center; }
+.disassembler-checkbox input { accent-color: var(--accent); width: 16px; height: 16px; }
+.disassembler-dialog-actions { display: flex; justify-content: flex-end; gap: var(--sp-8); padding-top: var(--sp-8); }
+.disassembler-review-heading { display: flex; gap: var(--sp-12); align-items: center; }
+.disassembler-review-heading > .icon { width: 24px; height: 24px; color: var(--accent); flex: none; }
+.disassembler-review-heading strong { font-size: var(--fs-16); }
+.disassembler-review-heading p { margin: var(--sp-4) 0 0; color: var(--text-3); font-size: var(--fs-12); overflow-wrap: anywhere; }
+.disassembler-database-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+@container disassembler-workspace (max-width: 780px) {
+  .disassembler-workbench { grid-template-columns: 170px minmax(0, 1fr); }
+  .disassembler-database-heading { padding: var(--sp-16); }
+  .disassembler-database-main > .workspace-panel { padding: var(--sp-12); }
+  .disassembler-database-main > .workspace-tabbar { padding-inline: var(--sp-12); }
+  .disassembler-browser-toolbar { flex-wrap: wrap; }
+  .disassembler-view-field { flex: 0 0 125px; }
+  .disassembler-target-field { flex: 1 1 150px; }
+}
+@container disassembler-workspace (max-width: 560px) {
+  .disassembler-heading-icon { display: none; }
+  .disassembler-page-heading { align-items: start; flex-wrap: wrap; }
+  .disassembler-page-heading p { max-width: 34em; }
+  .disassembler-environment { flex-wrap: wrap; }
+  .disassembler-environment > span { flex-basis: 60%; }
+  .disassembler-workbench { grid-template-columns: minmax(0, 1fr); }
+  .disassembler-databases { border-right: 0; border-bottom: 1px solid var(--border); }
+  .disassembler-database-list { display: flex; padding: 0 var(--sp-8) var(--sp-8); overflow-x: auto; }
+  .disassembler-database-row { flex: 0 0 160px; }
+  .disassembler-list-foot, .disassembler-list-search { display: none; }
+  .disassembler-list-heading { padding: var(--sp-10) var(--sp-12); }
+  .disassembler-open-row { flex-wrap: wrap; }
+  .disassembler-open-row > label { flex-basis: 100%; }
+  .disassembler-facts > div { grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); }
+  .disassembler-activity, .disassembler-cancel-row { flex-wrap: wrap; }
+}
+
+/* 引擎条：左侧选后端，中间每个引擎一枚状态胶囊（点色 = 检测结果，accent 描边 = 当前在用），
+   右侧刷新。Auto 时「使用中」那一枚就是自动命中的后端。 */
+.disassembler-engine-select { display: inline-flex; align-items: center; gap: var(--sp-8); flex: none; padding-inline-end: var(--sp-10); border-inline-end: 1px solid var(--border); }
+.disassembler-engine-select > .icon { color: var(--text-3); }
+.disassembler-environment.is-ready .disassembler-engine-select > .icon { color: var(--green); }
+.disassembler-engines { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--sp-6); flex: 0 1 auto; min-width: 0; }
+.disassembler-engine {
+  --engine-dot: var(--glyph-faint);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  height: 24px;
+  padding: 0 var(--sp-10) 0 var(--sp-8);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  background: var(--surface);
+  color: var(--text-3);
+  white-space: nowrap;
+  transition: border-color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
+}
+.disassembler-engine b { color: var(--text-2); font-weight: var(--fw-medium); }
+.disassembler-engine-dot { width: 6px; height: 6px; flex: none; border-radius: var(--r-full); background: var(--engine-dot); }
+.disassembler-engine[data-state="ready"] { --engine-dot: var(--green); }
+.disassembler-engine[data-state="unavailable"] { --engine-dot: var(--red); }
+.disassembler-engine[data-state="installing"] { --engine-dot: var(--amber); }
+.disassembler-engine[data-state="installing"] .disassembler-engine-dot { animation: omp-pulse var(--loop-pulse) var(--ease-loop) infinite; }
+.disassembler-engine[data-active] { border-color: var(--accent-border); background: var(--accent-softer); color: var(--accent); }
+.disassembler-engine[data-active] b { color: var(--text); }
+.disassembler-engine-reason { flex: 1 1 12rem; min-width: 0; color: var(--text-3); overflow-wrap: anywhere; }
+.disassembler-environment > button:last-child { margin-inline-start: auto; }
+.disassembler-backend-tag { display: inline-block; margin-inline-end: var(--sp-6); padding: 0 var(--sp-4); border-radius: var(--r-4); background: var(--surface-3); color: var(--text-2); font: var(--fw-semibold) calc(10px * var(--text-font-scale))/1.6 var(--font-ui); letter-spacing: 0.03em; vertical-align: 1px; }
+.disassembler-backend-tag[data-backend="ida"] { background: var(--blue-soft); color: var(--blue); }
+.disassembler-backend-tag[data-backend="ghidra"] { background: var(--amber-soft); color: var(--amber); }
+.disassembler-database-row[aria-pressed="true"] .disassembler-backend-tag { background: var(--accent-soft); color: var(--accent); }
+@media (max-width: 660px) { .disassembler-environment { flex-wrap: wrap; } .disassembler-engine-select { border-inline-end: 0; } }

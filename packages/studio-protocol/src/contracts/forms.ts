@@ -13,6 +13,7 @@ export interface FormOptionNote {
   option: string;
   value: string;
   text: string;
+  images?: Array<{ type: "image"; data: string; mimeType: string }>;
 }
 
 interface FormFieldBase {
@@ -74,6 +75,7 @@ export interface InteractionFormSection {
 }
 
 export interface InteractionForm {
+  acceptImages?: boolean;
   sections: InteractionFormSection[];
   fields: InteractionFormField[];
   /** Native hidden inputs, kept in order; a named unchecked field must not erase one. */

@@ -39,6 +39,9 @@ export interface StudioAgentUsage {
 }
 
 export interface StudioAgentSnapshot {
+  waitingOn?: string[];
+  waiters?: Array<{ waiter: string; since: number; via: string[] }>;
+  peer?: boolean;
   agentId: AgentId;
   generation: Generation;
   parentAgentId?: AgentId;

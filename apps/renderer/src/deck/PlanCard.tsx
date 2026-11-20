@@ -1,3 +1,4 @@
+import type { NativePlanOption } from "@omp-studio/studio-protocol";
 import { PlanExecutionPicker } from "./PlanExecutionPicker";
 import { getPreviewPlanExecution } from "../preview/planExecutionPreview";
 import { usePreviewMode } from "../preview/PreviewContext";
@@ -12,6 +13,8 @@ import { parsePlanSections } from "./planSections";
 import { PromptHead } from "./PromptHead";
 import { PLAN_ACTIONS, type PlanActionDetail, type PlanActionId } from "./types";
 import { MOTION_MS, MOTION_SLACK_MS, motionReduced } from "../motion";
+import { PLATFORM } from "../platform";
+import "./planEditor.css";
 
 function PlanHeadActions({
   expanded,
@@ -102,25 +105,30 @@ function PlanSaveAndQuitButton({
 }
 
 function PlanActions({
+  options,
   onPick,
   large,
   disabled,
 }: {
+  options?: readonly NativePlanOption[] | undefined;
   onPick: (id: PlanActionId) => void;
   large?: boolean;
   disabled?: boolean;
 }) {
+  const zh = useI18n().resolvedLanguage === "zh";
+  const labels = { execute: "批准并执行", keep: "批准并保留上下文", compact: "批准并压缩上下文", refine: "请求修改", dismiss: "关闭" };
   return (
     <div className="dk-actions">
-      {PLAN_ACTIONS.map((action) => (
+      {PLAN_ACTIONS.filter(action => !options || options.some(option => option.kind === action.id)).map((action) => (
         <button
           key={action.id}
           type="button"
           className={`btn ${large ? "lg" : "small"}${action.primary ? " primary" : " outline"}`}
-          disabled={disabled}
+          disabled={disabled || options?.find(option => option.kind === action.id)?.disabled}
+          title={options?.find(option => option.kind === action.id)?.description}
           onClick={() => onPick(action.id)}
         >
-          {action.label}
+          {zh ? labels[action.id] : action.label}
         </button>
       ))}
     </div>
@@ -179,6 +187,8 @@ function PlanReviewDialog({
   onAction,
   onSaveAndQuit,
   executionControl,
+  options,
+  editor,
   onPrepareAction,
   onNotesChange,
   onOverallNoteChange,
@@ -196,6 +206,8 @@ function PlanReviewDialog({
   onAction: (id: PlanActionId, detail?: PlanActionDetail) => void;
   onSaveAndQuit?: () => void;
   executionControl?: ReactNode;
+  options?: readonly NativePlanOption[] | undefined;
+  editor?: ReactNode;
   onPrepareAction?: (id: PlanActionId) => void;
   onNotesChange: (notes: Record<number, string[]>) => void;
   onOverallNoteChange: (note: string) => void;
@@ -300,6 +312,7 @@ function PlanReviewDialog({
             {...(disabled === true ? { disabled: true } : {})}
           />
         </div>
+        {editor}
         <div className="plan-review-dialog-body">
           {viewOnly === true ? (
             body.trim().length > 0 ? (
@@ -337,7 +350,7 @@ function PlanReviewDialog({
         {viewOnly === true ? null : (
         <>
         {executionControl}
-        <PlanActions
+        <PlanActions options={options}
           onPick={(id) => {
             onPrepareAction?.(id);
             requestClose(() => onAction(id));
@@ -365,6 +378,8 @@ export function PlanCard({
   onAction,
   onSaveAndQuit,
   executionControl,
+  options,
+  onSaveMarkdown,
 }: {
   title: string;
   body: string;
@@ -377,10 +392,47 @@ export function PlanCard({
   onAction: (id: PlanActionId, detail?: PlanActionDetail) => void;
   onSaveAndQuit?: () => void;
   executionControl?: ReactNode;
+  options?: readonly NativePlanOption[] | undefined;
+  onSaveMarkdown?: ((markdown: string) => Promise<boolean>) | undefined;
 }) {
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const { preview } = usePreviewMode();
+  const [draftMarkdown, setDraftMarkdown] = useState<string | undefined>();
+  const [savedMarkdown, setSavedMarkdown] = useState<string | undefined>();
+  const [saving, setSaving] = useState(false);
+  const displayedBody = savedMarkdown ?? body;
+  const dirty = draftMarkdown !== undefined && draftMarkdown !== displayedBody;
+  const savePlan = async () => {
+    if (draftMarkdown === undefined || disabled || saving) return;
+    setSaving(true);
+    try {
+      if (!onSaveMarkdown || await onSaveMarkdown(draftMarkdown)) { setSavedMarkdown(draftMarkdown); setDraftMarkdown(undefined); }
+    } finally { setSaving(false); }
+  };
+  const editor = onSaveMarkdown || preview || demo ? <div className="plan-inline-editor">
+    {draftMarkdown === undefined ? <div className="plan-inline-editor-bar">
+      {savedMarkdown !== undefined
+        ? <span className="plan-inline-editor-saved"><Icon name="check" extra="xs" />{zh ? "已保存到计划文件，审阅仍在进行" : "Saved to the plan file. Review stays open."}</span>
+        : <span>{zh ? "可以直接改写计划正文，保存后继续审阅" : "Rewrite the plan text here, then keep reviewing."}</span>}
+      <button type="button" className="btn small ghost" disabled={disabled} onClick={() => setDraftMarkdown(displayedBody)}><Icon name="pencil" extra="sm" />{zh ? "编辑计划" : "Edit plan"}</button>
+    </div> : <div className="plan-inline-editor-surface">
+      <div className="plan-inline-editor-head">
+        <Icon name="pencil" extra="sm" /><strong>{zh ? "编辑计划" : "Editing plan"}</strong>
+        {dirty ? <span className="plan-inline-editor-dirty">{zh ? "未保存" : "Unsaved"}</span> : null}
+      </div>
+      <textarea aria-label={zh ? "计划 Markdown" : "Plan Markdown"} rows={10} spellCheck={false} value={draftMarkdown} disabled={saving} onChange={event => setDraftMarkdown(event.target.value)} onKeyDown={event => {
+        if (event.nativeEvent.isComposing) return;
+        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDraftMarkdown(undefined); }
+        else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); event.stopPropagation(); void savePlan(); }
+      }} />
+      <div className="plan-inline-editor-foot">
+        <span className="plan-inline-editor-hint">{PLATFORM === "darwin" ? "⌘ ↵" : "Ctrl ↵"} {zh ? "保存 · Esc 取消" : "save · Esc cancel"}</span>
+        <button type="button" className="btn small ghost" disabled={saving} onClick={() => setDraftMarkdown(undefined)}>{zh ? "取消" : "Cancel"}</button>
+        <button type="button" className="btn small primary" disabled={disabled || saving || !dirty} onClick={() => void savePlan()}><Icon name="save" extra="sm" />{saving ? (zh ? "保存中…" : "Saving…") : (zh ? "保存计划" : "Save plan")}</button>
+      </div>
+    </div>}
+  </div> : null;
   const [demoRole, setDemoRole] = useState("default");
   const tierControl = executionControl ?? ((demo || preview) ? <PlanExecutionPicker details={getPreviewPlanExecution(zh)} role={demoRole} onChange={setDemoRole} disabled={disabled} /> : null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -403,7 +455,7 @@ export function PlanCard({
   overallNoteRef.current = overallNote;
   const annotateRef = useRef<PlanAnnotatedBodyHandle>(null);
   const refineNotesRef = useRef<PlanNotesBySection | undefined>(undefined);
-  const sections = useMemo(() => parsePlanSections(body), [body]);
+  const sections = useMemo(() => parsePlanSections(displayedBody), [displayedBody]);
   const captureRefineNotes = useCallback(() => {
     refineNotesRef.current = annotateRef.current?.flushDraft() ?? notesRef.current;
   }, []);
@@ -459,19 +511,22 @@ export function PlanCard({
       >
         <p className="dk-sub">{title}</p>
         <div className="plan-md-preview">
-          <MarkdownText text={body} />
+          <MarkdownText text={displayedBody} />
         </div>
       </div>
+      {editor}
       {tierControl}
-      <PlanActions
+      <PlanActions options={options}
         onPick={emitAction}
         {...(disabled === true ? { disabled: true } : {})}
       />
       {expanded ? (
         <PlanReviewDialog
+          options={options}
           executionControl={tierControl}
           title={title}
-          body={body}
+          editor={editor}
+          body={displayedBody}
           notes={notes}
           overallNote={overallNote}
           originRef={originRef ?? cardRef}
@@ -531,6 +586,8 @@ export function PlanReviewDeck({
   onAction,
   onSaveAndQuit,
   executionControl,
+  options,
+  onSaveMarkdown,
 }: {
   title: string;
   body: string;
@@ -542,6 +599,8 @@ export function PlanReviewDeck({
   onAction: (id: PlanActionId, detail?: PlanActionDetail) => void;
   onSaveAndQuit?: () => void;
   executionControl?: ReactNode;
+  options?: readonly NativePlanOption[] | undefined;
+  onSaveMarkdown?: ((markdown: string) => Promise<boolean>) | undefined;
 }) {
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
@@ -549,7 +608,9 @@ export function PlanReviewDeck({
     <div className="deck active preview-queue" role="region" aria-label={zh ? "待审核的计划" : "Plan pending review"} aria-live="polite">
       <div className="deck-card">
         <PlanCard
+          options={options}
           executionControl={executionControl}
+          onSaveMarkdown={onSaveMarkdown}
           title={title}
           body={body}
           onAction={onAction}

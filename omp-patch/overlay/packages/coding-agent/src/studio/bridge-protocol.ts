@@ -246,6 +246,7 @@ export type StudioRemoteInteractionRequest =
 			title: string;
 			placeholder?: string;
 			secret?: boolean;
+			riskAcknowledgement?: boolean;
 	  }
 	| {
 			kind: "editor";
@@ -381,6 +382,8 @@ export interface StudioEventEnvelope {
 }
 
 export interface StudioSessionTelemetry {
+	offTranscript?: Array<{ kind: "title" | "jobCaption" | "judge" | "cacheWarming"; requests: number; tokens: number }>;
+	decisionModels?: Array<{ purpose: string; provider: string; model: string; requests: number; tokens: number }>;
 	treeCost?: number;
 	budget?: { warnCost: number | null; maxCost: number | null; limitReached: boolean };
 	editRejections?: Record<string, number>;
@@ -464,6 +467,8 @@ export interface StudioOperatorStateSnapshot {
 	sessionTitleSource?: "user" | "auto";
 	isStreaming: boolean;
 	isCompacting: boolean;
+	compactionMode?: "normal" | "handoff";
+	hintCompression?: { skills: number; mcp: number };
 	activeMode: "normal" | "plan" | "goal" | "vibe";
 	approvalMode: "always-ask" | "always-ask-cached" | "write" | "yolo";
 	plan?: { status: "off" | "active" | "paused" | "review"; planReference?: string; title?: string; body?: string };

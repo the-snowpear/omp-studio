@@ -26,7 +26,7 @@ export function validateResourceOperation(v: unknown): asserts v is ResourceOper
 		typeof r.uri !== "string" ||
 		r.uri.length > 4096 ||
 		r.uri.includes("\0") ||
-		!/^(local|omp|attachment|conflict):\/\//.test(r.uri)
+		!/^(?:(?:local|omp|attachment|conflict):\/\/|artifact:\/\/\d+$)/.test(r.uri)
 	)
 		throw Error("Invalid resource target");
 	if (

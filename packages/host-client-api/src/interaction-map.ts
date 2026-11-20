@@ -64,6 +64,7 @@ export function mapRemoteInteractionToClient(
         kind: "input",
         ...(request.placeholder === undefined ? {} : { placeholder: request.placeholder }),
         secret: request.secret ?? false,
+        ...(request.riskAcknowledgement === undefined ? {} : { riskAcknowledgement: request.riskAcknowledgement }),
       };
     case "editor":
       return {

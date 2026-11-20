@@ -103,6 +103,8 @@ export function QueuedDeck({
   onPlanExpandedChange,
   planOriginRef,
   onCurrentKind,
+  readAskDraft,
+  skipSignal,
   onAskSubmit,
   onAskCancel,
   onFormRespond,
@@ -120,6 +122,8 @@ export function QueuedDeck({
   readonly planExpanded?: boolean;
   readonly onPlanExpandedChange?: (open: boolean) => void;
   readonly planOriginRef?: RefObject<HTMLElement | null>;
+  readonly readAskDraft?: ((answers: Readonly<Record<string, DeckAskAnswer>>) => void) | undefined;
+  readonly skipSignal?: number | undefined;
   readonly onCurrentKind?: (kind: "plan" | "ask" | null) => void;
   readonly onAskSubmit?: (item: QueuedAskItem, answer: DeckAskAnswer) => boolean | Promise<boolean>;
   readonly onAskCancel?: (item: QueuedAskItem) => boolean | Promise<boolean>;
@@ -137,6 +141,7 @@ export function QueuedDeck({
   const presentedForms = useRef(new Set<string>());
   const [pos, setPos] = useState(0);
   const posRef = useRef(pos);
+  const previousSkip = useRef(skipSignal);
   const [answers, setAnswers] = useState<Readonly<Record<string, DeckAskAnswer>>>({});
   const [swap, setSwap] = useState<DeckSwap | null>(null);
   const [busy, setBusy] = useState(false);
@@ -361,6 +366,13 @@ export function QueuedDeck({
     beginSwap(null, "fwd");
     setRemaining(next);
   }, [askPhase, beginSwap]);
+
+  useEffect(() => { readAskDraft?.(answers); }, [answers, readAskDraft]);
+  useEffect(() => {
+    if (skipSignal === previousSkip.current) return;
+    previousSkip.current = skipSignal;
+    if (current && current.kind !== "plan") drop(current.id);
+  }, [skipSignal, current, drop]);
 
   const dismissAsk = useCallback(async (item: QueuedAskItem, reason: "submit" | "cancel", chosen?: DeckAskAnswer) => {
     if (actionsLocked || (reason === "submit" && attachmentBusy)) return;

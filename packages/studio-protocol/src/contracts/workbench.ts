@@ -24,7 +24,7 @@ import { RATCHET_OPERATION_KINDS, type RatchetOperation, type RatchetResultMap }
 import { COMPUTER_WORKSPACE_COMMAND_KINDS, type ComputerWorkspaceCommand, type ComputerWorkspaceResultMap } from "./computer-workspace.js";
 import { COMPUTER_OBSERVATION_KINDS, type ComputerObservationOperation, type ComputerObservationResultMap } from "./computer-observation.js";
 import { BROWSER_OBSERVATION_KINDS, type BrowserObservationOperation, type BrowserObservationResultMap } from "./browser-observation.js";
-import { IDA_OPERATION_KINDS, type StudioIdaOperation, type StudioIdaResultMap } from "./ida-details.js";
+import { DISASSEMBLER_KINDS, type DisassemblerOperation, type DisassemblerResultMap } from "./disassembler.js";
 import { SESSION_OPTIONS_KINDS, type SessionOptionsOperation, type SessionOptionsResultMap } from "./session-options.js";
 import { SESSION_GUI_KINDS, SESSION_GUI_READ_KINDS, type SessionGuiOperation, type SessionGuiResultMap } from "./session-gui.js";
 import { SKILLSHARE_OPERATION_KINDS, type SkillshareOperation, type SkillshareResultMap } from "./skillshare.js";
@@ -49,6 +49,8 @@ export interface StudioServiceSpec {
 }
 export interface StudioServiceRow {
   name: string;
+  scope?: "session" | "project" | "global";
+  manageable?: boolean;
   instanceId: string;
   state: "starting" | "running" | "ready" | "restarting" | "stopping" | "exited" | "failed";
   startedAt: number;
@@ -67,6 +69,7 @@ export interface StudioServiceRow {
   mode: "session" | "persist" | "detached";
 }
 export interface RuntimeModelChoice {
+  snapcompactShape?: { variant: string; frameSize?: number };
   serviceTiers?: string[];
   promptCache?: { short?: number; long?: number };
   promptCacheConfig?: { short?: number; long?: number };
@@ -115,7 +118,7 @@ export type WorkbenchOperation =
   | ComputerObservationOperation
   | ComputerWorkspaceCommand
   | BrowserObservationOperation
-  | StudioIdaOperation
+  | DisassemblerOperation
   | SessionOptionsOperation
  | SessionGuiOperation
   | SkillshareOperation
@@ -140,7 +143,7 @@ export type WorkbenchOperation =
   | { kind: "runtime.models.describe"; selector: string }
  | { kind: "runtime.models.list"; modelKind?: string; cursor?: string; limit?: number };
 
-export interface WorkbenchResultMap extends SelectiveCommitCommandResultMap, PromptHistoryCommandResultMap, SearchCredentialsResultMap, ExtensionLinkResultMap, WebMcpResultMap, EvaluationWorkspaceResultMap, AdvisorConfigResultMap, LocalResourceResultMap, DictationResultMap,SessionGuiResultMap, SessionTitlesResultMap, PredictionResultMap, MaintenanceResultMap, ArchiveResultMap, AgentModelResultMap, SessionRestoreResultMap, RuntimeQueueResultMap, NativePreferenceResultMap, FeatureSettingsResultMap, SessionPortabilityResultMap, SessionCompressionResultMap, SessionWorktreeResultMap, NativePlanReviewResultMap, RatchetResultMap, ComputerObservationResultMap, Pick<ComputerWorkspaceResultMap, ComputerWorkspaceCommand["kind"]>, BrowserObservationResultMap, StudioIdaResultMap, SessionOptionsResultMap, SkillshareResultMap, LiveAudioResultMap, AnnotationResultMap, JudgmentResultMap, RuntimeCatalogResultMap, BenchmarkResultMap, MediaResultMap, RuntimeFeatureResultMap {
+export interface WorkbenchResultMap extends SelectiveCommitCommandResultMap, PromptHistoryCommandResultMap, SearchCredentialsResultMap, ExtensionLinkResultMap, WebMcpResultMap, EvaluationWorkspaceResultMap, AdvisorConfigResultMap, LocalResourceResultMap, DictationResultMap,SessionGuiResultMap, SessionTitlesResultMap, PredictionResultMap, MaintenanceResultMap, ArchiveResultMap, AgentModelResultMap, SessionRestoreResultMap, RuntimeQueueResultMap, NativePreferenceResultMap, FeatureSettingsResultMap, SessionPortabilityResultMap, SessionCompressionResultMap, SessionWorktreeResultMap, NativePlanReviewResultMap, RatchetResultMap, ComputerObservationResultMap, Pick<ComputerWorkspaceResultMap, ComputerWorkspaceCommand["kind"]>, BrowserObservationResultMap, DisassemblerResultMap, SessionOptionsResultMap, SkillshareResultMap, LiveAudioResultMap, AnnotationResultMap, JudgmentResultMap, RuntimeCatalogResultMap, BenchmarkResultMap, MediaResultMap, RuntimeFeatureResultMap {
   "accounts.status": AccountStatusResult;
  "accounts.status.details": AccountStatusResult;
   "accounts.logout": { loggedOut: true };
@@ -172,7 +175,7 @@ export const WORKBENCH_OPERATION_KINDS = [
 ...COMPUTER_OBSERVATION_KINDS,
 ...COMPUTER_WORKSPACE_COMMAND_KINDS,
 ...BROWSER_OBSERVATION_KINDS,
-...IDA_OPERATION_KINDS,
+...DISASSEMBLER_KINDS,
 ...SESSION_OPTIONS_KINDS,...SKILLSHARE_OPERATION_KINDS, ...LIVE_AUDIO_OPERATION_KINDS, ...MEDIA_OPERATION_KINDS, ...BENCHMARK_OPERATION_KINDS, ...RUNTIME_CATALOG_OPERATION_KINDS, ...JUDGMENT_OPERATION_KINDS, ...ANNOTATION_OPERATION_KINDS, ...RUNTIME_FEATURE_KINDS, "accounts.status", "accounts.status.details", "accounts.logout", "services.list", "services.start", "services.stop", "services.restart", "services.mode.set", "services.send", "services.logs", "tokens.count", "runtime.models.list", "runtime.models.describe"] as const;
 export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
  "search.credentials.list",
@@ -188,7 +191,7 @@ export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
 "ratchet.list", "ratchet.read", "ratchet.stop",
 "computer.status", "computer.capture", "computer.stop", "computer.observe.release",
 "browser.tabs.get", "browser.observe.prepare", "browser.managed.prepare",
-"ida.status.details", "ida.database.cancel",
+"disassembler.status", "disassembler.metadata.read", "disassembler.query", "disassembler.edit.prepare", "disassembler.cancel",
 "session.speed.get", "session.budget.get", "session.warming.get", "models.presets.list","skillshare.status", "skillshare.home", "skillshare.search", "skillshare.package", "skillshare.installed", "skillshare.tokens", "skillshare.action", "live.audio.status", "live.audio.mute", "live.audio.release", "media.models", "media.list", "media.read", "benchmarks.accounts.read", "benchmarks.list", "benchmarks.read", ...RUNTIME_CATALOG_OPERATION_KINDS, "judgments.list", "judgments.read", ...ANNOTATION_OPERATION_KINDS, ...RUNTIME_FEATURE_READ_KINDS, "accounts.status", "accounts.status.details", "services.list", "services.logs", "tokens.count", "runtime.models.list", "runtime.models.describe"];
 export function isWorkbenchOperationKind(value: string): value is WorkbenchOperation["kind"] {
   return (WORKBENCH_OPERATION_KINDS as readonly string[]).includes(value);

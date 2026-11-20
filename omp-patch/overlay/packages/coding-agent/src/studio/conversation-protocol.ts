@@ -43,6 +43,8 @@ export type ConversationMessageItem = {
 	createdAt: string;
 	role: ConversationRole;
 	content: readonly ConversationContentBlock[];
+	excludeFromContext?: boolean;
+	asyncNotify?: boolean;
 };
 
 export type ConversationCompactionItem = {
@@ -374,7 +376,16 @@ export function parseConversationItem(value: unknown): ConversationItem {
 	if (input.parentId !== null) boundedId(input.parentId);
 	if (!nonEmptyString(input.createdAt)) throw new StudioConversationError("Invalid item timestamp");
 	if (input.kind === "message") {
-		exactKeys(input, ["kind", "itemId", "parentId", "createdAt", "role", "content"]);
+		exactKeys(input, [
+			"kind",
+			"itemId",
+			"parentId",
+			"createdAt",
+			"role",
+			"content",
+			"excludeFromContext",
+			"asyncNotify",
+		]);
 		parseRole(input.role);
 		if (!Array.isArray(input.content)) throw new StudioConversationError("Invalid message content");
 		for (const block of input.content) parseBlock(block);

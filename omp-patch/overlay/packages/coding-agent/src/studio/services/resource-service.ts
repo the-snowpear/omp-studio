@@ -1,9 +1,11 @@
-import { listLocalFiles } from "../../internal-urls/local-protocol";
-import { acquireFileLock } from "@oh-my-pi/pi-utils";
+import { listLocalFiles, resolveLocalRoot } from "../../internal-urls/local-protocol";
+import { acquireFileLock, spillUrl } from "@oh-my-pi/pi-utils";
 import { writeFileAtomically } from "../../utils/atomic-file";
 import type { LocalResourceOperation } from "../local-resources-protocol";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import { runtimeText } from "../locale";
 import {
 	LocalProtocolHandler,
 	OmpProtocolHandler,
@@ -24,6 +26,11 @@ export class StudioResourceService {
 		const context = sessionResolveContext(this.session.studioToolSession);
 		const options = LocalProtocolHandler.resolveOptions(context);
 		if (!options) throw Error("Session local resource mapping is unavailable");
+		const localRootPath = resolveLocalRoot(options);
+		if (operation.kind === "resource.local.ensureDir") {
+			await fs.mkdir(localRootPath, { recursive: true });
+			return { localRootPath };
+		}
 		if (operation.kind === "resource.local.list") {
 			const files = await listLocalFiles(options);
 			return {
@@ -31,9 +38,9 @@ export class StudioResourceService {
 					.slice(0, 500)
 					.map(file => ({ name: file.name, uri: file.url, bytes: file.size, modifiedAt: file.mtimeMs })),
 				truncated: files.length > 500,
+				localRootPath,
 			};
 		}
-		if (!operation.uri.startsWith("local://")) throw Error("Choose a session-local file");
 		const handler = new LocalProtocolHandler();
 		const located = await handler.locate(parseInternalUrl(operation.uri), context);
 		if (!located) throw Error("Local file no longer exists");
@@ -49,12 +56,6 @@ export class StudioResourceService {
 			if (operation.sessionId !== this.session.sessionId) throw Error("Session changed while opening local file");
 			if (operation.kind === "resource.local.open") return { uri: operation.uri, version, text };
 			if (version !== operation.version) throw Error("The local file changed; reopen it before saving");
-			if (
-				typeof operation.text !== "string" ||
-				Buffer.byteLength(operation.text) > 512 * 1024 ||
-				operation.text.includes("\0")
-			)
-				throw Error("Local text exceeds editor limits");
 			await writeFileAtomically(located, operation.text, stat.mode & 0o777);
 			return { saved: true, uri: operation.uri, version: createHash("sha256").update(operation.text).digest("hex") };
 		} finally {
@@ -71,15 +72,31 @@ export class StudioResourceService {
 			attachment: new AttachmentProtocolHandler(),
 			conflict: new ConflictProtocolHandler(),
 		};
-		const scheme = operation.uri.split(":")[0]!;
+		const legacyId = /^artifact:\/\/(\d+)$/.exec(operation.uri)?.[1];
+		const uri = legacyId === undefined ? operation.uri : spillUrl(legacyId);
+		const scheme = uri.split(":")[0]!;
 		const handler = handlers[scheme]!;
-		const url = parseInternalUrl(operation.uri);
+		const url = parseInternalUrl(uri);
 		const context = sessionResolveContext(this.session.studioToolSession);
 		let content = "";
 		let bytes: Uint8Array | undefined;
 		let image: ResourcePage["image"];
 		if (handler.spec.backing === "file" && handler.locate) {
-			const located = await handler.locate(url, context);
+			let located = await handler.locate(url, context);
+			if (!located && legacyId !== undefined) {
+				const directory = this.session.sessionManager.getArtifactsDir();
+				if (directory) {
+					const files = await fs.readdir(directory).catch(error => {
+						if (error.code === "ENOENT") return [];
+						throw error;
+					});
+					const legacy = files.find(file => file === legacyId || file.startsWith(legacyId + "."));
+					if (legacy) {
+						const candidate = path.join(directory, legacy);
+						if ((await fs.lstat(candidate)).isFile()) located = candidate;
+					}
+				}
+			}
 			if (located) {
 				const stat = await fs.stat(located);
 				if (stat.isFile()) {
@@ -106,13 +123,22 @@ export class StudioResourceService {
 						image = { mimeType: resized.mimeType, data: resized.data };
 						content = `${resized.originalWidth}×${resized.originalHeight} → ${resized.width}×${resized.height}`;
 					} else {
-						if (bytes.includes(0)) throw Error("Binary resource; use the IDA panel or its native application");
+						if (bytes.includes(0))
+							throw Error(
+								runtimeText(
+									"二进制资源，请使用反汇编器或其原生应用",
+									"Binary resource; use the Disassembler panel or its native application",
+								),
+							);
 						content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 					}
 				}
 			}
 		}
-		if (bytes === undefined) content = (await handler.resolve(url, context)).content;
+		if (bytes === undefined) {
+			const resolved = await handler.resolve(url, context);
+			content = typeof resolved.content === "string" ? resolved.content : resolved.content.toString("utf8");
+		}
 		if (Buffer.byteLength(content) > 16 * 1024 * 1024) throw Error("Resource exceeds viewer budget");
 		const version = createHash("sha256")
 			.update(bytes ?? content)

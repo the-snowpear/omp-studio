@@ -28,7 +28,10 @@ export interface SessionWarmingState {
 		expectedSavings: number;
 		continuationProbability: number;
 		economicsAvailable: boolean;
-		action: "warm" | "stop";
+		action: "warm" | "stop" | "compact";
+		method?: "prewarm" | "replay";
+		compactCost?: number;
+		spentCost?: number;
 	};
 }
 export interface ModelPresetRow {

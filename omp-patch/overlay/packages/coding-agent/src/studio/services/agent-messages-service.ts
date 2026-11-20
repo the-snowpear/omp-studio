@@ -1,4 +1,5 @@
 import * as fs from "node:fs/promises";
+import { parsePeerAddress } from "../../irc/mesh-protocol";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import type { AgentRef } from "../../registry/agent-registry";
 import type { AgentSession } from "../../session/agent-session";
@@ -18,6 +19,11 @@ function body(text: string): string {
 	return text.length > MAX_BODY ? `${text.slice(0, MAX_BODY - 1)}…` : text;
 }
 
+function peerDetails(from: string): Pick<StudioAgentMessage, "peer" | "peerInstance"> {
+	const peer = parsePeerAddress(from);
+	return peer && peer.pid !== process.pid ? { peer: true, peerInstance: "agent://" + peer.pid } : {};
+}
+
 /**
  * Messages one agent received, read from its own session: the IRC bus keeps no
  * history, but every delivery lands in the recipient's transcript as an
@@ -33,6 +39,7 @@ export function receivedAgentMessages(agentId: string, entries: readonly Session
 			messages.push({
 				id: typeof details.id === "string" || typeof details.id === "number" ? String(details.id) : entry.id,
 				from: details.from,
+				...peerDetails(details.from),
 				to: agentId,
 				body: body(details.message),
 				at: Date.parse(entry.timestamp) || 0,
@@ -50,6 +57,7 @@ export function receivedAgentMessages(agentId: string, entries: readonly Session
 			messages.push({
 				id: entry.id,
 				from: steer.from,
+				...peerDetails(steer.from),
 				to: agentId,
 				body: body(steer.body),
 				at: typeof at === "number" ? at : Date.parse(entry.timestamp) || 0,

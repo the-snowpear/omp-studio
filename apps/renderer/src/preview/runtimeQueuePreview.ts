@@ -1,7 +1,10 @@
 import type { RuntimeQueueResult } from "@omp-studio/studio-protocol";
 import { isZh } from "../i18n";
 
+export const previewHintCompression = { skills: 2, mcp: 1 };
+
 export const runtimeQueuePreview = (zh = isZh()): RuntimeQueueResult => ({
+  compactionMode: "handoff",
   total: 4,
   truncated: false,
   entries: [

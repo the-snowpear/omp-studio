@@ -266,7 +266,7 @@ test("simultaneous dialogs wait in order and cancelling one agent leaves the oth
 test("WebRTC uses browser audio, renews only its owner's lease, and stops after owner disconnect", async () => {
 	const stopped = Promise.withResolvers<void>();
 	let stops = 0;
-	const session = { sessionId: "one" } as AgentSession;
+	const session = { sessionId: "one", settings: Settings.isolated() } as AgentSession;
 	const audio = new StudioLiveAudioService(session, {
 		webRtcOwnerTimeoutMs: 80,
 		createController: options => {
@@ -326,7 +326,7 @@ test("cancelling pending WebRTC negotiation releases the call before its SDP ans
 	const starting = Promise.withResolvers<void>(),
 		answer = Promise.withResolvers<void>();
 	let stops = 0;
-	const audio = new StudioLiveAudioService({ sessionId: "one" } as AgentSession, {
+	const audio = new StudioLiveAudioService({ sessionId: "one", settings: Settings.isolated() } as AgentSession, {
 		createController: options => ({
 			sdpAnswer: "late-answer",
 			muted: false,

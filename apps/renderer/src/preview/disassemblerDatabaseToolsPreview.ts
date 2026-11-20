@@ -1,10 +1,8 @@
-import type { IdaState, IdaView } from "@omp-studio/studio-protocol";
-import { PREVIEW_IDA as databases } from "./idaPreview";
+import type { DisassemblerStatus, DisassemblerView } from "@omp-studio/studio-protocol";
+import { PREVIEW_DISASSEMBLER as databases } from "./disassemblerPreview";
 
-export const PREVIEW_IDA: IdaState = { available: true, databases: databases.databases.map(row => ({
-  id: row.id, label: row.module, state: row.state, dirty: row.dirty, busy: row.busy, identity: `preview-${row.id}`, version: 1,
-})) };
-export const PREVIEW_IDA_TEXT = `// sample.exe : main
+export const PREVIEW_DISASSEMBLER: DisassemblerStatus = databases;
+export const PREVIEW_DISASSEMBLER_TEXT = `// sample.exe : main
 int main(int argc, char **argv)
 {
     if (argc < 2)
@@ -12,7 +10,7 @@ int main(int argc, char **argv)
 
     return parse_file(argv[1]);
 }`;
-export const PREVIEW_IDA_VIEWS: Record<IdaView, string> = {
+export const PREVIEW_DISASSEMBLER_VIEWS: Record<DisassemblerView, string> = {
   overview: `Module        sample.exe
 Format        Portable executable (PE)
 Architecture  x86 / 64-bit
@@ -25,7 +23,7 @@ Segments
 
 Entry points
 0x140001000   main`,
-  pseudocode: PREVIEW_IDA_TEXT,
+  pseudocode: PREVIEW_DISASSEMBLER_TEXT,
   asm: `main:
 0x140001000  sub     rsp, 28h
 0x140001004  cmp     ecx, 2

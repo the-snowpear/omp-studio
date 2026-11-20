@@ -13,7 +13,7 @@ export class StudioConversationEntryIdentity {
 	constructor(readonly manager: SessionManager) {}
 
 	prepare(event: AgentSessionEvent): StudioAgentSessionEvent {
-		if (event.type === "agent_end" && event.isTerminal !== false && !event.awaitingAsyncWork) {
+		if (event.type === "agent_end") {
 			this.#messages.length = 0;
 			return event;
 		}

@@ -47,6 +47,7 @@ export interface ModelAuthProvider {
   authenticated: boolean;
   kind: "api-key" | "oauth";
   credentials: Array<{ id: number; label: string; type: "api_key" | "oauth" }>;
+  loginBehavior?: "add-account" | "replace";
   warning?: string;
   paused?: boolean;
   pauseReason?: string;

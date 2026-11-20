@@ -222,6 +222,8 @@ function projectEntry(entry: SessionEntry): ConversationItem | undefined {
 			createdAt: entry.timestamp,
 			role,
 			content,
+			...(entry.excludeFromContext ? { excludeFromContext: true } : {}),
+			...(entry.customType === "async-notify" ? { asyncNotify: true } : {}),
 		};
 	}
 	if (IGNORED_ENTRY_TYPES.has(entry.type)) return undefined;

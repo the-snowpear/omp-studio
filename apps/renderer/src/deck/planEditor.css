@@ -1,0 +1,47 @@
+/* ---------------- Plan 原位编辑 ----------------
+   收起时是一行工具条；编辑时是一块带标题栏的编辑面，未保存的改动在标题栏亮一个点。 */
+.plan-inline-editor { padding: var(--sp-6) var(--sp-12) 0; }
+.plan-inline-editor-bar { display: flex; align-items: center; gap: var(--sp-8); color: var(--text-3); font-size: var(--fs-11); }
+.plan-inline-editor-bar > .btn { margin-inline-start: auto; }
+.plan-inline-editor-saved { display: inline-flex; align-items: center; gap: var(--sp-4); color: var(--green); animation: var(--motion-reveal); }
+.plan-inline-editor-surface {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--r-6);
+  background: var(--surface);
+  box-shadow: 0 0 0 3px var(--accent-softer);
+  overflow: hidden;
+  animation: var(--motion-unfold);
+}
+.plan-inline-editor-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  min-height: 32px;
+  padding: 0 var(--sp-6) 0 var(--sp-10);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--fs-11);
+}
+.plan-inline-editor-head > .icon { color: var(--accent); }
+.plan-inline-editor-head > strong { font-weight: var(--fw-semibold); color: var(--text); }
+.plan-inline-editor-dirty { display: inline-flex; align-items: center; gap: var(--sp-4); color: var(--amber); }
+.plan-inline-editor-dirty::before { content: ""; width: 6px; height: 6px; border-radius: var(--r-full); background: currentColor; }
+.plan-inline-editor-surface textarea {
+  display: block;
+  width: 100%;
+  min-height: 180px;
+  max-height: 46vh;
+  padding: var(--sp-10) var(--sp-12);
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  background: var(--code-bg);
+  color: var(--text);
+  font: var(--fs-12)/1.7 var(--font-mono);
+  resize: vertical;
+}
+.plan-inline-editor-foot { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-6); padding: var(--sp-6) var(--sp-8); border-top: 1px solid var(--border); }
+.plan-inline-editor-foot > .plan-inline-editor-hint { margin-inline-end: auto; color: var(--text-3); font-size: var(--fs-11); }

@@ -18,17 +18,25 @@ export interface StudioHandoffResult {
 }
 
 export class StudioHandoffService {
+	static readonly #running = new WeakSet<AgentSession>();
+
+	static running(session: AgentSession): boolean {
+		return this.#running.has(session);
+	}
+
 	constructor(private readonly session: AgentSession) {}
 
 	/**
-	 * Generate a handoff document from the current session and start a fresh
-	 * session seeded with it (mirrors the TUI `/handoff` command). The
-	 * SessionManager switches to the new session file, so the returned
-	 * sessionId is the post-handoff identity.
+	 * Compact the active session with the native background handoff method.
+	 * Native compaction owns the winning branch and summary insertion.
 	 */
 	async handoff(customInstructions?: string): Promise<StudioHandoffResult> {
-		if (this.session.isStreaming) throw new StudioHandoffError("BUSY_STREAMING", "Runtime is streaming");
-		if (this.session.isCompacting) throw new StudioHandoffError("BUSY_COMPACTING", "Runtime is compacting");
+		if (
+			this.session.isCompacting ||
+			this.session.isBackgroundCompacting ||
+			StudioHandoffService.running(this.session)
+		)
+			throw new StudioHandoffError("BUSY_COMPACTING", "Runtime is compacting");
 		if (this.session.getVibeModeState()?.enabled) {
 			throw new StudioHandoffError("MODE_CONFLICT", "Exit vibe mode before handing off the session");
 		}
@@ -36,23 +44,17 @@ export class StudioHandoffService {
 		if (messageCount < 2) {
 			throw new StudioHandoffError("COMMAND_BLOCKED", "Nothing to hand off (no messages yet)");
 		}
-		let result: Awaited<ReturnType<AgentSession["handoff"]>>;
+		StudioHandoffService.#running.add(this.session);
 		try {
-			result = await this.session.handoff(customInstructions);
+			const result = await this.session.compact(customInstructions, { mode: "handoff" });
+			return { handedOff: true, sessionId: this.session.sessionId, document: result.summary };
 		} catch (error) {
 			throw new StudioHandoffError(
 				"INTERNAL_ERROR",
 				error instanceof Error ? error.message : "Handoff generation failed",
 			);
+		} finally {
+			StudioHandoffService.#running.delete(this.session);
 		}
-		if (result === undefined) {
-			throw new StudioHandoffError("COMMAND_BLOCKED", "Handoff was cancelled or produced no document");
-		}
-		return {
-			handedOff: true,
-			sessionId: this.session.sessionManager.getSessionId(),
-			document: result.document,
-			...(result.savedPath === undefined ? {} : { savedPath: result.savedPath }),
-		};
 	}
 }

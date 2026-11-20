@@ -1,5 +1,5 @@
 import { WorkspaceTabs, WorkspacePanel } from "./workspaces/Workspace";
-import { IdaPane } from "./capabilities/IdaPane";
+import { DisassemblerPane } from "./capabilities/DisassemblerPane";
 import { SkillsharePane } from "./skillshare/SkillsharePane";
 import { loadRuntimeSkills } from "./skills/runtimeSkills";
 import { ResourcesPane } from "./capabilities/ResourcesPane";
@@ -54,7 +54,7 @@ const TABS: ReadonlyArray<readonly [CapTab, IconName]> = [
   ["plugins", "package"],
   ["mcp", "plug"],
   ["slash", "slash"],
-  ["ida", "code"],
+  ["disassembler", "code"],
   ["resources", "file"],
 ];
 
@@ -63,7 +63,7 @@ const TAB_LABELS: Record<CapTab, string> = {
   plugins: "capabilities.pluginsTab",
   mcp: "capabilities.mcpTab",
   slash: "capabilities.slashTab",
-  ida: "capabilities.idaTab",
+  disassembler: "capabilities.disassemblerTab",
   resources: "capabilities.resourcesTab",
 };
 
@@ -318,7 +318,7 @@ export function CapabilitiesPage({
   }, [refresh]);
 
   const counts: Record<CapTab, number> = {
-    ida: 0,
+    disassembler: 0,
     resources: 0,
     skills: skills.length,
     plugins: plugins.length,
@@ -969,7 +969,7 @@ export function CapabilitiesPage({
 
   const tabBody = (id: CapTab) => {
     if(id==="resources")return <ResourcesPane client={client} sessionId={sessionId} available={runtimeAvailable}/>;
-    if (id === "ida") return <IdaPane client={client} sessionId={sessionId} available={runtimeAvailable} capabilities={capabilities} visible={tab === "ida"} />;
+    if (id === "disassembler") return <DisassemblerPane initialPath={highlight || undefined} client={client} sessionId={sessionId} available={runtimeAvailable} capabilities={capabilities} visible={tab === "disassembler"} />;
     if (id === "skills") return <><WorkspaceTabs<"local"|"registry"> id="cap-skills-view" label={zh?"技能来源":"Skill source"} value={skillsView} onChange={setSkillsView} items={[{id:"local",icon:"book",label:zh?"已发现技能":"Discovered skills"},{id:"registry",icon:"package",label:"Skillshare"}]}/><WorkspacePanel id="cap-skills-view" name="local" active={skillsView==="local"}>{renderSkills()}</WorkspacePanel><WorkspacePanel id="cap-skills-view" name="registry" active={skillsView==="registry"}><SkillsharePane client={client} sessionId={sessionId} available={runtimeAvailable&&supports("skillshare.status")} visible={tab==="skills"&&skillsView==="registry"}/></WorkspacePanel></>;
     if (id === "plugins") return renderPlugins();
     if (id === "mcp") return <><WorkspaceTabs<"config"|"runtime"> id="cap-mcp-view" label="MCP" value={mcpView} onChange={setMcpView} items={[{id:"config",icon:"settings",label:zh?"服务器配置":"Server configuration"},{id:"runtime",icon:"pulse",label:zh?"会话连接":"Session connections"}]}/><WorkspacePanel id="cap-mcp-view" name="config" active={mcpView==="config"}>{renderMcp()}</WorkspacePanel><WorkspacePanel id="cap-mcp-view" name="runtime" active={mcpView==="runtime"}><McpRuntimePane client={client} sessionId={sessionId} available={runtimeAvailable&&supports("mcp.runtime.status")} authAvailable={runtimeAvailable&&supports("mcp.auth.reauth")} visible={tab==="mcp"&&mcpView==="runtime"}/></WorkspacePanel></>;
@@ -981,7 +981,7 @@ export function CapabilitiesPage({
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
         <div>
           <h1 style={{ fontSize: 18 }}>{t("capabilities.pageTitle")}</h1>
-          <p className="muted small">{tab === "ida" || tab === "resources" ? (zh ? "管理技能、工具、数据库与会话资源。" : "Manage skills, tools, databases and session resources.") : t("capabilities.pageSubtitle")}</p>
+          <p className="muted small">{tab === "disassembler" || tab === "resources" ? (zh ? "管理技能、工具、数据库与会话资源。" : "Manage skills, tools, databases and session resources.") : t("capabilities.pageSubtitle")}</p>
           {(preview && marks) || loadError ? (
             <p className="tiny muted">{preview && marks ? t("capabilities.previewSubtitle") : loadError}</p>
           ) : null}
@@ -1010,7 +1010,7 @@ export function CapabilitiesPage({
             label: t(TAB_LABELS[id]),
             buttonId: `capTab-${id}`,
             panelId: `cap-${id}`,
-            badge: id === "ida" || id === "resources" ? null : <span className="cnt">{counts[id]}<span className="sr-only"> {t("capabilities.catItemCount", { count: counts[id] })}</span></span>,
+            badge: id === "disassembler" || id === "resources" ? null : <span className="cnt">{counts[id]}<span className="sr-only"> {t("capabilities.catItemCount", { count: counts[id] })}</span></span>,
           }))}
         />
         <div className="cap-main" id="capMain">

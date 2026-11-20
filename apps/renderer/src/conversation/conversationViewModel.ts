@@ -40,7 +40,7 @@ export type AssistantSegment =
   | { readonly type: "batch"; readonly key: string; readonly tools: readonly ToolView[] };
 export type TimelineRow =
   | { readonly type: "user"; readonly itemId: string; readonly createdAt: string; readonly text: string; readonly pending?: PendingUser["status"]; readonly requestId?: string; readonly error?: string; readonly doc?: ComposerDoc; readonly thumbs?: readonly UserMessageThumb[] }
-  | { readonly type: "extension"; readonly itemId: string; readonly createdAt: string; readonly text: string }
+  | { readonly type: "extension"; readonly excludeFromContext?: boolean; readonly asyncNotify?: boolean; readonly itemId: string; readonly createdAt: string; readonly text: string }
   | { readonly type: "advisor"; readonly itemId: string; readonly createdAt: string; readonly notes: readonly Extract<ConversationContentBlock, { type: "text" }>[] }
   | { readonly type: "assistant"; readonly itemId: string; readonly createdAt: string; readonly segments: readonly AssistantSegment[]; readonly status: "streaming" | "completed" | "aborted" | "error"; readonly presentation?: "process" | "reply"; readonly turnOpen?: boolean; readonly error?: ConversationMessageError }
   | { readonly type: "compaction"; readonly item: ConversationCompactionItem }
@@ -215,7 +215,7 @@ function liveToolsByMessage(state: ConversationState): Map<string, LiveTool[]> {
 
 function persistedTimelineRow(state: ConversationState, item: ConversationItem, tools: readonly LiveTool[], cache: TimelineRowCache): TimelineRow {
   if (item.kind === "compaction" || item.kind === "resetBoundary") return cachedRow(cache, item.itemId, [item], () => item.kind === "compaction" ? { type: "compaction", item } : { type: "resetBoundary", item });
-  if (item.role === "extension") return cachedRow(cache, item.itemId, [item], () => ({ type: "extension", itemId: item.itemId, createdAt: item.createdAt, text: messageText(item) }));
+  if (item.role === "extension" || item.asyncNotify) return cachedRow(cache, item.itemId, [item], () => ({ type: "extension", ...(item.excludeFromContext ? { excludeFromContext: true } : {}), ...(item.asyncNotify ? { asyncNotify: true } : {}), itemId: item.itemId, createdAt: item.createdAt, text: messageText(item) }));
   if (item.role === "advisor") return cachedRow(cache, item.itemId, [item], () => ({
     type: "advisor", itemId: item.itemId, createdAt: item.createdAt, notes: item.content.filter(block => block.type === "text"),
   }));

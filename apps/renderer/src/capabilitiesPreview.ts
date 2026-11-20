@@ -45,7 +45,7 @@ export function createPreviewSlashCommands(zh = isZh()): PreviewSlash[] {
     { name: "/upstream-sync", desc: zh ? "执行上游同步流程" : "Run the upstream sync workflow", src: "Skill", args: "<tag>", ok: true },
     { name: "/graph", desc: zh ? "生成代码审查依赖图" : "Generate a code review dependency graph", src: "Skill", args: "[entry?]", ok: true },
     { name: "/worktree-new", desc: zh ? "在新 Worktree 中开始对话" : "Start a conversation in a new worktree", src: "Plugin", args: "<branch>", ok: true },
-    { name: "/handoff", desc: zh ? "将会话交接给新 Thread" : "Hand off the session to a new thread", src: builtin, args: "", ok: true },
+    { name: "/handoff", desc: zh ? "在后台生成当前会话的交接摘要" : "Summarize this session in the background", src: builtin, args: "", ok: true },
     { name: "/doctor", desc: zh ? "打开诊断中心" : "Open Diagnostics", src: builtin, args: "", ok: true },
   ];
 }

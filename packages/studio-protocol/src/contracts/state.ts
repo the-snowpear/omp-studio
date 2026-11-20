@@ -154,6 +154,8 @@ export interface OperatorStateSnapshot {
   sessionTitleSource?: SessionTitleSource;
   isStreaming: boolean;
   isCompacting: boolean;
+  compactionMode?: "normal" | "handoff";
+  hintCompression?: { skills: number; mcp: number };
   activeMode: "normal" | "plan" | "goal" | "vibe";
   /** Effective tool approval mode of the Runtime (override layer first). */
   approvalMode: ApprovalMode;

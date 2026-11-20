@@ -369,8 +369,13 @@ export class ConversationLiveProjector {
 			case "agent_start":
 				this.#onAgentStart();
 				return;
+			case "agent_pause":
+				this.#flushPending();
+				this.#continuationPending = true;
+				this.#openAssistantId = undefined;
+				break;
 			case "agent_end":
-				this.#onAgentEnd(event);
+				this.#onAgentEnd();
 				return;
 			case "message_start":
 				this.#onMessageStart(event.message, event.studioEntryId);
@@ -436,18 +441,9 @@ export class ConversationLiveProjector {
 		this.#openAssistantId = undefined;
 	}
 
-	#onAgentEnd(event: Extract<AgentSessionEvent, { type: "agent_end" }>): void {
+	#onAgentEnd(): void {
 		this.#flushPending();
 		const turnId = this.#ensureTurnId();
-		if (event.isTerminal === false || event.awaitingAsyncWork === true) {
-			// The Runtime has already scheduled another continuation, or only a
-			// background-job result can resume this run (`awaitingAsyncWork`; the
-			// state snapshot surfaces that wait). Keep the logical turn open
-			// instead of exposing a false completed event.
-			this.#continuationPending = true;
-			this.#openAssistantId = undefined;
-			return;
-		}
 		this.#continuationPending = false;
 		if (this.#turnAborted) {
 			this.#emitParsed({ kind: "conversation.turn.aborted", sessionId: this.#sessionId, turnId });
@@ -1074,6 +1070,8 @@ export class ConversationLiveProjector {
 			createdAt: open.createdAt,
 			role: open.role,
 			content,
+			...(message?.role === "custom" && message.excludeFromContext ? { excludeFromContext: true } : {}),
+			...(message?.role === "custom" && message.customType === "async-notify" ? { asyncNotify: true } : {}),
 		};
 		this.#lastItemId = open.messageId;
 		if (open.role === "assistant") this.#lastAssistantId = open.messageId;

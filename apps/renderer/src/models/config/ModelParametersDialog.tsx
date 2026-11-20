@@ -92,6 +92,10 @@ export function ModelParametersDialog({ context, availableModels, modelEditLeavi
                               <div className="field span2"><label>{t("modelConfig.headersPerLine")}</label>
                                 <textarea className="input mono" rows={2} placeholder={t("modelConfig.headersInheritPlaceholder")} value={modelEditView.draft.headersText} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, headersText: e.target.value } })} />
                               </div>
+                              <label className="field">{resolvedLanguage === "zh" ? "Snapcompact 压缩变体" : "Snapcompact variant"}
+                                <input className="input mono" value={modelEditView.draft.snapcompactVariant} onChange={event => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, snapcompactVariant: event.target.value } })} /></label>
+                              <label className="field">{resolvedLanguage === "zh" ? "压缩帧大小" : "Compression frame size"}
+                                <input className="input mono" type="number" value={modelEditView.draft.snapcompactFrame} onChange={event => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, snapcompactFrame: event.target.value } })} /></label>
                               <div className="field"><label>Context Promotion Target</label>
                                 <input className="input mono" placeholder="provider/model" value={modelEditView.draft.contextPromotionTarget} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, contextPromotionTarget: e.target.value } })} />
                               </div>
@@ -193,6 +197,10 @@ export function ModelParametersDialog({ context, availableModels, modelEditLeavi
                               <div className="field span2"><label>{t("modelConfig.headersPerLine")}</label>
                                 <textarea className="input mono" rows={2} placeholder="X-Model: value" value={modelEditView.draft.headersText} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, headersText: e.target.value } })} />
                               </div>
+                              <label className="field">{resolvedLanguage === "zh" ? "Snapcompact 压缩变体" : "Snapcompact variant"}
+                                <input className="input mono" value={modelEditView.draft.snapcompactVariant} onChange={event => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, snapcompactVariant: event.target.value } })} /></label>
+                              <label className="field">{resolvedLanguage === "zh" ? "压缩帧大小" : "Compression frame size"}
+                                <input className="input mono" type="number" value={modelEditView.draft.snapcompactFrame} onChange={event => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, snapcompactFrame: event.target.value } })} /></label>
                               <div className="field"><label>Context Promotion Target</label>
                                 <input className="input mono" placeholder="provider/model" value={modelEditView.draft.contextPromotionTarget} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, contextPromotionTarget: e.target.value } })} />
                               </div>

@@ -535,7 +535,12 @@ export function createStudioHostRuntime(
 	const loop = new StudioLoopService({
 		action: () => cfgLoopMode.get(session.settings),
 		isBlocked: () =>
-			studioPauseService.state().paused || session.isStreaming || session.isCompacting || session.hasPostPromptWork,
+			studioPauseService.state().paused ||
+			session.isRunActive ||
+			session.isStreaming ||
+			session.isCompacting ||
+			session.isBackgroundCompacting ||
+			session.hasPostPromptWork,
 		isVibeActive: () => session.getVibeModeState()?.enabled === true || modes.vibeTransitionPending,
 		submitPrompt: async prompt => {
 			await session.prompt(prompt);
@@ -704,6 +709,13 @@ export function createStudioHostRuntime(
 	const lifecycle = AgentLifecycleManager.global();
 	const irc = IrcBus.global();
 	const tan = new StudioTanService({
+		nameFor: async work => {
+			const [{ generateTanName }, { generateTaskName }] = await Promise.all([
+				import("../modes/controllers/tan-command-controller"),
+				import("../task/name-generator"),
+			]);
+			return (await generateTanName(session, work)) ?? generateTaskName();
+		},
 		parent: {
 			get sessionId() {
 				return session.sessionId;
@@ -1136,7 +1148,10 @@ export function createStudioHostRuntime(
 					return {
 						content: [
 							{ type: "text", text: result.text },
-							...("images" in result ? (result.images ?? []) : []).map(image => ({ type: "image", ...image })),
+							...("images" in result && Array.isArray(result.images) ? result.images : []).map(image => ({
+								type: "image",
+								...image,
+							})),
 						],
 						...("details" in result ? { details: result.details } : {}),
 					};
@@ -1263,7 +1278,7 @@ function createStudioMainWorkerSupervisor(
 		if (runtime.services.idleMaintenance.keepWorkerLive()) return true;
 		if (runtime.services.workbench.skillshare.running || runtime.services.workbench.modelAuth.isBusy()) return true;
 		if (
-			runtime.services.workbench.ida.running ||
+			runtime.services.workbench.disassembler.running ||
 			runtime.services.workbench.agentBtw.running ||
 			runtime.services.workbench.benchmarks.running ||
 			runtime.services.workbench.evaluations.running ||
@@ -1275,8 +1290,10 @@ function createStudioMainWorkerSupervisor(
 		)
 			return true;
 		if (
+			slot.isRunActive ||
 			slot.isStreaming ||
 			slot.isCompacting ||
+			slot.isBackgroundCompacting ||
 			slot.hasPostPromptWork ||
 			slot.queuedMessageCount > 0 ||
 			slot.hasHeldQueuedMessages

@@ -8,9 +8,10 @@ import type { RuntimeInstallationManifest, SessionPurgeResult } from "@omp-studi
  * an unknown selector as chat input. Call only with signature-verified metadata.
  */
 export function supportsSessionPurgeMaintenance(manifest: RuntimeInstallationManifest): boolean {
-  return manifest.upstreamVersion === "18.20.2"
-    && manifest.upstreamCommit === "7c49c11aa5bbaf3f418406583096168ad5b8c6dc"
-    && /^studio\.[1-9]\d*$/u.test(manifest.patchsetVersion);
+  return (
+    (manifest.upstreamVersion === "18.20.2" && manifest.upstreamCommit === "7c49c11aa5bbaf3f418406583096168ad5b8c6dc") ||
+    (manifest.upstreamVersion === "19.0.1" && manifest.upstreamCommit === "f40f335845f0b136453d12fec8d6057011082766")
+  ) && /^studio\.[1-9]\d*$/u.test(manifest.patchsetVersion);
 }
 
 /** Private Host-located identity, never supplied directly by a Renderer command. */

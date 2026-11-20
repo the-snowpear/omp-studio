@@ -31,6 +31,7 @@ export type ModelConfigThinkingEffort = (typeof MODEL_CONFIG_THINKING_EFFORTS)[n
 
 export const MODEL_THINKING_MODES = ["effort", "budget", "google-level", "anthropic-adaptive", "anthropic-budget-effort"] as const;
 export interface ModelThinkingConfig {
+  readonly unverified?: boolean;
   readonly mode: (typeof MODEL_THINKING_MODES)[number];
   readonly efforts: readonly ModelConfigThinkingEffort[];
   readonly defaultLevel?: ModelConfigThinkingEffort;
@@ -56,6 +57,7 @@ export function parseModelThinkingConfig(value: unknown): ModelThinkingConfig | 
     : undefined;
   return {
     mode: row.mode as ModelThinkingConfig["mode"], efforts,
+    ...(row.unverified === true ? { unverified: true } : {}),
     ...(typeof row.defaultLevel === "string" && efforts.includes(row.defaultLevel as ModelConfigThinkingEffort) ? { defaultLevel: row.defaultLevel as ModelConfigThinkingEffort } : {}),
     ...(effortMap && Object.keys(effortMap).length ? { effortMap } : {}),
     ...(typeof row.supportsDisplay === "boolean" ? { supportsDisplay: row.supportsDisplay } : {}),
@@ -75,7 +77,7 @@ export function modelThinkingYamlNode(
     for (const key of ["defaultLevel", "effortMap", "supportsDisplay", "requiresEffort"] as const) {
       if (config[key] === undefined) delete out[key];
     }
-    delete out.levels; delete out.minLevel; delete out.maxLevel;
+    delete out.levels; delete out.minLevel; delete out.maxLevel; delete out.unverified;
     return out;
   }
   if (legacyEfforts === undefined) return previous;

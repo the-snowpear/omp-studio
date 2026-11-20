@@ -108,7 +108,7 @@ export function previewSwarmMessages(zh: boolean): readonly SwarmMessage[] {
     to: to === "all" ? EVERYONE.filter(id => id !== from) : [to],
     body: zh ? zhText : enText,
     at: when < 0 ? at(-when) : firstOpen! + when * 1000,
-    ...(to === "all" ? { broadcast: true } : {}),
+    ...(to === "all" ? { peer: true, peerInstance: "agent://peers/reviewer", broadcast: true } : {}),
     ...(extra?.progress ? { progress: true } : {}),
     ...(extra?.replyTo ? { replyTo: extra.replyTo } : {}),
   })).sort((a, b) => a.at - b.at);

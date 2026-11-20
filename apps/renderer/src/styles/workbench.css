@@ -1554,6 +1554,15 @@
 .tc-foot { display: flex; align-items: center; gap: var(--sp-8); }
 .tc-label { font-size: var(--fs-11); color: var(--text-faint); margin-bottom: 4px; }
 .tc-note { font-size: var(--fs-11); color: var(--text-faint); }
+/* Browser 动作唤起的原生窗口（macOS 选择器、打印面板等）：提示条 + 可在电脑面板检查的窗口 ID。 */
+.tc-native-windows { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-6) var(--sp-10); margin-bottom: var(--sp-8); padding: var(--sp-8) var(--sp-10); border-radius: var(--r-6); background: var(--blue-soft); font-size: var(--fs-11); }
+.tc-native-windows > .icon { flex: none; color: var(--blue); }
+.tc-native-windows-copy { display: flex; flex-direction: column; gap: 1px; flex: 1 1 14rem; min-width: 0; }
+.tc-native-windows-copy strong { color: var(--text); font-weight: var(--fw-medium); }
+.tc-native-windows-copy small { color: var(--text-3); font-size: var(--fs-11); line-height: 1.5; }
+.tc-native-windows-ids { display: inline-flex; flex-wrap: wrap; gap: var(--sp-4); }
+.tc-native-windows-ids code { padding: 1px var(--sp-6); border-radius: var(--r-4); background: var(--surface); color: var(--text-2); font: var(--fs-11)/1.6 var(--font-mono); }
+.ev-extension .ev-context-excluded { display: inline-flex; align-items: center; gap: var(--sp-4); }
 .tc-answer { font-size: var(--fs-12); line-height: 1.6; color: var(--text-2); word-break: break-word; overflow-wrap: break-word; }
 .tl-card .c-dim { color: var(--text-faint); }
 .tc-kv {
@@ -2934,6 +2943,10 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   max-height: var(--deck-cap);
   overflow: visible;
 }
+.composer-region:has(> .composer .composer-mode-hint) > .deck.is-ask {
+  bottom: calc(100% - var(--sp-4));
+  --deck-limit: min(420px, 46dvh);
+}
 .deck.preview-queue .deck-card {
   position: relative;
   top: auto;
@@ -3511,10 +3524,13 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   padding: var(--sp-10) var(--sp-20);
 }
 /* Deck 激活时被覆盖的 composer：变暗并禁止交互（参照 ver1） */
-.composer-region:has(.deck.active) .composer {
+.composer-region:has(.deck.active) .composer:not(:has(.composer-mode-hint)) {
   opacity: 0.35;
   pointer-events: none;
   box-shadow: none;
+}
+.composer-region:has(.deck.is-ask) .composer:has(.composer-mode-hint) {
+  pointer-events: auto;
 }
 .composer {
   max-width: var(--doc-max-w);
@@ -5129,7 +5145,8 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   max-width: var(--doc-max-w);
   margin: 0 auto;
 }
-.composer-tray:has(> .queue-strip) {
+.composer-tray:has(> .queue-strip),
+.composer-tray:has(> .composer-hint-progress) {
   display: flex;
   pointer-events: auto;
   flex-direction: column;
@@ -5145,7 +5162,8 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
     0 6px 20px rgba(15, 17, 26, 0.07),
     0 1px 4px rgba(15, 17, 26, 0.05);
 }
-:root[data-theme="dark"] .composer-tray:has(> .queue-strip) {
+:root[data-theme="dark"] .composer-tray:has(> .queue-strip),
+:root[data-theme="dark"] .composer-tray:has(> .composer-hint-progress) {
   border-color: var(--border-strong);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), 0 1px 4px rgba(0, 0, 0, 0.25);
 }
@@ -7427,3 +7445,81 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   width: 24px;
   height: 24px;
 }
+
+/* 「更多模型」浮层的筛选头：搜索框 + 供应商胶囊（横向滚动）+ 思考档位条。
+   头部不随列表滚动（.rms-picker-pop 关掉外层滚动，列表在 .rms-scroll 里滚）。 */
+.cmp-flyout .cmp-model-filter { flex: none; display: flex; flex-direction: column; gap: var(--sp-8); padding: var(--sp-8) var(--sp-8) var(--sp-10); border-bottom: 1px solid var(--border); }
+.cmp-flyout .rms-scroll { flex: 1 1 auto; padding-bottom: var(--sp-4); }
+.cmp-model-search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  height: 30px;
+  padding: 0 var(--sp-4) 0 var(--sp-8);
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  background: var(--bg);
+  color: var(--text-3);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.cmp-model-search:focus-within { border-color: var(--accent-border); box-shadow: 0 0 0 2px var(--accent-softer); }
+.cmp-model-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-12); }
+.cmp-model-search input::placeholder { color: var(--text-faint); }
+.cmp-model-clear { display: grid; place-items: center; flex: none; width: 20px; height: 20px; padding: 0; border: 0; border-radius: var(--r-full); background: var(--surface-3); color: var(--text-2); cursor: pointer; }
+.cmp-model-clear:hover { color: var(--text); }
+.cmp-model-scopes { display: flex; gap: var(--sp-4); margin: 0 calc(-1 * var(--sp-8)); padding: 0 var(--sp-8); overflow-x: auto; scrollbar-width: none; }
+.cmp-model-scopes button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex: none;
+  height: 22px;
+  padding: 0 var(--sp-8);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-11);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
+}
+.cmp-model-scopes button:hover { border-color: var(--border-strong); color: var(--text); }
+.cmp-model-scopes button[aria-pressed="true"] { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent); font-weight: var(--fw-medium); }
+.cmp-model-scopes button svg, .cmp-model-scopes button img { width: 12px; height: 12px; }
+.cmp-model-effort { display: flex; flex-direction: column; gap: var(--sp-6); color: var(--text-2); font-size: var(--fs-11); }
+.cmp-model-effort-head { display: flex; align-items: center; gap: var(--sp-6); }
+.cmp-model-effort-head > .icon { color: var(--accent); }
+.cmp-model-effort-head > b { margin-inline-start: auto; padding: 0 var(--sp-6); border-radius: var(--r-full); background: var(--accent-soft); color: var(--accent); font-weight: var(--fw-semibold); }
+.cmp-model-effort-head > b.is-keep { background: var(--surface-2); color: var(--text-3); font-weight: var(--fw-medium); }
+/* 档位条：轨道上每档一个刻度，已选部分用 accent 填充。 */
+.cmp-model-effort input[type="range"] {
+  --effort-track: var(--surface-3);
+  width: 100%;
+  height: 16px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+}
+.cmp-model-effort input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--r-full);
+  background:
+    radial-gradient(circle, var(--surface) 1.2px, transparent 1.6px) 0 50% / calc((100% - 4px) / var(--effort-steps)) 100% repeat-x,
+    linear-gradient(90deg, var(--accent) var(--effort-fill), var(--effort-track) var(--effort-fill));
+}
+.cmp-model-effort input[type="range"]::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: 2px solid var(--accent);
+  border-radius: var(--r-full);
+  background: var(--surface);
+  appearance: none;
+  transition: scale var(--dur-fast) var(--ease-spring);
+}
+.cmp-model-effort input[type="range"]:hover::-webkit-slider-thumb { scale: 1.12; }
+.cmp-model-effort input[type="range"]:focus-visible { outline: none; }
+.cmp-model-effort input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--accent-soft); }

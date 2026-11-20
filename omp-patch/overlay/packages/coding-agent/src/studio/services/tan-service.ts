@@ -161,7 +161,7 @@ export interface StudioTanCreateAgentOptions {
 	customTools?: (CustomTool | ToolDefinition)[];
 	enableLsp: boolean;
 	agentId: string;
-	agentDisplayName: "tan";
+	agentDisplayName: string;
 	parentTaskPrefix: string;
 	parentAgentId: string;
 	/** The registry the created agent must be registered into exactly once. */
@@ -234,6 +234,7 @@ export interface StudioTanCleanupPorts {
 }
 
 export interface StudioTanPorts {
+	nameFor?: (work: string) => Promise<string>;
 	parent: StudioTanParentContext;
 	fork: StudioTanForkPort;
 	createAgent: StudioTanCreateAgentPort;
@@ -309,6 +310,7 @@ export class StudioTanService {
 		let jobId: string | undefined;
 		let created: StudioTanCreatedAgent | undefined;
 		try {
+			const displayName = (await this.#ports.nameFor?.(trimmedWork)) ?? "tan";
 			const cloneManager = await this.#ports.fork({
 				parentFile: parent.parentFile,
 				cwd: parent.cwd,
@@ -332,7 +334,7 @@ export class StudioTanService {
 				customTools: parent.customTools,
 				enableLsp: parent.enableLsp,
 				agentId: cloneId,
-				agentDisplayName: "tan",
+				agentDisplayName: displayName,
 				parentTaskPrefix: cloneId,
 				parentAgentId: parent.ownerId,
 				agentRegistry: this.#ports.registry,
@@ -342,7 +344,7 @@ export class StudioTanService {
 			const session = created.session;
 			const adopted = this.#ports.adopt({
 				agentId: cloneId,
-				displayName: "tan",
+				displayName,
 				parentId: parent.ownerId,
 				session,
 				sessionFile: created.sessionFile,

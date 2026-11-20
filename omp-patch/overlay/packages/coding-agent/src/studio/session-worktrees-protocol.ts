@@ -2,6 +2,9 @@ import * as path from "node:path";
 import type { SessionResumePreparation } from "./session-lifecycle-protocol";
 
 export interface SessionResumeRow {
+	backend?: "git" | "ovnfs";
+	sourceDirectory?: string;
+
 	sessionId: string;
 	title: string;
 	modifiedAt: string;
@@ -14,6 +17,9 @@ export interface SessionResumeRow {
 	conversationExcerpt?: string;
 }
 export interface SessionWorktreeRow {
+	backend?: "git" | "ovnfs";
+	sourceDirectory?: string;
+
 	id: string;
 	branch: string;
 	directory: string;

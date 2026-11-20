@@ -3,6 +3,7 @@ import { AppSelect } from "../AppSelect";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CommandInput, StudioClient } from "@omp-studio/client-contract";
 import { LIVE_AUDIO_VOICES, type LiveAudioResultMap, type LiveAudioState, type LiveAudioOperation } from "@omp-studio/studio-protocol";
+import { Icon } from "../icons";
 import { WorkspaceStatus } from "../workspaces/Workspace";
 import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
@@ -14,7 +15,11 @@ import { MicrophoneDeniedError, MicrophoneSettingsButton, ensureMicrophoneAccess
 export function LiveAudioPane({ client, sessionId, available, visible = true, remote = false, webrtcAvailable = false }: { remote?: boolean; webrtcAvailable?: boolean; client: StudioClient; sessionId?: string | undefined; available: boolean; visible?: boolean }) {
   const { preview, marks } = usePreviewMode(); const { resolvedLanguage } = useI18n(); const zh = resolvedLanguage === "zh";
   const t = (cn: string, en: string) => zh ? cn : en;
-  const [state, setState] = useState<LiveAudioState>(); const [voice, setVoice] = useState("sol"); const [device, setDevice] = useState(""); const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [endpointDraft, setEndpointDraft] = useState<string | undefined>();
+  const [keyDraft, setKeyDraft] = useState("");
+  const [settingsSaved, setSettingsSaved] = useState(false);
+  const [state, setState] = useState<LiveAudioState>(); const [voiceDraft, setVoice] = useState<string>();
+  const voice = voiceDraft ?? state?.voice ?? "sol"; const [device, setDevice] = useState(""); const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [review, setReview] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [micDenied, setMicDenied] = useState(false);
   const generation = useRef(0); const lock = useRef(false); const capture = useRef<{ stop(): void; setMuted?(muted: boolean): void } | undefined>(undefined); const abort = useRef<AbortController | undefined>(undefined); const audioId = useRef<string | undefined>(undefined); const confirm = useRef<HTMLButtonElement>(null);
   const zhRef = useRef(zh); zhRef.current = zh;
@@ -42,7 +47,7 @@ export function LiveAudioPane({ client, sessionId, available, visible = true, re
     setState(previous => previous ? { ...localized, voice: previous.voice, phase: previous.phase, attached: previous.attached, muted: previous.muted, inputLevel: previous.inputLevel, outputLevel: previous.outputLevel } : localized);
   }, [preview, zh]);
   useEffect(() => {
-    generation.current++; lock.current = false; setBusy(false); setError(""); setReview(false); setState(preview ? getPreviewLiveAudio(zhRef.current) : undefined);
+    generation.current++; lock.current = false; setEndpointDraft(undefined); setKeyDraft(""); setVoice(undefined); setSettingsSaved(false); setBusy(false); setError(""); setReview(false); setState(preview ? getPreviewLiveAudio(zhRef.current) : undefined);
     let alive = true;
     const hide = () => { if (document.hidden) { generation.current++; lock.current = false; setBusy(false); release(); setReview(false); setState(previous => previous ? { ...previous, phase: "off", attached: false, inputLevel: 0, outputLevel: 0 } : previous); } };
     document.addEventListener("visibilitychange", hide);
@@ -126,9 +131,41 @@ export function LiveAudioPane({ client, sessionId, available, visible = true, re
   const stop = () => { generation.current++; lock.current = false; setBusy(false); release(); setReview(false); setState(previous => previous ? { ...previous, phase: "off", attached: false, muted: false, inputLevel: 0, outputLevel: 0 } : previous); };
   return <section className="live-audio-pane" aria-label={t("Live 实时语音", "Live realtime audio")}>
     <div className="media-toolbar"><h3>{t("Live 实时语音", "Live realtime audio")}</h3>{preview && marks ? <span className="chip gray">{t("演示", "Demo")}</span> : null}<WorkspaceStatus state={state?.phase ?? "disconnected"} /></div>
-    <p className="small muted">{t("使用 Codex OAuth 实时语音；任务交给当前对话，麦克风和播放设备来自此窗口，账户与任务使用当前工作环境。隐藏窗口、离开此页面、切换会话或连接中断会停止麦克风，需要手动重新开始。", "Uses Codex OAuth realtime audio and delegates tasks to this conversation. Audio devices belong to this window; credentials and tasks belong to the selected work environment. Hiding the window, leaving this page, switching sessions or disconnecting stops the microphone; restart is always manual.")}</p>
+    <p className="small muted">{t("使用自定义服务端或 Codex OAuth 实时语音；任务交给当前对话，麦克风和播放设备来自此窗口，账户与任务使用当前工作环境。隐藏窗口、离开此页面、切换会话或连接中断会停止麦克风，需要手动重新开始。", "Uses a custom endpoint or Codex OAuth for realtime audio and delegates tasks to this conversation. Audio devices belong to this window; credentials and tasks belong to the selected work environment. Hiding the window, leaving this page, switching sessions or disconnecting stops the microphone; restart is always manual.")}</p>
     {!enabled ? <p className="muted">{t("Live 需要麦克风权限、支持实时语音的 Runtime，以及桌面音频通道或安全来源中的 WebRTC。", "Live requires microphone access, a supported Runtime, and desktop audio or WebRTC on a secure origin.")}</p> : null}
-    <div className="media-parameter-grid"><label>{t("麦克风", "Microphone")}<AppSelect className="select" value={device} disabled={active || busy} onChange={event => setDevice(event.target.value)}><option value="">{t("系统默认", "System default")}</option>{devices.map((item, index) => <option key={item.deviceId} value={item.deviceId}>{item.label || t("麦克风", "Microphone") + " " + (index + 1)}</option>)}</AppSelect></label><label>{t("音色", "Voice")}<AppSelect className="select" value={voice} disabled={active || busy} onChange={event => setVoice(event.target.value)}>{LIVE_AUDIO_VOICES.map(name => <option key={name}>{name}</option>)}</AppSelect></label></div>
+    <div className="media-parameter-grid"><label>{t("麦克风", "Microphone")}<AppSelect className="select" value={device} disabled={active || busy} onChange={event => setDevice(event.target.value)}><option value="">{t("系统默认", "System default")}</option>{devices.map((item, index) => <option key={item.deviceId} value={item.deviceId}>{item.label || t("麦克风", "Microphone") + " " + (index + 1)}</option>)}</AppSelect></label><label>{t("音色", "Voice")}<input className="input" list="live-audio-voices" value={voice} disabled={active || busy} placeholder="sol" onChange={event => { setVoice(event.target.value); setSettingsSaved(false); }} /><datalist id="live-audio-voices">{LIVE_AUDIO_VOICES.map(name => <option key={name} value={name} />)}</datalist></label></div>
+    <form className="live-connection" aria-label={t("服务端连接", "Server connection")} onSubmit={async event => {
+      event.preventDefault();
+      const endpoint = endpointDraft ?? state?.endpoint ?? "";
+      const epoch = generation.current; setBusy(true); setError("");
+      try {
+        if (!preview) {
+          const settings: ["live.endpoint" | "live.voice" | "live.apiKey", string][] = [["live.endpoint", endpoint], ["live.voice", voice]];
+          if (keyDraft) settings.push(["live.apiKey", keyDraft]);
+          for (const [key, value] of settings) {
+            const handle = await client.command("preferences.features.set", { sessionId: sessionId!, key, value, scope: "global" });
+            await waitReceipt(client, handle.requestId);
+          }
+        }
+        if (epoch === generation.current) {
+          setState(old => old ? { ...old, endpoint, voice, apiKeyConfigured: !!keyDraft || !!old.apiKeyConfigured } : old);
+          setKeyDraft(""); setSettingsSaved(true);
+        }
+      } catch (cause) { if (epoch === generation.current) setError(hostErrorMessage(cause, t("无法保存设置", "Could not save settings"))); }
+      finally { if (epoch === generation.current) setBusy(false); }
+    }}>
+      <div className="live-connection-head">
+        <Icon name="server" extra="sm" />
+        <strong>{t("服务端连接", "Server connection")}</strong>
+        <span className={`chip xs ${(endpointDraft ?? state?.endpoint) ? "purple" : "gray"}`}>{(endpointDraft ?? state?.endpoint) ? t("自定义服务端", "Custom endpoint") : t("Codex 登录", "Codex sign-in")}</span>
+        {settingsSaved ? <span className="live-connection-saved" role="status"><Icon name="check" extra="xs" />{t("已保存", "Saved")}</span> : null}
+      </div>
+      <div className="media-parameter-grid">
+        <label>{t("自定义服务端", "Live endpoint")}<input className="input mono" value={endpointDraft ?? state?.endpoint ?? ""} disabled={active || busy} placeholder="https://…" onChange={event => { setEndpointDraft(event.target.value); setSettingsSaved(false); }} /><small>{t("OpenAI Realtime WebRTC 兼容地址；留空则使用 Codex 登录", "An OpenAI Realtime WebRTC-compatible URL. Leave empty to use Codex sign-in.")}</small></label>
+        <label><span className="live-connection-label">API Key{state?.apiKeyConfigured ? <span className="chip green xs">{t("已配置", "Configured")}</span> : null}</span><input className="input mono" type="password" autoComplete="off" value={keyDraft} disabled={active || busy} placeholder={state?.apiKeyConfigured ? "••••••••" : t("密钥、环境变量名或 !command", "Key, environment variable or !command")} onChange={event => { setKeyDraft(event.target.value); setSettingsSaved(false); }} /><small>{t("留空保留已保存的密钥", "Leave empty to keep the saved key")}</small></label>
+      </div>
+      <div className="live-connection-foot"><button className="btn small outline" disabled={!enabled || busy || active}><Icon name="save" extra="sm" />{t("保存连接与音色", "Save connection and voice")}</button></div>
+    </form>
     <div className="media-toolbar"><button className="btn small outline" disabled={!enabled || busy || active} onClick={() => { if (preview) return; void navigator.mediaDevices.enumerateDevices().then(rows => setDevices(rows.filter(row => row.kind === "audioinput"))).catch(cause => setError(hostErrorMessage(cause, "Devices unavailable"))); }}>{t("刷新设备", "Refresh devices")}</button><button className="btn small primary" disabled={!enabled || busy || active} onClick={() => setReview(true)}>{t("准备开始 Live", "Review Live call")}</button><button className="btn small outline" disabled={!active && !busy} onClick={stop}>{t("停止 Live", "Stop Live")}</button><button className="btn small outline" disabled={!active || busy || state?.phase === "prepared" || state?.phase === "connecting"} onClick={() => {
       if (!state) return; if (preview) { setState({ ...state, muted: !state.muted, phase: state.muted ? "listening" : "muted" }); return; }
       const id = audioId.current; const epoch = generation.current; capture.current?.setMuted?.(!state.muted); if (id && sessionId) void invoke("live.audio.mute", { sessionId, audioId: id, muted: !state.muted }).then(next => {if(epoch===generation.current)setState(next);}).catch(cause => {if(epoch===generation.current)setError(hostErrorMessage(cause, "Mute failed"));});

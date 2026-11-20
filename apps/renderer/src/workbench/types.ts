@@ -109,7 +109,7 @@ export type ShellChrome = {
   onRenameThread: () => void;
   /** 顶栏「对话选项」：Fork 当前会话（session.fork，Runtime 身份切换）。 */
   onForkThread: () => void;
-  /** 顶栏「对话选项」：Handoff 到新会话（session.handoff，LLM 摘要 + 新会话）。 */
+  /** 顶栏「对话选项」：后台生成会话交接摘要。 */
   onHandoffThread: () => void;
   /** 顶栏「对话选项」：Compact 当前上下文（builtin.compact，默认模式）。 */
   onCompactThread: () => void;

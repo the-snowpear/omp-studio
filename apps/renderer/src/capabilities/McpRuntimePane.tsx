@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import type { McpRuntimeStatus, McpAuthResult } from "@omp-studio/studio-protocol";
 import { useI18n } from "../i18n";
 import { Icon } from "../icons";
-import { hostErrorMessage } from "../hostError";
+import { hostErrorMessage, waitReceipt } from "../hostError";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { getPreviewMcpRuntime, applyPreviewMcpAction } from "../preview/runtimeCatalogPreview";
 import { CatalogEmpty, CatalogHeading, useRuntimeCatalog, type RuntimeCatalogProps } from "./RuntimeCatalogShared";
@@ -40,7 +40,7 @@ function ServerTools({ server, zh }: { server: Server; zh: boolean }) {
   );
 }
 
-function ServerRow({ server, paneId, zh, props, preview, authAvailable, onComplete }: {
+function ServerRow({ server, paneId, zh, props, preview, authAvailable, onComplete, enableOriginal }: {
   server: Server;
   paneId: string;
   zh: boolean;
@@ -48,8 +48,10 @@ function ServerRow({ server, paneId, zh, props, preview, authAvailable, onComple
   preview: boolean;
   authAvailable: boolean;
   onComplete(result: McpAuthResult): void;
+  enableOriginal(): Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
+  const [enabling, setEnabling] = useState(false);
   const states = zh
     ? { ready: "工具就绪", pending: "连接 / 加载中", failed: "启动失败", disconnected: "未连接" }
     : { ready: "Tools ready", pending: "Connecting / loading", failed: "Startup failed", disconnected: "Disconnected" };
@@ -75,6 +77,21 @@ function ServerRow({ server, paneId, zh, props, preview, authAvailable, onComple
       </button>
       {preview || authAvailable ? <McpAuthActions client={props.client} sessionId={props.sessionId} name={server.name}
         available={authAvailable} preview={preview} zh={zh} authSupported={server.transport !== "stdio"} previewScope={server.source?.level === "project" ? "project" : "user"} onComplete={onComplete} /> : <span className="runtime-mcp-actions-unavailable">{zh ? "连接操作不可用" : "Connection actions unavailable"}</span>}
+      {server.replacedByBuiltin || server.evalNamespaceUri ? <div className="runtime-mcp-notes">
+        {server.replacedByBuiltin ? <div className="runtime-mcp-note is-replaced">
+          <Icon name="layers" extra="sm" />
+          <span className="runtime-mcp-note-copy">
+            <b>{zh ? "已由内置实现接管" : "Replaced by built-in"}<code>{server.replacedByBuiltin}</code></b>
+            <small>{zh ? "工具调用走内置实现；需要原版服务时可以重新启用。" : "Tool calls use the built-in implementation. Re-enable the original server if you need it."}</small>
+          </span>
+          <button type="button" className="btn small outline" disabled={enabling} onClick={async () => { setEnabling(true); try { await enableOriginal(); } finally { setEnabling(false); } }}>{enabling ? (zh ? "启用中…" : "Enabling…") : (zh ? "启用原版连接" : "Enable original connection")}</button>
+        </div> : null}
+        {server.evalNamespaceUri ? <div className="runtime-mcp-note">
+          <Icon name="code" extra="sm" />
+          <span className="runtime-mcp-note-copy"><b>{zh ? "Eval 命名空间" : "Eval namespace"}</b></span>
+          <code className="runtime-mcp-note-uri">{server.evalNamespaceUri}</code>
+        </div> : null}
+      </div> : null}
       {server.error ? <p className="runtime-mcp-failure"><Icon name="alert-c" extra="xs" /><span>{server.error}</span></p> : null}
       {open && hasTools ? <div id={toolsId} className="runtime-mcp-tools-region"><ServerTools server={server} zh={zh} /></div> : null}
     </article>
@@ -204,7 +221,17 @@ export function McpRuntimePane(props: RuntimeCatalogProps & { authAvailable?: bo
         </div>
         {filtered.length ? <div className="runtime-mcp-rows">
           <div className="runtime-mcp-columns" aria-hidden="true"><span>{zh ? "服务器 / 连接方式" : "Server / transport"}</span><span>{zh ? "会话状态" : "Session status"}</span><span>{zh ? "工具" : "Tools"}</span><span>{zh ? "连接操作" : "Connection actions"}</span></div>
-          {filtered.map((server, index) => <ServerRow key={`${preview ? "preview" : sessionId}-${server.name}`} server={server} paneId={`${paneId}-${index}`} zh={zh} props={props} preview={preview} authAvailable={authAvailable} onComplete={onComplete} />)}
+          {filtered.map((server, index) => <ServerRow key={`${preview ? "preview" : sessionId}-${server.name}`} server={server} paneId={`${paneId}-${index}`} zh={zh} props={props} preview={preview} authAvailable={authAvailable} onComplete={onComplete} enableOriginal={async () => {
+            if (preview) {
+              setStatus(old => old && ({ ...old, servers: old.servers.map(row => { if (row.name !== server.name) return row; const { replacedByBuiltin, ...original } = row; return { ...original, state: "ready" }; }) }));
+              return;
+            }
+            try {
+              const handle = await client.command("mcp.setEnabled", { name: server.name, enabled: true, scope: server.source?.level === "project" ? "project" : "user" });
+              await waitReceipt(client, handle.requestId);
+              setRefreshRevision(value => value + 1);
+            } catch (cause) { setError(hostErrorMessage(cause, zh ? "未能启用原版连接" : "Could not enable original connection")); }
+          }} />)}
         </div> : <CatalogEmpty icon="plug" title={servers.length ? (zh ? "没有匹配的连接" : "No matching connections") : (zh ? "当前会话没有 MCP 服务器" : "No MCP servers in this session")}>{servers.length ? (zh ? "调整状态筛选或搜索关键词。" : "Try another status filter or search term.") : (zh ? "添加服务器配置后，在新会话中加载。" : "Add a server configuration, then load it in a new session.")}</CatalogEmpty>}
         <footer className="runtime-catalog-footnote"><Icon name="pulse" extra="xs" /><span>{zh ? "会话状态自动更新。服务器配置页的连接测试是独立探测。" : "Session status updates automatically. Configuration tests are separate probes."}</span>{status.total > servers.length ? <span>{zh ? `显示 ${servers.length} / ${status.total} 个服务器` : `Showing ${servers.length} of ${status.total} servers`}</span> : null}</footer>
       </> : <CatalogEmpty icon={canRead && !status ? "pulse" : "plug"} title={status ? (zh ? "本会话未启用 MCP" : "MCP is not active in this session") : canRead ? (error ? (zh ? "连接状态暂不可用" : "Connection status unavailable") : (zh ? "读取会话连接…" : "Reading session connections…")) : (zh ? "连接活动会话后可用" : "Connect an active session")}>{status ? (zh ? "MCP 可能尚未初始化或已禁用。服务器配置仍可在另一页签管理。" : "MCP may be disabled or uninitialized. Server configurations are available in the other tab.") : canRead ? (zh ? "读取当前 Runtime 的实际工具就绪状态。" : "Read the actual tool readiness from the current Runtime.") : (zh ? "连接后可查看实际状态，并重新授权或重连服务器。" : "Read live status, re-authorize, or reconnect servers once a session is connected.")}</CatalogEmpty>}

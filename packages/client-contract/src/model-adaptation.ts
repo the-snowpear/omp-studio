@@ -1,7 +1,9 @@
 import type { ModelThinkingConfig } from "./model-thinking.js";
 import type { ModelKind } from "./model-kinds.js";
 
-export const MODEL_PARAMETER_FIELDS = ["contextWindow", "maxContextWindow", "maxTokens", "reasoning", "thinkingConfig"] as const;
+export interface SnapcompactShape { readonly variant: string; readonly frameSize?: number }
+
+export const MODEL_PARAMETER_FIELDS = ["contextWindow", "maxContextWindow", "maxTokens", "reasoning", "thinkingConfig", "snapcompactShape"] as const;
 export type ModelParameterField = (typeof MODEL_PARAMETER_FIELDS)[number];
 
 /** Only fields that models.yml can express. Missing means unknown/inherited. */
@@ -11,6 +13,7 @@ export interface ModelParameterValues {
   readonly maxTokens?: number;
   readonly reasoning?: boolean;
   readonly thinkingConfig?: ModelThinkingConfig | null;
+  readonly snapcompactShape?: SnapcompactShape;
 }
 
 export interface ModelParameterOrigin {

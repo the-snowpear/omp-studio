@@ -44,3 +44,16 @@
 .live-audio-levels meter { width:180px; max-width:100%; }
 .live-audio-transcripts { border-top:1px solid var(--border); padding-top:var(--sp-16); }
 .live-audio-transcripts p + p { margin-top:var(--sp-12); }
+
+/* Live 服务端连接：一张内嵌小卡片（标题行 + 两栏输入 + 右下保存），与上方设备 / 音色分开。 */
+.live-connection { display: grid; gap: var(--sp-12); margin: 0 0 var(--sp-16); padding: var(--sp-14) var(--sp-16); border: 1px solid var(--border); border-radius: var(--r-8); background: var(--surface-2); }
+.live-connection-head { display: flex; align-items: center; gap: var(--sp-8); font-size: var(--fs-12); }
+.live-connection-head > .icon { color: var(--text-3); }
+.live-connection-head > strong { font-weight: var(--fw-semibold); color: var(--text); }
+.live-connection-saved { display: inline-flex; align-items: center; gap: var(--sp-4); margin-inline-start: auto; color: var(--green); font-size: var(--fs-11); animation: var(--motion-reveal); }
+.live-connection .media-parameter-grid label { display: grid; gap: var(--sp-6); font-size: var(--fs-12); font-weight: var(--fw-medium); color: var(--text-2); min-width: 0; }
+.live-connection .media-parameter-grid small { color: var(--text-3); font-size: var(--fs-11); font-weight: var(--fw-regular); line-height: 1.5; }
+.live-connection .input { width: 100%; background: var(--surface); }
+.live-connection-label { display: inline-flex; align-items: center; gap: var(--sp-6); }
+.live-connection-foot { display: flex; justify-content: flex-end; }
+@container (max-width: 560px) { .live-connection .media-parameter-grid { grid-template-columns: minmax(0, 1fr); } }

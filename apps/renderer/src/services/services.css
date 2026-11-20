@@ -132,3 +132,12 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* 服务范围：会话 / 项目 / 全局守护进程，分段切换并带各自数量。 */
+.service-scope { display: flex; padding: var(--sp-8) 0 var(--sp-4); }
+.service-scope .seg { flex-wrap: wrap; }
+.service-scope .seg button { display: inline-flex; align-items: center; gap: var(--sp-6); }
+.service-scope-count { color: var(--text-3); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.service-scope .seg button.active .service-scope-count { color: var(--accent); }
+.service-name-line { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--sp-6); min-width: 0; }
+.service-name-line .chip { gap: var(--sp-4); }

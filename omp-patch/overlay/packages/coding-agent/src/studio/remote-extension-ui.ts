@@ -242,6 +242,7 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 		const form = dialogOptions?.parsedForm ?? parseHtmlForm(html);
 		const presentation = await presentHtmlForm(form, {
 			cwd: dialogOptions?.cwd ?? process.cwd(),
+			acceptImages: dialogOptions?.acceptImages === true,
 			...(dialogOptions?.signal === undefined ? {} : { signal: dialogOptions.signal }),
 		});
 		dialogOptions?.signal?.throwIfAborted();
@@ -252,6 +253,7 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 					commandId: this.commandId,
 					title: runtimeText("Agent 提问", "Agent Question"),
 					form: presentation,
+					signal: dialogOptions?.signal,
 					...(dialogOptions?.timeout === undefined ? {} : { timeoutMs: dialogOptions.timeout }),
 				}),
 			dialogOptions,

@@ -508,7 +508,7 @@ export interface RuntimeCommandInputMap extends EvaluationCommandInputMap, Upgra
   "session.clearContext": EmptyInput;
   "session.fork": EmptyInput;
   /**
-   * Generate a handoff document from the current session and start a fresh
+   * Generate a handoff summary in the background and compact the current
    * session seeded with it. The Runtime switches to the new session, so the
    * post-command snapshot carries the new sessionId.
    */

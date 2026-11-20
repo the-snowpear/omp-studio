@@ -1,6 +1,9 @@
 import type { SessionResumePreparation } from "./session-lifecycle.js";
 
 export interface SessionResumeRow {
+  backend?: "git" | "ovnfs";
+  sourceDirectory?: string;
+
   sessionId: string;
   title: string;
   modifiedAt: string;
@@ -12,7 +15,10 @@ export interface SessionResumeRow {
   firstMessage?: string;
   conversationExcerpt?: string;
 }
-export interface SessionWorktreeRow { id: string; branch: string; directory: string; sessionId: string; current: boolean; dirty: boolean; hasCommits: boolean; detached: boolean; missing: boolean; reason?: string }
+export interface SessionWorktreeRow {
+  backend?: "git" | "ovnfs";
+  sourceDirectory?: string;
+   id: string; branch: string; directory: string; sessionId: string; current: boolean; dirty: boolean; hasCommits: boolean; detached: boolean; missing: boolean; reason?: string }
 export interface WorktreeStartPolicy { eligible: boolean; policy: "off" | "ask" | "create"; reason?: string }
 export interface WorktreeRemovalPreview { token: string; expiresAt: number; worktree: SessionWorktreeRow; keepBranch: boolean }
 export type SessionWorktreeOperation =

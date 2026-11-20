@@ -1,8 +1,10 @@
+import { runtimeText } from "../locale";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type Server, type Socket } from "node:net";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { LiveSessionController, type LiveSessionControllerOptions } from "../../live/controller";
+import { cfgLiveEndpoint, cfgLiveApiKey, resolveLiveVoice } from "../../live/settings";
 import type { AgentSession } from "../../session/agent-session";
 import { isSttModelCached } from "../../stt/downloader";
 import { resolveSttModelSpec } from "../../stt/models";
@@ -231,7 +233,7 @@ export class StudioLiveAudioService {
 				kind: "webrtc",
 				id: operation.audioId,
 				sessionId: operation.sessionId,
-				voice: operation.voice ?? "sol",
+				voice: resolveLiveVoice(this.session.settings, operation.voice),
 				sdpOffer: operation.sdpOffer,
 				started: false,
 				closed: false,
@@ -385,7 +387,7 @@ export class StudioLiveAudioService {
 			if (this.#disposed || operation.sessionId !== this.session.sessionId)
 				throw new StudioLiveError("COMMAND_BLOCKED", "Live audio requires the active session");
 			if (operation.kind === "live.audio.prepare")
-				await this.#prepare(operation.sessionId, operation.voice ?? "sol");
+				await this.#prepare(operation.sessionId, resolveLiveVoice(this.session.settings, operation.voice));
 			else if (operation.kind !== "live.audio.status") {
 				const capture = this.#current();
 				if (
@@ -402,7 +404,10 @@ export class StudioLiveAudioService {
 					void this.#control.start(capture.id).catch(() => {
 						if (this.#current() === capture) {
 							this.#state.phase = "error";
-							this.#state.error = "Live connection failed; check your Codex OAuth account and network.";
+							this.#state.error = runtimeText(
+								"实时语音连接失败。请检查服务端、登录状态与网络。",
+								"Live connection failed. Check the endpoint, sign-in settings and network.",
+							);
 							this.#closeSocket(capture);
 						}
 					});
@@ -414,7 +419,13 @@ export class StudioLiveAudioService {
 				}
 			}
 			const state = this.#current()?.sessionId === operation.sessionId ? this.#state : blank(this.#available);
-			return structuredClone(state);
+			const endpoint = cfgLiveEndpoint.get(this.session.settings)?.trim() || undefined;
+			return {
+				...structuredClone(state),
+				voice: state.phase === "off" ? resolveLiveVoice(this.session.settings) : state.voice,
+				endpoint,
+				apiKeyConfigured: !!cfgLiveApiKey.get(this.session.settings),
+			};
 		});
 		this.#operations = work.catch(() => {});
 		return work;

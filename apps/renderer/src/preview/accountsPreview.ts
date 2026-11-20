@@ -7,7 +7,7 @@ export const PREVIEW_ACCOUNT_STATUS: AccountStatusResult = {
   refreshedAt: previewNow,
   accounts: [
     {
-      id: "preview-claude",
+      id: "preview-claude", subscriptionPlan: "Max 20x", credentialId: 1, activeCredential: true,
       provider: "anthropic",
       label: "mira@studio.dev",
       organization: "OMP Studio",
@@ -53,6 +53,16 @@ export const PREVIEW_ACCOUNT_STATUS: AccountStatusResult = {
           },
         ],
       },
+    },
+    {
+      id: "preview-kiro", provider: "kiro", label: "studio@kiro.example", source: "oauth", active: false, credentialId: 2,
+      reportedAt: previewNow, resets: { state: "unfetched", credits: [] },
+      limits: [
+        { id: "kiro:credits", label: "Monthly plan", status: "exhausted", usedFraction: 1, resetsAt: previewNow + 3 * 86400000 },
+        { id: "kiro:bonus:starter", label: "Bonus credits", status: "ok", usedFraction: 0.4, resetsAt: previewNow + 10 * 86400000 },
+        { id: "kiro:add-on:purchased", label: "Purchased credits", status: "ok", usedFraction: 0.1 },
+        { id: "kiro:overage", label: "Overage", status: "warning" },
+      ],
     },
     {
       id: "preview-codex", provider: "openai-codex", label: "mira@studio.dev · Codex", source: "oauth", active: false,

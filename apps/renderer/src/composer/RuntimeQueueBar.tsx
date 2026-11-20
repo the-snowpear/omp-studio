@@ -75,7 +75,7 @@ export function RuntimeQueueBar({
       )
     );
   const supported = can("session.queue.get");
-  const hasCompaction = result.entries.some(entry => entry.kind === "compaction");
+  const hasCompaction = !!result.compactionMode || result.entries.some(entry => entry.kind === "compaction");
   async function invoke<K extends keyof RuntimeQueueResultMap>(
     kind: K,
     input: CommandInput<K>,
@@ -288,7 +288,7 @@ export function RuntimeQueueBar({
         </button>
       </div>
     ) : null;
-  if (!supported || (!result.entries.length && !error && !result.compactionError && !showRefreshIssue && !editing)) return null;
+  if (!supported || (!result.entries.length && !result.compactionMode && !error && !result.compactionError && !showRefreshIssue && !editing)) return null;
   return (
     <div
       ref={host}
@@ -316,6 +316,23 @@ export function RuntimeQueueBar({
           </span>
         </button>
       </div>
+      {result.compactionMode === "handoff" && <div className="runtime-handoff" role="status">
+        <span className="runtime-handoff-glyph" aria-hidden><Icon name="handoff" extra="sm" /></span>
+        <span className="runtime-handoff-copy">
+          <span className="runtime-handoff-title">{zh ? "正在后台生成交接摘要…" : "Preparing handoff in the background…"}</span>
+          <span className="runtime-handoff-note">{zh ? "可继续阅读和发送消息，完成后切换到交接后的上下文" : "Keep reading and sending. The handed-off context takes over when it is ready."}</span>
+        </span>
+        <button className="btn small ghost runtime-handoff-cancel" disabled={busy || !can("session.compaction.cancel")} onClick={async () => {
+          const generation = ++epoch.current;
+          setBusy(true);
+          try {
+            const next = preview ? { entries: result.entries.filter(row => row.kind !== "compaction").map(({ heldFor, ...row }) => heldFor ? { ...row, state: "queued" as const } : row), total: result.total - 1, truncated: false } : await invoke("session.compaction.cancel", { sessionId: sessionId! });
+            if (generation === epoch.current) setResult(next);
+          } catch (cause) {
+            if (generation === epoch.current) setError(hostErrorMessage(cause, zh ? "无法取消交接" : "Could not cancel handoff"));
+          } finally { if (generation === epoch.current) setBusy(false); }
+        }}>{zh ? "取消交接" : "Cancel handoff"}</button>
+      </div>}
       {error || result.compactionError ? <p role="alert">{error || result.compactionError}</p> : showRefreshIssue ? (
         <p role="status">{zh ? "暂时无法刷新已提交队列" : "Could not refresh submitted messages"}</p>
       ) : null}

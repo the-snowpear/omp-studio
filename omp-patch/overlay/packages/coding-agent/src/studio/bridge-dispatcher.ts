@@ -512,7 +512,7 @@ export class StudioBridgeDispatcher {
 					stateVersion: this.projector.stateVersion,
 					status: "accepted",
 				});
-				if (["session.clearContext", "session.handoff", "session.tree.navigate"].includes(operation.kind))
+				if (["session.clearContext", "session.tree.navigate"].includes(operation.kind))
 					await Promise.all([
 						this.runtime.services.btw.settle(),
 						this.runtime.services.workbench.agentBtw.settle(),

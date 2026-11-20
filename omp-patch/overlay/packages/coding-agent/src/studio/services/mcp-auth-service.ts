@@ -1,4 +1,7 @@
-import { updateMCPServer } from "../../mcp/config-writer";
+import { runtimeText } from "../locale";
+import { getMCPConfigPath } from "@oh-my-pi/pi-utils";
+import { loadAllMCPConfigs } from "../../mcp/config";
+import { setServerDisabled, setServerForceEnabled, updateMCPServer } from "../../mcp/config-writer";
 import {
 	mcpOAuthCredentialIdsForServerUrl,
 	removeManagedMcpOAuthCredential,
@@ -147,6 +150,31 @@ export class StudioMcpAuthService {
 
 	async reconnect(name: string): Promise<McpAuthResult> {
 		const manager = this.#manager;
+		if (manager?.getBuiltinDrops?.().has(name)) {
+			const cwd = this.session.sessionManager.getCwd();
+			const file = getMCPConfigPath("user", cwd);
+			await setServerDisabled(file, name, false);
+			await setServerForceEnabled(file, name, true);
+			const { configs, sources } = await loadAllMCPConfigs(cwd, {
+				extensionRoots: this.session.effectiveExtensionRoots,
+				enableProjectConfig: cfgMcpEnableProjectConfig.get(this.session.settings),
+			});
+			const config = configs[name];
+			if (!config)
+				return {
+					name,
+					status: "failed",
+					scope: "user",
+					message: runtimeText("MCP 服务器配置不可用", "MCP server configuration is unavailable"),
+				};
+			const result = await manager.connectServers(
+				{ [name]: config },
+				sources[name] ? { [name]: sources[name]! } : {},
+			);
+			await this.session.refreshMCPTools(manager.getTools());
+			const error = result.errors.get(name);
+			return { name, status: error ? "failed" : "connected", scope: "user", message: error };
+		}
 		if (!manager?.getServerConfig(name)) {
 			throw new SessionControlError("INVALID_ARGUMENT", `MCP server "${name}" is not loaded in this session`);
 		}

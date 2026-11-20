@@ -15,6 +15,23 @@ export interface AskAnswerPayload {
 		noteImages?: AskImage[];
 	}>;
 }
+export function validateAskImages(value: unknown): asserts value is AskImage[] {
+	if (!Array.isArray(value) || value.length > 4) throw Error("Too many Ask images");
+	for (const image of value) {
+		if (!image || typeof image !== "object") throw Error("Invalid Ask image");
+		if (
+			image.type !== "image" ||
+			!["image/png", "image/jpeg", "image/gif", "image/webp"].includes(image.mimeType as string) ||
+			typeof image.data !== "string" ||
+			!image.data ||
+			image.data.length > 262144 ||
+			image.data.length % 4 !== 0 ||
+			!/^[A-Za-z0-9+/]*={0,2}$/.test(image.data)
+		)
+			throw Error("Invalid Ask image");
+	}
+}
+
 export function validateAskAnswerPayload(value: unknown): asserts value is AskAnswerPayload {
 	const object = (v: unknown, keys: readonly string[]): Record<string, unknown> => {
 		if (!v || typeof v !== "object" || Array.isArray(v) || Object.keys(v).some(key => !keys.includes(key)))
@@ -51,19 +68,8 @@ export function validateAskAnswerPayload(value: unknown): asserts value is AskAn
 		for (const key of ["customInputImages", "noteImages"]) {
 			const list = row[key];
 			if (list === undefined) continue;
-			if (!Array.isArray(list) || list.length > 4) throw Error("Too many Ask images");
-			for (const value of list) {
-				const image = object(value, ["type", "mimeType", "data"]);
-				if (
-					image.type !== "image" ||
-					!["image/png", "image/jpeg", "image/gif", "image/webp"].includes(image.mimeType as string) ||
-					typeof image.data !== "string" ||
-					!image.data ||
-					image.data.length > 262144 ||
-					image.data.length % 4 !== 0 ||
-					!/^[A-Za-z0-9+/]*={0,2}$/.test(image.data)
-				)
-					throw Error("Invalid Ask image");
+			validateAskImages(list);
+			for (const image of list) {
 				bytes += image.data.length;
 				images++;
 			}
