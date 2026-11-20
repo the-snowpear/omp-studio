@@ -24,6 +24,7 @@ Public documentation for OMP Studio.
 | [dictation.md](dictation.md) | 工作台与 BTW 语音输入、原生模式、麦克风配置和内存恢复 |
 | [btw.md](btw.md) | BTW 原生功能对齐、话题历史、图片、子代理与快捷键 |
 | [fonts.md](fonts.md) | Independent interface, terminal and output font preferences |
+| [releases/v0.2.6.md](releases/v0.2.6.md) | 0.2.6 启动崩溃修复、平台下载与升级提示 |
 | [releases/v0.2.5.md](releases/v0.2.5.md) | 0.2.5 发布说明、平台下载与升级提示 |
 | [releases/v0.2.4.md](releases/v0.2.4.md) | 0.2.4 发布说明、平台下载与升级提示 |
 | [releases/v0.2.3.md](releases/v0.2.3.md) | 0.2.3 发布说明、平台下载与升级提示 |

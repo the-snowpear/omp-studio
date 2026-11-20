@@ -48,6 +48,7 @@ asarUnpack:
 
 npmRebuild: true
 buildDependenciesFromSource: false
+afterPack: ./scripts/audit-mobile-certificate.mjs
 
 # Renderer is loaded as appPath/../renderer/dist/index.html
 # (`app.asar` → `resources/renderer/dist`). See resolveRendererEntry.

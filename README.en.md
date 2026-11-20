@@ -47,7 +47,7 @@
 </p>
 
 > [!NOTE]
-> **0.2.5** brings WSL 2 workspaces to Windows, lets you continue chats from a paired phone on the local network, and restores Advisor notes in conversations. It fixes session placement, file links in chats, question form pagination, and OpenCode credential setup. It bundles Runtime `18.20.2-studio.15`. [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.5) · [Release notes](docs/releases/v0.2.5.md)
+> **0.2.6** fixes the 0.2.5 desktop startup crash caused by missing dependencies for mobile access certificates. If 0.2.5 cannot open, download and run the new installer. This release bundles Runtime `18.20.2-studio.15`. [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.6) · [Release notes](docs/releases/v0.2.6.md)
 
 <table>
 <tr>

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-11-20
+
+### Fixed
+
+- 补齐桌面安装包中的手机访问 HTTPS 证书依赖，修复 0.2.5 启动时的 `ERR_MODULE_NOT_FOUND` 崩溃。 [#50](https://github.com/the-snowpear/omp-studio/issues/50)
+
 ## [0.2.5] - 2026-11-20
 
 ### Added
@@ -614,7 +620,8 @@ Agent 改代码改嗨了、或者聊到第五轮发现方向歪了，以前想�
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/the-snowpear/omp-studio/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/the-snowpear/omp-studio/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/the-snowpear/omp-studio/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/the-snowpear/omp-studio/compare/v0.2.2...v0.2.3

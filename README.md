@@ -47,7 +47,7 @@
 </p>
 
 > [!NOTE]
-> **0.2.5** 支持 WSL 2 工作区和局域网手机访问，并在对话中恢复显示 Advisor 审阅意见。修复了会话归属、对话文件链接、原生提问分页和 OpenCode 凭据入口。内置 Runtime 为 `18.20.2-studio.15`。 [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.5) · [发布说明](docs/releases/v0.2.5.md)
+> **0.2.6** 修复 0.2.5 桌面版因缺少手机访问证书依赖而无法启动的问题。若无法打开 0.2.5，请直接下载并运行新安装包。内置 Runtime 为 `18.20.2-studio.15`。 [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.6) · [发布说明](docs/releases/v0.2.6.md)
 
 <table>
 <tr>
