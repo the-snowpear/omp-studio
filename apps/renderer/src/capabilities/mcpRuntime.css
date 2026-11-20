@@ -60,6 +60,18 @@
 .runtime-mcp-tool-hint { display: inline-flex; align-items: center; gap: var(--sp-4); color: var(--text-3); font-size: var(--fs-11); white-space: nowrap; }
 .runtime-mcp-tool-hint.readonly { color: var(--green); }
 .runtime-mcp-tools-limit { margin: var(--sp-10) 0 0; color: var(--text-3); font-size: var(--fs-11); }
+/* 服务器行下的附注：被内置实现接管（可重新启用原版）、Eval 命名空间。 */
+.runtime-mcp-notes { grid-column: 1 / -1; display: grid; gap: var(--sp-6); margin-left: 48px; }
+.runtime-mcp-note { display: flex; align-items: center; gap: var(--sp-10); min-width: 0; padding: var(--sp-8) var(--sp-10); border-radius: var(--r-6); background: var(--surface-2); color: var(--text-2); font-size: var(--fs-11); }
+.runtime-mcp-note > .icon { flex: none; color: var(--text-3); }
+.runtime-mcp-note.is-replaced { background: var(--blue-soft); }
+.runtime-mcp-note.is-replaced > .icon { color: var(--blue); }
+.runtime-mcp-note-copy { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.runtime-mcp-note-copy b { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--sp-6); color: var(--text); font-weight: var(--fw-medium); }
+.runtime-mcp-note-copy code, .runtime-mcp-note-uri { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-2); overflow-wrap: anywhere; }
+.runtime-mcp-note-copy small { color: var(--text-3); font-size: var(--fs-11); line-height: 1.5; }
+.runtime-mcp-note > .btn { flex: none; }
+.runtime-mcp-note-uri { padding: 1px var(--sp-6); border-radius: var(--r-4); background: var(--code-chip-bg); color: var(--code-chip-text); }
 
 @container runtime-catalog (max-width: 760px) {
   .runtime-mcp-columns { display: none; }
@@ -80,7 +92,8 @@
   .runtime-mcp-identity strong { font-size: var(--fs-12); }
   .runtime-mcp-server > .runtime-mcp-state { font-size: var(--fs-11); gap: var(--sp-4); }
   .runtime-mcp-tool-toggle { margin-left: 30px; }
-  .runtime-mcp-failure, .runtime-mcp-tools-region { margin-left: 0; }
+  .runtime-mcp-failure, .runtime-mcp-tools-region, .runtime-mcp-notes { margin-left: 0; }
+  .runtime-mcp-note { flex-wrap: wrap; }
   .runtime-mcp-tool { flex-wrap: wrap; }
   .runtime-mcp-tool-hint { margin-left: 24px; }
   .runtime-mcp-toolbar > .runtime-catalog-search { width: 100%; }

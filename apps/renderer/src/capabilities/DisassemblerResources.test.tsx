@@ -24,7 +24,7 @@ it("IDA preview requires exact operation review and never reaches Host", async (
   fireEvent.click(screen.getByRole("button", { name: "修改数据库" }));
   selectOption(screen.getByRole("combobox", { name: "IDA 操作" }), "保存数据库");
   fireEvent.click(screen.getByRole("button", { name: "检查操作" }));
-  expect(await screen.findByRole("dialog", { name: "确认 IDA 操作" })).toBeTruthy();
+  expect(await screen.findByRole("dialog", { name: "确认反汇编操作" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "确认执行" }));
   expect(await screen.findByText("演示操作已完成")).toBeTruthy();
   expect(client.command).not.toHaveBeenCalled(); expect(client.query).not.toHaveBeenCalled();

@@ -28,7 +28,7 @@ it("previews reviewed Python execution without Host calls and keeps drafts per d
   await waitFor(() => expect(screen.getByRole("button", { name: /sample.exe/ })).toHaveProperty("disabled", false));
   expect(screen.getByRole("textbox", { name: "Python" })).toHaveProperty("value", "print(db)");
   fireEvent.click(screen.getByRole("button", { name: /运行请求/ }));
-  expect(screen.getByRole("dialog", { name: "确认 IDA 操作" })).toBeTruthy();
+  expect(screen.getByRole("dialog", { name: "确认反汇编操作" })).toBeTruthy();
   expect(screen.getByRole("textbox", { name: "待执行 Python" })).toHaveProperty("value", "print(db)");
   fireEvent.click(screen.getByRole("button", { name: "确认" }));
   await screen.findByText(PREVIEW_DISASSEMBLER_RESULT.output);

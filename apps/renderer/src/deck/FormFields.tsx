@@ -8,6 +8,8 @@ import { SvgFigureImage } from "../graphics/SvgFigureImage";
 import { useI18n } from "../i18n";
 import { FormSession } from "./FormSession";
 import type { FormPage } from "./formPages";
+import { Icon } from "../icons";
+import { StepNode } from "../conversation/StepRail";
 
 /** Render native inline spans as text and fixed semantic tags, never Host HTML. */
 export function FormSpans({ spans }: { spans: readonly FormSpan[] }) {
@@ -23,12 +25,21 @@ export function FormFields({ form, session, pages, current, disabled, jump }: {
   const locked = useSyncExternalStore(session.subscribeMeta, () => session.getMeta().phase !== "open", () => true);
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
-  return <div role={pages.length > 1 ? "navigation" : undefined} aria-label={zh ? "表单题组" : "Form sections"}>{pages.map((page, pageIndex) => <div key={pageIndex} className="form-stack-section">
-    {pages.length > 1 && <button type="button" className="form-stack-summary" aria-current={pageIndex === current ? "step" : undefined} aria-expanded={pageIndex === current} onClick={() => jump(pageIndex)}>
-      <span className="form-stack-index">{pageIndex + 1}</span><strong>{page.label || (zh ? "问题" : "Question")}</strong>
-      {pageIndex !== current && page.fields.map(field => <FieldSummary key={field.id} field={field} session={session} />)}
+  const stacked = pages.length > 1;
+  useSyncExternalStore(session.subscribeMeta, () => session.getMeta().filled, () => 0);
+  return <div className={`form-stack${stacked ? " is-stacked" : ""}`} role={stacked ? "navigation" : undefined} aria-label={zh ? "表单题组" : "Form sections"}>{pages.map((page, pageIndex) => {
+    const open = pageIndex === current;
+    const done = page.fields.length > 0 && page.fields.every(field => session.isFieldFilled(field.id));
+    return <div key={pageIndex} className={`form-stack-section${open ? " is-open" : ""}${done ? " is-done" : ""}`}>
+    {stacked && <button type="button" className="form-stack-summary" aria-current={open ? "step" : undefined} aria-expanded={open} onClick={() => jump(pageIndex)}>
+      <StepNode tone={open ? "active" : done ? "done" : "pending"} label={pageIndex + 1} />
+      <span className="sr-only">{pageIndex + 1}</span>
+      <span className="form-stack-title">{page.label || (zh ? `问题 ${pageIndex + 1}` : `Question ${pageIndex + 1}`)}</span>
+      {!open ? <span className="form-stack-answers">{page.fields.map(field => <FieldSummary key={field.id} field={field} session={session} />)}</span> : null}
+      {!open && !done ? <span className="form-stack-pending">{zh ? "待回答" : "Unanswered"}</span> : null}
+      <Icon name="chevron-r" extra="sm form-stack-chevron" />
     </button>}
-    <div className="form-page" hidden={pageIndex !== current}>{page.sections.map((group, index) => {
+    <div className="form-page" hidden={!open}>{page.sections.map((group, index) => {
     const content = group.blocks.map((block, at) => block.kind === "field" ? (
       <FormFieldView key={at} field={fields.get(block.fieldId)!} session={session} disabled={disabled || locked} />
     ) : <FormContextBlock key={at} block={block} />);
@@ -38,7 +49,14 @@ export function FormFields({ form, session, pages, current, disabled, jump }: {
     return <section key={index} className="form-section form-loose">
       {group.title.length ? <h3><FormSpans spans={group.title} /></h3> : null}{content}
     </section>;
-  })}</div></div>)}{pages.length > 1 && <button type="button" className="form-stack-summary" aria-current={current === pages.length ? "step" : undefined} onClick={() => jump(pages.length)}>{zh ? "核对答案" : "Review answers"}</button>}</div>;
+  })}</div></div>;
+  })}{stacked && <div className={`form-stack-section is-review${current === pages.length ? " is-open" : ""}`}>
+    <button type="button" className="form-stack-summary" aria-current={current === pages.length ? "step" : undefined} onClick={() => jump(pages.length)}>
+      <StepNode tone={current === pages.length ? "active" : "pending"} icon="check" />
+      <span className="form-stack-title">{zh ? "核对答案" : "Review answers"}</span>
+      <span className="form-stack-count" aria-hidden>{session.getMeta().filled}/{session.getMeta().total}</span>
+    </button>
+  </div>}</div>;
 }
 
 const FormContextBlock = memo(function FormContextBlock({ block }: { block: Exclude<InteractionFormBlock, { kind: "field" }> }) {
@@ -76,7 +94,7 @@ function FieldSummary({ field, session }: { field: InteractionFormField; session
   const draft = useFieldDraft(session, field.id);
   const answer = field.kind === "text" ? (field.type === "password" ? "•".repeat(draft.text.length) : draft.text)
     : draft.checked.map(index => spansText(field.options[index]?.label ?? [])).join(", ");
-  return <>{answer && <span className="form-answer-chip">{answer}</span>}{Object.values(draft.noteImages).flat().map((image, index) => <img key={index} alt="" width="24" height="24" src={`data:${image.mimeType};base64,${image.data}`} />)}</>;
+  return <>{answer && <span className="form-answer-chip" title={answer}>{answer}</span>}{Object.values(draft.noteImages).flat().map((image, index) => <img key={index} className="form-answer-thumb" alt="" width="20" height="20" src={`data:${image.mimeType};base64,${image.data}`} />)}</>;
 }
 
 const FormFieldView = memo(function FormFieldView({ field, session, disabled }: {
@@ -156,8 +174,8 @@ function ChoiceFormField({ field, session, disabled, inputId, errorId }: {
             setPasteError("");
           } catch (cause) { setPasteError(String(cause)); }
         }} />
-        {pasteError && <small role="status">{pasteError === "unsupported" ? zh ? "此提问不接受图片" : "This question does not accept images" : pasteError}</small>}
-        {(draft.noteImages[index] ?? []).map((image, at) => <button key={at} type="button" className="form-note-thumbnail" aria-label={zh ? `移除图片 ${at + 1}` : `Remove image ${at + 1}`} disabled={disabled} onClick={() => session.setNoteImages(field.id, index, draft.noteImages[index]!.filter((_, n) => n !== at))}><img alt="" width="40" height="40" src={`data:${image.mimeType};base64,${image.data}`} /> ×</button>)}
+        {pasteError && <small className={`form-note-paste${pasteError === "unsupported" ? "" : " is-error"}`} role="status"><Icon name={pasteError === "unsupported" ? "info" : "alert-c"} extra="xs" />{pasteError === "unsupported" ? zh ? "此提问不接受图片，附注只保留文字" : "This question does not accept images. Notes keep text only." : pasteError}</small>}
+        {draft.noteImages[index]?.length ? <span className="form-note-images">{draft.noteImages[index]!.map((image, at) => <button key={at} type="button" className="form-note-thumbnail" aria-label={zh ? `移除图片 ${at + 1}` : `Remove image ${at + 1}`} data-tip={zh ? "移除图片" : "Remove image"} disabled={disabled} onClick={() => session.setNoteImages(field.id, index, draft.noteImages[index]!.filter((_, n) => n !== at))}><img alt="" width="44" height="44" src={`data:${image.mimeType};base64,${image.data}`} /><span className="form-note-thumbnail-x" aria-hidden><Icon name="x" extra="xs" /></span></button>)}</span> : null}
       </label> : <button type="button" className="btn small ghost" aria-label={zh ? `添加附注：${label}` : `Add note: ${label}`} disabled={disabled} onClick={() => {
         session.openNote(field.id, index);
         queueMicrotask(() => host.current?.querySelector<HTMLTextAreaElement>(`[data-form-note="${index}"]`)?.focus());

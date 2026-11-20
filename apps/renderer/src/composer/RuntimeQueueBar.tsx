@@ -316,9 +316,13 @@ export function RuntimeQueueBar({
           </span>
         </button>
       </div>
-      {result.compactionMode === "handoff" && <div className="qs-head-row" role="status">
-        <Icon name="handoff" /><span>{zh ? "正在后台生成交接摘要…" : "Preparing handoff in the background…"}</span>
-        <button className="btn small outline" disabled={busy || !can("session.compaction.cancel")} onClick={async () => {
+      {result.compactionMode === "handoff" && <div className="runtime-handoff" role="status">
+        <span className="runtime-handoff-glyph" aria-hidden><Icon name="handoff" extra="sm" /></span>
+        <span className="runtime-handoff-copy">
+          <span className="runtime-handoff-title">{zh ? "正在后台生成交接摘要…" : "Preparing handoff in the background…"}</span>
+          <span className="runtime-handoff-note">{zh ? "可继续阅读和发送消息，完成后切换到交接后的上下文" : "Keep reading and sending. The handed-off context takes over when it is ready."}</span>
+        </span>
+        <button className="btn small ghost runtime-handoff-cancel" disabled={busy || !can("session.compaction.cancel")} onClick={async () => {
           const generation = ++epoch.current;
           setBusy(true);
           try {

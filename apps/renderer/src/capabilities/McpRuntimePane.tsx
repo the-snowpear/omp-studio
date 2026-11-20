@@ -77,9 +77,21 @@ function ServerRow({ server, paneId, zh, props, preview, authAvailable, onComple
       </button>
       {preview || authAvailable ? <McpAuthActions client={props.client} sessionId={props.sessionId} name={server.name}
         available={authAvailable} preview={preview} zh={zh} authSupported={server.transport !== "stdio"} previewScope={server.source?.level === "project" ? "project" : "user"} onComplete={onComplete} /> : <span className="runtime-mcp-actions-unavailable">{zh ? "连接操作不可用" : "Connection actions unavailable"}</span>}
-      {server.replacedByBuiltin && <div className="runtime-mcp-tools-region"><span className="chip xs gray">{zh ? "内置实现已接管" : "Replaced by built-in"} · {server.replacedByBuiltin}</span>
-        <button className="btn small outline" disabled={enabling} onClick={async () => { setEnabling(true); try { await enableOriginal(); } finally { setEnabling(false); } }}>{zh ? "启用原版连接" : "Enable original connection"}</button></div>}
-      {server.evalNamespaceUri && <code className="runtime-mcp-tools-region">{server.evalNamespaceUri}</code>}
+      {server.replacedByBuiltin || server.evalNamespaceUri ? <div className="runtime-mcp-notes">
+        {server.replacedByBuiltin ? <div className="runtime-mcp-note is-replaced">
+          <Icon name="layers" extra="sm" />
+          <span className="runtime-mcp-note-copy">
+            <b>{zh ? "已由内置实现接管" : "Replaced by built-in"}<code>{server.replacedByBuiltin}</code></b>
+            <small>{zh ? "工具调用走内置实现；需要原版服务时可以重新启用。" : "Tool calls use the built-in implementation. Re-enable the original server if you need it."}</small>
+          </span>
+          <button type="button" className="btn small outline" disabled={enabling} onClick={async () => { setEnabling(true); try { await enableOriginal(); } finally { setEnabling(false); } }}>{enabling ? (zh ? "启用中…" : "Enabling…") : (zh ? "启用原版连接" : "Enable original connection")}</button>
+        </div> : null}
+        {server.evalNamespaceUri ? <div className="runtime-mcp-note">
+          <Icon name="code" extra="sm" />
+          <span className="runtime-mcp-note-copy"><b>{zh ? "Eval 命名空间" : "Eval namespace"}</b></span>
+          <code className="runtime-mcp-note-uri">{server.evalNamespaceUri}</code>
+        </div> : null}
+      </div> : null}
       {server.error ? <p className="runtime-mcp-failure"><Icon name="alert-c" extra="xs" /><span>{server.error}</span></p> : null}
       {open && hasTools ? <div id={toolsId} className="runtime-mcp-tools-region"><ServerTools server={server} zh={zh} /></div> : null}
     </article>

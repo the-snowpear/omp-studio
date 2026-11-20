@@ -242,10 +242,15 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
   return <section className="resources-local" aria-label={zh ? "本地会话文件" : "Session-local files"}>
     <div className="resources-local-intro"><Icon name="folder" /><p>{zh ? "原位编辑会话文件" : "Edit session files in place"}<span>{zh ? "UTF-8 文本 · 最大 512 KiB · 保存校验版本" : "UTF-8 text · up to 512 KiB · version-checked saves"}</span></p>{preview && marks ? <span className="resources-demo">{zh ? "演示" : "Demo"}</span> : null}</div>
     {supported && <div className="resources-root">
-      <code title={localRoot}>{localRoot || "local://"}</code>
-      <button className="btn small outline" onClick={() => void directoryAction("copy")}><Icon name="copy" />{zh ? "复制目录路径" : "Copy local path"}</button>
-      <button className="btn small outline" disabled={!preview && (target.kind !== "local" || !globalThis.ompStudioChrome?.systemFileOpen)} title={target.kind !== "local" && !preview ? (zh ? "目录位于远端运行环境" : "The directory is on the remote runtime") : undefined} onClick={() => void directoryAction("open")}><Icon name="folder" />{zh ? "打开目录" : "Open folder"}</button>
-      {directoryMessage && <span role="status">{directoryMessage === "copied" ? (zh ? "路径已复制" : "Path copied") : directoryMessage}</span>}
+      <Icon name="folder" extra="sm" />
+      <span className="resources-root-label">{zh ? "会话目录" : "Session folder"}</span>
+      <code title={localRoot || undefined}><bdi>{localRoot || "local://"}</bdi></code>
+      {directoryMessage && (marks || directoryMessage !== localRoot) ? <span role="status" className={`resources-root-status${directoryMessage === "copied" || directoryMessage === localRoot ? "" : " is-error"}`}>
+        {directoryMessage === "copied" ? <><Icon name="check" extra="xs" />{zh ? "已复制" : "Copied"}</>
+          : directoryMessage === localRoot ? (zh ? "演示：不打开文件管理器" : "Demo: file manager not opened") : directoryMessage}
+      </span> : null}
+      <button type="button" className="icon-btn" aria-label={zh ? "复制目录路径" : "Copy local path"} data-tip={zh ? "复制目录路径" : "Copy local path"} onClick={() => void directoryAction("copy")}><Icon name="copy" /></button>
+      <button type="button" className="icon-btn" aria-label={zh ? "打开目录" : "Open folder"} data-tip={target.kind !== "local" && !preview ? (zh ? "目录位于远端运行环境" : "The directory is on the remote runtime") : (zh ? "在文件管理器中打开" : "Open in file manager")} disabled={!preview && (target.kind !== "local" || !globalThis.ompStudioChrome?.systemFileOpen)} onClick={() => void directoryAction("open")}><Icon name="external" /></button>
     </div>}
     <div className="resources-split">
       <aside className="resources-sidebar" aria-label={zh ? "文件导航" : "File navigation"}>

@@ -198,9 +198,15 @@ export function DisassemblerPane({ client, sessionId, available, visible = true,
           setConfirm({ kind: "configure", backend: choice, maxOpen: status!.maxOpen, idleCloseSec: status!.idleCloseSec });
         }}><option value="auto">{zh ? "自动" : "Auto"}{status?.backend === "auto" && status.activeBackend ? ` · ${status.activeBackend === "ida" ? "IDA Pro" : "Ghidra"}` : ""}</option><option value="ida">IDA Pro</option><option value="ghidra">Ghidra</option><option value="none">{zh ? "仅文件头" : "Metadata only"}</option></AppSelect>
       </label>
-      {status && (["ida", "ghidra"] as const).map(engine => <span key={engine} title={status.backends[engine].detail}>
-        {engine === "ida" ? "IDA Pro" : "Ghidra"} · {({ready: zh ? "就绪" : "Ready", unavailable: zh ? "不可用" : "Unavailable", installing: zh ? "安装中" : "Installing", unknown: zh ? "待检测" : "Unknown"})[status.backends[engine].state]}
-      </span>)}{status?.reason && <span>{status.reason}</span>}
+      {status ? <span className="disassembler-engines" role="list" aria-label={zh ? "引擎状态" : "Engine status"}>{(["ida", "ghidra"] as const).map(engine => {
+        const engineState = status.backends[engine].state;
+        const inUse = status.available && status.activeBackend === engine;
+        return <span key={engine} role="listitem" className="disassembler-engine" data-state={engineState} data-active={inUse || undefined} data-tip={status.backends[engine].detail || undefined}>
+          <span className="disassembler-engine-dot" aria-hidden />
+          <b>{engine === "ida" ? "IDA Pro" : "Ghidra"}</b>
+          <span>{inUse ? (zh ? "使用中" : "In use") : ({ ready: zh ? "就绪" : "Ready", unavailable: zh ? "不可用" : "Unavailable", installing: zh ? "安装中" : "Installing", unknown: zh ? "待检测" : "Unknown" })[engineState]}</span>
+        </span>;
+      })}</span> : null}{status?.reason && <span className="disassembler-engine-reason">{status.reason}</span>}
       <button className="icon-btn" aria-label={zh ? "刷新分析引擎状态" : "Refresh analysis engine status"} disabled={!canRead || busy || loading} onClick={() => { setError(""); void refresh(); setRefreshKey(key => key + 1); }}><Icon name="refresh" /></button>
     </div>
     {error ? <div className="disassembler-notice is-error" role="alert"><Icon name="alert-c" /><span>{error}</span></div> : null}
@@ -224,7 +230,7 @@ export function DisassemblerPane({ client, sessionId, available, visible = true,
         <div className="disassembler-list-heading"><strong>{zh ? "项目数据库" : "Project databases"}</strong><span>{status?.databases.length ?? 0}</span></div>
         <div className="disassembler-list-search"><Icon name="search" /><input aria-label={zh ? "筛选数据库" : "Filter databases"} placeholder={zh ? "筛选数据库…" : "Filter databases…"} value={filter} onChange={event => setFilter(event.target.value)} /></div>
         <div className="disassembler-database-list">{status?.databases.filter(row => row.module.toLowerCase().includes(filter.toLowerCase())).map(row => <button key={row.id} type="button" className="disassembler-database-row" aria-pressed={row.id === db?.id} disabled={busy} onClick={() => setSelected(row.id)}>
-          <Icon name="cpu" /><span><strong>{row.module}</strong><small>{row.backend === "ida" ? "IDA Pro" : "Ghidra"} · {row.arch} / {row.bitness}-bit</small></span>{row.dirty ? <span className="disassembler-dirty" title={zh ? "未保存更改" : "Unsaved changes"} aria-label={zh ? "未保存更改" : "Unsaved changes"} /> : null}{row.busy ? <Icon name="clock" /> : null}
+          <Icon name="cpu" /><span><strong>{row.module}</strong><small><span className="disassembler-backend-tag" data-backend={row.backend}>{row.backend === "ida" ? "IDA" : "Ghidra"}</span>{row.arch} / {row.bitness}-bit</small></span>{row.dirty ? <span className="disassembler-dirty" title={zh ? "未保存更改" : "Unsaved changes"} aria-label={zh ? "未保存更改" : "Unsaved changes"} /> : null}{row.busy ? <Icon name="clock" /> : null}
         </button>)}{filter && !status?.databases.some(row => row.module.toLowerCase().includes(filter.toLowerCase())) ? <p className="disassembler-hint">{zh ? "没有匹配的数据库" : "No matching databases"}</p> : null}</div>
         <div className="disassembler-list-foot"><Icon name="shield" /><p>{zh ? "运行、保存和关闭前\n自动保留恢复副本" : "A recovery copy precedes\nrun, save and close"}</p></div>
       </aside>
@@ -258,7 +264,7 @@ export function DisassemblerPane({ client, sessionId, available, visible = true,
         <label>{zh ? "空闲关闭时间（秒）" : "Idle timeout (seconds)"}<input className="input" type="number" value={idleCloseSec} onChange={event => setIdleCloseSec(event.target.valueAsNumber)} /></label>
         <button className="btn primary" disabled={!can("disassembler.configure")}>{zh ? "保存设置" : "Save settings"}</button>
       </form></WorkspaceDialog> : null}
-    {confirm ? <WorkspaceDialog title={zh ? "确认 IDA 操作" : "Confirm IDA action"} onClose={() => setConfirm(undefined)}><div className="disassembler-edit-form"><div className="disassembler-review-heading"><Icon name="shield" /><div><strong>{actionTitle(confirm.kind)}</strong><p>{"id" in confirm ? status?.databases.find(row => row.id === confirm.id)?.module : confirm.kind === "open" ? confirm.path : (zh ? "原生全局配置" : "Native global configuration")}</p></div></div>
+    {confirm ? <WorkspaceDialog title={zh ? "确认反汇编操作" : "Confirm disassembler action"} onClose={() => setConfirm(undefined)}><div className="disassembler-edit-form"><div className="disassembler-review-heading"><Icon name="shield" /><div><strong>{actionTitle(confirm.kind)}</strong><p>{"id" in confirm ? status?.databases.find(row => row.id === confirm.id)?.module : confirm.kind === "open" ? confirm.path : (zh ? "原生全局配置" : "Native global configuration")}</p></div></div>
       <p className="disassembler-hint">{confirm.kind === "configure" ? (zh ? "将分析引擎、数据库数量与空闲时间保存到全局设置。" : "Save the analysis engine, database limit and idle timeout globally.") : confirm.kind === "open" ? (zh ? "二进制将使用独立分析数据库。已有 IDB / i64 会原位打开，分析可能需要一些时间。" : "A binary uses a separate analysis database. Existing IDB / i64 files open in place. Analysis can take a while.") : confirm.kind === "close" ? (zh ? "先保留恢复副本并保存数据库，再关闭。其他使用此数据库的代理也会受影响。" : "Keep a recovery copy, save, then close the database. Other agents using it will be affected.") : confirm.kind === "run" ? (zh ? "先保留恢复副本。Python 可修改数据库并访问本机资源，命名空间与其他代理共享。" : "A recovery copy is kept first. Python can modify the database and access local resources. Its namespace is shared with other agents.") : (zh ? "保留恢复副本后，将当前数据库更改保存到磁盘。" : "Keep a recovery copy, then save database changes to disk.")}</p>
       {confirm.kind === "run" ? <CapabilityEditor label={zh ? "待执行 Python" : "Python to execute"} value={confirm.code} language="python" readOnly /> : null}
       <div className="disassembler-dialog-actions"><button className="btn outline" onClick={() => setConfirm(undefined)}>{zh ? "取消" : "Cancel"}</button><button className="btn primary" onClick={() => void run()}>{zh ? "确认" : "Confirm"}</button></div></div></WorkspaceDialog> : null}

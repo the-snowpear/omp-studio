@@ -46,6 +46,21 @@
 .usage-chevron { margin-left: auto; transition: transform var(--dur-fast) var(--ease); }
 .usage-disclosure[open] > summary .usage-chevron { transform: rotate(90deg); }
 .usage-disclosure-body { padding: 2px 16px 14px; }
+.usage-summary-meta { margin-left: auto; color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-10); font-variant-numeric: tabular-nums; }
+.usage-summary-meta + .usage-chevron { margin-left: 0; }
+.usage-disclosure > summary > .icon:first-child { color: var(--text-3); }
+.usage-disclosure[open] > summary > .icon:first-child { color: var(--accent); }
+.usage-disclosure[open] > .usage-disclosure-body { animation: var(--motion-unfold); }
+/* 份额行：标签 + 数值一行，下方一根按 token 占比填充的细条，组内互相比较。 */
+.usage-share-note { margin: 0 0 8px; color: var(--text-3); font-size: var(--fs-10); }
+.usage-share { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
+.usage-share > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 3px 12px; font-size: var(--fs-11); }
+.usage-share-label { display: flex; align-items: baseline; gap: 6px; min-width: 0; color: var(--text-2); }
+.usage-share-label code { min-width: 0; overflow: hidden; color: var(--text-3); font-size: var(--fs-10); text-overflow: ellipsis; white-space: nowrap; }
+.usage-share-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+.usage-share-value small { margin-left: 6px; color: var(--text-3); font-size: var(--fs-10); }
+.usage-share-bar { grid-column: 1 / -1; position: relative; height: 3px; border-radius: var(--r-full); background: var(--surface-3); overflow: hidden; }
+.usage-share-bar::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--share); border-radius: inherit; background: var(--accent); opacity: 0.7; }
 .telemetry-footer { flex: none; padding: 8px; border-top: 1px solid var(--border); background: var(--surface-2); }
 .telemetry-footer button { display: flex; align-items: center; gap: 8px; padding: 8px; width: 100%; border-radius: var(--r-6); text-align: left; font-size: var(--fs-11); color: var(--text-2); transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
 .telemetry-footer button > .icon:last-child { margin-left: auto; }

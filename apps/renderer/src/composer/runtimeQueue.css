@@ -64,3 +64,40 @@
 .convo-wrap[data-reading-column] > .composer-region > .composer-queues .runtime-queue .qs-text {
   overflow-wrap: anywhere;
 }
+
+/* 后台交接：不阻塞的状态行，挂在已提交队列标题下。标签用 BTW / 工作行同款扫光
+   说明「仍在进行」，取消是次要动作，所以是 ghost。 */
+.runtime-handoff {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  margin: var(--sp-2) calc(-1 * var(--sp-6)) var(--sp-6);
+  padding: var(--sp-6) var(--sp-6) var(--sp-6) var(--sp-8);
+  border-radius: var(--r-6);
+  background: var(--accent-softer);
+  animation: var(--motion-reveal);
+}
+.runtime-handoff-glyph {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-4);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.runtime-handoff-copy { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.runtime-handoff-title {
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  background: linear-gradient(90deg, var(--text-2) 30%, var(--text) 50%, var(--text-2) 70%);
+  background-size: 240% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: al-sweep var(--loop-drift) linear infinite;
+}
+.runtime-handoff-note { overflow: hidden; color: var(--text-3); font-size: var(--fs-11); text-overflow: ellipsis; white-space: nowrap; }
+.runtime-handoff-cancel { flex: none; }
+.runtime-handoff-cancel:hover:not(:disabled) { color: var(--red); }

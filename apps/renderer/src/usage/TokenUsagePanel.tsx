@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { SessionTelemetrySnapshot } from "@omp-studio/studio-protocol";
 import { useI18n } from "../i18n";
 import { Icon } from "../icons";
@@ -115,13 +116,27 @@ export function TokenUsagePanel({ telemetry, view, onOpenCounter, onClose }: {
           </div>)}</dl>
         </section>
         <div className="usage-round"><UsageRows rows={data.rows} /></div>
-        {[
-          {title: zh ? "旁路辅助调用" : "Off-transcript calls", rows: data.offTranscript?.map(row => ({
-            label: ({ title: zh ? "会话标题" : "Session title", jobCaption: zh ? "作业摘要" : "Job caption", judge: zh ? "评判" : "Judge", cacheWarming: zh ? "缓存预热" : "Cache warming" } as Record<string, string>)[row.kind] ?? row.kind, ...row }))},
-          {title: zh ? "评判模型" : "Decision models", rows: data.decisionModels?.map(row => ({ label: `${row.provider}/${row.model} · ${row.purpose}`, ...row }))},
-        ].map(group => group.rows?.length ? <details key={group.title} className="usage-disclosure">
-          <summary>{group.title}</summary><dl>{group.rows.map(row => <div key={row.label}><dt>{row.label}</dt><dd>{row.requests} {zh ? "次" : "requests"} · {fmtTokens(row.tokens)} tokens</dd></div>)}</dl>
-        </details> : null)}
+        {([
+          { key: "off", icon: "layers", title: zh ? "旁路辅助调用" : "Off-transcript calls", note: zh ? "不进入对话的后台调用" : "Background calls outside the chat", rows: data.offTranscript?.map(row => ({
+            id: row.kind, label: ({ title: zh ? "会话标题" : "Session title", jobCaption: zh ? "作业摘要" : "Job caption", judge: zh ? "评判" : "Judge", cacheWarming: zh ? "缓存预热" : "Cache warming" } as Record<string, string>)[row.kind] ?? row.kind, detail: undefined, requests: row.requests, tokens: row.tokens })) },
+          { key: "judge", icon: "brain", title: zh ? "评判模型" : "Decision models", note: zh ? "原生 Judge 按用途计" : "Native judges by purpose", rows: data.decisionModels?.map(row => ({
+            id: `${row.provider}/${row.model}/${row.purpose}`, label: row.purpose, detail: `${row.provider}/${row.model}`, requests: row.requests, tokens: row.tokens })) },
+        ] as const).map(group => {
+          if (!group.rows?.length) return null;
+          const tokens = group.rows.reduce((sum, row) => sum + row.tokens, 0);
+          const requests = group.rows.reduce((sum, row) => sum + row.requests, 0);
+          return <details key={group.key} className="usage-disclosure">
+            <summary><Icon name={group.icon} extra="sm" /><span>{group.title}</span><span className="usage-summary-meta">{fmtTokens(tokens)} · {requests} {zh ? "次" : requests === 1 ? "call" : "calls"}</span><Icon name="chevron-r" extra="sm usage-chevron" /></summary>
+            <div className="usage-disclosure-body">
+              <p className="usage-share-note">{group.note}</p>
+              <ul className="usage-share">{group.rows.map(row => <li key={row.id}>
+                <span className="usage-share-label">{row.label}{row.detail ? <code>{row.detail}</code> : null}</span>
+                <span className="usage-share-value">{fmtTokens(row.tokens)}<small>{row.requests} {zh ? "次" : row.requests === 1 ? "call" : "calls"}</small></span>
+                <i className="usage-share-bar" aria-hidden style={{ "--share": `${tokens > 0 ? Math.max(2, row.tokens / tokens * 100) : 0}%` } as CSSProperties} />
+              </li>)}</ul>
+            </div>
+          </details>;
+        })}
         <details className="usage-disclosure">
           <summary><Icon name="chart" extra="sm" /><span>{zh ? "更多用量明细" : "More usage details"}</span><Icon name="chevron-r" extra="sm usage-chevron" /></summary>
           <div className="usage-disclosure-body"><UsageRows rows={data.details} /></div>

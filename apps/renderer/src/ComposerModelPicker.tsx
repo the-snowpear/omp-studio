@@ -12,7 +12,7 @@
  * Runtime 把选择记到下一轮用户对话，当前请求和自动重试仍用原模型。
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import type {
   CommandInput,
@@ -271,19 +271,35 @@ export function ComposerModelMenu({
         </span>
         {moreOpen ? (
           <div
-            className={`menu rms-pop cmp-flyout side-${flyoutSide}`}
+            className={`menu rms-pop rms-picker-pop cmp-flyout side-${flyoutSide}`}
             role="listbox"
             aria-label={t("composer.allModels")}
             onMouseEnter={keepFlyoutOpen}
             onMouseLeave={scheduleFlyoutClose}
           >
             <div className="cmp-model-filter">
-              <input className="input" aria-label={zh ? "搜索模型" : "Search models"} placeholder={zh ? "搜索模型或 provider/model" : "Search model or provider/model"} value={search} onChange={event => setSearch(event.target.value)} />
-              <div className="cmp-model-scopes">{groups.map(group => <button type="button" key={group.providerId} aria-pressed={scope === group.providerId} onClick={() => setScope(value => value === group.providerId ? undefined : group.providerId.toLowerCase())}>{group.providerName}</button>)}</div>
-              {chooseEffort && <label className="cmp-model-effort"><span>{zh ? "思考强度" : "Thinking effort"} · {effort ?? (zh ? "保留当前" : "Keep current")}</span>
-                <input type="range" min={0} max={SESSION_THINKING_SELECTORS.length} value={effortIndex} onChange={event => setEffortIndex(Number(event.target.value))} />
+              <label className="cmp-model-search">
+                <Icon name="search" extra="sm" />
+                <input aria-label={zh ? "搜索模型" : "Search models"} placeholder={zh ? "搜索模型，或 provider/model" : "Search models, or provider/model"} value={search} onChange={event => setSearch(event.target.value)} />
+                {search ? <button type="button" className="cmp-model-clear" aria-label={zh ? "清除搜索" : "Clear search"} onClick={() => setSearch("")}><Icon name="x" extra="xs" /></button> : null}
+              </label>
+              {groups.length > 1 ? <div className="cmp-model-scopes" role="group" aria-label={zh ? "按供应商筛选" : "Filter by provider"}>
+                <button type="button" aria-pressed={!scope} onClick={() => setScope(undefined)}>{zh ? "全部" : "All"}</button>
+                {groups.map(group => <button type="button" key={group.providerId} aria-pressed={scope === group.providerId.toLowerCase()} onClick={() => setScope(value => value === group.providerId.toLowerCase() ? undefined : group.providerId.toLowerCase())}>
+                  <ProviderGlyph id={group.providerId} local={group.local} />{group.providerName}
+                </button>)}
+              </div> : null}
+              {chooseEffort && <label className="cmp-model-effort">
+                <span className="cmp-model-effort-head">
+                  <Icon name="brain" extra="sm" />{zh ? "切换时的思考档位" : "Thinking on switch"}
+                  <b className={effort ? "" : "is-keep"}>{effort ? MODEL_THINKING.find(item => item.id === effort)?.label ?? effort : (zh ? "保留当前" : "Keep current")}</b>
+                </span>
+                <input type="range" min={0} max={SESSION_THINKING_SELECTORS.length} step={1} value={effortIndex}
+                  style={{ "--effort-fill": `${(effortIndex / SESSION_THINKING_SELECTORS.length) * 100}%`, "--effort-steps": SESSION_THINKING_SELECTORS.length } as CSSProperties}
+                  aria-valuetext={effort ?? (zh ? "保留当前" : "Keep current")} onChange={event => setEffortIndex(Number(event.target.value))} />
               </label>}
             </div>
+            <div className="rms-scroll">
             {filtered.length === 0 ? (
               <div className="rms-empty">{t("composer.noAvailableModels")}</div>
             ) : (
@@ -320,6 +336,7 @@ export function ComposerModelMenu({
                 </div>
               ))
             )}
+            </div>
           </div>
         ) : null}
         {preview && marks ? (

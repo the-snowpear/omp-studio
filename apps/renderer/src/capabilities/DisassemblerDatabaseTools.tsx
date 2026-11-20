@@ -66,7 +66,7 @@ export function DisassemblerDatabaseTools({ client, sessionId, available, initia
     const generation = epoch.current;
     locked.current = true; setBusy(true); onBusyChange?.(true); setError("");
     try { await job(generation); }
-    catch (cause) { if (generation === epoch.current) setError(hostErrorMessage(cause, zh ? "IDA 操作失败，请刷新数据库状态后重试。" : "IDA operation failed. Refresh the database before retrying.")); }
+    catch (cause) { if (generation === epoch.current) setError(hostErrorMessage(cause, zh ? "反汇编操作失败，请刷新数据库状态后重试。" : "Disassembler operation failed. Refresh the database before retrying.")); }
     finally { if (generation === epoch.current) { locked.current = false; setBusy(false); onBusyChange?.(false); } }
   };
   const refresh = async (generation: number) => {
@@ -82,7 +82,7 @@ export function DisassemblerDatabaseTools({ client, sessionId, available, initia
       const ids = next.capabilities.filter(cap => cap.grade !== "unavailable").map(cap => cap.id);
       setCapabilities(ids);
       if (ids.includes("disassembler.status")) await refresh(generation);
-    }).catch(cause => { if (generation === epoch.current) setError(hostErrorMessage(cause, "IDA unavailable")); });
+    }).catch(cause => { if (generation === epoch.current) setError(hostErrorMessage(cause, zh ? "分析引擎不可用" : "Analysis engine unavailable")); });
     return () => { epoch.current++; onBusyChange?.(false); };
   }, [client, sessionId, available, preview]);
   useEffect(() => { setPath(initialPath ?? ""); }, [initialPath]);
@@ -164,7 +164,7 @@ export function DisassemblerDatabaseTools({ client, sessionId, available, initia
 
   return <section className={`disassembler-browser ${databaseId ? "is-embedded" : ""}`} aria-label={zh ? "数据库视图与编辑" : "Database views and edits"}>
     {!databaseId ? <div className="disassembler-standalone-head">
-      <div><h3>{zh ? "数据库视图与编辑" : "Database views and edits"}</h3><p>{zh ? "已授权的 IDA Pro / idalib 与匹配的 Python。所有修改均先核对再执行。" : "Licensed IDA Pro / idalib with matching Python. Review every edit before execution."}</p></div>
+      <div><h3>{zh ? "数据库视图与编辑" : "Database views and edits"}</h3><p>{zh ? "由当前分析引擎（IDA Pro 或 Ghidra）提供。所有修改均先核对再执行。" : "Served by the active analysis engine (IDA Pro or Ghidra). Review every edit before execution."}</p></div>
       <div className="disassembler-browser-toolbar"><AppSelect className="select" aria-label={zh ? "IDA 数据库" : "IDA database"} value={selected} disabled={busy} onChange={event => setSelected(event.target.value)}>
         <option value="">{zh ? "选择数据库" : "Select database"}</option>{state?.databases.map(row => <option key={row.id} value={row.id}>{row.label} · {row.state}</option>)}
       </AppSelect><button className="btn outline small" disabled={!can("disassembler.status") || busy} onClick={() => void run(refresh)}><Icon name="refresh" />{zh ? "检测 / 刷新" : "Detect / refresh"}</button></div>
@@ -172,7 +172,7 @@ export function DisassemblerDatabaseTools({ client, sessionId, available, initia
     </div> : null}
     {error && !editing ? <div className="disassembler-notice is-error" role="alert"><Icon name="alert-c" /><span>{error}</span><button className="btn small ghost" disabled={busy || !can("disassembler.status")} onClick={() => void run(refresh)}>{zh ? "刷新状态" : "Refresh"}</button></div> : null}
     {state?.reason ? <p className="disassembler-hint" role="status">{state.reason}</p> : null}
-    {!can("disassembler.query") ? <WorkspaceEmpty icon="plug" title={zh ? "当前 Runtime 未提供数据库视图" : "Database views are unavailable"}>{zh ? "连接支持 IDA 分页查看的 Runtime 后使用。" : "Connect a Runtime with IDA view support."}</WorkspaceEmpty> : <>
+    {!can("disassembler.query") ? <WorkspaceEmpty icon="plug" title={zh ? "当前 Runtime 未提供数据库视图" : "Database views are unavailable"}>{zh ? "连接支持反汇编分页查看的 Runtime 后使用。" : "Connect a Runtime with disassembler view support."}</WorkspaceEmpty> : <>
       <div className="disassembler-browser-toolbar">
         <label className="disassembler-view-field">{zh ? "查看内容" : "View"}<AppSelect className="select" aria-label={zh ? "IDA 视图" : "IDA view"} value={view} disabled={busy} onChange={event => { setView(event.target.value as DisassemblerView); setPage(undefined); }}>
           {DISASSEMBLER_VIEWS.map(id => <option key={id} value={id}>{label(id)}</option>)}
@@ -212,7 +212,7 @@ export function DisassemblerDatabaseTools({ client, sessionId, available, initia
       {action === "close" ? <><label className="disassembler-checkbox"><input type="checkbox" checked={save} disabled={busy} onChange={event => setSave(event.target.checked)} />{zh ? "关闭前保存" : "Save before closing"}</label><p className="disassembler-hint">{zh ? "不保存只丢弃尚未落盘的修改，不能撤销此前的自动保存。关闭会影响共享此数据库的代理。" : "Skipping save discards only unsaved changes, not prior autosaves. Closing affects agents sharing this database."}</p></> : null}
       <div className="disassembler-dialog-actions"><button className="btn outline" disabled={busy} onClick={() => setEditing(false)}>{zh ? "返回" : "Back"}</button><button className="btn primary" disabled={!canEdit || busy || !validEdit} onClick={() => prepare(buildEdit())}>{busy ? (zh ? "检查中…" : "Reviewing…") : (zh ? "检查操作" : "Review operation")}</button></div>
     </div></WorkspaceDialog> : null}
-    {review ? <WorkspaceDialog title={zh ? "确认 IDA 操作" : "Confirm IDA operation"} onClose={() => setReview(undefined)}><div className="disassembler-edit-form">
+    {review ? <WorkspaceDialog title={zh ? "确认反汇编操作" : "Confirm disassembler action"} onClose={() => setReview(undefined)}><div className="disassembler-edit-form">
       <div className="disassembler-review-heading"><Icon name="shield" /><div><strong>{editLabel(review.edit.action)}</strong><p>{review.identity ?? path}{review.version !== undefined ? ` · v${review.version}` : ""}</p></div></div>
       <pre className="disassembler-output">{JSON.stringify(review.edit, null, 2)}</pre>
       <p className="disassembler-hint">{review.edit.action === "exec" ? (zh ? "Python 可修改数据库并访问本机资源，请核对完整代码。" : "Python can modify the database and access local resources. Review the full code.") : (zh ? "确认只授权上方操作。数据库版本变化后，需要重新检查；不会自动重试。" : "This confirms only the operation above. A changed database requires a new review. No automatic retries.")}</p>

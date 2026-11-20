@@ -1,4 +1,6 @@
 import { previewHintCompression } from "../preview/runtimeQueuePreview";
+import "../composer/composerModes.css";
+import { WorkspaceDialog } from "../workspaces/Workspace";
 import { SpillViewer } from "../conversation/SpillLink";
 import { DisassemblerPane } from "../capabilities/DisassemblerPane";
 import { useWorkbenchResizers } from "../layout/useWorkbenchResizers";
@@ -2287,8 +2289,8 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
           </form>
         </section>
       </div> : null}
-      {spillUri && <div className="modal-backdrop"><section className="modal" role="dialog" aria-label={spillUri}><button autoFocus className="btn small ghost" onClick={() => setSpillUri("")}>{t("common.close")}</button><DeferredPanel><SpillReader key={spillUri} client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches} initialUri={spillUri} /></DeferredPanel></section></div>}
-      {localFilesOpen ? <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="local://"><button autoFocus className="btn small ghost" onClick={() => setLocalFilesOpen(false)}>{t("common.close")}</button><DeferredPanel><LocalFilesPane client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches} initialName={localFileName} /></DeferredPanel></section></div> : null}
+      {spillUri && <WorkspaceDialog title={`${zh ? "完整输出" : "Full output"} · ${spillUri}`} onClose={() => setSpillUri("")}><DeferredPanel><SpillReader key={spillUri} client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches} initialUri={spillUri} /></DeferredPanel></WorkspaceDialog>}
+      {localFilesOpen ? <WorkspaceDialog title={zh ? "会话本地文件 · local://" : "Session-local files · local://"} onClose={() => setLocalFilesOpen(false)}><DeferredPanel><LocalFilesPane client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches} initialName={localFileName} /></DeferredPanel></WorkspaceDialog> : null}
       <WorktreeLaunchGate client={client} context={{ sessionId: snapshot?.sessionId, available: runtimeConnected && executionMatches && !connection?.resyncRequired, capabilities }} visible={state.route === "workbench"} onGateChange={changeWorktreeGate} onOpenWorkspace={onOpenWorktree} />
       <div className={`workbench${!mdi && sideOpen ? " split-right" : ""}`} id="workbench">
         <div ref={readingColumnRef} className={`convo-wrap${surfaceWelcome ? " is-empty" : ""}`} inert={state.loading}>
@@ -2558,8 +2560,13 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
               </button>
             ) : null}
             <div className="composer-tray">
-            {hintCompression && (hintCompression.skills > 0 || hintCompression.mcp > 0) && <div className="qs-head-row composer-hint-progress" role="status">
-              <Icon name="layers" extra="sm" /><span>{zh ? "正在生成工具提示" : "Preparing tool hints"} · {hintCompression.skills} {zh ? "项技能" : "skills"} · {hintCompression.mcp} MCP</span>
+            {hintCompression && (hintCompression.skills > 0 || hintCompression.mcp > 0) && <div className="composer-hint-progress" role="status">
+              <span className="dot purple pulse" aria-hidden />
+              <span className="composer-hint-title">{zh ? "正在后台整理工具提示" : "Preparing tool hints in the background"}</span>
+              <span className="composer-hint-counts">
+                {hintCompression.skills > 0 ? <span><b>{hintCompression.skills}</b>{zh ? " 项技能" : hintCompression.skills === 1 ? " skill" : " skills"}</span> : null}
+                {hintCompression.mcp > 0 ? <span><b>{hintCompression.mcp}</b>{zh ? " 个 MCP" : " MCP"}</span> : null}
+              </span>
             </div>}
             {(preview || can("session.queue.get")) ? (<RuntimeQueueBar client={client} sessionId={snapshot?.sessionId} capabilities={capabilities} available={runtimeConnected && executionMatches && !connection?.resyncRequired} pending={snapshot?.pendingMessages ?? 0} running={Boolean(snapshot?.isStreaming || snapshot?.isCompacting)} showDemo={previewThreadId === "t1"} />) : (!preview ? <RuntimeQueue client={client} sessionId={composerOwner} available={can("session.queue.list")} running={Boolean(snapshot?.isStreaming)} pending={snapshot?.pendingMessages ?? 0} hasDraft={() => !snapshotIsEmpty(takeComposerSnapshot())} onRecover={(recovered, owner) => {
               if (owner !== composerOwner) return;
@@ -2795,8 +2802,17 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
               </button>
             </div> : null}
             <div className={`composer${btwMode ? " btw-mode" : ""}${composerRunning ? ` running ${composerExpanded ? "expanded" : "compact"}` : ""}`} id="composer">
-              {btwMode ? <div className="composer-mode-hint">{zh ? "BTW 旁路提问 · 不打断当前对话" : "BTW · ask without interrupting"}</div>
-                : skipAsk && <div className="composer-mode-hint">{textReady ? skipLabel : (zh ? "输入消息可跳过当前提问" : "Type a message to skip this question")}</div>}
+              {btwMode ? <div className="composer-mode-hint" data-mode="btw">
+                <span className="composer-mode-badge"><Icon name="sparkles" extra="sm" />BTW</span>
+                <span className="composer-mode-text">{zh ? "旁路提问 · 不打断当前对话" : "Side question · the main chat keeps going"}</span>
+                <span className="composer-mode-key">{zh ? "删除开头的 ? 退出" : "Remove the leading ? to exit"}</span>
+              </div>
+                : skipAsk && <div className="composer-mode-hint" data-mode="skip" data-ready={textReady || undefined}>
+                <span className="composer-mode-badge"><Icon name="arrow-r" extra="sm" />{textReady ? skipLabel : (zh ? "提问等待中" : "Question waiting")}</span>
+                <span className="composer-mode-text">{textReady
+                  ? (zh ? "发送后跳过当前提问，已填写的答案会一并带回" : "Sending skips the question and returns the answers you filled in")
+                  : (zh ? "在这里输入消息即可跳过当前提问" : "Type here to skip the question and send a message instead")}</span>
+              </div>}
               <LuxOrbit state={composerLightState} />
               <div className="composer-ctx" aria-label={zh ? "已引用的上下文" : "Referenced context"} role="group" />
               <label className="sr-only" htmlFor="composerInput">{zh ? "消息输入框。发送给 Runtime 的文本。" : "Message input box. Text to send to the Runtime."}</label>

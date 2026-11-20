@@ -1,0 +1,93 @@
+/* ---------------- 主输入框的临时模式 ----------------
+   以 ? 开头 = BTW 旁路提问；有未决提问时打字 = 跳过并发送。两种模式都在输入框
+   顶部挂一条细标签栏：左侧胶囊说明当前模式，右侧说明发送会发生什么。
+   BTW 用 accent（与 BTW 面板同一色），跳过用 amber（提醒而非危险）。 */
+.composer-mode-hint {
+  --mode-ink: var(--text-2);
+  --mode-fill: var(--surface-2);
+  --mode-badge: var(--surface-3);
+  --mode-badge-ink: var(--text-2);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  min-width: 0;
+  margin: var(--sp-6) var(--sp-6) 0;
+  padding: var(--sp-4) var(--sp-10) var(--sp-4) var(--sp-4);
+  border-radius: calc(var(--r-10) - var(--sp-6)) calc(var(--r-10) - var(--sp-6)) var(--r-4) var(--r-4);
+  background: var(--mode-fill);
+  color: var(--mode-ink);
+  font-size: var(--fs-11);
+  animation: var(--motion-unfold);
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.composer-mode-hint[data-mode="btw"] {
+  --mode-ink: var(--accent);
+  --mode-fill: var(--accent-softer);
+  --mode-badge: var(--accent);
+  --mode-badge-ink: var(--text-on-accent);
+}
+.composer-mode-hint[data-mode="skip"] {
+  --mode-ink: var(--text-2);
+  --mode-fill: var(--amber-soft);
+  --mode-badge: transparent;
+  --mode-badge-ink: var(--amber);
+}
+.composer-mode-hint[data-mode="skip"][data-ready] {
+  --mode-ink: var(--text);
+  --mode-badge: var(--amber);
+  --mode-badge-ink: var(--surface);
+}
+.composer-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex: none;
+  height: 20px;
+  padding: 0 var(--sp-8) 0 var(--sp-6);
+  border-radius: var(--r-full);
+  background: var(--mode-badge);
+  color: var(--mode-badge-ink);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.02em;
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.composer-mode-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-mode-key { flex: none; color: var(--text-3); }
+
+.composer.btw-mode { border-color: var(--accent-border); }
+.composer.btw-mode .send-btn:not(:disabled) { box-shadow: 0 0 0 3px var(--accent-soft); }
+.composer:has(.composer-mode-hint[data-mode="skip"][data-ready]) { border-color: color-mix(in srgb, var(--amber) 45%, var(--border-strong)); }
+
+@container (max-width: 520px) {
+  .composer-mode-key { display: none; }
+}
+
+/* ---------------- 后台工具提示生成 ----------------
+   与已提交队列同一张浮卡（workbench.css 的 .composer-tray 卡片规则也收这一行）：
+   单独出现时它自己就是卡片，和队列同时出现时是卡片的第一行。 */
+.composer-hint-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  min-height: 34px;
+  padding: 0 var(--sp-12);
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  animation: var(--motion-reveal);
+}
+.composer-hint-progress .dot { flex: none; width: 6px; height: 6px; margin: 0 var(--sp-4); }
+.composer-hint-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-hint-counts { display: inline-flex; gap: var(--sp-4); flex: none; }
+.composer-hint-counts > span {
+  display: inline-flex;
+  align-items: baseline;
+  height: 18px;
+  padding: 0 var(--sp-6);
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  line-height: 18px;
+}
+.composer-hint-counts b { color: var(--text); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.composer-hint-progress + .queue-strip { border-top: 1px solid var(--border); }

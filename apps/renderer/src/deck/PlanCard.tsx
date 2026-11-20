@@ -13,6 +13,8 @@ import { parsePlanSections } from "./planSections";
 import { PromptHead } from "./PromptHead";
 import { PLAN_ACTIONS, type PlanActionDetail, type PlanActionId } from "./types";
 import { MOTION_MS, MOTION_SLACK_MS, motionReduced } from "../motion";
+import { PLATFORM } from "../platform";
+import "./planEditor.css";
 
 function PlanHeadActions({
   expanded,
@@ -400,17 +402,36 @@ export function PlanCard({
   const [savedMarkdown, setSavedMarkdown] = useState<string | undefined>();
   const [saving, setSaving] = useState(false);
   const displayedBody = savedMarkdown ?? body;
+  const dirty = draftMarkdown !== undefined && draftMarkdown !== displayedBody;
+  const savePlan = async () => {
+    if (draftMarkdown === undefined || disabled || saving) return;
+    setSaving(true);
+    try {
+      if (!onSaveMarkdown || await onSaveMarkdown(draftMarkdown)) { setSavedMarkdown(draftMarkdown); setDraftMarkdown(undefined); }
+    } finally { setSaving(false); }
+  };
   const editor = onSaveMarkdown || preview || demo ? <div className="plan-inline-editor">
-    {draftMarkdown === undefined ? <button className="btn small outline" disabled={disabled} onClick={() => setDraftMarkdown(displayedBody)}><Icon name="pencil" />{zh ? "编辑计划" : "Edit plan"}</button> : <>
-      <textarea className="input mono" aria-label={zh ? "计划 Markdown" : "Plan Markdown"} rows={10} value={draftMarkdown} disabled={saving} onChange={event => setDraftMarkdown(event.target.value)} />
-      <div><button className="btn small primary" disabled={disabled || saving} onClick={async () => {
-        setSaving(true);
-        try {
-          if (!onSaveMarkdown || await onSaveMarkdown(draftMarkdown)) { setSavedMarkdown(draftMarkdown); setDraftMarkdown(undefined); }
-        } finally { setSaving(false); }
-      }}>{zh ? "保存计划" : "Save plan"}</button>
-      <button className="btn small ghost" disabled={saving} onClick={() => setDraftMarkdown(undefined)}>{zh ? "取消" : "Cancel"}</button></div>
-    </>}
+    {draftMarkdown === undefined ? <div className="plan-inline-editor-bar">
+      {savedMarkdown !== undefined
+        ? <span className="plan-inline-editor-saved"><Icon name="check" extra="xs" />{zh ? "已保存到计划文件，审阅仍在进行" : "Saved to the plan file. Review stays open."}</span>
+        : <span>{zh ? "可以直接改写计划正文，保存后继续审阅" : "Rewrite the plan text here, then keep reviewing."}</span>}
+      <button type="button" className="btn small ghost" disabled={disabled} onClick={() => setDraftMarkdown(displayedBody)}><Icon name="pencil" extra="sm" />{zh ? "编辑计划" : "Edit plan"}</button>
+    </div> : <div className="plan-inline-editor-surface">
+      <div className="plan-inline-editor-head">
+        <Icon name="pencil" extra="sm" /><strong>{zh ? "编辑计划" : "Editing plan"}</strong>
+        {dirty ? <span className="plan-inline-editor-dirty">{zh ? "未保存" : "Unsaved"}</span> : null}
+      </div>
+      <textarea aria-label={zh ? "计划 Markdown" : "Plan Markdown"} rows={10} spellCheck={false} value={draftMarkdown} disabled={saving} onChange={event => setDraftMarkdown(event.target.value)} onKeyDown={event => {
+        if (event.nativeEvent.isComposing) return;
+        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setDraftMarkdown(undefined); }
+        else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); event.stopPropagation(); void savePlan(); }
+      }} />
+      <div className="plan-inline-editor-foot">
+        <span className="plan-inline-editor-hint">{PLATFORM === "darwin" ? "⌘ ↵" : "Ctrl ↵"} {zh ? "保存 · Esc 取消" : "save · Esc cancel"}</span>
+        <button type="button" className="btn small ghost" disabled={saving} onClick={() => setDraftMarkdown(undefined)}>{zh ? "取消" : "Cancel"}</button>
+        <button type="button" className="btn small primary" disabled={disabled || saving || !dirty} onClick={() => void savePlan()}><Icon name="save" extra="sm" />{saving ? (zh ? "保存中…" : "Saving…") : (zh ? "保存计划" : "Save plan")}</button>
+      </div>
+    </div>}
   </div> : null;
   const [demoRole, setDemoRole] = useState("default");
   const tierControl = executionControl ?? ((demo || preview) ? <PlanExecutionPicker details={getPreviewPlanExecution(zh)} role={demoRole} onChange={setDemoRole} disabled={disabled} /> : null);
