@@ -47,7 +47,7 @@
 </p>
 
 > [!NOTE]
-> **0.2.6** fixes the 0.2.5 desktop startup crash caused by missing dependencies for mobile access certificates. If 0.2.5 cannot open, download and run the new installer. This release bundles Runtime `18.20.2-studio.15`. [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.6) · [Release notes](docs/releases/v0.2.6.md)
+> **0.2.7** upgrades to OMP 19.0.1 with a Plan source editor and live preview, floating session files and logs, a unified disassembler workspace, and improvements to streaming, evaluation pagination and 3D previews. This release bundles Runtime `19.0.1-studio.1`. [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.7) · [Release notes and screenshots](docs/releases/v0.2.7.md)
 
 <table>
 <tr>

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-11-20
+
+### Added
+
+- Plan 评审支持 Markdown 源码与实时预览联动定位、调整编辑区高度、查找替换和按章节批注。收起、重新展开或切换界面语言时保留草稿、撤销历史、光标和批注；批准、请求修改或保存退出前先保存正文，失败时保留现场并显示原因。
+- 会话本地文件与完整工具输出使用可停靠的独立浮窗。`/local` 可定位文件，Markdown 支持源码、预览与分栏视图，文本支持查找、跳转、换行和字号调整；日志保留 ANSI 颜色与跨页样式，并标记常见日志级别。
+- 反汇编工作台接入 OMP 19 的统一反汇编器，支持 IDA Pro、Ghidra、自动选择及头部元数据模式，提供快捷卡、数据库浏览、查询与带预览的编辑入口。
+
+### Changed
+
+- 内置 Runtime 升级到 **OMP 19.0.1（`19.0.1-studio.1`）**。同步原生 Plan、Ask、后台交接、Daemon、Agent 等待关系和工作树状态，移除上游已删除的 Seance 入口。 [迁移报告](docs/migrations/omp-19.0.1.md)
+- Ask 表单采用连续折叠布局，选项附注可带图片；主输入框以 `?` 发起 BTW，回答可在时间线便签和 BTW 面板继续处理。
+- 模型菜单增加供应商筛选与 `provider/model` 搜索；同步 Kiro 多账号、Claude 订阅信息、Live 端点与音色设置，并区分会话辅助调用与评判模型用量。
+- 减少流式对话的重复拷贝与代码块重绘，优化大型评测报告翻页、3D 模型法线与贴图处理、会话切换和工作台空闲开销。 [实测方法与适用范围](docs/reviews/runtime-performance-2026-11-19.md)
+
+### Fixed
+
+- 修复后台交接结束后误切换会话，以及会话文件目录、完整输出链接与当前会话关联不正确的问题。
+- 资源浮窗按会话区分焦点与内容宿主；重复打开文件时保留未保存草稿并确认后再切换，避免跨会话浮窗互相抢焦点。
+- 修复文件编辑器在内容更新、只读状态变化或语言切换时重建编辑状态的问题，并保留预览文件的本地修改。
+
 ## [0.2.6] - 2026-11-20
 
 ### Fixed
@@ -620,7 +641,8 @@ Agent 改代码改嗨了、或者聊到第五轮发现方向歪了，以前想�
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.2.6...HEAD
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.2.7...HEAD
+[0.2.7]: https://github.com/the-snowpear/omp-studio/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/the-snowpear/omp-studio/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/the-snowpear/omp-studio/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/the-snowpear/omp-studio/compare/v0.2.3...v0.2.4

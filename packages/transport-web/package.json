@@ -1,6 +1,6 @@
 {
   "name": "@omp-studio/transport-web",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "private": true,
   "type": "module",
   "main": "./dist/src/index.js",
@@ -25,6 +25,6 @@
     "test:built": "node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@omp-studio/client-contract": "0.2.6"
+    "@omp-studio/client-contract": "0.2.7"
   }
 }

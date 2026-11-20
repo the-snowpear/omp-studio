@@ -69,7 +69,7 @@ it("pages the original IDA view and version even if the address draft changed", 
   const client = { command, results, query: vi.fn(async () => ({ capabilities: ["disassembler.status", "disassembler.query"].map(id => ({ id, grade: "native" })) })) } as unknown as StudioClient;
   render(<I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled><DisassemblerDatabaseTools client={client} sessionId="s" available /></PreviewModeProvider></I18nProvider>);
   await selectDatabase();
-  selectOption(screen.getByRole("combobox", { name: "IDA 视图" }), "函数");
+  selectOption(screen.getByRole("combobox", { name: "查看内容" }), "函数");
   fireEvent.change(screen.getByLabelText("地址 / 符号"), { target: { value: "main" } });
   fireEvent.click(screen.getByRole("button", { name: "读取" }));
   await screen.findByDisplayValue("first page");

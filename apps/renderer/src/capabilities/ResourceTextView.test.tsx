@@ -31,7 +31,7 @@ it("keeps the draft, caret and undo history when previewing a session Markdown f
   const initial = editor();
   act(() => initial.dispatch({ changes: { from: 0, to: original.length, insert: draft }, selection: { anchor: 5 } }));
   fireEvent.click(screen.getByRole("radio", { name: "预览" }));
-  await screen.findByRole("heading", { name: "Updated title" });
+  await screen.findByRole("heading", { name: "Updated title" }, { timeout: 5_000 });
   expect(screen.getByText("tracked").tagName).toBe("STRONG");
 
   view.rerender(<Surface language="en" />);

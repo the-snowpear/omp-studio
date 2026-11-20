@@ -47,7 +47,7 @@
 </p>
 
 > [!NOTE]
-> **0.2.6** 修复 0.2.5 桌面版因缺少手机访问证书依赖而无法启动的问题。若无法打开 0.2.5，请直接下载并运行新安装包。内置 Runtime 为 `18.20.2-studio.15`。 [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.6) · [发布说明](docs/releases/v0.2.6.md)
+> **0.2.7** 升级至 OMP 19.0.1，带来 Plan 源码与实时预览编辑、会话文件与日志浮窗、统一反汇编工作台，以及流式输出、评测翻页和 3D 预览性能优化。内置 Runtime 为 `19.0.1-studio.1`。 [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.7) · [发布说明与界面截图](docs/releases/v0.2.7.md)
 
 <table>
 <tr>
