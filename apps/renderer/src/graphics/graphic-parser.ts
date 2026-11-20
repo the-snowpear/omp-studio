@@ -23,12 +23,15 @@ import {
   normalizeGraphicPath,
   openGraphicBundle,
 } from "./graphic-bundle";
+import { indexedNormals } from "./indexed-normals";
 import type {
   GraphicBundle,
   GraphicMaterial,
   GraphicMesh,
   GraphicResult,
 } from "./graphic-types";
+
+const MAX_GEOMETRY_BYTES = 64 * 1024 * 1024;
 
 function arrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return Uint8Array.from(bytes).buffer;
@@ -335,7 +338,7 @@ export async function parseGraphic(
       )
         throw new Error("Geometry contains invalid coordinates");
       bytes += result.byteLength;
-      if (bytes > 64 * 1024 * 1024)
+      if (bytes > MAX_GEOMETRY_BYTES)
         throw new Error("Decoded geometry exceeds 64 MiB");
       return result;
     };
@@ -394,8 +397,8 @@ export async function parseGraphic(
       if (vertices > 1_000_000 || meshes.length >= 512)
         throw new Error("Scene exceeds 1 million vertices or 512 objects");
       const position = attribute(geometry, "position", 3)!;
-      const normal = attribute(geometry, "normal", 3),
-        uv = attribute(geometry, "uv", 2),
+      let normal = attribute(geometry, "normal", 3);
+      const uv = attribute(geometry, "uv", 2),
         color = attribute(geometry, "color", 3);
       if ((geometry.index?.count ?? 0) > 3_000_000)
         throw new Error("Geometry exceeds 3 million indices");
@@ -405,8 +408,13 @@ export async function parseGraphic(
       if (index?.some((i) => i >= count))
         throw new Error("Geometry has an invalid vertex index");
       bytes += index?.byteLength ?? 0;
-      if (bytes > 64 * 1024 * 1024)
+      if (bytes > MAX_GEOMETRY_BYTES)
         throw new Error("Decoded geometry exceeds 64 MiB");
+      // Models already within the parser limit still open if derived data would exceed it.
+      if (bundle.format === "ply" && index && !normal && bytes + position.byteLength <= MAX_GEOMETRY_BYTES) {
+        normal = indexedNormals(position, index);
+        bytes += normal.byteLength;
+      }
       if (!node.matrixWorld.elements.every(Number.isFinite))
         throw new Error("Invalid scene transform");
       const materials = (

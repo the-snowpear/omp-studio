@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { zipSync } from "fflate";
+import { BufferAttribute, BufferGeometry } from "three";
 import { parseGraphic } from "./graphic-parser";
 import { normalizeGraphicPath, openGraphicBundle } from "./graphic-bundle";
 const encode = (text: string) => new TextEncoder().encode(text);
@@ -42,6 +43,33 @@ const fixtures: Record<string, string> = {
 };
 afterEach(() => vi.unstubAllGlobals());
 describe("bounded graphic parsers", () => {
+  it("projects Three-compatible normals for an indexed PLY and preserves authored normals and point clouds", async () => {
+    const ply = (normals: boolean, faces: string[]) => buffer([
+      "ply", "format ascii 1.0", "element vertex 5",
+      "property float x", "property float y", "property float z",
+      ...(normals ? ["property float nx", "property float ny", "property float nz"] : []),
+      `element face ${faces.length}`, "property list uchar int vertex_indices", "end_header",
+      ...["0 0 0", "1 0 0", "0 1 0", "0 0 3", "5 5 5"].map(point => normals ? point + " 0 1 0" : point),
+      ...faces, "",
+    ].join("\n"));
+    const faces = ["3 0 1 2", "3 0 3 1", "3 4 4 4"];
+    const generated = await parseGraphic("mesh.ply", ply(false, faces));
+    const authored = await parseGraphic("mesh.ply", ply(true, faces));
+    const cloud = await parseGraphic("cloud.ply", ply(false, []));
+    if (generated.kind !== "scene" || authored.kind !== "scene" || cloud.kind !== "scene") {
+      throw new Error("Expected PLY scenes");
+    }
+    const mesh = generated.meshes[0]!;
+    const geometry = new BufferGeometry()
+      .setAttribute("position", new BufferAttribute(mesh.position, 3))
+      .setIndex(new BufferAttribute(mesh.index!, 1));
+    geometry.computeVertexNormals();
+    expect(mesh.normal).toEqual(geometry.getAttribute("normal").array);
+    expect(authored.meshes[0]!.normal).toEqual(new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0]));
+    expect(cloud.meshes[0]).toMatchObject({ kind: "points" });
+    expect(cloud.meshes[0]!.normal).toBeUndefined();
+  });
+
   it.each(Object.entries(fixtures))(
     "parses %s into drawable finite geometry",
     async (name, source) => {

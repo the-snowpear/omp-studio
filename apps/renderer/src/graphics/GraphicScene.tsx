@@ -73,10 +73,10 @@ export default function GraphicScene({
       const scene = new Scene();
       const group = new Group();
       const camera = new PerspectiveCamera(40, 1, 0.01, 10000);
-      const initW = Math.max(1, host.clientWidth || 600);
-      const initH = Math.max(1, host.clientHeight || 380);
-      renderer.setSize(Math.min(initW, 1600), Math.min(initH, 1000), false);
-      camera.aspect = initW / initH;
+      let lastWidth = Math.max(1, host.clientWidth || 600);
+      let lastHeight = Math.max(1, host.clientHeight || 380);
+      renderer.setSize(Math.min(lastWidth, 1600), Math.min(lastHeight, 1000), false);
+      camera.aspect = lastWidth / lastHeight;
       camera.updateProjectionMatrix();
       scene.add(group);
       scene.add(new AmbientLight(0xffffff, 0.8));
@@ -182,6 +182,9 @@ export default function GraphicScene({
         observer = new ObserverCtor(() => {
           const width = Math.max(1, host.clientWidth),
             height = Math.max(1, host.clientHeight);
+          if (width === lastWidth && height === lastHeight) return;
+          lastWidth = width;
+          lastHeight = height;
           renderer?.setSize(Math.min(width, 1600), Math.min(height, 1000), false);
           camera.aspect = width / height;
           camera.updateProjectionMatrix();
