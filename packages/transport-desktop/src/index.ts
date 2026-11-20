@@ -16,3 +16,4 @@ export {
   parseClientCommandRequest,
   parseSubscriptionScope,
 } from "./ipc-envelope.js";
+export { MOBILE_ACCESS_CHANNELS, type MobileAccessApi, type MobileAccessStatus } from "./mobile-access.js";

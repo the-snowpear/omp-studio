@@ -10,6 +10,7 @@ import { NO_ASK_ANSWER, type AskHeader, type DeckAskAnswer, type DeckAskQuestion
 import type { SlideDir } from "../pageTransition";
 import type { FormSubmitValue } from "@omp-studio/studio-protocol";
 import { FormCard } from "./FormCard";
+import { QuestionHeightHandle } from "./QuestionHeightHandle";
 import type { FormSession } from "./FormSession";
 import { useI18n } from "../i18n/I18nContext";
 
@@ -461,6 +462,7 @@ export function QueuedDeck({
             />
           ) : current.kind === "form" ? null : (
             <div className="ask-card">
+              <QuestionHeightHandle visible={!collapsed} />
               {/* 标题行：队列位置与胶囊高亮始终是当前卡的，不随离场正文回退 */}
               <AskHead
                 {...(demo === true ? { demo: true } : {})}

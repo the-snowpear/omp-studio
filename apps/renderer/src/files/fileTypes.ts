@@ -1,3 +1,4 @@
+import { isSystemFilePath } from "@omp-studio/client-contract";
 import { isZh } from "../i18n";
 
 export type FileKind = "text" | "markdown" | "pdf" | "image" | "audio" | "video" | "spreadsheet" | "office";
@@ -53,6 +54,11 @@ export function formatBytes(size: number | undefined): string {
   while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }
+/** The kinds the transcript links on sight; other slash-separated text waits for the Host verdict. */
+const KNOWN_FILE_EXTENSION = /\.(?:[cm]?js|jsx|tsx?|py|rs|go|java|c|h|cpp|hpp|cs|rb|php|sh|ps1|sql|json|ya?ml|toml|ini|conf|txt|log|md|mdx|markdown|html?|css|scss|xml|csv|tsv|xlsx?|pdf|png|jpe?g|gif|webp|bmp|avif|svg|mp4|webm|mov|mkv|mp3|wav|ogg|flac|m4a|docx?|pptx?|odt|odp|rtf)$/i;
+export function hasKnownFileExtension(path: string): boolean {
+  return KNOWN_FILE_EXTENSION.test(path);
+}
 export interface FileReference { path: string; line?: number; column?: number }
 
 function decodeFileUrlPath(rawUrl: string): string | null {
@@ -70,10 +76,6 @@ function decodeFileUrlPath(rawUrl: string): string | null {
     fallback = fallback.replace(/[?#].*$/, "");
     return /^\/[A-Za-z]:[\\/]/.test(fallback) ? fallback.slice(1) : fallback || null;
   }
-}
-
-export function isAbsoluteFileReference(path: string): boolean {
-  return /^(?:[A-Za-z]:[\\/]|[/\\]|file:)/i.test(path.trim());
 }
 
 function splitPathRoot(slashPath: string): { root: string; rest: string } {
@@ -131,7 +133,7 @@ export function parseFileReference(value: string, explicitLink = false): FileRef
   if (!explicitLink && (/[\n\r<>{}=]/.test(path))) return null;
   if (!explicitLink && !/[/\\]/.test(path)) {
     const named = ["README", "LICENSE", "Dockerfile", "Makefile", ".gitignore", ".gitattributes", ".env"].includes(path);
-    const formats = /\.(?:[cm]?js|jsx|tsx?|py|rs|go|java|c|h|cpp|hpp|cs|rb|php|sh|ps1|sql|json|ya?ml|toml|ini|conf|txt|log|md|mdx|markdown|html?|css|scss|xml|csv|tsv|xlsx?|pdf|png|jpe?g|gif|webp|bmp|avif|svg|mp4|webm|mov|mkv|mp3|wav|ogg|flac|m4a|docx?|pptx?|odt|odp|rtf)$/i.test(path);
+    const formats = hasKnownFileExtension(path);
     if (!named && (!formats || path.startsWith(".") || !/^[\p{L}\p{N}_ .@+-]+$/u.test(path))) return null;
   }
   return { path, ...(location ? { line: Number(location[1] ?? location[3]), ...(location[2] || location[4] ? { column: Number(location[2] ?? location[4]) } : {}) } : {}) };
@@ -141,7 +143,9 @@ export function relativeFileReference(base: string, path: string): string {
     const decoded = decodeFileUrlPath(path);
     if (decoded) path = decoded;
   }
-  if (/^(?:[A-Za-z]:[\\/]|[/\\]|file:)/i.test(path)) {
+  if (isSystemFilePath(path)) {
+    // Keep home-relative segments for the Host to resolve after expanding ~.
+    if (path.startsWith("~")) return path;
     if (!/(?:^|[/\\])\.\.?(?:[/\\]|$)/.test(path)) return path;
     const { root, rest } = splitPathRoot(path.replaceAll("\\", "/"));
     return `${root}${reduceSegments(rest.split("/"), root.length > 0).join("/")}`;

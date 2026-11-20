@@ -7,7 +7,7 @@ export class RemoteConnectionError extends Error {
   constructor(readonly connectionCode: RemoteConnectionErrorCode, message: string) { super(message); this.name = "RemoteConnectionError"; }
 }
 
-export function connectionCancelled(): RemoteConnectionError { return new RemoteConnectionError("cancelled", desktopText("SSH 连接已取消", "SSH connection cancelled")); }
+export function connectionCancelled(noun = "SSH"): RemoteConnectionError { return new RemoteConnectionError("cancelled", desktopText(`${noun} 连接已取消`, `${noun} connection cancelled`)); }
 
 export function sshFailure(diagnostics: string, fallback: unknown, exitCode?: number | null): RemoteConnectionError {
   if (fallback instanceof RemoteConnectionError && fallback.connectionCode !== "network") return fallback;
@@ -30,7 +30,17 @@ export function sshFailure(diagnostics: string, fallback: unknown, exitCode?: nu
   return new RemoteConnectionError("unknown", desktopText("SSH 连接失败，未自动重试；请检查系统 SSH 和远端 Host 环境", "SSH connection failed and was not automatically retried; please check system SSH and the remote Host environment"));
 }
 
-export function connectionFailure(error: unknown): RemoteConnectionError {
+export function wslFailure(diagnostics: string, fallback?: unknown, exitCode?: number | null): RemoteConnectionError {
+  if (fallback instanceof RemoteConnectionError && fallback.connectionCode !== "network") return fallback;
+  if ((fallback as NodeJS.ErrnoException)?.code === "ENOENT") return new RemoteConnectionError("configuration", desktopText("未安装 WSL", "WSL is not installed"));
+  if (/WSL_E_DISTRO_NOT_FOUND|no distribution with the supplied name/iu.test(diagnostics)) return new RemoteConnectionError("configuration", desktopText("WSL 发行版不存在或已被移除", "WSL distribution does not exist or was removed"));
+  if ((fallback as Error)?.name === "AbortError") return new RemoteConnectionError("cancelled", desktopText("WSL 连接已取消", "WSL connection cancelled"));
+  if (fallback instanceof RemoteConnectionError) return fallback;
+  return new RemoteConnectionError("network", desktopText("WSL 通道已断开，请重新连接以核对任务状态", "WSL channel disconnected. Reconnect to check task status.") + (exitCode == null ? "" : ` (${exitCode})`));
+}
+
+export function connectionFailure(error: unknown, kind?: "wsl" | "ssh"): RemoteConnectionError {
   if (error instanceof RemoteConnectionError) return error;
+  if (kind === "wsl") return new RemoteConnectionError("environment", desktopText("WSL 工作区准备失败，请检查发行版和运行包", "WSL workspace preparation failed. Check the distribution and its runtime package."));
   return sshFailure("", error);
 }

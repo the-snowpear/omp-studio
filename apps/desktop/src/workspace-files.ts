@@ -8,8 +8,10 @@ import type {
   WorkspaceFileTreeReadModel,
   WorkspaceId,
   WorkspaceFileInfo, WorkspaceFileTarget,
+  WorkspacePathResolveInput,
 } from "@omp-studio/client-contract";
 import type { HostWorkspaceFileService } from "@omp-studio/host-client-api";
+import { probeFilePaths } from "./platform/path-probe.js";
 import type { WorkspaceRegistry } from "@omp-studio/studio-host";
 import { desktopText } from "./desktop-language-shared.js";
 
@@ -66,15 +68,33 @@ export function createWorkspaceFileService({ registry }: { readonly registry: Wo
     return workspace.canonicalPath;
   };
 
+  /** Markdown links may use `/C:/...` as well as `C:\...` on Windows. */
+  function candidatePath(root: string, requested: string): string {
+    let path = requested;
+    if (/^file:/i.test(path)) path = fileURLToPath(path);
+    if (process.platform === "win32" && /^\/[A-Za-z]:[\\/]/.test(path)) path = path.slice(1);
+    return isAbsolute(path) ? path : resolve(root, path);
+  }
+
+  /**
+   * A missing path is an ordinary outcome for transcript probes, so a click
+   * gets a readable message instead of a raw `fs` error string.
+   */
+  async function realTarget(candidate: string, requested: string): Promise<string> {
+    try {
+      return await realpath(candidate);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") throw new Error(`${desktopText("路径不存在", "Path does not exist")}: ${requested}`);
+      throw error;
+    }
+  }
+
   async function targetFor(input: WorkspaceFileTarget, writing = false): Promise<{ target: string; path: string }> {
     const root = await realpath(storedRoot(input.workspaceId));
-    let requested = input.path;
-    if (/^file:/i.test(requested)) requested = fileURLToPath(requested);
-    // Markdown links may use /C:/... as well as C:\... on Windows.
-    if (process.platform === "win32" && /^\/[A-Za-z]:[\\/]/.test(requested)) requested = requested.slice(1);
-    const candidate = isAbsolute(requested) ? requested : resolve(root, requested);
+    const candidate = candidatePath(root, input.path);
     if (writing && (await lstat(candidate)).isSymbolicLink()) throw new Error(desktopText("不能写入符号链接文件", "Cannot write through a symbolic link"));
-    const target = await realpath(candidate);
+    const target = await realTarget(candidate, input.path);
     if (escapedFrom(root, target)) throw new Error(desktopText("文件不在当前工作区内", "File is outside the current workspace"));
     if (!(await lstat(target)).isFile()) throw new Error(desktopText("此路径不是文件", "Path is not a file"));
     return { target, path: relative(root, target).split(sep).join("/") };
@@ -82,6 +102,18 @@ export function createWorkspaceFileService({ registry }: { readonly registry: Wo
   async function inspect(input: WorkspaceFileTarget): Promise<WorkspaceFileInfo> {
     const { target, path } = await targetFor(input);
     return { ...await inspectFile(target), workspaceId: input.workspaceId, path };
+  }
+
+  async function resolveAll({ workspaceId, paths, explicit }: WorkspacePathResolveInput) {
+    const root = storedRoot(workspaceId);
+    return probeFilePaths(paths, async path => {
+      const candidate = resolve(candidatePath(root, path));
+      if (escapedFrom(root, candidate)) throw new Error("File is outside the current workspace");
+      if (!explicit) return candidate;
+      const target = await realTarget(candidate, path);
+      if (escapedFrom(root, target)) throw new Error("File is outside the current workspace");
+      return target;
+    }, explicit);
   }
 
   async function directory(root: string, requestedPath?: string): Promise<WorkspaceFileNode[]> {
@@ -106,6 +138,7 @@ export function createWorkspaceFileService({ registry }: { readonly registry: Wo
 
   return {
     inspect,
+    resolveAll,
     async writeText(input) {
       const { target } = await targetFor(input, true);
       return writeFileText(target, input, () => inspect(input));

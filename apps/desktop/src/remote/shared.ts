@@ -4,12 +4,18 @@ export const REMOTE_CHANNELS = {
   openContext: "omp-studio:remote:open-context", closeContext: "omp-studio:remote:close-context",
   installRuntime: "omp-studio:remote:install-runtime",
   approve: "omp-studio:remote:approve", retryNetwork: "omp-studio:remote:retry-network",
+  wslDistributions: "omp-studio:remote:wsl-distributions", ensureWsl: "omp-studio:remote:ensure-wsl",
   list: "omp-studio:remote:list", save: "omp-studio:remote:save", remove: "omp-studio:remote:remove", connect: "omp-studio:remote:connect", disconnect: "omp-studio:remote:disconnect", select: "omp-studio:remote:select",
   bootstrap: "omp-studio:remote:bootstrap", query: "omp-studio:remote:query", command: "omp-studio:remote:command", directories: "omp-studio:remote:directories", register: "omp-studio:remote:register", event: "omp-studio:remote:event", changed: "omp-studio:remote:changed",
 } as const;
 export type RemoteNetworkMode = "remote-first" | "remote-only" | "local-only";
 export type RemotePreparationStage = "probe" | "confirmation" | "download" | "upload" | "install" | "verify" | "configure" | "connect";
+export type RemoteTargetKind = "ssh" | "wsl";
+export interface WslDistribution { name: string; version: 1 | 2; running: boolean; isDefault: boolean; }
+export interface WslInventory { available: boolean; distributions: WslDistribution[]; }
+export function targetNoun(profile?: { kind?: RemoteTargetKind }): "SSH" | "WSL" { return profile?.kind === "wsl" ? "WSL" : "SSH"; }
 export interface RemoteConnectionProfile {
+  kind?: RemoteTargetKind; distro?: string;
   id: string; name: string; host: string; user?: string; port?: number;
   /** Detected information retained for display; never a user-supplied requirement. */
   platform?: "linux" | "win32" | "darwin";
@@ -41,6 +47,8 @@ export interface RemoteConnectionStatus {
 export interface RemoteInventory { profiles: RemoteConnectionProfile[]; statuses: RemoteConnectionStatus[]; activeId?: string | null; }
 export interface RemoteDirectoryList { path: string; parent: string; directories: { name: string; path: string }[]; }
 export interface RemoteApi {
+  wslDistributions?(): Promise<WslInventory>;
+  ensureWsl?(distro: string): Promise<RemoteConnectionProfile>;
   list(): Promise<RemoteInventory>;
   save(profile: Omit<RemoteConnectionProfile, "id"> & { id?: string }): Promise<RemoteConnectionProfile>;
   remove(id: string): Promise<void>;

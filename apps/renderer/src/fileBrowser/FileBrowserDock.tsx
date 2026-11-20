@@ -3,7 +3,8 @@ import type { WorkspaceId } from "@omp-studio/client-contract";
 import { PanelInstances } from "../dock/PanelRegistration";
 import { useDockEngine } from "../dock/DockContext";
 import { useConversationView } from "../conversationWorkspace/Context";
-import { useExecutionTargets } from "../workspaces/ExecutionTargets";
+import { executionTargetLabel } from "../workspaces/remoteStatus";
+import { useExecutionTarget, useExecutionTargets } from "../workspaces/ExecutionTargets";
 import { useI18n } from "../i18n";
 import { hostErrorMessage } from "../hostError";
 import { useOpenFile } from "../files/fileLinks";
@@ -74,41 +75,50 @@ export function FileBrowserDock({ targetId, targetName, workspaceId, actions }: 
   const { preview } = usePreviewMode(), { resolvedLanguage } = useI18n();
   const targets = useExecutionTargets(), view = useConversationView(), { store } = useDockEngine();
   const open = useOpenFile(), language: "zh" | "en" = resolvedLanguage === "zh" ? "zh" : "en";
-  const contextRef = useRef({ language, workspaceId, targetName });
-  contextRef.current = { language, workspaceId, targetName };
-  const [location, setLocation] = useState<{ revision: number; path?: string; error?: string }>();
+  const { inventory } = useExecutionTarget();
+  const contextRef = useRef({ inventory, language, workspaceId, targetId, targetName, targets });
+  contextRef.current = { inventory, language, workspaceId, targetId, targetName, targets };
+  const [location, setLocation] = useState<{ revision: number; path?: string; error?: string; targetId: string | null }>();
+  const browserTarget = location ? location.targetId : targetId;
   const source = useMemo(
     () =>
       preview
         ? createDynamicPreviewSource(() => contextRef.current.language)
         : createHostFileBrowserSource({
-            client: () => targets.readyClient(targetId),
-            targetId,
+            client: () => contextRef.current.targets.readyClient(browserTarget),
+            targetId: browserTarget,
             workspaceId: () => contextRef.current.workspaceId,
             language: () => contextRef.current.language,
-            label: () => (targetId ? `SSH · ${contextRef.current.targetName ?? targetId}` : contextRef.current.language === "zh" ? "本机" : "Local"),
+            label: () => {
+              const context = contextRef.current;
+              if (!browserTarget) return context.language === "zh" ? "本机" : "Local";
+              const profile = context.inventory.profiles.find(item => item.id === browserTarget);
+              const name = profile?.name ?? (browserTarget === context.targetId ? context.targetName : undefined) ?? browserTarget;
+              return executionTargetLabel(profile?.kind ?? "ssh", name);
+            },
           }),
-    [preview, targets, targetId],
+    [preview, browserTarget],
   );
-  const scope = `${preview ? "preview" : "host"}:${targetId ?? "local"}`;
+  const scope = `${preview ? "preview" : "host"}:${browserTarget ?? "local"}`;
   useEffect(() => registerFileBrowser(view?.document.id ?? "standalone", intent => {
+    const openTarget = intent.targetId === undefined ? targetId : intent.targetId;
     store.dispatch({ type: "open", panel: "file-browser" });
     void (async () => {
       if (preview) {
         const places = await source.places();
         const path = intent.workspaceId ? `${places.projects[0]?.root ?? places.home}${places.separator}${intent.path.replaceAll("/", places.separator)}` : intent.path;
-        setLocation(previous => ({ revision: (previous?.revision ?? 0) + 1, path }));
+        setLocation(previous => ({ revision: (previous?.revision ?? 0) + 1, path, targetId: openTarget }));
       } else {
-        const client = await targets.readyClient(targetId);
+        const client = await contextRef.current.targets.readyClient(openTarget);
         const directory = await client.query("fs.list", intent.workspaceId ? { workspaceId: intent.workspaceId as WorkspaceId, path: intent.path } : { path: intent.path });
-        setLocation(previous => ({ revision: (previous?.revision ?? 0) + 1, path: directory.path }));
+        setLocation(previous => ({ revision: (previous?.revision ?? 0) + 1, path: directory.path, targetId: openTarget }));
       }
-    })().catch(error => setLocation(previous => ({ revision: (previous?.revision ?? 0) + 1, error: hostErrorMessage(error, contextRef.current.language === "zh" ? "无法打开文件夹" : "Cannot open the folder") })));
-  }), [view?.document.id, store, source, targets, targetId, preview]);
+    })().catch(error => setLocation(previous => ({ revision: (previous?.revision ?? 0) + 1, targetId: openTarget, error: hostErrorMessage(error, contextRef.current.language === "zh" ? "无法打开文件夹" : "Cannot open the folder") })));
+  }), [view?.document.id, store, source, targetId, preview]);
 
   const openFile = (entry: FsEntry) => {
     const intent = preview ? previewProjectFile(entry.path) ?? { source: "system" as const, path: entry.path } : systemFileReference(entry);
-    open({ ...intent, targetId });
+    open({ ...intent, targetId: browserTarget });
   };
   const systemActions: FileBrowserSystemAction[] = [
     ...(actions?.openProjectPath ? ["openAsProject" as const] : []),
@@ -116,7 +126,7 @@ export function FileBrowserDock({ targetId, targetName, workspaceId, actions }: 
     ...(globalThis.ompStudioChrome?.systemFileOpen ? ["openSystem", "openWith", "reveal"] as const : []),
   ];
   const systemAction = async (action: FileBrowserSystemAction, entry: FsEntry, openerId?: string) => {
-    if (action === "openAsProject") { await actions?.openProjectPath?.(entry.path, targetId); return; }
+    if (action === "openAsProject") { await actions?.openProjectPath?.(entry.path, browserTarget); return; }
     if (action === "revealExplorer") { if (entry.workspace) actions?.revealInExplorer?.(entry.workspace.workspaceId, entry.workspace.relativePath); return; }
     const chrome = globalThis.ompStudioChrome!;
     const result = await (action === "openSystem" ? chrome.systemFileOpen({ path: entry.path }) : action === "openWith"

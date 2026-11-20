@@ -1,14 +1,19 @@
 import { modelConfigHasUnsavedChanges } from "../models/modelConfigState";
+import { PLATFORM } from "../platform";
+import { usePreviewMode } from "../preview/PreviewContext";
 import { useI18n } from "../i18n";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { StudioClientImpl } from "@omp-studio/client";
 import type { StudioClient } from "@omp-studio/client-contract";
-import type { RemoteApi, RemoteInventory, RemoteConnectionProfile, RemoteCredentials } from "../../../desktop/src/remote/shared";
+import type { RemoteApi, RemoteTargetKind, WslInventory, RemoteInventory, RemoteConnectionProfile, RemoteCredentials } from "../../../desktop/src/remote/shared";
 import { SshPasswordDialog } from "./SshPasswordDialog";
 import { SshPreparationDialog } from "./SshPreparationDialog";
 import { createRemoteTransport, type RemoteTransportState } from "./remoteTransport";
 
 interface ExecutionTargetContextValue {
+  kind: RemoteTargetKind | "local";
+  wsl: WslInventory | undefined;
+  refreshWsl(): void;
   localClient?: StudioClient;
   id: string | null;
   name: string;
@@ -25,7 +30,7 @@ interface ExecutionTargetContextValue {
   directoryRequest: number;
   memory: Map<string, unknown>;
 }
-const Context = createContext<ExecutionTargetContextValue>({ id: null, name: "This computer", inventory: { profiles: [], statuses: [] }, api: undefined, inventoryError: "", syncRevision: 0, syncError: "", refresh: async () => {}, connect: async () => {}, cancelConnection: async () => {}, select: async () => {}, openDirectory: () => {}, directoryRequest: 0, memory: new Map() });
+const Context = createContext<ExecutionTargetContextValue>({ id: null, kind: "local", wsl: undefined, refreshWsl() {}, name: "This computer", inventory: { profiles: [], statuses: [] }, api: undefined, inventoryError: "", syncRevision: 0, syncError: "", refresh: async () => {}, connect: async () => {}, cancelConnection: async () => {}, select: async () => {}, openDirectory: () => {}, directoryRequest: 0, memory: new Map() });
 export function useExecutionTarget() { return useContext(Context); }
 interface TargetRegistry {
   client(id: string | null): StudioClient;
@@ -73,10 +78,26 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
   zhRef.current = zh;
   const text = useCallback((zhText: string, enText: string) => (zhRef.current ? zhText : enText), []);
   const api = globalThis.ompStudioRemote;
+  const { preview } = usePreviewMode();
+  const [wslInventory, setWslInventory] = useState<WslInventory>();
+  const wslSequence = useRef(0);
+  const discover = !preview && PLATFORM === "win32" ? api?.wslDistributions : undefined;
+  const refreshWsl = useCallback(() => {
+    if (!discover) return;
+    const sequence = ++wslSequence.current;
+    void discover().then(value => {
+      if (sequence === wslSequence.current) setWslInventory(value);
+    }, () => {
+      if (sequence === wslSequence.current) setWslInventory(last => last ?? { available: false, distributions: [] });
+    });
+  }, [discover]);
+  useEffect(() => { refreshWsl(); return () => { wslSequence.current++; }; }, [refreshWsl]);
   const [id, setId] = useState<string | null>(null);
   const [ready, setReady] = useState(!api);
   const [generation, setGeneration] = useState(0);
   const [rawInventory, setInventory] = useState<RemoteInventory>({ profiles: [], statuses: [] });
+  const profilesRef = useRef(rawInventory.profiles);
+  const noun = (targetId: string) => profilesRef.current.find(item => item.id === targetId)?.kind === "wsl" ? "WSL" : "SSH";
   const [inventoryError, setInventoryError] = useState("");
   const [directoryRequest, setDirectoryRequest] = useState(0);
   const [passwordProfile, setPasswordProfile] = useState<RemoteConnectionProfile>();
@@ -103,13 +124,13 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
       const state = stateFor(targetId);
       value = new StudioClientImpl(createRemoteTransport(api!, targetId, state));
       clients.current.set(targetId, value);
-      if (!state.available) value.transportLost(text("SSH 尚未同步，暂停写操作", "SSH not synchronized; write operations paused"));
+      if (!state.available) value.transportLost(text(`${noun(targetId)} 尚未同步，暂停写操作`, `${noun(targetId)} not synchronized; write operations paused`));
     }
     return value;
   }, [api, stateFor]);
   const synchronize = useCallback(async (targetId: string, force = false) => {
     const state = stateFor(targetId);
-    if (!state.available) throw new Error(text("SSH 通道尚未恢复，请稍候或重新连接", "SSH channel is still recovering; please wait or reconnect"));
+    if (!state.available) throw new Error(text(`${noun(targetId)} 通道尚未恢复，请稍候或重新连接`, `${noun(targetId)} channel is still recovering; please wait or reconnect`));
     if (state.synchronized && !force) return;
     const revision = state.revision;
     const pending = synchronizing.current.get(targetId);
@@ -140,6 +161,7 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
     try { await run; } finally { if (synchronizing.current.get(targetId) === attempt) synchronizing.current.delete(targetId); }
   }, [clientFor, stateFor]);
   const adoptInventory = useCallback((next: RemoteInventory) => {
+    profilesRef.current = next.profiles;
     for (const status of next.statuses) {
       const state = stateFor(status.id);
       const available = status.state === "connected";
@@ -148,7 +170,7 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
         state.revision++;
         state.synchronized = false;
         delete state.error;
-        clients.current.get(status.id)?.transportLost(text("SSH 连接已改变；命令结果未知，未自动重发", "SSH connection changed; command outcome unknown and was not resent"));
+        clients.current.get(status.id)?.transportLost(text(`${noun(status.id)} 连接已改变，命令结果未知，未自动重发`, `${noun(status.id)} connection changed; command outcome unknown and was not resent`));
       }
       state.available = available;
       state.generation = nextGeneration;
@@ -166,7 +188,7 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
     const sequence = ++refreshSequence.current;
     let next: RemoteInventory;
     try { next = await api.list(); }
-    catch (error) { if (mounted.current && sequence === refreshSequence.current) setInventoryError(error instanceof Error ? error.message : text("无法读取 SSH 连接", "Unable to read SSH connections")); throw error; }
+    catch (error) { if (mounted.current && sequence === refreshSequence.current) setInventoryError(error instanceof Error ? error.message : text("无法读取工作位置", "Unable to read execution targets")); throw error; }
     if (!mounted.current || sequence !== refreshSequence.current) return;
     adoptInventory(next);
     await Promise.allSettled(next.statuses.filter(status => {
@@ -219,8 +241,8 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
     pending?.resolve(password);
   }, []);
   const connect = useCallback(async (targetId: string) => {
-    if (!api) throw new Error(text("SSH 连接需要桌面客户端", "SSH connections require the desktop app"));
-    if (connectionLock.current) throw new Error(text("另一个 SSH 连接正在准备中", "Another SSH connection is already being prepared"));
+    if (!api) throw new Error(text("远程连接需要桌面客户端", "Remote connections require the desktop app"));
+    if (connectionLock.current) throw new Error(text("另一个连接正在准备中", "Another connection is already being prepared"));
     const token = Symbol();
     connectionLock.current = { id: targetId, token };
     let credentials: RemoteCredentials | undefined;
@@ -229,10 +251,10 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
       if (!inventory.profiles.some(value => value.id === targetId)) inventory = await api.list();
       if (connectionLock.current?.token !== token) throw new Error(text("连接已取消", "Connection cancelled"));
       const profile = inventory.profiles.find(value => value.id === targetId);
-      if (!profile) throw new Error(text("SSH 连接不存在", "SSH connection does not exist"));
+      if (!profile) throw new Error(text("工作位置不存在", "Execution target does not exist"));
       const status = inventory.statuses.find(value => value.id === targetId);
       if (status?.state === "connected") { await synchronize(targetId); return; }
-      if (status && ["connecting", "awaiting-approval", "recovering", "degraded", "synchronizing"].includes(status.state)) throw new Error(text("SSH 正在恢复或同步；可以等待或取消，不会重复连接", "SSH is recovering or synchronizing; you can wait or cancel without opening a duplicate connection"));
+      if (status && ["connecting", "awaiting-approval", "recovering", "degraded", "synchronizing"].includes(status.state)) throw new Error(text(`${noun(targetId)} 正在恢复或同步，请等待或取消`, `${noun(targetId)} is recovering or synchronizing. Wait or cancel.`));
       if (profile.authMode === "password") {
         let password = await new Promise<string | null>(resolve => {
           passwordRequest.current = { id: targetId, resolve };
@@ -261,7 +283,7 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
     if (passwordRequest.current?.id === targetId) { finishPassword(null); return; }
     const state = stateFor(targetId);
     state.available = false; state.synchronized = false; state.revision++;
-    clients.current.get(targetId)?.transportLost(text("SSH 连接已取消；已发送命令未重发", "SSH connection cancelled; in-flight commands were not resent"));
+    clients.current.get(targetId)?.transportLost(text(`${noun(targetId)} 连接已取消，已发送命令未重发`, `${noun(targetId)} connection cancelled; in-flight commands were not resent`));
     await api?.disconnect(targetId);
     await refresh();
   }, [api, finishPassword, refresh, stateFor]);
@@ -283,13 +305,14 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
   const inventory: RemoteInventory = { ...rawInventory, statuses: rawInventory.statuses.map(status => {
     const state = transports.current.get(status.id);
     return status.state === "connected" && clients.current.has(status.id) && state && !state.synchronized
-      ? { ...status, state: state.error ? "failed" as const : "synchronizing" as const, message: state.error ? (zh ? `状态同步失败：${state.error}` : `Status sync failed: ${state.error}`) : (zh ? "SSH 已连通，正在同步页面；写操作仍暂停" : "SSH connected, syncing pages; write operations remain paused") }
+      ? { ...status, state: state.error ? "failed" as const : "synchronizing" as const, message: state.error ? (zh ? `状态同步失败：${state.error}` : `Status sync failed: ${state.error}`) : (zh ? `${noun(status.id)} 已连通，正在同步页面；写操作仍暂停` : `${noun(status.id)} connected, syncing pages; write operations remain paused`) }
       : status;
   }) };
   const profile = inventory.profiles.find(value => value.id === id);
   const syncRevision = id === null ? 0 : transports.current.get(id)?.syncRevision ?? 0;
   const syncError = id === null ? "" : transports.current.get(id)?.error ?? "";
-  const value = useMemo(() => ({ localClient: client, id, name: id === null ? (zh ? "此计算机" : "This computer") : profile?.name ?? "SSH", inventory, api, inventoryError, syncRevision, syncError, refresh, connect, cancelConnection, select, openDirectory: () => setDirectoryRequest(value => value + 1), directoryRequest, memory }), [client, id, profile?.name, inventory, api, inventoryError, syncRevision, syncError, refresh, connect, cancelConnection, select, directoryRequest, memory, zh]);
+  const kind: RemoteTargetKind | "local" = id === null ? "local" : profile?.kind ?? "ssh";
+  const value = useMemo(() => ({ kind, wsl: discover ? wslInventory : undefined, refreshWsl, localClient: client, id, name: id === null ? (zh ? "此计算机" : "This computer") : profile?.name ?? "SSH", inventory, api, inventoryError, syncRevision, syncError, refresh, connect, cancelConnection, select, openDirectory: () => setDirectoryRequest(value => value + 1), directoryRequest, memory }), [client, id, kind, discover, wslInventory, refreshWsl, profile?.name, inventory, api, inventoryError, syncRevision, syncError, refresh, connect, cancelConnection, select, directoryRequest, memory, zh]);
   const preparing = rawInventory.statuses.find(status => ["connecting", "awaiting-approval", "synchronizing"].includes(status.state) && connectionLock.current?.id === status.id);
   const preparingProfile = preparing && rawInventory.profiles.find(profile => profile.id === preparing.id);
   const activeClient = id === null ? client : clientFor(id);
@@ -300,7 +323,8 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
       const memoryKey = `${target ?? "local"}:document:${key}`;
       if (!memories.current.has(memoryKey)) memories.current.set(memoryKey, new Map());
       const state = target === null ? undefined : stateFor(target);
-      return { ...value, id: target, name: target === null ? (zh ? "此计算机" : "This computer") : inventory.profiles.find(profile => profile.id === target)?.name ?? "SSH",
+      const targetProfile = inventory.profiles.find(item => item.id === target);
+      return { ...value, kind: target === null ? "local" : targetProfile?.kind ?? "ssh", id: target, name: target === null ? (zh ? "此计算机" : "This computer") : targetProfile?.name ?? "SSH",
         memory: memories.current.get(memoryKey)!, syncRevision: state?.syncRevision ?? 0, syncError: state?.error ?? "" };
     },
   };

@@ -1,8 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import type { RemoteConnectionManager } from "../remote/manager.js";
-import { sshAuthenticationRequest } from "../remote/authentication.js";
-import { sshArguments, systemSshExecutable } from "../remote/platform.js";
+import { remoteSpawn } from "../remote/channel.js";
 import { processGroupSpawnOptions, terminateProcessTree } from "../platform/process-tree.js";
 import { desktopText } from "../desktop-language-shared.js";
 import { remoteListCommand, remoteTmuxCommand, splitTmuxFields, supportedTmuxVersion } from "./commands.js";
@@ -28,11 +27,11 @@ export class TmuxControlManager {
   #launch(targetId: string, command: string) {
     const remote = this.options.connections;
     const profile = remote.profile(targetId);
-    const authentication = sshAuthenticationRequest(profile, remote.authentication(targetId));
+    const launch = remoteSpawn(profile, command, remote.authentication(targetId));
     try {
-      const child = this.#spawn(systemSshExecutable(), [...sshArguments(profile), command], { windowsHide: true, ...processGroupSpawnOptions(), env: { ...process.env, ...authentication?.env } });
-      return { child, release: () => authentication?.dispose() };
-    } catch (error) { authentication?.dispose(); throw error; }
+      const child = this.#spawn(launch.file, launch.args, { windowsHide: true, ...processGroupSpawnOptions(), env: { ...process.env, ...launch.env } });
+      return { child, release: () => launch.dispose() };
+    } catch (error) { launch.dispose(); throw error; }
   }
   async sessions(windowId: number, input: TmuxSessionsInput): Promise<TmuxSessionsResult> {
     if (this.#closed) throw new Error(desktopText("tmux 服务已关闭", "tmux manager closed"));

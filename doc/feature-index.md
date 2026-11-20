@@ -22,7 +22,7 @@
 
 | 功能 | Renderer / 预览 | Runtime / 协议 |
 | --- | --- | --- |
-| 原生 HTML 表单 | `InteractionDeck.tsx`、`deck/{FormCard,FormFields,FormSession}`、`preview/{formPreview,PreviewDeck}` | overlay `remote-extension-ui.ts`、`services/{form-presentation,interaction-port,tree-service,studio-thread-service}`；`contracts/forms.ts`；正文瞬时 `interaction.form.read`，不进 snapshot / ledger |
+| 原生 HTML 表单 | `InteractionDeck.tsx`、`deck/{FormCard,FormFields,FormSession,formPages,QuestionHeightHandle}`、`preview/{formPreview,PreviewDeck}` | 按 OMP 原生问题标签分页，末页可核对答案；拖动顶边调整卡高。overlay `remote-extension-ui.ts`、`services/{form-presentation,interaction-port,tree-service,studio-thread-service}`；`contracts/forms.ts`；正文瞬时 `interaction.form.read`，不进 snapshot / ledger |
 | 有序步骤与委派策略 | `AgentHub.tsx`、`agents/{TaskAssignmentEditor,TaskStepsView}`、`settings/TaskDelegationSettings.tsx`、`preview/taskStepsPreview.ts` | 原生 `task/executor.ts` / `task/steps.ts`，overlay `services/{agent-hub,task-options}-service.ts`；`contracts/agents-jobs.ts`；一次 spawn、同一 Agent/job，最多四组原生提示 |
 | 同页浏览器与引擎选择 | `browser/{BrowserPane,BrowserStartPage,ManagedBrowserPane,NativeBrowserFrame,browserNativeBackend,useNativeBrowserObservation}`、`preview/browserPreview.ts` | overlay `services/browser-observation-{service,adapter}.ts`、`browser-tab-control.ts`；Desktop `browser-observation.ts` / `managed-browser-relay.ts`；`contracts/browser-observation.ts`；继承 CLI 时不传 `app`，embedded 显式选择 |
 | 系统模板与实际来源 | `ModelConfigPage.tsx`、`models/ModelSystemTemplates.tsx`、`preview/modelServicesPreview.ts` | overlay `services/model-system-templates-service.ts`；原生 `sdk.ts` / `system-prompt.ts`；`contracts/model-services.ts`；config.yml 关联、既有编辑器与原生重渲染 |
@@ -260,6 +260,7 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 | 文件浏览器与项目联动 | `fileBrowser/fileBrowserLinks.ts`、`sidebar/WorkspaceTree.tsx`、`sidebar/treeKeyboard.ts`、`workbench/AppShell.tsx`；命令面板 `commandPaletteCatalog.ts` | `workspace.openPath` → `omp-workspace-adapter.ts`；Explorer 双向定位、绝对路径 Composer 胶囊；系统文件窗口使用 `files/fileBackend.ts` 和 `source: "system"`，项目内仍共用工作区缓冲区 |
 | 文件无覆盖重命名 | `apps/desktop/src/platform/file-rename.ts` | Windows `Rename-Item`；macOS `renameatx_np(RENAME_EXCL)`、Linux `renameat2(RENAME_NOREPLACE)` 通过系统 Perl 调用，不替换并发创建的目标 |
 | 通用文件窗口 / 编辑与预览 | `files/{FileDockInstances,FilePane,FileTextEditor,PdfPane,SpreadsheetPane,OfficePane}.tsx`、`fileDocuments.ts`、`fileLinks.tsx`；Dock `file-view:` 实例 | `workspace.file.inspect/readText/readChunk/writeText` → `workspace-files.ts`；桌面 `file-resources.ts` 的 `omp-file:` Range 通道覆盖本地 / SSH；保存版本冲突、共享缓冲、布局恢复与关闭确认；预览 `preview/filesPreview.ts`，说明 `docs/file-viewer.md` |
+| 对话正文路径链接 | `files/{fileTypes,fileLinks,pathResolution,fileBackend}.tsx,ts`；注册点 `files/FileDockInstances.tsx` | `workspace.paths.resolve` → facade 按绝对／相对分流 → `apps/desktop/src/workspace-files.ts` 与 `system-files.ts` 的 `resolveAll`。Markdown 预览以文档目录为基准，同一路径用于探测和打开。Renderer 按 Host 与工作区批量探测，失败、遗漏或 `missing` 会延迟重试一次。目录在文件浏览器定位，网络路径待点击才访问，预览模式不探测。 |
 | 文件窗口头部 / 状态栏 / Git 标记 / 添加到对话 | `files/{FileHeader,FileStatusBar}.tsx`、`gitMarks.ts`（hunk → 行号旁标记）、`fileActions.ts`（`workbench/AppShell.tsx` 的 `fileViewerActions` 复用 Explorer 文件菜单动作与 Composer 胶囊）、`filePreferences.ts`（换行 / 字号） | Git 改动走 `git.diff.get`（`target: "working"`），Diff 视图复用 `git/GitPatch.tsx`；预览补丁 `previewFilePatch` |
 | 可选 Office 预览组件 | `files/FileViewerSettings.tsx`；更新与维护的「可选组件」 | Desktop `office-component.ts` / `office-process.ts` / `office-component-manifest.ts` / `file-viewer-ipc.ts`；仅主动安装，独立签名工件；打包 `scripts/office-component.mjs`，独立验收 `office-component-smoke.mjs`，手动 workflow `office-component.yml` |
 | Explorer 文件 ⋯ / 右键菜单 | `apps/renderer/src/menus.tsx`（`MenuItem` / `FileRowMenu`）、`sidebar/WorkspaceTree.tsx` `RealFileTree`；`useRowMenuAnchor` 与会话行共享定位；预览 `preview/surfaces.tsx` 同款 | 打开 / 打开方式（已装编辑器子菜单 + 系统「打开方式」）/ 资源管理器定位 / 复制绝对路径 = workspace-shell 文件级通道（`workspace-shell-shared.ts` `fileOpen` / `fileOpenWith` / `fileReveal` / `fileAbsolutePath` / `fileOpeners`，Main 强制包含性校验）；复制相对路径 = Renderer 剪贴板；「添加上下文」复用 @ 按钮的 Composer 胶囊链路；目录「打开」= 树内展开；预览态桌面项禁用 |
@@ -339,6 +340,8 @@ macOS host 日志：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-
 
 | 主题 | 文件 |
 |---|---|
+| 局域网手机访问 | Desktop `mobile-access{,-ipc}.ts`、`mobile-certificate.ts`、`mobile-scope.ts`；`transport-web` HTTP/WS 传输；Renderer `mobile/`、`settings/MobileAccessSettings.tsx`；配对、会话与证书说明见 `docs/mobile-access.md` |
+| WSL 工作位置 | Desktop `apps/desktop/src/remote/{wsl,channel,wsl-paths,manager,environment-installer}.ts`；Renderer `apps/renderer/src/workspaces/{ExecutionTargets,ExecutionTargetPicker,SshPreparationDialog}.tsx`；用法见 [WSL 工作区](../docs/wsl-workspaces.md) |
 | SSH 工作位置与连接管理 | `apps/renderer/src/workspaces/{ExecutionTargets,ExecutionTargetPicker,RemoteScopeNotice,SshPasswordDialog}.tsx`、`{remoteTransport,remoteStatus}.ts`；`apps/desktop/src/remote/{manager,ipc,shared,errors}.ts`；有界重连、健康检查、目标代次同步；用法见 `docs/ssh-workspaces.md` |
 | SSH Headless Host / 部署 / 安装 | `apps/desktop/src/remote/{main,host,server,transport,wire,platform,authority,deploy,install}.ts`；`scripts/bundle-remote-host.mjs`；阶段状态见 `doc/ssh-workspace-progress.md` |
 | SSH 账密认证 / 终端 | `apps/desktop/src/remote/{authentication,terminal}.ts`；`apps/desktop/ssh-askpass/`；`scripts/build-ssh-askpass.mjs`；Renderer `terminalSessions.tsx`；验收交接见 `doc/ssh-workspace-test-prompt.md` |
@@ -416,6 +419,7 @@ macOS host 日志：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-
 | `skills.*` / `mcp.*` / `plugins.setEnabled` | 抽屉 / Capabilities：`skills.reveal` / `skills.revealRoot` 开系统目录；`mcp.refresh` / `mcp.test` / `mcp.logs.get` 为 Host 探测；Slash 执行走 Composer `runSlashCommand` |
 | `git.*` / `github.*` | Git 面板 → `git-service.ts` / `github-service.ts` |
 | `workspace.fileTree` | `sidebar/WorkspaceTree.tsx` `RealFileTree` → `workspace-files.ts` |
+| `workspace.paths.resolve` | 对话正文路径链接 `files/{fileLinks,pathResolution,fileBackend}.tsx,ts` → facade 按 `isSystemFilePath` 分流 → `workspace-files.ts` / `system-files.ts` 的 `resolveAll` |
 | `fs.*` | `fileBrowser/fileBrowserSource.ts`、`files/fileBackend.ts` → facade → `apps/desktop/src/system-files.ts`；本机／SSH 同一服务，`file-resources.ts` 承载媒体 Range 读取 |
 | `workspace.openPath` | 文件浏览器“设为项目” → `AppShell.tsx` → `omp-workspace-adapter.ts` → registry，然后新建该项目的对话 |
 | `session.transcript.readPage` | 历史 / 对话回放 → `session-archive-reader.ts` |

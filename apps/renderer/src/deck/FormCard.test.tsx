@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { InteractionId, SessionId } from "@omp-studio/client-contract";
 import type { InteractionForm } from "@omp-studio/studio-protocol";
 import { InteractionDeck } from "../InteractionDeck";
+import { I18nProvider } from "../i18n";
 import { PreviewModeProvider } from "../preview/PreviewContext";
 import { PREVIEW_FORM_LONG, PREVIEW_FORM_SHORT } from "../preview/formPreview";
 import { closeFormSession, FormSession, type FormInteraction, type ReadInteractionForm } from "./FormSession";
@@ -51,6 +52,7 @@ it("preserves field DOM and edits through fieldset navigation, collapse, expansi
   await screen.findByRole("navigation", { name: "表单题组" });
   fireEvent.click(screen.getByRole("button", { name: /交互参数/ }));
   const input = screen.getByRole("textbox", { name: "惯性衰减系数" }) as HTMLInputElement;
+  expect(screen.getByRole("textbox", { name: "停止阈值" })).toBeTruthy();
   fireEvent.change(input, { target: { value: "0.85" } });
   fireEvent.click(screen.getByRole("button", { name: /1\s*惯性/ }));
   expect(input.isConnected).toBe(true);
@@ -59,7 +61,7 @@ it("preserves field DOM and edits through fieldset navigation, collapse, expansi
   fireEvent.click(screen.getByRole("button", { name: "收起表单" }));
   expect(input.isConnected).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "展开 / Show" }));
-  fireEvent.click(screen.getByRole("button", { name: /交互参数/ }));
+  expect(screen.getByRole("textbox", { name: "惯性衰减系数" })).toBe(input);
   fireEvent.click(screen.getByRole("button", { name: "放大表单" }));
   rerender(<InteractionDeck interaction={{ ...interaction, summary: "更新的摘要" }} readForm={read} onRespond={respond} disabled={false} />);
   expect(screen.getByRole("textbox", { name: "惯性衰减系数" })).toBe(input);
@@ -116,13 +118,51 @@ it("makes Other reachable from radio keys, keeps option notes attached and sends
   await waitFor(() => expect(document.activeElement).toBe(other));
   fireEvent.change(other, { target: { value: "只给触控板加惯性" } });
   expect(setting.getAttribute("aria-checked")).toBe("false");
+  expect(screen.queryByRole("radio", { name: "默认关" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+  expect(screen.queryByRole("radio", { name: /^做成设置项/ })).toBeNull();
   fireEvent.click(screen.getByRole("radio", { name: "默认关" }));
   fireEvent.click(screen.getByRole("button", { name: "添加附注：默认关" }));
   fireEvent.change(screen.getByRole("textbox", { name: "附注：默认关" }), { target: { value: "保留精确定位" } });
+  fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+  expect(screen.getByText(/Other: 只给触控板加惯性/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "提交" }));
   await waitFor(() => expect(respond).toHaveBeenCalledWith("submit", { data: { inertia: "只给触控板加惯性", default: "off" }, notes: [
     { name: "default", question: "如果做成设置项，默认值怎么定？", option: "默认关", value: "off", text: "保留精确定位" },
   ] }));
+});
+
+it("pages loose questions with their context and opens the invalid page on submission", async () => {
+  const decay = PREVIEW_FORM_LONG.fields[2]!;
+  const threshold = PREVIEW_FORM_LONG.fields[3]!;
+  const dto: InteractionForm = {
+    ...PREVIEW_FORM_SHORT, fields: [PREVIEW_FORM_SHORT.fields[0]!, decay, threshold],
+    sections: [PREVIEW_FORM_SHORT.sections[1]!, { title: [], fieldset: false, blocks: [
+      { kind: "field", fieldId: decay.id },
+      { kind: "text", heading: false, spans: [{ text: "Threshold context" }] },
+      { kind: "field", fieldId: threshold.id },
+    ] }],
+  };
+  const target = pending(dto);
+  const read = async () => dto;
+  const respond = vi.fn(() => Promise.resolve(true));
+  const surface = (language: "en" | "zh") => <I18nProvider forcedLanguage={language}>
+    <InteractionDeck interaction={target} readForm={read} onRespond={respond} disabled={false} />
+  </I18nProvider>;
+  const { rerender } = render(surface("zh"));
+  fireEvent.click(await screen.findByRole("button", { name: "下一页" }));
+  const input = screen.getByRole("textbox", { name: decay.question });
+  expect(screen.queryByRole("textbox", { name: threshold.question })).toBeNull();
+  fireEvent.change(input, { target: { value: "2" } });
+  rerender(surface("en"));
+  expect(screen.getByRole("separator", { name: "Resize question card" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByText("Threshold context").closest("[hidden]")).toBeNull();
+  rerender(surface("zh"));
+  fireEvent.click(screen.getByRole("button", { name: "提交" }));
+  expect(screen.getByRole("textbox", { name: decay.question })).toBe(input);
+  expect(document.activeElement).toBe(input);
+  expect(respond).not.toHaveBeenCalled();
 });
 
 it("never inserts model HTML or SVG into the privileged form DOM", async () => {
@@ -143,11 +183,20 @@ it("never inserts model HTML or SVG into the privileged form DOM", async () => {
 it("hides preview marks in both compact and open forms and keeps demo submissions local", async () => {
   window.history.replaceState(null, "", "?preview=1&marks=off");
   const session = await local(PREVIEW_FORM_SHORT, `preview-form-${++counter}`);
-  render(<PreviewModeProvider switchEnabled><QueuedDeck demo items={[{ kind: "form", id: "preview", title: "Agent 提问", summary: "交互默认", session }]} regionLabel="待处理提问" /></PreviewModeProvider>);
+  const items: QueuedDeckItem[] = [{ kind: "form", id: "preview", title: "Agent 提问", summary: "交互默认", session }];
+  const preview = (language: "zh" | "en") => <I18nProvider forcedLanguage={language}><PreviewModeProvider switchEnabled>
+    <QueuedDeck demo items={items} regionLabel="待处理提问" />
+  </PreviewModeProvider></I18nProvider>;
+  const { rerender } = render(preview("zh"));
   expect(screen.queryByText("演示")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "收起表单" }));
   expect(screen.queryByText("演示")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "展开 / Show" }));
+  fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+  rerender(preview("en"));
+  expect(screen.getByRole("button", { name: "Review answers" })).toBeTruthy();
+  expect(screen.getByRole("radio", { name: "默认关" }).getAttribute("aria-checked")).toBe("true");
+  rerender(preview("zh"));
   fireEvent.click(screen.getByRole("button", { name: "提交" }));
   await waitFor(() => expect(session.getMeta().phase).toBe("closed"));
   expect(screen.queryByRole("button", { name: "提交" })).toBeNull();

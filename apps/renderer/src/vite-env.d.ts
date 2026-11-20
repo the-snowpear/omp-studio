@@ -1,9 +1,10 @@
 /// <reference types="vite/client" />
 
 import type { StudioClient } from "@omp-studio/client-contract";
-import type { OmpStudioDesktopApi } from "@omp-studio/transport-desktop";
+import type { OmpStudioDesktopApi, MobileAccessApi } from "@omp-studio/transport-desktop";
 
 declare global {
+  var ompStudioMobileAccess: MobileAccessApi | undefined;
   /**
    * Semantic client injected by the hosting shell (local WebUI bridge or a
    * test harness) before the renderer bundle runs. Optional at runtime:
@@ -40,6 +41,7 @@ declare global {
 
   /** Explorer 文件树单个节点的桌面定位（工作区相对路径 + 节点类型）。 */
   type WorkspaceFileTargetInput = {
+    readonly targetId?: string;
     readonly workspaceId: string;
     readonly path: string;
     readonly kind: "file" | "dir";
@@ -123,8 +125,8 @@ declare global {
         >;
         loadAvatar(): Promise<{ readonly mime: "image/jpeg" | "image/webp" | "image/png"; readonly bytes: Uint8Array } | null>;
         clearAvatar(): Promise<void>;
-        openProjectInEditor(workspaceId: string): Promise<WorkspaceShellEditorResult>;
-        openProjectDirectory(workspaceId: string): Promise<void>;
+        openProjectInEditor(workspaceId: string, targetId?: string): Promise<WorkspaceShellEditorResult>;
+        openProjectDirectory(workspaceId: string, targetId?: string): Promise<void>;
         /** Electron `webUtils.getPathForFile` for dropped / pasted File objects. */
         getPathForFile(file: File): string | null;
         /**

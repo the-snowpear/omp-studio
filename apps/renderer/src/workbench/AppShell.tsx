@@ -2174,7 +2174,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   // 预览模式只是显示层：桌面 shell 操作仍走真实 API。若已注册过真实
   // workspace，就允许在预览态下对当前真实项目执行；没有真实 workspace
   // 时保持禁用并给出原因，绝不使用 preview fixture 里的演示路径。
-  const projectShellUnavailable = realActiveWorkspace === undefined
+  const projectShellUnavailable = executionTarget.kind === "ssh" ? (zh ? "SSH 工作区不支持在本机打开" : "Not available for SSH workspaces") : realActiveWorkspace === undefined
     ? (zh ? "请先打开本地项目" : "Open a local project first")
     : (globalThis.ompStudioChrome?.openProjectInEditor === undefined || globalThis.ompStudioChrome?.openProjectDirectory === undefined)
       ? (zh ? "仅桌面端可用" : "Desktop only")
@@ -2204,7 +2204,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     const workspace = realActiveWorkspace;
     const openInEditor = globalThis.ompStudioChrome?.openProjectInEditor;
     if (workspace === undefined || openInEditor === undefined) return;
-    void runProjectShellAction("editor", () => openInEditor(workspace.workspaceId));
+    void runProjectShellAction("editor", () => openInEditor(workspace.workspaceId, executionTarget.id ?? undefined));
   };
 
   const openProjectDirectory = () => {
@@ -2212,13 +2212,13 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     const openDirectory = globalThis.ompStudioChrome?.openProjectDirectory;
     if (workspace === undefined || openDirectory === undefined) return;
     void runProjectShellAction("directory", async () => {
-      await openDirectory(workspace.workspaceId);
+      await openDirectory(workspace.workspaceId, executionTarget.id ?? undefined);
       return { status: "opened" };
     });
   };
 
   // Explorer 文件「更多」菜单：本机编辑器清单只在真实 workspace 且桌面 chrome 可用时拉取一次。
-  const { fileOpeners, fileShellUnavailable, runFileShellAction } = useWorkspaceFileActions({ workspace: realActiveWorkspace, remote: !!executionTarget.id, onNotice: setShellNotice, onOpenIda: absolute => { setCapIntent("ida", absolute); setCapNonce(value => value + 1); go("capabilities"); } });
+  const { fileOpeners, fileShellUnavailable, runFileShellAction } = useWorkspaceFileActions({ workspace: realActiveWorkspace, remote: executionTarget.kind === "local" ? false : executionTarget.kind, targetId: executionTarget.id, onNotice: setShellNotice, onOpenIda: absolute => { setCapIntent("ida", absolute); setCapNonce(value => value + 1); go("capabilities"); } });
   // File windows reuse the Explorer shell actions and the Composer capsule chain; a line range follows the capsule as plain text.
   const fileViewerActions: FileViewerActions = {
     contextWorkspaceId: realActiveWorkspace?.workspaceId,

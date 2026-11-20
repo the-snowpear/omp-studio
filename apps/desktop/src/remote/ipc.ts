@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ClientTransport, ClientContextScope } from "@omp-studio/client-contract";
 import { parseClientCommandRequest, parseClientQueryRequest } from "@omp-studio/transport-desktop";
+import { listWslDistributions } from "./wsl.js";
 import { REMOTE_CHANNELS, type RemoteConnectionProfile, type RemoteCredentials } from "./shared.js";
 import type { RemoteConnectionManager } from "./manager.js";
 import { RemoteOperationError } from "./wire.js";
@@ -53,7 +54,7 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
     const remote = manager.get(target);
     const generation = remote.generation;
     const result = await action(remote);
-    if (manager.get(target) !== remote || remote.generation !== generation) throw new Error(desktopText("SSH 通道已改变，请重新同步；已丢弃旧连接的读取结果", "SSH channel changed; please resynchronize (read result from previous connection was discarded)"));
+    if (manager.get(target) !== remote || remote.generation !== generation) throw new Error(desktopText("工作位置的连接已改变，请重新同步", "The execution target connection changed. Please synchronize again."));
     return result;
   };
   const cancelPending = async (): Promise<void> => {
@@ -64,6 +65,8 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
     contexts.clear();
     await manager.cancelPending();
   };
+  handle(REMOTE_CHANNELS.wslDistributions, listWslDistributions);
+  handle(REMOTE_CHANNELS.ensureWsl, distro => manager.ensureWsl(String(distro)));
   handle(REMOTE_CHANNELS.list, () => manager.list());
   handle(REMOTE_CHANNELS.save, profile => manager.save(profile as Omit<RemoteConnectionProfile, "id"> & { id?: string }));
   handle(REMOTE_CHANNELS.remove, async id => {
@@ -74,7 +77,7 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
   handle(REMOTE_CHANNELS.connect, async (id, input) => {
     const credentials = input as RemoteCredentials | undefined;
     const target = idOf(id);
-    if (connecting.has(target)) { if (credentials) credentials.password = ""; throw new Error(desktopText("此 SSH 连接正在准备中", "This SSH connection is still being prepared")); }
+    if (connecting.has(target)) { if (credentials) credentials.password = ""; throw new Error(desktopText("此连接正在准备中", "This connection is still being prepared")); }
     const attempt = { controller: new AbortController(), clearCredentials: () => { if (credentials) credentials.password = ""; } };
     connecting.set(target, attempt);
     let stopWaiting: (() => void) | undefined;
@@ -109,7 +112,7 @@ export function registerRemoteIpc(options: { ipc: Ipc; manager: RemoteConnection
   handle(REMOTE_CHANNELS.openContext, async (id, scope) => {
     const name = idOf(id), remote = manager.get(name), generation = remote.generation;
     const transport = await remote.transport.openContext(scope as ClientContextScope);
-    if (disposed || manager.get(name) !== remote || remote.generation !== generation) { await transport.close(); throw new Error("SSH connection changed while opening the conversation"); }
+    if (disposed || manager.get(name) !== remote || remote.generation !== generation) { await transport.close(); throw new Error(desktopText("打开对话时连接已改变", "Connection changed while opening the conversation")); }
     const contextId = randomUUID();
     const off = transport.subscribe({ scope: "all" }, event => emit(REMOTE_CHANNELS.event, { id: name, generation, contextId, event }));
     contexts.set(contextId, { id: name, generation, transport, off }); return contextId;

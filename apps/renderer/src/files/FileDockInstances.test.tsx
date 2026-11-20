@@ -16,7 +16,17 @@ vi.mock("../dock/DockContext", () => ({
   useDockEngine: () => ({ store: useContext(engine)!, setFileViewDefinitions: targets.definitions }),
   DockPanel: ({ children }: { children: (visibility: { visible: boolean }) => ReactNode }) => <>{children({ visible: true })}</>,
 }));
-vi.mock("./FilePane", () => ({ default: ({ descriptor, actions, onOpen }: { descriptor: FilePanelDescriptor; actions?: FileViewerActions; onOpen: (reference: { path: string }) => void }) => <section data-testid={descriptor.fileId}><button onClick={() => actions?.addContext({ path: descriptor.path, label: descriptor.title })}>添加到对话</button><button onClick={() => onOpen({ path: "linked.md" })}>打开相对链接</button></section> }));
+vi.mock("./FilePane", async () => {
+  const { FileDocumentContext, FileLink } = await import("./fileLinks");
+  return { default: ({ descriptor, actions }: { descriptor: FilePanelDescriptor; actions?: FileViewerActions }) =>
+    <section data-testid={descriptor.fileId}>
+      <button onClick={() => actions?.addContext({ path: descriptor.path, label: descriptor.title })}>添加到对话</button>
+      <FileDocumentContext.Provider value={{ basePath: descriptor.path, workspaceId: descriptor.workspaceId, targetId: descriptor.targetId, preview: false }}>
+        <FileLink href="linked.md">打开相对链接</FileLink>
+      </FileDocumentContext.Provider>
+    </section>,
+  };
+});
 const stores: DockStore[] = [];
 afterEach(() => { cleanup(); for (const store of stores.splice(0)) store.flush(); localStorage.removeItem("omp.file-viewer.scope"); vi.clearAllMocks(); });
 
@@ -30,7 +40,9 @@ function setup() {
   const view = (id: string) => ({ store: workspace, document: metadata.documents.find(item => item.id === id)! }) as NonNullable<ContextType<typeof ConversationViewContext>>;
   const actions = (): FileViewerActions => ({ openers: [], addContext: vi.fn(), runShell: vi.fn() });
   const sourceActions = actions(), activeActions = actions();
-  const query = vi.fn(async (_name: string, input: { path: string }) => ({ workspaceId: "workspace", path: input.path, id: input.path, name: input.path, mime: "text/plain", size: 1, version: "v1", writable: true } as WorkspaceFileInfo));
+  const query = vi.fn(async (name: string, input: { path: string; paths: string[] }) => name === "workspace.paths.resolve"
+    ? { resolutions: input.paths.map(path => ({ path, kind: "file" })) }
+    : { workspaceId: "workspace", path: input.path, id: input.path, name: input.path, mime: "text/plain", size: 1, version: "v1", writable: true } as WorkspaceFileInfo);
   targets.readyClient.mockResolvedValue({ query } as unknown as StudioClient);
   const ui = (sourceTarget: string | null = null) => <>
     <engine.Provider value={source}><ConversationViewContext.Provider value={view("source")}><FileDockInstances workspaceId="workspace" targetId={sourceTarget} onSettings={() => {}} actions={sourceActions} /></ConversationViewContext.Provider></engine.Provider>
@@ -55,7 +67,7 @@ it("adds workspace-owned file context to the current conversation, then follows 
 it("opens links through the file's original Host target after the conversation switches targets", async () => {
   const source = setup(); render(source.ui("current-ssh"));
   const pane = await screen.findByTestId("source-file");
-  fireEvent.click(within(pane).getByRole("button", { name: "打开相对链接" }));
+  fireEvent.click(within(pane).getByRole("link", { name: "打开相对链接" }));
   await waitFor(() => expect(source.query).toHaveBeenCalledWith("workspace.file.inspect", { workspaceId: "workspace", path: "linked.md" }));
   expect(targets.readyClient).toHaveBeenCalledWith(null); expect(targets.readyClient).not.toHaveBeenCalledWith("current-ssh");
 });

@@ -7,7 +7,7 @@ import { ModelCompactionPane } from "./models/ModelCompactionPane";
 import { ModelPresetsPane } from "./models/ModelPresetsPane";
 import { SessionOptionsPane } from "./models/SessionOptionsPane";
 import { AccountStatusPane } from "./models/AccountStatusPane";
-import { NativeModelAccessPane } from "./models/NativeModelAccessPane";
+import { isOpenCodeProvider, NativeModelAccessPane } from "./models/NativeModelAccessPane";
 import { ModelSystemTemplates, ModelSystemTemplateInspector } from "./models/ModelSystemTemplates";
 import { modelServiceAvailable, useModelAuth } from "./models/useModelAuth";
 import { ModelAvailabilityStrip } from "./models/ModelAvailabilityStrip";
@@ -87,6 +87,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     : {});
   const modelContext = useMemo(() => ({ client, sessionId, available: runtimeAvailable, capabilities }), [client, sessionId, runtimeAvailable, capabilities]);
   const nativeAuth = useModelAuth(modelContext, preview, shownTab === "providers" || shownTab === "accounts" || shownTab === "roles");
+  const [nativeProvider, setNativeProvider] = useState("");
   const [runtimeModels, setRuntimeModels] = useState<AvailableModelRecord[]>([]);
   const nativeLoad = useRef(0);
   const [data, setData] = useState<ModelConfigReadModel | null>(preview ? createPreviewModelConfig(zh) : null);
@@ -1450,14 +1451,14 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         <section id="mcPanelAccounts" role="tabpanel" aria-labelledby="mcTabAccounts" hidden={shownTab !== "accounts"} {...tabPanelMotion("accounts")}>
           <AccountStatusPane sessionId={sessionId} standalone visible={shownTab === "accounts"} client={client} available={runtimeAvailable} capabilities={capabilities} />
           <SessionOptionsPane client={client} sessionId={sessionId} available={runtimeAvailable} capabilities={capabilities} visible={shownTab === "accounts"} />
-          <NativeModelAccessPane context={modelContext} auth={nativeAuth} visible={shownTab === "accounts"} accounts onChanged={() => { void refresh(); }} />
+          <NativeModelAccessPane context={modelContext} auth={nativeAuth} visible={shownTab === "accounts"} accounts selected={nativeProvider} onSelect={setNativeProvider} onChanged={() => { void refresh(); }} />
         </section>
         <section id="mcPanelProviders" role="tabpanel" aria-labelledby="mcTabProviders" hidden={shownTab !== "providers"} {...tabPanelMotion("providers")}>
           {!editor ? <ModelAvailabilityStrip
             availability={preview ? previewModelAvailability(data?.availableModels.length ?? 0) : data?.availability}
             refreshing={availabilityRefreshing} canRefresh={preview || !!data} runtimeRefresh={preview || runtimeAvailable}
             demo={preview && marks} onRefresh={() => void refreshAvailability()} /> : null}
-          {!editor ? <NativeModelAccessPane context={modelContext} auth={nativeAuth} visible={shownTab === "providers"} onChanged={() => { void refresh(); }} /> : null}
+          {!editor ? <NativeModelAccessPane context={modelContext} auth={nativeAuth} visible={shownTab === "providers"} selected={nativeProvider} onSelect={setNativeProvider} onChanged={() => { void refresh(); }} /> : null}
           <div className={editorLive ? `mc-view ${pagePhaseClass(editorPhase)}` : "mc-view"} data-page-dir={pageDir(editorDir)}>
           {editor ? (
             <>
@@ -1540,6 +1541,13 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                 />
                 <div className="auth-box">
                   {editor.authType === "oauth" ? (() => {
+                    if (isOpenCodeProvider(editor.id)) return (
+                      <div className="auth-actions">
+                        <button type="button" className="btn small outline" onClick={() => { setNativeProvider(editor.id); setTab("accounts"); }}>
+                          <Icon name="key" extra="sm" />{t("modelConfig.openCode.configure")}
+                        </button>
+                      </div>
+                    );
                     const login = preview ? data?.loginProviders.find(item => item.id === editor.id) : nativeAuth.providers?.find(item => item.id === editor.id);
                     const authed = Boolean(login?.authenticated);
                     const account = marks ? data?.providers.find((item) => item.id === editor.id)?.auth.account : undefined;

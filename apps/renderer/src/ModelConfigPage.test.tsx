@@ -4,6 +4,7 @@ import { selectOption } from "./test/selectOption";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type {
+  ClientBootstrap,
   ClientEvent,
   CommandReceipt,
   CommandRequestId,
@@ -12,8 +13,10 @@ import type {
   ModelProviderRecord,
   StudioClient,
 } from "@omp-studio/client-contract";
+import type { ModelAuthProvider, ModelAuthProvidersResult, ModelProviderRoster } from "@omp-studio/studio-protocol";
 
 import { ModelConfigPage } from "./ModelConfigPage";
+import { I18nProvider } from "./i18n";
 import { PreviewModeProvider } from "./preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "./preview/mode";
 
@@ -196,6 +199,86 @@ function fakeClient(probe: ModelDiscoveryResult | Error = PROBE_OK, modelConfig?
     readonly command: ReturnType<typeof vi.fn>;
   };
 }
+
+it("configures OpenCode Go from the provider editor and keeps a saved key when the catalog needs a retry", async () => {
+  const providerId = "opencode-go";
+  const configuredProvider = { ...gateway(), id: providerId, name: "OpenCode Go", auth: { type: "oauth" as const, hasSecret: false }, models: [] };
+  const client = fakeClient(PROBE_OK, { ...readModel(), providers: [configuredProvider] });
+  const provider: ModelAuthProvider = { id: providerId, name: "OpenCode Go", kind: "api-key", available: true, authenticated: false, credentials: [] };
+  const read = client.query.getMockImplementation() as (name: string, input: unknown) => Promise<unknown>;
+  client.query.mockImplementation(async (name, input) => name === "models.auth.providers.read"
+    ? { sessionId: "owner", providers: [provider] }
+    : read(name, input));
+  const capabilities = { capabilities: ["models.auth.providers.read", "models.auth.login", "models.auth.key.set", "models.provider.roster.refresh"]
+    .map(id => ({ id, grade: "stable" })) } as ClientBootstrap["capabilityManifest"];
+  const commands: Record<string, CommandReceipt> = {};
+  let catalogAttempts = 0;
+  Object.assign(client, { getState: () => ({ commands }) });
+  client.command.mockImplementation(async (commandName: "models.auth.key.set" | "models.provider.roster.refresh" | "runtime.models.list") => {
+    if (commandName === "runtime.models.list") throw new Error("Runtime models are unavailable in this workspace");
+    const requestId = `open-code-${Object.keys(commands).length}` as CommandRequestId;
+    let result: ModelAuthProvidersResult | ModelProviderRoster;
+    if (commandName === "models.auth.key.set") {
+      result = { sessionId: "owner", providers: [{ ...provider, authenticated: true }] };
+    } else {
+      const failed = ++catalogAttempts === 1;
+      result = { providerId, models: [], authenticated: true, authoritative: true, status: failed ? "error" : "ready", ...(failed ? { error: "Gateway timed out" } : {}) };
+    }
+    commands[requestId] = { requestId, commandName, status: "completed", result, observedAt: T0 };
+    return { requestId };
+  });
+  const page = (language: "zh" | "en") => <I18nProvider forcedLanguage={language}>
+    <ModelConfigPage client={client} sessionId="owner" runtimeAvailable capabilities={capabilities} />
+  </I18nProvider>;
+  const { rerender } = render(page("zh"));
+  fireEvent.click(await screen.findByRole("button", { name: "编辑供应商" }));
+  fireEvent.click(await screen.findByRole("button", { name: "配置 API Key" }));
+  const input = await screen.findByLabelText<HTMLInputElement>("API Key");
+  expect(input.type).toBe("password");
+  expect(screen.getByRole("link", { name: "打开 OpenCode 控制台" }).getAttribute("href")).toBe("https://opencode.ai/auth");
+  fireEvent.change(input, { target: { value: "test-go-key" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存 API Key" }));
+  expect(await screen.findByText("API Key 已保存。")).toBeTruthy();
+  expect(await screen.findByText("Gateway timed out")).toBeTruthy();
+  expect(input.value).toBe("");
+
+  rerender(page("en"));
+  expect(screen.getByText("API key saved.")).toBeTruthy();
+  expect(screen.getByText("Could not refresh the model catalog.")).toBeTruthy();
+  expect(screen.getByText("Gateway timed out")).toBeTruthy();
+  rerender(page("zh"));
+
+  fireEvent.click(screen.getByRole("button", { name: "检查模型目录" }));
+  expect(await screen.findByText("目录未返回可用模型。")).toBeTruthy();
+  expect(screen.getByText("API Key 已保存。")).toBeTruthy();
+  expect(client.command.mock.calls.filter(([name]) => name !== "runtime.models.list")).toEqual([
+    ["models.auth.key.set", { sessionId: "owner", providerId, apiKey: "test-go-key" }],
+    ["models.provider.roster.refresh", { sessionId: "owner", providerId }],
+    ["models.provider.roster.refresh", { sessionId: "owner", providerId }],
+  ]);
+});
+
+it("keeps the OpenCode Zen key draft through a live language switch in preview", async () => {
+  const client = fakeClient();
+  window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "1");
+  const page = (language: "zh" | "en") => <I18nProvider forcedLanguage={language}>
+    <PreviewModeProvider switchEnabled><ModelConfigPage client={client} /></PreviewModeProvider>
+  </I18nProvider>;
+  const { rerender } = render(page("zh"));
+  selectOption(await screen.findByRole("combobox", { name: "原生供应商" }), /OpenCode Zen/);
+  const input = screen.getByLabelText<HTMLInputElement>("API Key");
+  fireEvent.change(input, { target: { value: "test-zen-key" } });
+  rerender(page("en"));
+  expect(screen.getByRole("heading", { name: "Configure API Key" })).toBeTruthy();
+  expect(input.value).toBe("test-zen-key");
+  rerender(page("zh"));
+  expect(screen.getByRole("heading", { name: "配置 API Key" })).toBeTruthy();
+  expect(input.value).toBe("test-zen-key");
+  fireEvent.click(screen.getByRole("button", { name: "保存 API Key" }));
+  expect(await screen.findByText("可用模型 1 个")).toBeTruthy();
+  expect(input.value).toBe("");
+  expect(client.command).not.toHaveBeenCalled();
+});
 
 it("keeps an unavailable role model editable and saves its replacement through the native role command", async () => {
   window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");

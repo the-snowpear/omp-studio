@@ -26,6 +26,7 @@ export const WORKSPACE_SHELL_IPC_CHANNELS = {
 const WORKSPACE_ID_PATTERN = /^[A-Za-z0-9._~-]{1,128}$/u;
 
 export interface WorkspaceShellInput {
+  readonly targetId?: string;
   readonly workspaceId: string;
 }
 
@@ -61,18 +62,24 @@ function assertPlainObject(value: unknown, what: string): asserts value is Recor
   }
 }
 
+function shellTarget(input: Record<string, unknown>): { targetId?: string } {
+  if (input.targetId === undefined) return {};
+  if (typeof input.targetId !== "string" || !input.targetId) throw new WorkspaceShellIpcError("Invalid execution target");
+  return { targetId: input.targetId };
+}
+
 export function parseWorkspaceShellInput(value: unknown): WorkspaceShellInput {
   assertPlainObject(value, "workspace shell");
   const input = value as Record<string, unknown>;
   for (const key of Object.keys(input)) {
-    if (key !== "workspaceId") {
+    if (key !== "workspaceId" && key !== "targetId") {
       throw new WorkspaceShellIpcError(`workspace shell: unexpected field ${key}`);
     }
   }
   if (typeof input.workspaceId !== "string" || !WORKSPACE_ID_PATTERN.test(input.workspaceId)) {
     throw new WorkspaceShellIpcError("workspace shell: workspaceId must be an opaque 1–128 character token");
   }
-  return { workspaceId: input.workspaceId };
+  return { workspaceId: input.workspaceId, ...shellTarget(input) };
 }
 
 const MAX_DROPPED_PATHS = 32;
@@ -141,6 +148,7 @@ export type WorkspaceFileKind = "file" | "dir";
  * root; absolute paths never cross the IPC boundary inbound.
  */
 export interface WorkspaceFileTargetInput {
+  readonly targetId?: string;
   readonly workspaceId: string;
   readonly path: string;
   readonly kind: WorkspaceFileKind;
@@ -177,7 +185,7 @@ export type WorkspaceFileActionResult =
 function parseWorkspaceFileTarget(value: unknown, what: string, extraKeys: readonly string[] = []): WorkspaceFileTargetInput {
   assertPlainObject(value, what);
   const input = value as Record<string, unknown>;
-  const allowedKeys = ["workspaceId", "path", "kind", ...extraKeys];
+  const allowedKeys = ["workspaceId", "targetId", "path", "kind", ...extraKeys];
   for (const key of Object.keys(input)) {
     if (!allowedKeys.includes(key)) {
       throw new WorkspaceShellIpcError(`${what}: unexpected field ${key}`);
@@ -197,7 +205,7 @@ function parseWorkspaceFileTarget(value: unknown, what: string, extraKeys: reado
   if (input.kind !== "file" && input.kind !== "dir") {
     throw new WorkspaceShellIpcError(`${what}: kind must be "file" or "dir"`);
   }
-  return { workspaceId: input.workspaceId, path: input.path, kind: input.kind };
+  return { workspaceId: input.workspaceId, path: input.path, kind: input.kind, ...shellTarget(input) };
 }
 
 export function parseWorkspaceFileTargetInput(value: unknown): WorkspaceFileTargetInput {

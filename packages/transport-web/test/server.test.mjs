@@ -2,6 +2,28 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BrowserWebClientTransport, LoopbackWebAdapter, createLoopbackHttpServer } from '../dist/src/index.js';
 
+test('an expired mobile pairing code cannot grant access', async (t) => {
+  const origin = 'http://localhost';
+  let time = 0;
+  const adapter = new LoopbackWebAdapter({
+    host: host(), origins: [origin], now: () => time,
+    mobile: { workspaceId: 'project', workspaceName: 'Project' },
+  });
+  const server = createLoopbackHttpServer(adapter);
+  t.after(() => server.close());
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const endpoint = `http://127.0.0.1:${server.address().port}/api/v1/pair`;
+  const pair = (code) => fetch(endpoint, {
+    method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ code }),
+  });
+  const expiredCode = adapter.pairingCode;
+  time = adapter.pairingExpiresAt;
+  assert.equal((await pair(expiredCode)).status, 401);
+  adapter.rotatePairingCode();
+  assert.equal((await pair(adapter.pairingCode)).status, 200);
+  await adapter.revokeAll();
+});
+
 function host() { return {
   bootstrap: async () => ({ contractVersion: 2 }),
   query: async (r) => ({ ok: true, queryName: r.queryName, result: {} }),

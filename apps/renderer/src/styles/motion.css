@@ -264,6 +264,12 @@
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
 }
+/* A ring leaving a status dot: "waiting on someone" (a phone to scan, an
+   approval to answer). Run it on a pseudo-element around the dot. */
+@keyframes omp-ping {
+  from { opacity: 0.7; scale: 0.5; }
+  to { opacity: 0; scale: 2.3; }
+}
 @keyframes omp-sweep {
   from { translate: -100% 0; }
   to { translate: 100% 0; }

@@ -21,6 +21,7 @@
  */
 
 import { contextBridge, ipcRenderer, webUtils } from "electron";
+import { MOBILE_ACCESS_CHANNELS, type MobileAccessApi } from "@omp-studio/transport-desktop";
 
 import {
   createDesktopIpcBridge,
@@ -68,6 +69,8 @@ const api = createDesktopIpcBridge(sender);
 
 contextBridge.exposeInMainWorld(DESKTOP_BRIDGE_GLOBAL, api);
 const remoteApi: RemoteApi = {
+  wslDistributions: () => ipcRenderer.invoke(REMOTE_CHANNELS.wslDistributions),
+  ensureWsl: distro => ipcRenderer.invoke(REMOTE_CHANNELS.ensureWsl, distro),
   list: () => ipcRenderer.invoke(REMOTE_CHANNELS.list),
   save: profile => ipcRenderer.invoke(REMOTE_CHANNELS.save, profile),
   remove: id => ipcRenderer.invoke(REMOTE_CHANNELS.remove, id),
@@ -93,6 +96,14 @@ const remoteApi: RemoteApi = {
 };
 contextBridge.exposeInMainWorld("ompStudioRemote", Object.freeze(remoteApi));
 contextBridge.exposeInMainWorld("ompStudioChrome", createOmpStudioChromeApi(ipcRenderer, webUtils));
+contextBridge.exposeInMainWorld("ompStudioMobileAccess", Object.freeze({
+  status: () => ipcRenderer.invoke(MOBILE_ACCESS_CHANNELS.status),
+  start: (ip, workspaceId) => ipcRenderer.invoke(MOBILE_ACCESS_CHANNELS.start, ip, workspaceId),
+  stop: () => ipcRenderer.invoke(MOBILE_ACCESS_CHANNELS.stop),
+  pair: () => ipcRenderer.invoke(MOBILE_ACCESS_CHANNELS.pair),
+  revoke: () => ipcRenderer.invoke(MOBILE_ACCESS_CHANNELS.revoke),
+  exportCertificate: () => ipcRenderer.invoke(MOBILE_ACCESS_CHANNELS.exportCertificate),
+} satisfies MobileAccessApi));
 // P0-6: read-only GPU/low-spec profile. `cached` is read synchronously at
 // preload time (sendSync) so the Renderer can pick its first-paint policy
 // without waiting for an IPC round-trip; there is no write method.

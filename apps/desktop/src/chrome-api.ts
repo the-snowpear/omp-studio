@@ -224,11 +224,11 @@ export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?
     clearAvatar(): Promise<void> {
       return ipcRenderer.invoke(CHROME_PROFILE_CHANNELS.clearAvatar) as Promise<void>;
     },
-    openProjectInEditor(workspaceId: string): Promise<WorkspaceShellEditorResult> {
-      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.openInEditor, { workspaceId }) as Promise<WorkspaceShellEditorResult>;
+    openProjectInEditor(workspaceId: string, targetId?: string): Promise<WorkspaceShellEditorResult> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.openInEditor, { workspaceId, ...(targetId ? { targetId } : {}) }) as Promise<WorkspaceShellEditorResult>;
     },
-    openProjectDirectory(workspaceId: string): Promise<void> {
-      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.revealInFileManager, { workspaceId }) as Promise<void>;
+    openProjectDirectory(workspaceId: string, targetId?: string): Promise<void> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.revealInFileManager, { workspaceId, ...(targetId ? { targetId } : {}) }) as Promise<void>;
     },
     getPathForFile(file: File): string | null {
       try {

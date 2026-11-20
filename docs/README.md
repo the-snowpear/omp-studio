@@ -9,8 +9,10 @@ Public documentation for OMP Studio.
 | [getting-started.md](getting-started.md) | Run from source |
 | [linux.md](linux.md) | Linux AppImage / deb 安装、更新、沙箱、源码开发与原生包验收 |
 | [settings.md](settings.md) | 设置分类、搜索与 Runtime 保存范围 |
+| [mobile-access.md](mobile-access.md) | 手机访问的证书信任、扫码配对、会话与审批 / Mobile setup and pairing |
 | [time-travel.md](time-travel.md) | Time Travel 开启、检查点、代码/对话恢复、存储与限制 |
 | [ssh-workspaces.md](ssh-workspaces.md) | SSH 工作区开发预览：连接、远端 Runtime、终端与当前限制 |
+| [wsl-workspaces.md](wsl-workspaces.md) | Windows WSL 2 工作区、项目文件、本机编辑器和连接恢复 |
 | [tmux.md](tmux.md) | SSH tmux 会话附加、窗口与分屏、隐藏与分离、恢复及限制 |
 | [../doc/ssh-workspace-test-prompt.md](../doc/ssh-workspace-test-prompt.md) | SSH 与账密功能的独立测试交接提示词 |
 | [model-adaptation.md](model-adaptation.md) | Model parameter recommendations, provenance and catalog maintenance |
@@ -22,6 +24,8 @@ Public documentation for OMP Studio.
 | [dictation.md](dictation.md) | 工作台与 BTW 语音输入、原生模式、麦克风配置和内存恢复 |
 | [btw.md](btw.md) | BTW 原生功能对齐、话题历史、图片、子代理与快捷键 |
 | [fonts.md](fonts.md) | Independent interface, terminal and output font preferences |
+| [releases/v0.2.6.md](releases/v0.2.6.md) | 0.2.6 启动崩溃修复、平台下载与升级提示 |
+| [releases/v0.2.5.md](releases/v0.2.5.md) | 0.2.5 发布说明、平台下载与升级提示 |
 | [releases/v0.2.4.md](releases/v0.2.4.md) | 0.2.4 发布说明、平台下载与升级提示 |
 | [releases/v0.2.3.md](releases/v0.2.3.md) | 0.2.3 发布说明、平台下载与升级提示 |
 | [releases/v0.2.2.md](releases/v0.2.2.md) | 0.2.2 发布说明、平台下载与升级提示 |

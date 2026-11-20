@@ -3,6 +3,7 @@ import { useI18n } from "../i18n";
 import { DockSettings } from "../dock/DockSettings";
 import { ConversationWidthSettings } from "./ConversationWidthSettings";
 import { FontSettings } from "./FontSettings";
+import { MobileAccessSettings } from "./MobileAccessSettings";
 import { UpdateAutomationSettings } from "./UpdateAutomationSettings";
 import { CONVERSATION_WIDTH_KEYS, DEFAULT_APP_SETTINGS, type AppSettings } from "./appSettings";
 import { SettingRow, SettingSection, Switch } from "./SettingRow";
@@ -57,6 +58,7 @@ export function LocalSettings({ ctl, section }: { ctl: SettingsCtl; section: "ge
   </SettingSection>;
 
   return <>
+    <MobileAccessSettings key={String(ctl.preview)} preview={ctl.preview} />
     <SettingSection title={t("settings.general.sectionApp")}>
       <SettingRow label={t("settings.general.language")} desc={t("settings.general.languageDesc")} source={source("language")}>
         <Select label={t("settings.general.language")} value={app.language} options={[["system", t("settings.general.langSystem")], ["zh", t("settings.general.langZh")], ["en", t("settings.general.langEn")]]} onChange={language => updateApp({ language })} />

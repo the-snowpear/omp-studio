@@ -47,7 +47,7 @@
 </p>
 
 > [!NOTE]
-> **0.2.4** 缩短了会话切换等待，修复了自定义模型保存后消失和用户消息里的链接在深色主题下不可见的问题。内置 Runtime 为 `18.20.2-studio.14`。 [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.4) · [发布说明](docs/releases/v0.2.4.md)
+> **0.2.6** 修复 0.2.5 桌面版因缺少手机访问证书依赖而无法启动的问题。若无法打开 0.2.5，请直接下载并运行新安装包。内置 Runtime 为 `18.20.2-studio.15`。 [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.6) · [发布说明](docs/releases/v0.2.6.md)
 
 <table>
 <tr>
@@ -251,6 +251,8 @@ Anthropic、OpenAI、OpenRouter、本地 LM Studio 等供应商在同一页管�
 | **Git / Changes** | 暂存、diff、提交、Fetch / Pull / Push、提交图和 Worktree；Changes 按回合列出文件变化 | [feature-index.md](doc/feature-index.md) |
 | **文件查看器** | 文本编辑、Markdown、PDF、图片、音视频、Excel / CSV；Word / PPT 通过可选组件打开 | [file-viewer.md](docs/file-viewer.md) |
 | **SSH 工作区** | 在本机或远端工作，支持系统密钥和账号密码，远端 Runtime 可有限恢复（开发预览） | [ssh-workspaces.md](docs/ssh-workspaces.md) |
+| **WSL 2 工作区** | 从 Windows 桌面版选择 Linux 发行版和目录，在其中运行 Agent、Git 和终端 | [wsl-workspaces.md](docs/wsl-workspaces.md) |
+| **手机访问** | 在同一局域网内配对手机，继续所选本地项目中的已有会话 | [mobile-access.md](docs/mobile-access.md) |
 | **BTW 旁路追问** | 不打断主线程地追问；支持图片、分支和子代理复用 | [btw.md](docs/btw.md) |
 | **语音输入** | 点击或按住空格听写，内容插入到光标位置；失败后可从内存恢复录音 | [dictation.md](docs/dictation.md) |
 | **评测工作区** | 原生基准、指令遵循评测、后台执行、历史对比，以及 Ratchet 最佳版本差异导出 | [evaluation.md](docs/evaluation.md) |

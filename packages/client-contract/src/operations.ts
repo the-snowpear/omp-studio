@@ -125,6 +125,8 @@ export interface QueryInputMap extends RuntimeViewQueryMap, ContextViewQueryMap,
   "diagnostics.get": EmptyInput;
   "history.list": {
     readonly limit?: number;
+    readonly offset?: number;
+    readonly sessionId?: SessionId;
     readonly status?: SessionHistoryStatus;
     readonly workspaceId?: WorkspaceId;
   };
@@ -144,6 +146,7 @@ export interface QueryInputMap extends RuntimeViewQueryMap, ContextViewQueryMap,
   "workspace.file.inspect": import("./files.js").WorkspaceFileTarget;
   "workspace.file.readText": import("./files.js").WorkspaceFileTarget;
   "workspace.file.readChunk": import("./files.js").WorkspaceFileChunkInput;
+  "workspace.paths.resolve": import("./files.js").WorkspacePathResolveInput;
   "fs.places": Record<string, never>;
   "fs.list": import("./system-files.js").SystemListInput;
   "fs.file.inspect": import("./system-files.js").SystemFileTarget;
@@ -241,6 +244,7 @@ export interface QueryResultMap extends RuntimeViewResultMap, ContextViewResultM
   "workspace.file.inspect": import("./files.js").WorkspaceFileInfo;
   "workspace.file.readText": import("./files.js").WorkspaceFileText;
   "workspace.file.readChunk": import("./files.js").WorkspaceFileChunk;
+  "workspace.paths.resolve": import("./files.js").WorkspacePathResolveResult;
   "fs.places": import("./system-files.js").SystemPlaces;
   "fs.list": import("./system-files.js").SystemDirectory;
   "fs.file.inspect": import("./system-files.js").SystemFileInfo;

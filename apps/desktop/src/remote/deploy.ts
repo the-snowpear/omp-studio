@@ -3,11 +3,13 @@ import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { sshArguments, systemSshExecutable, type RemotePlatform, type SshConnection } from "./platform.js";
+import type { RemotePlatform, SshConnection } from "./platform.js";
 import { SshRemoteTransport } from "./transport.js";
-import { sshAuthenticationRequest, type SshAuthentication } from "./authentication.js";
-import { RemoteConnectionError, connectionCancelled, sshFailure } from "./errors.js";
+import type { SshAuthentication } from "./authentication.js";
+import { RemoteConnectionError, connectionCancelled, sshFailure, wslFailure } from "./errors.js";
 import type { RemoteAttachment } from "./wire.js";
+import { remoteSpawn } from "./channel.js";
+import { targetNoun } from "./shared.js";
 import { desktopText } from "../desktop-language-shared.js";
 
 export interface RemoteEnvironment {
@@ -18,13 +20,15 @@ export interface RemoteInstallation { entry: string; state: string; bundleVersio
 
 export async function runSsh(connection: SshConnection, command: string, input?: Buffer | Readable, timeoutMs = 30_000, signal?: AbortSignal, authentication?: SshAuthentication): Promise<string> {
   signal?.throwIfAborted();
-  const authenticationRequest = sshAuthenticationRequest(connection, authentication);
+  const launch = remoteSpawn(connection, command, authentication);
+  const wsl = connection.kind === "wsl";
+  const failure = wsl ? wslFailure : sshFailure;
   return new Promise<string>((resolve, reject) => {
-    const child = spawn(systemSshExecutable(), [...sshArguments(connection), command], { stdio: "pipe", windowsHide: true, ...(authenticationRequest ? { env: authenticationRequest.env } : {}) });
+    const child = spawn(launch.file, launch.args, { stdio: "pipe", windowsHide: true, env: launch.env });
     let stdout = "";
     let stderr = "";
     let settled = false;
-    const cancel = (): void => finish(connectionCancelled());
+    const cancel = (): void => finish(connectionCancelled(targetNoun(connection)));
     const finish = (error?: Error): void => {
       if (settled) return;
       settled = true;
@@ -33,17 +37,17 @@ export async function runSsh(connection: SshConnection, command: string, input?:
       if (input instanceof Readable) { input.unpipe(child.stdin); input.destroy(); }
       if (error) { child.kill(); reject(error); } else resolve(stdout.trim());
     };
-    const timer = setTimeout(() => finish(new RemoteConnectionError("network", desktopText("SSH 操作超时；已发送操作的结果未知，未自动重发", "SSH operation timed out; outcome of sent operation is unknown and was not resent"))), timeoutMs);
+    const timer = setTimeout(() => finish(new RemoteConnectionError("network", desktopText(`${targetNoun(connection)} 操作超时；已发送操作的结果未知，未自动重发`, `${targetNoun(connection)} operation timed out; outcome of sent operation is unknown and was not resent`))), timeoutMs);
     signal?.addEventListener("abort", cancel, { once: true });
-    child.stdout.on("data", chunk => { stdout += String(chunk); if (stdout.length > 1024 * 1024) finish(new Error("SSH response exceeded its limit")); });
+    child.stdout.setEncoding("utf8").on("data", chunk => { stdout += String(chunk); if (stdout.length > 1024 * 1024) finish(new Error(`${targetNoun(connection)} response exceeded its limit`)); });
     child.stderr.on("data", chunk => { stderr = (stderr + String(chunk)).slice(-4096); });
-    child.once("error", error => finish(sshFailure("", error)));
-    child.stdin.on("error", error => { if (!["EPIPE", "EOF", "ECONNRESET"].includes((error as NodeJS.ErrnoException).code ?? "")) finish(sshFailure("", error)); });
-    child.once("close", code => finish(code === 0 ? undefined : sshFailure(stderr, undefined, code)));
+    child.once("error", error => finish(failure("", error)));
+    child.stdin.on("error", error => { if (!["EPIPE", "EOF", "ECONNRESET"].includes((error as NodeJS.ErrnoException).code ?? "")) finish(failure("", error)); });
+    child.once("close", code => finish(code === 0 ? undefined : failure(wsl ? (stderr + stdout).replaceAll("\0", "") : stderr, undefined, code)));
     if (signal?.aborted) { cancel(); return; }
     if (input instanceof Readable) { input.once("error", finish); input.pipe(child.stdin); }
     else child.stdin.end(input);
-  }).finally(() => authenticationRequest?.dispose());
+  }).finally(() => launch.dispose());
 }
 
 export function nodeRemoteCommand(script: string, executable = "node"): string {

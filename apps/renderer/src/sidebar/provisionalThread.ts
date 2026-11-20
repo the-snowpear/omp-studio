@@ -149,7 +149,10 @@ export function reconcileProvisionalProjectThread(
     selectedTitleIsPlaceholder: context.selectedTitleIsPlaceholder,
     composer: change,
     sessionId: change.sessionId,
-    workspaceId: change.workspaceId,
+    // The session decides its own workspace. During a project switch the shell
+    // already reports the incoming project while `composerOwner` still names the
+    // session just left, so a re-emitted report must not move the row.
+    workspaceId: current[key]?.workspaceId ?? change.workspaceId,
     untitledTitle: context.untitledTitle,
   });
   if (nextThread === undefined) return current;

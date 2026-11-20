@@ -17,6 +17,7 @@ import { agentPanelId, panelBaseId, type AgentPanelId, type PanelId } from "../d
 import { DeferredPanel, lazyPanel } from "../DeferredPanel";
 import { DictationControl } from "../composer/DictationControl";
 import { PromptHistoryButton } from "../composer/PromptHistory";
+import { executionTargetLabel } from "../workspaces/remoteStatus";
 import { useExecutionTarget, useTargetMemory } from "../workspaces/ExecutionTargets";
 import { ExecutionTargetPicker } from "../workspaces/ExecutionTargetPicker";
 import { AppSelect } from "../AppSelect";
@@ -2242,7 +2243,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       {remotePlanSave ? <div className="modal-backdrop" onKeyDown={event => { if (event.key === "Escape") { remotePlanSave.resolve(null); setRemotePlanSave(undefined); } }}>
         <section className="modal" role="dialog" aria-modal="true" aria-label={zh ? "保存远端计划" : "Save remote plan"}>
           <form onSubmit={event => { event.preventDefault(); remotePlanSave.resolve(remotePlanPath.trim()); setRemotePlanSave(undefined); }}>
-            <h2>{zh ? "保存远端计划" : "Save remote plan"}</h2><p>{zh ? `保存到 SSH · ${executionTarget.name} 的当前项目中。` : `Save to the current project on SSH · ${executionTarget.name}.`}</p>
+            <h2>{zh ? "保存远端计划" : "Save remote plan"}</h2><p>{zh ? `保存到 ${executionTargetLabel(executionTarget.kind, executionTarget.name)} 的当前项目中。` : `Save to the current project on ${executionTargetLabel(executionTarget.kind, executionTarget.name)}.`}</p>
             <label>{zh ? "项目内相对路径" : "Project-relative path"}<input autoFocus required value={remotePlanPath} onChange={event => setRemotePlanPath(event.target.value)} /></label>
             <div className="ssh-dialog-actions"><button type="button" className="btn outline" onClick={() => { remotePlanSave.resolve(null); setRemotePlanSave(undefined); }}>{zh ? "取消" : "Cancel"}</button><button className="btn primary" disabled={!remotePlanPath.trim()}>{zh ? "保存并退出" : "Save & Quit"}</button></div>
           </form>
@@ -3054,7 +3055,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
         environment: <EnvironmentDockCard {...(preview
           ? previewEnvironmentCard(activePreviewProject === undefined ? undefined : { name: activePreviewProject.name, root: activePreviewProject.path }, zh)
           : {
-              target: { remote: executionTarget.id !== null, ...(executionTarget.id === null ? {} : { name: executionTarget.name }) },
+              target: { remote: executionTarget.id !== null, kind: executionTarget.kind, ...(executionTarget.id === null ? {} : { name: executionTarget.name }) },
               runtimeStatus: runtime?.status ?? "unavailable",
               ...(runtime?.runtimeVersion === undefined ? {} : { version: runtime.runtimeVersion }),
               ...(activeWorkspace === undefined ? {} : { project: { name: activeWorkspace.name, ...(activeWorkspace.root === undefined ? {} : { root: activeWorkspace.root }) } }),

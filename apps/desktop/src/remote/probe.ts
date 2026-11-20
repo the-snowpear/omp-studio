@@ -16,13 +16,14 @@ const POSIX_PROBE = `printf '__OMP_PROBE__\\n'; uname -s; uname -m; printf '%s\\
 const WINDOWS_PROBE = `$ErrorActionPreference='Stop'; $arch=if($env:PROCESSOR_ARCHITEW6432){$env:PROCESSOR_ARCHITEW6432}else{$env:PROCESSOR_ARCHITECTURE}; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); Write-Output '__OMP_WINDOWS__'; @{platform='win32';arch=$arch.ToLower();home=$env:USERPROFILE;root=(Join-Path $env:LOCALAPPDATA 'omp-studio\\remote');shell='powershell';freeBytes=(Get-PSDrive -Name ($env:USERPROFILE.Substring(0,1))).Free} | ConvertTo-Json -Compress`;
 
 /** Bootstrap runs before there is a Node executable on the remote machine. */
-export async function detectRemoteEnvironment(connection: SshConnection & { installRoot?: string }, signal?: AbortSignal, authentication?: SshAuthentication): Promise<RemoteEnvironment> {
+export async function detectRemoteEnvironment(connection: SshConnection & { installRoot?: string }, signal?: AbortSignal, authentication?: SshAuthentication, run = runSsh): Promise<RemoteEnvironment> {
   let output = "";
-  try { output = await runSsh(connection, `sh -c ${quoteSh(POSIX_PROBE)}`, undefined, 30_000, signal, authentication); }
+  try { output = await run(connection, `sh -c ${quoteSh(POSIX_PROBE)}`, undefined, 30_000, signal, authentication); }
   catch (error) {
-    if (signal?.aborted || error instanceof RemoteConnectionError && ["network", "authentication", "host-key", "cancelled"].includes(error.connectionCode)) throw error;
+    if (connection.kind === "wsl" || signal?.aborted || error instanceof RemoteConnectionError && ["network", "authentication", "host-key", "cancelled"].includes(error.connectionCode)) throw error;
   }
   const fields = output.slice(output.indexOf("__OMP_PROBE__") + "__OMP_PROBE__".length).trim().split(/\r?\n/u);
+  if (connection.kind === "wsl" && (!output.includes("__OMP_PROBE__") || fields[0] !== "Linux")) throw new RemoteConnectionError("environment", desktopText("未能在 WSL 发行版中检测到 Linux", "Could not detect Linux in the WSL distribution"));
   let environment: RemoteEnvironment;
   if (output.includes("__OMP_PROBE__") && /^(Linux|Darwin)$/u.test(fields[0] ?? "")) {
     const platform = fields[0] === "Darwin" ? "darwin" : "linux";
@@ -34,7 +35,7 @@ export async function detectRemoteEnvironment(connection: SshConnection & { inst
     if (platform === "linux" && libc && (Number(libc[1]) < 2 || Number(libc[1]) === 2 && Number(libc[2]) < 28)) throw new RemoteConnectionError("environment", desktopText("远端 glibc 低于 2.28，无法运行随包 Node；请升级远端系统", "Remote glibc is older than 2.28 and cannot run bundled Node; please upgrade the remote OS"));
     environment = { platform, arch, home, root, node: "node", version: "", shell: "posix" };
   } else {
-    output = await runSsh(connection, powershellCommand(WINDOWS_PROBE), undefined, 30_000, signal, authentication);
+    output = await run(connection, powershellCommand(WINDOWS_PROBE), undefined, 30_000, signal, authentication);
     const marker = output.indexOf("__OMP_WINDOWS__");
     if (marker < 0) throw new RemoteConnectionError("environment", desktopText("无法自动识别远端系统；需要 POSIX Shell 或 Windows PowerShell", "Unable to detect the remote OS automatically; requires a POSIX shell or Windows PowerShell"));
     const value = JSON.parse(output.slice(marker + "__OMP_WINDOWS__".length).trim()) as { arch: string; home: string; root: string };

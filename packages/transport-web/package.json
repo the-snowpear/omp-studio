@@ -1,6 +1,6 @@
 {
   "name": "@omp-studio/transport-web",
-  "version": "0.2.4",
+  "version": "0.2.6",
   "private": true,
   "type": "module",
   "main": "./dist/src/index.js",
@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
+    },
+    "./browser": {
+      "types": "./dist/src/browser-client.d.ts",
+      "default": "./dist/src/browser-client.js"
     }
   },
   "files": [
@@ -21,6 +25,6 @@
     "test:built": "node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@omp-studio/client-contract": "0.2.4"
+    "@omp-studio/client-contract": "0.2.6"
   }
 }

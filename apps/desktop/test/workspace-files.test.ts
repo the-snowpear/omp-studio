@@ -127,6 +127,50 @@ test("Unix viewer preserves backslashes in filenames returned by Explorer", { sk
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("path probes classify transcript candidates and a missing path reads as missing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-path-resolve-"));
+  const registry = new WorkspaceRegistry(join(root, "registry.json"));
+  try {
+    await mkdir(join(root, "project", "src"), { recursive: true });
+    await writeFile(join(root, "project", "src", "main.ts"), "export {};");
+    await writeFile(join(root, "outside.txt"), "outside");
+    const workspace = await registry.upsertByPath(join(root, "project"));
+    const service = createWorkspaceFileService({ registry });
+    const workspaceId = workspace.workspaceId as WorkspaceId;
+    assert.deepEqual(await service.resolveAll!({ workspaceId, paths: ["src/main.ts", "src", "RSA/ECB/PKCS1Padding", "../outside.txt", "src/main.ts"] }), [
+      { path: "src/main.ts", kind: "file" },
+      { path: "src", kind: "directory" },
+      { path: "RSA/ECB/PKCS1Padding", kind: "missing" },
+      { path: "../outside.txt", kind: "missing" },
+      { path: "src/main.ts", kind: "file" },
+    ]);
+    await assert.rejects(service.inspect!({ workspaceId, path: "RSA/ECB/PKCS1Padding" }), (error: Error) => !/ENOENT|realpath/i.test(error.message) && error.message.includes("RSA/ECB/PKCS1Padding"));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("path probes defer a linked directory until it is explicitly opened", async t => {
+  const root = await mkdtemp(join(tmpdir(), "omp-linked-directory-"));
+  try {
+    const folder = join(root, "content"), linked = join(root, "shortcut");
+    await mkdir(folder);
+    if (!await tryLink(folder, linked, process.platform === "win32" ? "junction" : "dir")) {
+      t.skip("links are unavailable on this host");
+      return;
+    }
+    await writeFile(join(folder, "note.txt"), "linked file");
+    const registry = new WorkspaceRegistry(join(root, "registry.json"));
+    const workspaceId = (await registry.upsertByPath(root)).workspaceId as WorkspaceId;
+    const service = createWorkspaceFileService({ registry });
+    const paths = ["shortcut", "shortcut/note.txt"];
+    assert.deepEqual(await service.resolveAll!({ workspaceId, paths }), []);
+    assert.deepEqual(await service.resolveAll!({ workspaceId, paths, explicit: true }), [
+      { path: paths[0], kind: "directory" },
+      { path: paths[1], kind: "file" },
+    ]);
+    assert.equal((await service.readText!({ workspaceId, path: paths[1]! })).text, "linked file");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("viewer saves UTF-16 and bounds media reads without loading the whole file", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-file-bytes-"));
   try {

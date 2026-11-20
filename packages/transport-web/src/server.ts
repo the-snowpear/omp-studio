@@ -2,7 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import type {
   ClientBootstrap, ClientCommandRequest, ClientQueryRequest, ClientQueryResponse,
-  ClientCommandAccepted, ClientEvent, SubscriptionScope, QueryName, CommandName,
+  ClientCommandAccepted, ClientEvent, SubscriptionScope, QueryName, CommandName, WorkspaceId,
 } from "@omp-studio/client-contract";
 
 export interface WebAdapterHost {
@@ -22,9 +22,20 @@ export interface WebAdapterOptions {
   maxBodyBytes?: number;
   maxOutstandingCommands?: number;
   now?: () => number;
+  mobile?: { workspaceName: string; workspaceId: WorkspaceId };
 }
 
-interface Session { contexts: Map<string, import("@omp-studio/client-contract").ClientTransport>; csrf: string; expiresAt: number; scope: SubscriptionScope; outstanding: number; revoked: boolean }
+interface Session {
+  contexts: Map<string, import("@omp-studio/client-contract").ClientTransport>;
+  connections: Set<{ contextId: string; close: () => void }>;
+  csrf: string;
+  expiresAt: number;
+  scope: SubscriptionScope;
+  outstanding: number;
+  revoked: boolean;
+  opening?: boolean;
+  expiry?: ReturnType<typeof setTimeout>;
+}
 
 function token(bytes = 24): string { return randomBytes(bytes).toString("base64url"); }
 function json(res: ServerResponse, status: number, body: unknown, headers: Record<string,string> = {}): void {
@@ -53,16 +64,38 @@ export class LoopbackWebAdapter {
     this.#pairing = { code: options.pairingCode ?? token(8), expiresAt: this.now() + this.#options.pairingTtlMs, used: false };
   }
   get pairingCode(): string { return this.#pairing.code; }
+  get paired(): boolean { this.pruneSessions(); return this.#sessions.size > 0; }
+  get pairingExpiresAt(): number { return this.#pairing.expiresAt; }
+  rotatePairingCode(): void {
+    this.#pairing = { code: token(24), expiresAt: this.now() + this.#options.pairingTtlMs, used: false };
+  }
+  async revokeAll(): Promise<void> {
+    this.#pairing.used = true;
+    await Promise.all([...this.#sessions].map(([id, session]) => this.revoke(id, session)));
+  }
   private now(): number { return (this.#options.now ?? Date.now)(); }
+  private async closeContext(session: Session, id: string): Promise<void> {
+    const context = session.contexts.get(id);
+    session.contexts.delete(id);
+    for (const connection of session.connections) {
+      if (connection.contextId !== id) continue;
+      session.connections.delete(connection);
+      connection.close();
+    }
+    await context?.close();
+  }
+  private async revoke(id: string, session: Session): Promise<void> {
+    session.revoked = true;
+    clearTimeout(session.expiry);
+    this.#sessions.delete(id);
+    for (const connection of session.connections) connection.close();
+    session.connections.clear();
+    await Promise.allSettled([...session.contexts.keys()].map(contextId => this.closeContext(session, contextId)));
+  }
   private pruneSessions(): void {
     const now = this.now();
     for (const [id, session] of this.#sessions) {
-      if (session.revoked || session.expiresAt <= now) {
-        this.#sessions.delete(id);
-        const contexts = [...session.contexts.values()];
-        session.contexts.clear();
-        for (const context of contexts) void context.close().catch(() => {});
-      }
+      if (session.revoked || session.expiresAt <= now) void this.revoke(id, session);
     }
   }
   private originAllowed(req: IncomingMessage, allowSameOriginGet = false): boolean {
@@ -93,25 +126,63 @@ export class LoopbackWebAdapter {
         this.pruneSessions();
         const b = await this.body(req); const code = b !== null && typeof b === "object" && "code" in b ? String((b as { code?: unknown }).code ?? "") : "";
         if (this.#pairing.used || this.#pairing.expiresAt <= this.now() || code.length !== this.#pairing.code.length || !timingSafeEqual(Buffer.from(code), Buffer.from(this.#pairing.code))) return json(res, 401, { error: "unauthenticated" });
-        this.#pairing.used = true; const sid = token(32), csrf = token(24); const s: Session = { contexts: new Map(), csrf, expiresAt: this.now()+this.#options.sessionTtlMs, scope: { scope: "all" }, outstanding: 0, revoked: false }; this.#sessions.set(sid,s);
-        return json(res, 200, { csrf, expiresAt: s.expiresAt }, { "set-cookie": `studio_session=${encodeURIComponent(sid)}; HttpOnly; SameSite=Strict; Path=/` });
+        this.#pairing.used = true;
+        if (this.#options.mobile) {
+          for (const [id, session] of this.#sessions) void this.revoke(id, session);
+        }
+        const sid = token(32), csrf = token(24);
+        const s: Session = { contexts: new Map(), connections: new Set(), csrf, expiresAt: this.now() + this.#options.sessionTtlMs, scope: { scope: "all" }, outstanding: 0, revoked: false };
+        this.#sessions.set(sid, s);
+        if (this.#options.mobile) {
+          s.expiry = setTimeout(() => void this.revoke(sid, s), this.#options.sessionTtlMs);
+          s.expiry.unref();
+        }
+        return json(res, 200, { csrf, expiresAt: s.expiresAt }, { "set-cookie": `studio_session=${encodeURIComponent(sid)}; HttpOnly; SameSite=Strict; Path=/${this.#options.mobile ? "; Secure" : ""}` });
+      }
+      if (path === "/api/v1/session" && req.method === "GET" && this.#options.mobile) {
+        const auth = this.auth(req);
+        if (!auth) return json(res, 401, { error: "unauthenticated" });
+        return json(res, 200, { csrf: auth[1].csrf, expiresAt: auth[1].expiresAt, ...this.#options.mobile });
       }
       if (path === "/api/v1/context/open" && req.method === "POST") {
         const a = this.auth(req, true); if (!a) return json(res,401,{error:"unauthenticated"});
         if (!this.#options.host.openContext) return json(res,501,{error:"context_unavailable"});
-        const context = await this.#options.host.openContext(await this.body(req) as import("@omp-studio/client-contract").ClientContextScope);
-        if (a[1].revoked || a[1].expiresAt <= this.now()) { await context.close(); return json(res,401,{error:"unauthenticated"}); }
-        const contextId = token(); a[1].contexts.set(contextId, context); return json(res,200,{contextId});
+        if (this.#options.mobile && a[1].opening) return json(res, 409, { error: "context_opening" });
+        a[1].opening = true;
+        try {
+          const context = await this.#options.host.openContext(await this.body(req) as import("@omp-studio/client-contract").ClientContextScope);
+          if (this.#options.mobile) {
+            await Promise.allSettled([...a[1].contexts.keys()].map(id => this.closeContext(a[1], id)));
+          }
+          if (a[1].revoked || a[1].expiresAt <= this.now()) { await context.close(); return json(res,401,{error:"unauthenticated"}); }
+          const contextId = token(); a[1].contexts.set(contextId, context); return json(res,200,{contextId});
+        } finally {
+          a[1].opening = false;
+        }
       }
       if (path === "/api/v1/context/close" && req.method === "POST") {
         const a = this.auth(req, true); if (!a) return json(res,401,{error:"unauthenticated"});
         const id = String(req.headers["x-studio-context"] ?? "");
-        const context = a[1].contexts.get(id); a[1].contexts.delete(id); await context?.close(); return json(res,200,{closed:true});
+        await this.closeContext(a[1], id); return json(res,200,{closed:true});
       }
-      if (path === "/api/v1/session/revoke" && req.method === "POST") { const a = this.auth(req,true); if (!a) return json(res,401,{error:"unauthenticated"}); a[1].revoked=true; this.#sessions.delete(a[0]); const contexts = [...a[1].contexts.values()]; a[1].contexts.clear(); await Promise.all(contexts.map(context => context.close())); return json(res,200,{ok:true}); }
+      if (path === "/api/v1/session/revoke" && req.method === "POST") { const a = this.auth(req,true); if (!a) return json(res,401,{error:"unauthenticated"}); await this.revoke(a[0], a[1]); return json(res,200,{ok:true}); }
       if (path === "/api/v1/bootstrap" && req.method === "GET") { const a=this.auth(req); if(!a) return json(res,401,{error:"unauthenticated"}); return json(res,200,await this.target(req,a[1]).bootstrap()); }
-      if (path === "/api/v1/query" && req.method === "POST") { const a=this.auth(req); if(!a) return json(res,401,{error:"unauthenticated"}); return json(res,200,await this.target(req,a[1]).query(await this.body(req) as ClientQueryRequest)); }
-      if (path === "/api/v1/command" && req.method === "POST") { const a=this.auth(req,true); if(!a) return json(res,401,{error:"unauthenticated"}); if(a[1].outstanding>=this.#options.maxOutstandingCommands) return json(res,429,{error:"rate_limited"}); a[1].outstanding++; try { return json(res,202,await this.target(req,a[1]).command(await this.body(req) as ClientCommandRequest)); } finally { a[1].outstanding--; } }
+      if (path === "/api/v1/query" && req.method === "POST") { const a=this.auth(req, !!this.#options.mobile); if(!a) return json(res,401,{error:"unauthenticated"}); return json(res,200,await this.target(req,a[1]).query(await this.body(req) as ClientQueryRequest)); }
+      if (path === "/api/v1/command" && req.method === "POST") {
+        const a = this.auth(req, true);
+        if (!a) return json(res, 401, { error: "unauthenticated" });
+        if (a[1].outstanding >= this.#options.maxOutstandingCommands) return json(res, 429, { error: "rate_limited" });
+        a[1].outstanding++;
+        try {
+          const request = await this.body(req) as ClientCommandRequest;
+          if (!this.auth(req, true)) return json(res, 401, { error: "unauthenticated" });
+          const contextId = req.headers["x-studio-context"];
+          if (this.#options.mobile && ![...a[1].connections].some(connection => connection.contextId === contextId)) return json(res, 409, { error: "event_stream_required" });
+          return json(res, 202, await this.target(req, a[1]).command(request));
+        } finally {
+          a[1].outstanding--;
+        }
+      }
       return json(res,404,{error:"not_found"});
     } catch (e) { return json(res,400,{error: e instanceof Error && e.message === "body_too_large" ? "body_too_large" : "bad_request"}); }
   }
@@ -123,6 +194,15 @@ export class LoopbackWebAdapter {
     // A tab may reconnect after its conversation context has already closed.
     try { return { sessionId: s[0], session: s[1], host: this.target(req, s[1]) }; }
     catch { return; }
+  }
+  trackMobileEvents(req: IncomingMessage, close: () => void): { host: WebAdapterHost; unsubscribe: () => void } | undefined {
+    const contextId = new URL(req.url ?? "/", "http://localhost").searchParams.get("contextId");
+    if (!contextId) return;
+    const auth = this.authenticateWebSocket(req);
+    if (!auth || [...auth.session.connections].some(connection => connection.contextId === contextId)) return;
+    const connection = { contextId, close };
+    auth.session.connections.add(connection);
+    return { host: auth.host, unsubscribe: () => { auth.session.connections.delete(connection); } };
   }
 }
 
