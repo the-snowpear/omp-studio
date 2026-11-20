@@ -342,7 +342,7 @@ export const BUILTIN_SLASH_CATALOG: readonly StudioSlashCommand[] = [
   }),
   cmd("new", "Start a new session", "session", { select: "native-ui", ui: "new-chat" }),
   cmd("rename", "Rename current session", "session", { allowArgs: true, hint: "<title>", select: "complete-args", invokeId: "builtin.rename" }),
-  cmd("handoff", "Hand off context to new session", "session", {
+  cmd("handoff", "Summarize this session in the background", "session", {
     select: "run-now",
     typed: { name: "session.handoff" },
   }),
@@ -515,7 +515,7 @@ const SLASH_ZH_OVERRIDES: Record<string, SlashZhOverride> = {
   delete: { description: "删除当前会话并开新会话" },
   new: { description: "开始新会话" },
   rename: { description: "重命名当前会话" },
-  handoff: { description: "交接上下文到新会话" },
+  handoff: { description: "在后台生成当前会话的交接摘要" },
   resume: { description: "切换到另一会话" },
   retry: { description: "重试上一轮失败" },
   fork: { description: "从先前消息分叉" },

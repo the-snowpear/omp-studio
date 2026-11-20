@@ -39,6 +39,7 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
   const [draft, setDraft] = useState("");
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState<"checking" | "listing" | "opening" | "saving" | null>(null);
+  const [directorySupported, setDirectorySupported] = useState(false);
   const [supported, setSupported] = useState(false);
   const [error, setError] = useState("");
   const [saveFailed, setSaveFailed] = useState(false);
@@ -79,7 +80,7 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
 
   useEffect(() => {
     const generation = ++epoch.current;
-    setLocalRoot(""); setDirectoryMessage("");
+    setLocalRoot(""); setDirectoryMessage(""); setDirectorySupported(false);
     lock.current = true;
     previewFiles.current = createPreviewLocalFiles(zh);
     handledInitial.current = initial.current;
@@ -88,8 +89,11 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
     void (async () => {
       try {
         if (!preview && (!available || !sessionId)) return;
-        const canList = preview || (await client.query("capabilities.get", {})).capabilities.some(cap => cap.id === "resource.local.list" && cap.grade !== "unavailable");
+        const manifest = preview ? undefined : await client.query("capabilities.get", {});
         if (generation !== epoch.current) return;
+        const supports = (id: string) => preview || manifest?.capabilities.some(cap => cap.id === id && cap.grade !== "unavailable") === true;
+        const canList = supports("resource.local.list");
+        setDirectorySupported(supports("resource.local.ensureDir"));
         setSupported(canList);
         if (!canList) return;
         setBusy("listing");
@@ -241,7 +245,7 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
 
   return <section className="resources-local" aria-label={zh ? "本地会话文件" : "Session-local files"}>
     <div className="resources-local-intro"><Icon name="folder" /><p>{zh ? "原位编辑会话文件" : "Edit session files in place"}<span>{zh ? "UTF-8 文本 · 最大 512 KiB · 保存校验版本" : "UTF-8 text · up to 512 KiB · version-checked saves"}</span></p>{preview && marks ? <span className="resources-demo">{zh ? "演示" : "Demo"}</span> : null}</div>
-    {supported && <div className="resources-root">
+    {supported && directorySupported && <div className="resources-root">
       <Icon name="folder" extra="sm" />
       <span className="resources-root-label">{zh ? "会话目录" : "Session folder"}</span>
       <code title={localRoot || undefined}><bdi>{localRoot || "local://"}</bdi></code>

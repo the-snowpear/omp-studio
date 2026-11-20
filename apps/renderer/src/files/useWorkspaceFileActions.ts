@@ -54,7 +54,7 @@ export function useWorkspaceFileActions({ workspace, remote, targetId, onNotice,
     if(action.type==="disassembler"){
       if (ownerId) return;
       const resolve=desktop?.resolveFileAbsolutePath;if(!resolve)return;
-      void resolve(input).then(absolute=>{onOpenDisassembler(absolute);}).catch(cause=>notice(`IDA: ${messageOf(cause)}`,"alert"));return;
+      void resolve(input).then(absolute=>{onOpenDisassembler(absolute);}).catch(cause=>notice(`${zh ? "反汇编器" : "Disassembler"}: ${messageOf(cause)}`,"alert"));return;
     }
     if (action.type === "copyAbsolute") {
       const resolve = desktop?.resolveFileAbsolutePath;

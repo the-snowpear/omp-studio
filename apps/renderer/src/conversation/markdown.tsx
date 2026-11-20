@@ -109,7 +109,12 @@ function componentsFor(streaming: boolean, magic: boolean, highlightEligible = f
       return isSafeMarkdownUrl(url, true) ? <img src={url} alt={alt ?? ""} loading="lazy" decoding="async" referrerPolicy="no-referrer" /> : null;
     },
     table: ({ children,node }) => <NumericMarkdownTable node={node} streaming={streaming}>{children}</NumericMarkdownTable>,
-    code: ({ className, children }) => className ? <code className={className}>{children}</code> : <code className="chip-code">{parseFileReference(nodeText(children)) ? <FileLink href={nodeText(children)} inline>{children}</FileLink> : children}</code>,
+    code: ({ className, children }) => {
+      if (className) return <code className={className}>{children}</code>;
+      const text = nodeText(children);
+      if (isSpillUri(text)) return <code className="chip-code"><SpillLink uri={text}>{children}</SpillLink></code>;
+      return <code className="chip-code">{parseFileReference(text) ? <FileLink href={text} inline>{children}</FileLink> : children}</code>;
+    },
     pre: ({ children }) => {
       const child = Array.isArray(children) ? children[0] : children;
       const props = child && typeof child === "object" && "props" in child ? (child as { props: { className?: string; children?: ReactNode } }).props : {};

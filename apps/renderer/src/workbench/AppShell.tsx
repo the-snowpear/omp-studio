@@ -1430,18 +1430,23 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     });
   };
 
-  /** 顶栏「对话选项」Handoff：LLM 生成摘要并切换到新会话。 */
-  const handoffThread = () => {
-    void workspaceActionQueue.enqueue(async () => {
-      try {
-        const handle = await client.command("session.handoff", {});
-        const receipt = await waitReceipt<OperatorStateSnapshot>(client, handle.requestId);
+  const reportHandoffError = (error: unknown) => {
+    setShellNotice({ text: hostErrorMessage(error, zhRef.current ? "交接失败" : "Handoff failed"), icon: "alert" });
+  };
+  // Serialize dispatch with workspace switches. The summary can finish while the user is elsewhere.
+  const startHandoff = async () => {
+    const sourceId = client.getState?.().entities.snapshot?.sessionId;
+    const handle = await client.command("session.handoff", {});
+    void waitReceipt<{ sessionId: string }>(client, handle.requestId, null).then(async receipt => {
+      // Older runtimes create a successor session. Follow it only while it is still active.
+      if (sourceId && receipt.sessionId !== sourceId && client.getState?.().entities.snapshot?.sessionId === receipt.sessionId) {
         await selectBranchedSession(receipt.sessionId);
-        setShellNotice({ text: t("shell.handoffToNewSession", { id: receipt.sessionId }), icon: "check" });
-      } catch (error) {
-        setShellNotice({ text: hostErrorMessage(error, zhRef.current ? "Handoff 失败" : "Handoff failed"), icon: "alert" });
       }
-    });
+      setShellNotice({ text: zhRef.current ? "会话交接已完成" : "Session handoff complete", icon: "check" });
+    }).catch(reportHandoffError);
+  };
+  const handoffThread = () => {
+    void workspaceActionQueue.enqueue(startHandoff).catch(reportHandoffError);
   };
 
   /** 顶栏 Compact：与 Composer 发送一样，先 ensureSelectedSessionActive（历史会话
@@ -1555,7 +1560,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
             forkThread();
             break;
           case "handoff":
-            handoffThread();
+            await startHandoff();
             break;
           case "compact":
             compactThread({

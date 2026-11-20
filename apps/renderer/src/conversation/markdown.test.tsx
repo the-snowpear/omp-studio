@@ -1,6 +1,7 @@
-import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { SpillViewer } from "./SpillLink";
 import { MarkdownInline } from "./markdown";
 
 afterEach(cleanup);
@@ -14,6 +15,15 @@ describe("MarkdownInline", () => {
     expect(container.querySelectorAll("a")).toHaveLength(1);
     expect(container.querySelector("a")?.getAttribute("href")).toBe("https://example.com/a");
     expect(container.querySelector("a")?.getAttribute("rel")).toBe("noreferrer noopener");
+  });
+
+  it("opens current and legacy spill URIs written as inline code", () => {
+    const open = vi.fn();
+    render(<SpillViewer.Provider value={open}><MarkdownInline text={"`local://7.log` and `artifact://8`"} /></SpillViewer.Provider>);
+    for (const uri of ["local://7.log", "artifact://8"]) {
+      fireEvent.click(screen.getByRole("button", { name: uri }));
+      expect(open).toHaveBeenLastCalledWith(uri);
+    }
   });
 
   it("renders http images only", () => {

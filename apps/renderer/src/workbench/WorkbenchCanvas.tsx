@@ -382,7 +382,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   const agentViewBook = sharedSubagentViewBook;
   const contextInspectorOpened = useSyncExternalStore(dock.store.subscribe, () => !!locatePanel(dock.store.getSnapshot().layout, "context-viewer"));
   const openContextInspector = () => dock.store.dispatch({ type: "open", panel: "context-viewer" });
-  const [spillUri, setSpillUri] = useState("");
+  const [spill, setSpill] = useState<{ uri: string; scope: string }>();
   const [localFilesOpen, setLocalFilesOpen] = useState(false);
   const [localFileName, setLocalFileName] = useState("");
   const [planDialogOpen, setPlanDialogOpen] = useState(false);
@@ -1223,6 +1223,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     [activityRetry, awaitingTurn, convo.state, executionMatches, optimisticPrompt, preview, previewThreadId, sessionStreaming, snapshot?.pendingMessages, snapshot?.awaitingAsyncWork, snapshot?.pause, zh],
   );
   const runWindowKey = preview ? `preview:${previewThreadId ?? ""}` : convo.identityKey;
+  const openSpill = useCallback((uri: string) => setSpill({ uri, scope: runWindowKey }), [runWindowKey]);
   const runWindow = useRunWindow(activityStatus !== null, runWindowKey);
   const activity = activityStatus === null
     ? undefined
@@ -2289,7 +2290,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
           </form>
         </section>
       </div> : null}
-      {spillUri && <WorkspaceDialog title={`${zh ? "完整输出" : "Full output"} · ${spillUri}`} onClose={() => setSpillUri("")}><DeferredPanel><SpillReader key={spillUri} client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches} initialUri={spillUri} /></DeferredPanel></WorkspaceDialog>}
+      {spill?.scope === runWindowKey && <WorkspaceDialog title={`${zh ? "完整输出" : "Full output"} · ${spill.uri}`} onClose={() => setSpill(undefined)}><DeferredPanel><SpillReader key={spill.uri} client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches} initialUri={spill.uri} /></DeferredPanel></WorkspaceDialog>}
       {localFilesOpen ? <WorkspaceDialog title={zh ? "会话本地文件 · local://" : "Session-local files · local://"} onClose={() => setLocalFilesOpen(false)}><DeferredPanel><LocalFilesPane client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches} initialName={localFileName} /></DeferredPanel></WorkspaceDialog> : null}
       <WorktreeLaunchGate client={client} context={{ sessionId: snapshot?.sessionId, available: runtimeConnected && executionMatches && !connection?.resyncRequired, capabilities }} visible={state.route === "workbench"} onGateChange={changeWorktreeGate} onOpenWorkspace={onOpenWorktree} />
       <div className={`workbench${!mdi && sideOpen ? " split-right" : ""}`} id="workbench">
@@ -2305,7 +2306,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
           <DockRail mode={hideNewConversationRail ? "hidden" : railMode} />
           <DockCapsules />
           <SessionModelRecovery demo={previewThreadId === "t5"} client={client} currentSessionId={snapshot?.sessionId} targetSessionId={selectedSessionId} threadId={selectedThreadId} available={runtimeConnected && !connection?.resyncRequired} capabilities={capabilities} onOpenModels={() => onRoute("model-config")} />
-          <SpillViewer.Provider value={setSpillUri}><InlineBtwContext.Provider value={{ anchors: btwAnchors.filter(note => note.scope === runWindowKey), session: btwSession, openPanel: () => dock.store.dispatch({ type: "open", panel: "btw" }) }}>
+          <SpillViewer.Provider value={openSpill}><InlineBtwContext.Provider value={{ anchors: btwAnchors.filter(note => note.scope === runWindowKey), session: btwSession, openPanel: () => dock.store.dispatch({ type: "open", panel: "btw" }) }}>
           <CommandBlockProvider workspaceId={workspaceId} sessionId={terminalSessionId} conversationId={terminalConversationId}>
           <ConversationPane
             {...(preview && previewThreadId === "t15" ? { supplement: <ContentGallerySamples /> } : {})}
@@ -2568,7 +2569,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
                 {hintCompression.mcp > 0 ? <span><b>{hintCompression.mcp}</b>{zh ? " 个 MCP" : " MCP"}</span> : null}
               </span>
             </div>}
-            {(preview || can("session.queue.get")) ? (<RuntimeQueueBar client={client} sessionId={snapshot?.sessionId} capabilities={capabilities} available={runtimeConnected && executionMatches && !connection?.resyncRequired} pending={snapshot?.pendingMessages ?? 0} running={Boolean(snapshot?.isStreaming || snapshot?.isCompacting)} showDemo={previewThreadId === "t1"} />) : (!preview ? <RuntimeQueue client={client} sessionId={composerOwner} available={can("session.queue.list")} running={Boolean(snapshot?.isStreaming)} pending={snapshot?.pendingMessages ?? 0} hasDraft={() => !snapshotIsEmpty(takeComposerSnapshot())} onRecover={(recovered, owner) => {
+            {(preview || can("session.queue.get")) ? (<RuntimeQueueBar client={client} sessionId={snapshot?.sessionId} capabilities={capabilities} available={runtimeConnected && executionMatches && !connection?.resyncRequired} pending={snapshot?.pendingMessages ?? 0} running={Boolean(snapshot?.isStreaming || snapshot?.isCompacting || snapshot?.compactionMode === "handoff")} showDemo={previewThreadId === "t1"} />) : (!preview ? <RuntimeQueue client={client} sessionId={composerOwner} available={can("session.queue.list")} running={Boolean(snapshot?.isStreaming)} pending={snapshot?.pendingMessages ?? 0} hasDraft={() => !snapshotIsEmpty(takeComposerSnapshot())} onRecover={(recovered, owner) => {
               if (owner !== composerOwner) return;
               const current = takeComposerSnapshot();
               const merged = snapshotIsEmpty(current) ? recovered : {
