@@ -104,6 +104,7 @@ export function useReadingColumn(
       const narrow = containerWidth <= NARROW_COLUMN_MAX;
       const narrowChanged = element.hasAttribute("data-reading-narrow") !== narrow;
       const height = element.clientHeight;
+      const queueHeight = queues?.offsetHeight ?? 0;
       const currentShort = (element.dataset.readingShort as ReadingColumnHeightTier) || undefined;
       const shortTier = readingColumnHeightTier(height, currentShort);
       const shortChanged = currentShort !== shortTier;
@@ -124,7 +125,9 @@ export function useReadingColumn(
             element.dataset.readingMinimap = minimap;
             // Switching to native scrollbars changes the scroller's clientWidth.
             // Read the real gutter after the marker, within this same transaction.
-            geometry = readingColumnGeometry(containerWidth, current, isWelcome, scale, nativeScrollbar());
+            if (!geometry.minimap) {
+              geometry = readingColumnGeometry(containerWidth, current, isWelcome, scale, nativeScrollbar());
+            }
           }
           element.style.setProperty("--conversation-width", `${geometry.width}px`);
           element.style.setProperty("--reading-gutter", `${geometry.gutter}px`);
@@ -147,7 +150,6 @@ export function useReadingColumn(
       }
       // Extend the scroller beneath the tray while reserving the same space at
       // the transcript tail. Collapsing either queue keeps the latest row clear.
-      const queueHeight = queues?.offsetHeight ?? 0;
       if (queueHeight !== previousQueueHeight) {
         previousQueueHeight = queueHeight;
         element.style.setProperty("--composer-queues-height", `${queueHeight}px`);
