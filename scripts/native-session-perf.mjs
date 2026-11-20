@@ -186,7 +186,19 @@ try {
   await page.screenshot({ path: join(output, "native-initial.png") });
   await runPhase("idle-before", async () => { await pause(Number(process.env.OMP_NATIVE_PERF_IDLE_MS ?? (smoke ? 2000 : 20_000))); });
   await runPhase("cold-sequential", async entry => {
-    if (trace) { cdp = await page.context().newCDPSession(page); await cdp.send("Tracing.start", { categories: "devtools.timeline,blink.user_timing,disabled-by-default-devtools.timeline", transferMode: "ReturnAsStream" }); }
+    if (trace) {
+      cdp = await page.context().newCDPSession(page);
+      await cdp.send("Tracing.start", {
+        categories: [
+          "devtools.timeline",
+          "blink.user_timing",
+          "disabled-by-default-devtools.timeline",
+          "disabled-by-default-devtools.timeline.stack",
+          "disabled-by-default-v8.cpu_profiler",
+        ].join(","),
+        transferMode: "ReturnAsStream",
+      });
+    }
     if (cpuProfile) await app.evaluate(async () => { await global.__switchProfile("Profiler.enable"); await global.__switchProfile("Profiler.start"); });
     for (let index = 1; index <= (smoke ? 3 : 12); index++) { entry.steps.push(await select(index)); await pause(smoke ? 100 : 600); }
     if (cpuProfile) {
@@ -235,7 +247,14 @@ try {
       return { itemId: row.dataset.itemId, offset: row.getBoundingClientRect().top - top };
     });
     report.readingRestoration = { passed: false, tolerancePx: 3, expected: anchor };
-    await select(1); await select(0, { tail: false });
+    const composer = page.locator(".cw-main-conversation #composerInput");
+    const draft = "Offline draft 组合输入";
+    await composer.fill(draft);
+    await select(1);
+    if (await composer.textContent() === draft) throw new Error("Draft leaked into another conversation");
+    await select(0, { tail: false });
+    await page.waitForFunction(value => document.querySelector(".cw-main-conversation #composerInput")?.textContent === value, draft);
+    report.draftRestored = true;
     report.readingRestoration.actual = await page.evaluate(anchor => {
       const scroller = document.querySelector(".cw-main-conversation .convo-scroll");
       const row = [...scroller.querySelectorAll("[data-item-id]")].find(row => row.dataset.itemId === anchor.itemId);
