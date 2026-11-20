@@ -970,6 +970,7 @@
   margin: 0;
   padding: var(--sp-8) var(--sp-10);
   overflow: auto;
+  contain: layout style paint;
   font-family: var(--font-mono);
   font-size: var(--fs-12);
   line-height: 1.65;
