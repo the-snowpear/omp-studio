@@ -345,7 +345,7 @@ macOS host 日志：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-
 | SSH 工作位置与连接管理 | `apps/renderer/src/workspaces/{ExecutionTargets,ExecutionTargetPicker,RemoteScopeNotice,SshPasswordDialog}.tsx`、`{remoteTransport,remoteStatus}.ts`；`apps/desktop/src/remote/{manager,ipc,shared,errors}.ts`；有界重连、健康检查、目标代次同步；用法见 `docs/ssh-workspaces.md` |
 | SSH Headless Host / 部署 / 安装 | `apps/desktop/src/remote/{main,host,server,transport,wire,platform,authority,deploy,install}.ts`；`scripts/bundle-remote-host.mjs`；阶段状态见 `doc/ssh-workspace-progress.md` |
 | SSH 账密认证 / 终端 | `apps/desktop/src/remote/{authentication,terminal}.ts`；`apps/desktop/ssh-askpass/`；`scripts/build-ssh-askpass.mjs`；Renderer `terminalSessions.tsx`；验收交接见 `doc/ssh-workspace-test-prompt.md` |
-| 后台评测任务与报告 | `packages/studio-host/src/evaluation-coordinator.ts`、`apps/desktop/src/evaluation-workspace.ts`；Host 共享所有者由 `host-composition.ts` 的 `evaluationOwner` 传入各对话上下文 |
+| 后台评测任务与报告 | `packages/studio-host/src/evaluation-coordinator.ts`、`evaluation-row-index.ts`、`apps/desktop/src/evaluation-workspace.ts`；Host 共享所有者由 `host-composition.ts` 的 `evaluationOwner` 传入各对话上下文；终态报告分页复用有界字节偏移索引 |
 | Backend 生命周期 | `packages/studio-host/src/host-backend.ts` |
 | 解析 / 启动 Runtime | `runtime-resolver.ts`、`runtime-session-controller.ts`、`runtime-process-port.ts`；Desktop `runtime-session.ts` 的 `runtime.launch.stage` 分别记录校验、Bridge 准备、握手、快照和命令清单耗时；共用 `packages/runtime-installer/src/file-digests.ts`，Electron 的 ≥32 MiB 文件在短生命周期 Worker 中按 1 MiB 读取校验，其他场景保留主线程异步流 |
 | 托管 Runtime 日常快速启动 | `packages/studio-host/src/managed-runtime-acceptance.ts`、`host-backend.ts`、`runtime-resolver.ts`；验收文件 `<profile>/runtime-acceptance.json`。首次／升级／契约变化完整探测；日常对新鲜内容指纹匹配的签名版本复用能力验收，连接仍需真实握手。系统／自定义 Runtime 不复用；修改验收规则时递增 `MANAGED_ACCEPTANCE_POLICY` |
@@ -529,7 +529,7 @@ GUI 适配及本地验收记录：[实施记录](../docs/migrations/omp-18.4.4-g
 | Computer Use | `browser/ComputerPane.tsx` 兼容入口、`computer/{ComputerWorkspace,ComputerFrameView,ComputerActivity,ComputerStructure,ComputerSettings}.tsx`、`computer/workspaceSource.ts`；共享 `composer/ImagePreview.tsx`；`conversation/ToolBody.tsx` 同帧联动 | 新版 `computer-workspace-protocol.ts` / `computer-workspace-service.ts`、native computer run/action/frame 事件与停止策略；Host 独立 query/event；Desktop `computer-frames.ts` 私有资源与保留；旧 `computer-observation-service.ts` 保留。说明 `docs/computer-use.md`，隔离验收 `computer-harness.html` |
 | IDA 管理与编辑 | `capabilities/IdaPane.tsx`、`IdaDatabaseTools.tsx`、`ida.css`、`CapabilityEditor.tsx`；数据库列表、版本化分页视图、确认编辑与 Python 控制台 | ida-details-service.ts 新管理接口、ida-service.ts 保留发布协议；同一原生 IDA Broker |
 | Ratchet | evaluation/RatchetPane.tsx | ratchet-service.ts、ratchet-boundary.ts；原生隔离、审批与评分 |
-| 图形预览 | `graphics/{GraphicPreview,GraphicScene,SvgFigureImage}.tsx`、`previewActivity.ts`、`graphic-result-cache.ts`、`conversation/{NumericMarkdownTable,LazyMermaid}.tsx` | Worker 与 GPU 仍限制并发；32 MiB / 12 项几何缓存复用滚动回看的结果，GPU 在离屏且滚动结束后释放，以最后一帧和固定视口保留内容高度；静态图表保留，图片异步解码，重渲染等滚动停止；Three/X_ITE、本地资源包；Desktop chrome-artifacts.ts |
+| 图形预览 | `graphics/{GraphicPreview,GraphicScene,SvgFigureImage}.tsx`、`previewActivity.ts`、`graphic-result-cache.ts`、`conversation/{NumericMarkdownTable,LazyMermaid}.tsx` | Worker 与 GPU 限制并发。解析 Worker 用 `indexed-normals.ts` 补齐索引 PLY 的法线，去重转移 WRL/X3D 缓冲区。32 MiB / 12 项几何缓存支持回看。离屏且滚动结束后释放 GPU，保留最后一帧和视口高度。Three/X_ITE、本地资源包、Desktop `chrome-artifacts.ts` |
 | 录制与标注 | recordings/RecordingPlayer.tsx、annotations/Annotations.tsx、terminalTheme.ts | 既有产物库、录制和标注协议；隐藏页面释放媒体资源 |
 
 发布范围和验证：[OMP 18.8.0](../docs/migrations/omp-18.8.0.md)。0.1.8 既有 Stats、Frustration、Ask 图片、技能命名空间及子代理 BTW 路径保留。

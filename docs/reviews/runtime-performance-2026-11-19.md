@@ -60,3 +60,41 @@
 - Host 热路径用 `PERF_INCREMENTAL_REPLAY=1 node scripts/host-replay-bench.mjs`。帧与生命周期用 `scripts/streaming-perf-gate.mjs` 和 `scripts/render-work-bench.mjs`。前者选择 `PERF_BUILD_MODE=production`，后者选择 `PERF_BUILD_MODE=file`。
 - 会话切换用 `node scripts/native-session-perf.mjs --smoke`，阅读位置可追加 `--verify-reading`。生产入口体积用 `node scripts/renderer-assets.mjs apps/renderer/dist`。本机本轮的原始采样、专项负载脚本与日志位于忽略目录 `outputs/perf/hardware-review-20261119-1304/`。
 - CPU 与内存采用 Electron 的分进程采样方法，浏览器用 CDP 记录脚本、样式和布局，显存另外读取 Windows 的 GPU 进程计数器。实现依据见 [Electron 性能指南](https://www.electronjs.org/docs/latest/tutorial/performance)、[Chromium 渲染阶段](https://web.dev/articles/rendering-performance)、[Three.js 纹理数据源](https://threejs.org/docs/pages/TextureSource.html)和 [Windows GPU 引擎与显存计量](https://devblogs.microsoft.com/directx/gpus-in-the-task-manager/)。
+
+## 2026-11-20 复验
+
+以 `821bc22` 的生产构建为开发基线。使用同一台 Windows x64、i9-13900HX、RTX 4080 Laptop GPU、260 Hz 显示器的机器。由真实组件消费独立配置中的合成数据，模型调用数为零。
+
+| 场景 | 第一版 | 完善版 |
+| --- | ---: | ---: |
+| 40.3 万三角形 PLY 冷挂载的同步任务，五组中位数 | 62.3 ms | 23.4 ms |
+| 同一模型冷挂载期间的 WebGL 绘制与 WebP 海报次数 | 各 2 次 | 各 1 次 |
+| 接近 8 MiB 的 WRL 贴图从 Worker 投递到 Renderer，五组中位数 | 6.6 ms | 0.3 ms |
+| 24,000 行已完成评测报告暖翻页，读取 30 行 | 66.2 ms | 2.2 ms |
+| 24 个代码块滚动时的滚轮响应 p95，五轮 p95 的中位数 | 32.3 ms | 20.8 ms |
+| 同一滚动场景中的实际 Composer 输入响应 p95 | 16.9 ms | 13.6 ms |
+| 16 个原生归档，点击后事件循环恢复时间的冷切中位数 | 74.1 ms | 65.9 ms |
+| 同一组归档的暖切中位数 | 96.1 ms | 86.2 ms |
+
+PLY 的生成法线由解析 Worker 计算并和几何一起进入现有缓存。比较样本的法线和海报哈希，海报编码沿用原时序。挂载期测试按实际调用统计 WebGL 绘制次数，静态等尺寸回调跳过绘制。WRL/X3D 只在 Worker 到 Renderer 的边界转移每块底层缓冲区一次，iframe 继续读取 Renderer 持有的缓存数据。
+
+评测分页索引保留首见的键顺序和同键最后一条记录。旧文件和新写入共用 JSONL 格式。索引只保留最近一个终态报告，偏移表最多 2 MiB。活动报告、导出、重跑失败项继续使用原有数据读取路径。专项覆盖 UTF-8 跨块、CRLF、追加、替换和重启。
+
+真实会话测试使用正文、工具卡和实际 Composer，分别渲染 1、4、24 个代码块，输入由 Chromium 驱动注入按键和中文组合事件。24 块的场景快速滚动经过 19 块正文，同屏最多两个已着色块。比较紧凑 token、直接 DOM 提交、分帧提交及 CSS 隔离后，采用局部 CSS 隔离。轻量场景的帧间隔 p95 均约 7.7 ms，暗色和浅色的嵌套斜体、字重、文本选区与横向滚动通过等价校验。
+
+带 JS 栈的切换跟踪定位到阅读列在写入布局标记后读取 Composer 队列高度。候选版在三次冷切中移除了该处三次 647 节点样式重算。表中的切换时长来自其他未开启跟踪的轮次，原生读取和草稿恢复另有验收。输入延迟为浏览器事件到下一帧后的任务，帧间隔来自浏览器调度。Windows 进程采样分别记录私有内存与 GPU 专用显存。
+
+在合并前的主分支和集成分支各自构建生产资源。两边使用相同样本、独立配置、交替顺序。比较静态入口依赖时只沿桌面入口的静态导入计算原始字节，另检查桌面、图形和移动端三个 HTML 的资源。给需要复验的代码路径保留以下入口。
+
+```bash
+npm run check -- --production
+npm run runtime:verify-source
+npm run omp:verify:patches
+PERF_INCREMENTAL_REPLAY=1 node scripts/host-replay-bench.mjs
+PERF_BUILD_MODE=production npm run perf:streaming
+PERF_BUILD_MODE=file node scripts/render-work-bench.mjs
+node scripts/native-session-perf.mjs --smoke --trace --verify-reading
+node scripts/renderer-assets.mjs apps/renderer/dist
+```
+
+本机专项脚本、集成版对照原始数据和运行日志保存在忽略目录 `outputs/perf/refine-20261120/`。
