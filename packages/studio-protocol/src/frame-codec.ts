@@ -52,6 +52,7 @@ const EMPTY_BUFFER: Buffer = typeof Buffer === "function"
 
 export class FrameDecoder {
   #buffer = EMPTY_BUFFER;
+  #used = 0;
   #failed = false;
 
   constructor(private readonly maxBytes = DEFAULT_MAX_CONTROL_FRAME_BYTES) {}
@@ -61,73 +62,57 @@ export class FrameDecoder {
       throw new FrameCodecError("Frame decoder is closed after a protocol error");
     }
     const frames: DecodedFrame[] = [];
-    const chunkView = Buffer.isBuffer(chunk)
-      ? chunk
-      : Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+    const view = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
     let offset = 0;
-
-    while (offset < chunkView.byteLength || this.#buffer.byteLength >= LENGTH_PREFIX_BYTES) {
-      if (this.#buffer.byteLength === 0) {
-        const remaining = chunkView.byteLength - offset;
-        if (remaining < LENGTH_PREFIX_BYTES) {
-          if (remaining > 0) {
-            this.#buffer = Buffer.from(chunkView.subarray(offset));
-          }
+    while (offset < view.length) {
+      const available = view.length - offset;
+      if (this.#used === 0 && available >= LENGTH_PREFIX_BYTES) {
+        const length = this.#frameLength(view.readUInt32BE(offset));
+        if (available < length) {
+          this.#append(view.subarray(offset), length);
           break;
         }
-        const payloadLength = chunkView.readUInt32BE(offset);
-        if (payloadLength > this.maxBytes) {
-          this.#fail(`Frame exceeds ${this.maxBytes} bytes`);
-        }
-        if (payloadLength < LENGTH_PREFIX_BYTES) {
-          this.#fail("Frame payload is too small");
-        }
-        const frameLength = LENGTH_PREFIX_BYTES + payloadLength;
-        if (remaining >= frameLength) {
-          frames.push(this.#decodePayload(chunkView.subarray(offset + LENGTH_PREFIX_BYTES, offset + frameLength)));
-          offset += frameLength;
-          continue;
-        }
-        this.#buffer = Buffer.from(chunkView.subarray(offset));
-        break;
+        frames.push(this.#decodePayload(view.subarray(offset + LENGTH_PREFIX_BYTES, offset + length)));
+        offset += length;
+        continue;
       }
 
-      if (this.#buffer.byteLength < LENGTH_PREFIX_BYTES) {
-        const prefixBytes = Math.min(LENGTH_PREFIX_BYTES - this.#buffer.byteLength, chunkView.byteLength - offset);
-        if (prefixBytes <= 0) break;
-        this.#buffer = Buffer.concat([
-          this.#buffer,
-          chunkView.subarray(offset, offset + prefixBytes),
-        ]);
-        offset += prefixBytes;
-        if (this.#buffer.byteLength < LENGTH_PREFIX_BYTES) break;
+      if (this.#used < LENGTH_PREFIX_BYTES) {
+        const count = Math.min(LENGTH_PREFIX_BYTES - this.#used, available);
+        this.#append(view.subarray(offset, offset + count), LENGTH_PREFIX_BYTES);
+        offset += count;
+        if (this.#used < LENGTH_PREFIX_BYTES) break;
       }
-
-      const payloadLength = this.#buffer.readUInt32BE(0);
-      if (payloadLength > this.maxBytes) {
-        this.#fail(`Frame exceeds ${this.maxBytes} bytes`);
-      }
-      if (payloadLength < LENGTH_PREFIX_BYTES) {
-        this.#fail("Frame payload is too small");
-      }
-
-      const frameLength = LENGTH_PREFIX_BYTES + payloadLength;
-      if (this.#buffer.byteLength < frameLength && offset < chunkView.byteLength) {
-        const frameBytes = Math.min(frameLength - this.#buffer.byteLength, chunkView.byteLength - offset);
-        this.#buffer = Buffer.concat([
-          this.#buffer,
-          chunkView.subarray(offset, offset + frameBytes),
-        ]);
-        offset += frameBytes;
-      }
-      if (this.#buffer.byteLength < frameLength) break;
-
-      const payload = this.#buffer.subarray(LENGTH_PREFIX_BYTES, frameLength);
-      frames.push(this.#decodePayload(payload));
+      const length = this.#frameLength(this.#buffer.readUInt32BE(0));
+      const count = Math.min(length - this.#used, view.length - offset);
+      this.#append(view.subarray(offset, offset + count), length);
+      offset += count;
+      if (this.#used < length) break;
+      frames.push(this.#decodePayload(this.#buffer.subarray(LENGTH_PREFIX_BYTES, length)));
       this.#buffer = EMPTY_BUFFER;
+      this.#used = 0;
     }
-
     return frames;
+  }
+
+  #frameLength(payloadLength: number): number {
+    if (payloadLength > this.maxBytes) this.#fail(`Frame exceeds ${this.maxBytes} bytes`);
+    if (payloadLength < LENGTH_PREFIX_BYTES) this.#fail("Frame payload is too small");
+    return LENGTH_PREFIX_BYTES + payloadLength;
+  }
+
+  // Partial frames own only the bytes received so far. Growing geometrically
+  // avoids copying the entire prefix on every pipe or socket read.
+  #append(fragment: Buffer, limit: number): void {
+    const needed = this.#used + fragment.length;
+    if (needed > this.#buffer.length) {
+      const capacity = Math.min(limit, Math.max(needed, this.#buffer.length * 2));
+      const next = Buffer.allocUnsafe(capacity);
+      this.#buffer.copy(next, 0, 0, this.#used);
+      this.#buffer = next;
+    }
+    fragment.copy(this.#buffer, this.#used);
+    this.#used = needed;
   }
 
   #decodePayload(payload: Buffer): DecodedFrame {

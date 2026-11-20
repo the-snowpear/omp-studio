@@ -208,16 +208,21 @@ export function OnboardingTour({ mode, onClose }: { readonly mode: OnboardingMod
             <h2 className="ob-title" id={titleId}>{t(`${stepKey}.title`)}</h2>
             <p className="ob-body" id={bodyId}>{richText(t(`${stepKey}.body`, params))}</p>
             <ul className="ob-tips">
-              {step.tips.map((mark, tipIndex) => (
-                <li
-                  key={`${step.id}:${replay}:${tipIndex}`}
-                  className={`ob-tip${step.id === "overview" ? " is-legend" : ""}`}
-                  style={step.id === "overview" ? { animationDelay: overviewSlotDelay(tipIndex) } : undefined}
-                >
+              {step.tips.map((mark, tipIndex) => {
+                const legend = step.id === "overview";
+                const tip = <>
                   <span className={`ob-tip-mark${mark === "num" ? " is-num" : ""}`}>{mark === "num" ? tipIndex + 1 : <Icon name={mark} />}</span>
                   <span>{richText(t(`${stepKey}.tips.t${tipIndex + 1}`, params))}</span>
-                </li>
-              ))}
+                </>;
+                return <li
+                  key={`${step.id}:${replay}:${tipIndex}`}
+                  className={`ob-tip${legend ? " is-legend" : ""}`}
+                  style={legend ? { animationDelay: overviewSlotDelay(tipIndex) } : undefined}
+                >
+                  {tip}
+                  {legend && <span aria-hidden="true" className="ob-tip-emphasis">{tip}</span>}
+                </li>;
+              })}
             </ul>
           </div>
           <div className="ob-foot">

@@ -1,5 +1,6 @@
 import { lstat, mkdir, opendir, readdir, realpath, stat, statfs } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
+import { windowsVolumes } from "./platform/windows-volumes.js";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import type { SystemDirectory, SystemEntry, SystemFileTarget, SystemListInput, SystemPlaces, SystemQuickKind, WorkspaceId } from "@omp-studio/client-contract";
 import type { HostSystemFileService } from "@omp-studio/host-client-api";
@@ -70,7 +71,7 @@ export function createSystemFileService({ registry, knownFolders, trash }: Syste
 
   async function volume(path: string): Promise<SystemPlaces["volumes"][number] | undefined> {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const label = platform === "win32" ? path.slice(0, 2) : path === "/" ? "/" : basename(path);
+    const label = path === "/" ? "/" : basename(path);
     try {
       const info = await Promise.race([statfs(path), new Promise<undefined>(resolveTimeout => { timer = setTimeout(() => resolveTimeout(undefined), 400); })]);
       return info ? { path, label, totalBytes: info.blocks * info.bsize, freeBytes: info.bavail * info.bsize, ready: true } : { path, label, ready: false };
@@ -89,11 +90,14 @@ export function createSystemFileService({ registry, knownFolders, trash }: Syste
       const path = knownFolders?.[kind] ?? (kind === "home" ? home : join(home, label));
       return await stat(path).then(info => info.isDirectory() ? { kind, label, path } : undefined, () => undefined);
     }))).filter(item => item !== undefined);
-    const paths = platform === "win32" ? Array.from({ length: 26 }, (_, index) => `${String.fromCharCode(65 + index)}:\\`)
-      : platform === "darwin" ? ["/", "/Applications", ...await mountFolders("/Volumes")]
-      : ["/", ...await mountFolders("/mnt"), ...await mountFolders(join("/media", userInfo().username))];
-    const volumes = (await Promise.all(paths.map(volume))).filter(item => item !== undefined);
+    const volumes = platform === "win32" ? await windowsVolumes() : await localVolumes();
     return { platform, separator: platform === "win32" ? "\\" : "/", home, quick, volumes, trash: !!trash };
+  }
+
+  async function localVolumes() {
+    const paths = platform === "darwin" ? ["/", "/Applications", ...await mountFolders("/Volumes")]
+      : ["/", ...await mountFolders("/mnt"), ...await mountFolders(join("/media", userInfo().username))];
+    return (await Promise.all(paths.map(volume))).filter(item => item !== undefined);
   }
 
   async function directoryPath(input: SystemListInput): Promise<string> {

@@ -37,7 +37,7 @@ export const SCENE_DURATION: Readonly<Record<OnboardingSceneId, number>> = Objec
   Object.entries(BASE_DURATION).map(([id, seconds]) => [id, seconds * ONBOARDING_TEMPO]),
 ) as Record<OnboardingSceneId, number>;
 
-const at = (x: number, y: number, w: number, h: number): CSSProperties => ({ left: x, top: y, width: w, height: h });
+const at = (x: number, y: number, w: number, h: number) => ({ left: x, top: y, width: w, height: h });
 
 function Ln({ w, tone, style }: { w: number | string; tone?: "accent" | "strong" | "faint"; style?: CSSProperties }) {
   return <i className={`ob-ln${tone ? ` is-${tone}` : ""}`} style={{ width: w, ...style }} />;
@@ -230,7 +230,7 @@ export function overviewSlotDelay(index: number): string {
 }
 
 function OverviewScene() {
-  const slots: readonly { readonly key: string; readonly rects: readonly CSSProperties[] }[] = [
+  const slots = [
     { key: "rail", rects: [at(1, 19, 24, 380)] },
     { key: "side", rects: [at(27, 19, 118, 380)] },
     { key: "convo", rects: [at(147, 19, 284, 298)] },
@@ -256,15 +256,12 @@ function OverviewScene() {
         <Tabs items={["terminal", "console", "alert"]} active={0} style={at(4, 1, 200, 16)} />
         <div className="ob-dock-body" style={at(0, 18, 374, 64)}><TermBody /></div>
       </div>
-      {slots.map((slot, index) => (
-        <div key={slot.key} className="ob-hl ob-a s1-slot" style={{ animationDelay: overviewSlotDelay(index) }}>
-          {slot.rects.map((rect, rectIndex) => (
-            <div key={rectIndex} className="ob-hl-rect" style={rect}>
-              {rectIndex === 0 ? <b className="ob-hl-badge">{index + 1}</b> : null}
-            </div>
-          ))}
+      {slots.flatMap((slot, index) => slot.rects.map((rect, rectIndex) => (
+        <div key={`${slot.key}-${rectIndex}`} className="ob-hl-rect ob-a s1-slot"
+          style={{ ...rect, animationDelay: overviewSlotDelay(index), transformOrigin: `${320 - rect.left}px ${200 - rect.top}px` }}>
+          {rectIndex === 0 ? <b className="ob-hl-badge">{index + 1}</b> : null}
         </div>
-      ))}
+      )))}
     </>
   );
 }

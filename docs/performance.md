@@ -1,5 +1,7 @@
 # 流式性能维护
 
+2026-11-19 的 Windows 实机审查覆盖了 Bridge 分片、工具输出、报告分页、3D 显存、首次教程和工作台空闲占用。测量口径与复测结果见[运行性能审查](reviews/runtime-performance-2026-11-19.md)。
+
 0.2.0 新功能的持续运行审查见 [2026-11-06 报告](reviews/0.2.0-performance-review-2026-11-06.md)：评测读取合并与隐藏暂停、浏览器存档写入收敛，以及首屏体积、后台网页与大型报告的后续优化空间。
 
 Runtime 启动和重连专项见 [启动报告](reviews/runtime-startup-performance-2026-11-06.md)：大文件校验使用 1 MiB 分块；每次解析都检查新鲜内容，完整探测另比较执行前后指纹。Studio Bridge 公布会话前将其落盘，避免空会话重连失败。`runtime.launch.stage` 的 `verify`、`bootstrap`、`handshake`、`snapshot`、`manifest` 给出单阶段和累计耗时；仅记录阶段与数字，不记录凭据或正文。

@@ -12,9 +12,15 @@
   display: grid;
   place-items: center;
   padding: 24px;
+  animation: omp-fade-in var(--dur-slow) var(--ease-out) backwards;
+}
+.ob-backdrop::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
   background: color-mix(in srgb, #06070c 46%, transparent);
   backdrop-filter: blur(6px) saturate(1.1);
-  animation: omp-fade-in var(--dur-slow) var(--ease-out) backwards;
 }
 
 .ob-dialog {
@@ -218,13 +224,16 @@
   padding: 0;
   list-style: none;
 }
-.ob-tip {
+.ob-tip,
+.ob-tip-emphasis {
   display: flex;
   align-items: flex-start;
   gap: 9px;
   padding: 6px 8px;
-  margin: 0 -8px;
   border-radius: 8px;
+}
+.ob-tip {
+  margin: 0 -8px;
   font-size: var(--fs-12);
   line-height: 1.55;
   color: var(--text-2);
@@ -259,13 +268,21 @@
   font-size: 11px;
   color: var(--text);
 }
-.ob-tip.is-legend {
-  animation: ob-s1-legend var(--ob-d, 7s) var(--ease) infinite;
-}
-.ob-tip.is-legend .ob-tip-mark {
-  animation: ob-s1-legend-mark var(--ob-d, 7s) var(--ease) infinite;
+.ob-tip.is-legend { position: relative; }
+/* Crossfade the highlighted row on the compositor. Animating foreground and
+   background colors here required paint on every tick of the tutorial. */
+.ob-tip-emphasis {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  user-select: none;
+  color: var(--text);
+  background: var(--accent-softer);
+  opacity: 0;
+  animation: ob-s1-legend var(--ob-d) var(--ease) infinite;
   animation-delay: inherit;
 }
+.ob-tip-emphasis .ob-tip-mark { background: var(--accent); color: var(--text-on-accent); }
 
 .ob-foot {
   display: flex;
@@ -795,9 +812,9 @@
 .ob-press { position: absolute; left: -4px; top: -4px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); opacity: 0; box-shadow: 0 0 0 3px var(--accent-soft); }
 
 /* 概览：五个区域依次高亮（负延迟让五个槽位共用一条时间轴） */
-.ob-hl { position: absolute; inset: 0; pointer-events: none; }
 .ob-hl-rect {
   position: absolute;
+  pointer-events: none;
   border-radius: 7px;
   border: 1.5px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 10%, transparent);
@@ -824,16 +841,6 @@
   0% { opacity: 0; transform: scale(0.99); }
   3%, 17% { opacity: 1; transform: scale(1); }
   20%, 100% { opacity: 0; transform: scale(0.99); }
-}
-@keyframes ob-s1-legend {
-  0% { background-color: transparent; color: var(--text-2); }
-  3%, 17% { background-color: var(--accent-softer); color: var(--text); }
-  20%, 100% { background-color: transparent; color: var(--text-2); }
-}
-@keyframes ob-s1-legend-mark {
-  0% { background-color: var(--accent-softer); color: var(--accent); }
-  3%, 17% { background-color: var(--accent); color: var(--text-on-accent); }
-  20%, 100% { background-color: var(--accent-softer); color: var(--accent); }
 }
 @keyframes ob-cursor-vis {
   0% { opacity: 0; }

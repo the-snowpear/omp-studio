@@ -254,6 +254,12 @@
 @keyframes omp-spin {
   to { rotate: 360deg; }
 }
+/* The tour's active legend row follows the highlight in the overview scene. */
+@keyframes ob-s1-legend {
+  0%, 20%, 100% { opacity: 0; }
+  3%, 17% { opacity: 1; }
+}
+
 @keyframes omp-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }

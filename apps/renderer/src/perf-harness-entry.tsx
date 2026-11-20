@@ -22,6 +22,7 @@ import { ConversationPane } from "./conversation/ConversationPane";
 import { ConversationStore } from "./conversation/conversationStore";
 import type { ConversationSnapshot } from "./conversation/conversationEngine";
 import { renderWorkHarness } from "./render-work-harness";
+import { ChipComposer } from "./composer/ChipComposer";
 
 import "./styles/tokens.css";
 import "./styles/base.css";
@@ -37,7 +38,12 @@ const TURN = "perf-turn";
 const LIVE_MESSAGE = "perf-live-message";
 const LIVE_TOOL = "perf-live-tool";
 
-export type PerfSeed = { readonly turns: number; readonly toolsPerTurn: number; readonly outputLines: number };
+export type PerfSeed = {
+  readonly turns: number;
+  readonly toolsPerTurn: number;
+  readonly outputLines: number;
+  readonly codeBlocks?: number;
+};
 export type PerfRunOptions = {
   readonly frames: number;
   readonly charsPerFrame: number;
@@ -147,8 +153,20 @@ function historyItems(seed: PerfSeed, prefix = ""): readonly ConversationMessage
       role: "user",
       content: [{ type: "text", text: `第 ${turn} 个请求` }],
     });
-    const content: ConversationMessageItem["content"][number][] = [{ type: "text", text: PROSE }];
+    const text = seed.codeBlocks && turn === seed.turns - 1
+      ? Array.from({ length: seed.codeBlocks }, (_, block) => `\`\`\`ts\n${Array.from(
+        { length: 80 },
+        (_, row) => `const value_${block}_${row} = "结果"; // TODO: check`,
+      ).join("\n")}\n\`\`\``).join("\n\n")
+      : PROSE;
+    const content: ConversationMessageItem["content"][number][] = [{ type: "text", text }];
     for (let tool = 0; tool < seed.toolsPerTurn; tool += 1) {
+      if (seed.codeBlocks !== undefined) {
+        const source = Array.from({ length: 80 }, (_, row) => `const read_${tool}_${row} = "结果"; // TODO: check`).join("\n");
+        content.push({ type: "toolCall", toolCallId: `${turn}-t${tool}`, toolName: "read", arguments: { path: "fixture.ts" } } as never);
+        content.push({ type: "toolResult", toolCallId: `${turn}-t${tool}`, toolName: "read", isError: false, data: { preview: source.split("\n") } } as never);
+        continue;
+      }
       content.push({ type: "toolCall", toolCallId: `${turn}-t${tool}`, toolName: "bash", arguments: { command: `npm test -- ${tool}` } } as never);
       content.push({ type: "toolResult", toolCallId: `${turn}-t${tool}`, toolName: "bash", isError: false, output } as never);
     }
@@ -565,6 +583,12 @@ async function expandJitterContract(): Promise<ExpandPerfResult> {
   await afterPaint();
   scroller.scrollTop = scroller.scrollHeight;
   await settle(80);
+  // The seeded running card auto-opens. At high refresh rates its height can
+  // still be changing below the probe when we start measuring the manual click.
+  const opening = doc.getAnimations({ subtree: true }).filter(animation =>
+    animation instanceof CSSTransition && animation.transitionProperty === "grid-template-rows");
+  await Promise.allSettled(opening.map(animation => animation.finished));
+  await afterPaint();
   const target = pickExpandTarget();
   if (target === null) {
     return { clicked: null, grewPx: 0, maxShiftPx: 0, maxDocBottomShiftPx: 0, samples: 0, tailDistancePx: 0 };
@@ -615,7 +639,7 @@ function HarnessView() {
     [storeSnapshot],
   );
   return (
-    <div className="app-body" style={{ display: "flex", position: "relative", height: "100vh", overflow: "hidden" }}>
+    <div className="app-body" style={{ display: "flex", position: "relative", height: "100vh", overflow: "hidden", ...(inputProbe ? { paddingBottom: 80 } : {}) }}>
       {/* minimap 由 ConversationPane 自己渲染，与本 pane 共用同一个 scroller。
           这里曾再挂一个：两条轨道同时测量同一份 DOM，流式帧里的布局开销被算了两遍。 */}
       <ConversationPane
@@ -623,10 +647,14 @@ function HarnessView() {
         scrollerRef={scrollerRef}
         onLoadOlder={() => undefined}
       />
+      {inputProbe && <div className="composer-region" style={{ position: "absolute", bottom: 0, left: 0, width: "100%", height: 80 }}>
+        <ChipComposer id="perf-composer" ariaLabel="Composer performance probe" />
+      </div>}
     </div>
   );
 }
 
+const inputProbe = new URLSearchParams(location.search).has("composer");
 const host = document.getElementById("root");
 if (host !== null) createRoot(host).render(<HarnessView />);
 

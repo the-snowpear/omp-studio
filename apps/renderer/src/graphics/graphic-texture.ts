@@ -1,11 +1,12 @@
-import { Matrix3, SRGBColorSpace, Texture, type Wrapping } from "three";
+import { Matrix3, SRGBColorSpace, Texture, type TextureSource, type Wrapping } from "three";
 import type { GraphicMaterial } from "./graphic-types";
 /** ImageBitmap ignores WebGL's unpack flip flag; preserve the source orientation in UV space. */
 export function graphicTexture(
-  bitmap: ImageBitmap,
+  source: TextureSource<ImageBitmap>,
   material: GraphicMaterial,
 ): Texture {
-  const texture = new Texture(bitmap);
+  const texture = new Texture<ImageBitmap>();
+  texture.source = source;
   texture.colorSpace = SRGBColorSpace;
   texture.flipY = false;
   texture.matrixAutoUpdate = false;

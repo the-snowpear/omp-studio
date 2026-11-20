@@ -17,6 +17,7 @@ import {
   PointsMaterial,
   Scene,
   Texture,
+  TextureSource,
   Vector3,
   WebGLRenderer,
 } from "three";
@@ -72,16 +73,19 @@ export default function GraphicScene({
       const scene = new Scene();
       const group = new Group();
       const camera = new PerspectiveCamera(40, 1, 0.01, 10000);
-      const initW = Math.max(1, host.clientWidth || 600);
-      const initH = Math.max(1, host.clientHeight || 380);
-      renderer.setSize(Math.min(initW, 1600), Math.min(initH, 1000), false);
-      camera.aspect = initW / initH;
+      let lastWidth = Math.max(1, host.clientWidth || 600);
+      let lastHeight = Math.max(1, host.clientHeight || 380);
+      renderer.setSize(Math.min(lastWidth, 1600), Math.min(lastHeight, 1000), false);
+      camera.aspect = lastWidth / lastHeight;
       camera.updateProjectionMatrix();
       scene.add(group);
       scene.add(new AmbientLight(0xffffff, 0.8));
       const light = new DirectionalLight(0xffffff, 2);
       light.position.set(3, 5, 4);
       scene.add(light);
+      // Three shares the WebGL allocation for a source and sampler settings.
+      // Each material can still use its own UV transform.
+      const textureSources = data.images.map(bitmap => new TextureSource(bitmap));
       for (const item of data.meshes) {
         const geometry = new BufferGeometry();
         geometries.push(geometry);
@@ -100,9 +104,8 @@ export default function GraphicScene({
         for (const part of item.groups)
           geometry.addGroup(part.start, part.count, part.materialIndex);
         const material = item.materials.map((value) => {
-          const bitmap =
-            value.map === undefined ? undefined : data.images[value.map];
-          const map = bitmap ? graphicTexture(bitmap, value) : undefined;
+          const source = value.map === undefined ? undefined : textureSources[value.map];
+          const map = item.kind === "mesh" && source ? graphicTexture(source, value) : undefined;
           if (map) textures.push(map);
           const shared = {
             color: value.color,
@@ -179,6 +182,9 @@ export default function GraphicScene({
         observer = new ObserverCtor(() => {
           const width = Math.max(1, host.clientWidth),
             height = Math.max(1, host.clientHeight);
+          if (width === lastWidth && height === lastHeight) return;
+          lastWidth = width;
+          lastHeight = height;
           renderer?.setSize(Math.min(width, 1600), Math.min(height, 1000), false);
           camera.aspect = width / height;
           camera.updateProjectionMatrix();
