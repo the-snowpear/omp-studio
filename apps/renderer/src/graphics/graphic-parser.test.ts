@@ -43,6 +43,30 @@ const fixtures: Record<string, string> = {
 };
 afterEach(() => vi.unstubAllGlobals());
 describe("bounded graphic parsers", () => {
+  it("delivers a zipped VRML scene and its shared source buffer to the renderer", async () => {
+    const postMessage = vi.fn((message: unknown, options?: StructuredSerializeOptions) =>
+      structuredClone(message, options));
+    const worker: {
+      onmessage?: (event: { data: { name: string; data: ArrayBuffer } }) => Promise<void>;
+      postMessage: typeof postMessage;
+    } = { postMessage };
+    vi.stubGlobal("self", worker);
+    await import("./graphic.worker");
+    const source = "#VRML V2.0 utf8\nShape { geometry Box {} }";
+    const texture = new Uint8Array([12, 34, 56]);
+    const archive = zipSync({ "box.wrl": encode(source), "texture.png": texture });
+    await worker.onmessage!({ data: { name: "box.zip", data: Uint8Array.from(archive).buffer } });
+    expect(postMessage).toHaveBeenCalledOnce();
+    expect(postMessage.mock.calls[0]![1]?.transfer).toHaveLength(2);
+    const { ok, result } = postMessage.mock.results[0]!.value as {
+      ok: boolean; result: { bundle: { bytes: Uint8Array; resources: Record<string, Uint8Array> } };
+    };
+    expect(ok).toBe(true);
+    expect(new TextDecoder().decode(result.bundle.bytes)).toBe(source);
+    expect(result.bundle.resources["box.wrl"]?.buffer).toBe(result.bundle.bytes.buffer);
+    expect(result.bundle.resources["texture.png"]).toEqual(texture);
+  });
+
   it("projects Three-compatible normals for an indexed PLY and preserves authored normals and point clouds", async () => {
     const ply = (normals: boolean, faces: string[]) => buffer([
       "ply", "format ascii 1.0", "element vertex 5",

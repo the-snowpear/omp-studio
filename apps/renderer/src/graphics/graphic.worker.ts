@@ -16,6 +16,11 @@ self.onmessage = async (
         ])
           if (data) transfer.push(data.buffer as ArrayBuffer);
       transfer.push(...result.images);
+    } else if (result.bundle.format === "wrl" || result.bundle.format === "x3dv") {
+      // A ZIP bundle can expose the selected scene through both fields.
+      const buffers = new Set([result.bundle.bytes.buffer]);
+      for (const resource of Object.values(result.bundle.resources)) buffers.add(resource.buffer);
+      for (const buffer of buffers) transfer.push(buffer as ArrayBuffer);
     }
     self.postMessage({ ok: true, result }, { transfer });
   } catch (error) {
