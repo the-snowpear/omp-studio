@@ -75,6 +75,7 @@ export function ServicesPane({
         ? label("失败时重启", "Restart on failure")
         : label("不自动重启", "No automatic restart");
   const [open, setOpen] = useState(standalone);
+  const [scope, setScope] = useState("all");
   const [rows, setRows] = useState<StudioServiceRow[]>([]);
   const [definitions, setDefinitions] = useState<Definition[]>([]);
   const [editing, setEditing] = useState<Definition>();
@@ -464,8 +465,12 @@ export function ServicesPane({
               {error}
             </p>
           ) : null}
+          <label className="service-scope">{label("范围", "Scope")} <AppSelect value={scope} onChange={event => setScope(event.target.value)}>
+            <option value="all">{label("所有服务", "All services")}</option><option value="session">{label("当前会话", "Current session")}</option>
+            <option value="project">{label("当前项目", "Current project")}</option><option value="global">{label("全局守护进程", "Global daemon")}</option>
+          </AppSelect></label>
           <div className="service-table" role="list">
-            {rows.map((row) => (
+            {rows.filter(row => scope === "all" || row.scope === scope).map((row) => (
               <div
                 role="listitem"
                 className={`service-row${selected?.name === row.name ? " selected" : ""}`}
@@ -475,7 +480,7 @@ export function ServicesPane({
                   className="service-name"
                   onClick={() => setSelected(row)}
                 >
-                  <b>{row.name}</b>
+                  <b>{row.name}</b>{row.scope && <span className="chip xs gray">{{session:label("会话", "Session"), project:label("项目", "Project"), global:label("全局", "Global")}[row.scope]}</span>}
                   <span className="small muted">
                     <WorkspaceStatus state={row.state} /> ·{" "}
                     {lifetimeLabel(row.mode)} · {label("重启", "restarts")}{" "}
@@ -489,7 +494,7 @@ export function ServicesPane({
                   value={row.mode}
                   disabled={
                     busy ||
-                    !canControl ||
+                    row.manageable === false || !canControl ||
                     ["exited", "failed"].includes(row.state)
                   }
                   onChange={(event) =>
@@ -510,7 +515,7 @@ export function ServicesPane({
                 </AppSelect>
                 <button
                   className="btn small outline"
-                  disabled={busy || !canControl}
+                  disabled={busy || row.manageable === false || !canControl}
                   onClick={() => setConfirm({ kind: "services.restart", row })}
                 >
                   {label("重启", "Restart")}
@@ -519,7 +524,7 @@ export function ServicesPane({
                   className="btn small outline"
                   disabled={
                     busy ||
-                    !canControl ||
+                    row.manageable === false || !canControl ||
                     ["exited", "failed"].includes(row.state)
                   }
                   onClick={() => setConfirm({ kind: "services.stop", row })}
@@ -607,7 +612,7 @@ export function ServicesPane({
                 />
                 <button
                   className="btn small"
-                  disabled={busy || !canControl || !input}
+                  disabled={busy || selected?.manageable === false || !canControl || !input}
                 >
                   {label("发送输入", "Send input")}
                 </button>

@@ -4,6 +4,7 @@ import { isZh } from "../i18n";
 /** ver1 Preview inertia/default story, expressed as the native form DTO; never parsed or sent to a Host. */
 export function getPreviewFormShort(zh = isZh()): InteractionForm {
   return {
+    acceptImages: true,
     sections: [
       { title: [], fieldset: false, blocks: [
         { kind: "text", heading: true, spans: [{ text: zh ? "确认 Preview 拖拽与缩放的默认行为" : "Confirm default Preview pan and zoom behavior" }] },
@@ -47,6 +48,7 @@ export const PREVIEW_FORM_SHORT: InteractionForm = getPreviewFormShort();
 export function getPreviewFormLong(zh = isZh()): InteractionForm {
   const short = getPreviewFormShort(zh);
   return {
+    acceptImages: true,
     sections: [
       ...short.sections,
       { title: [{ text: zh ? "交互参数" : "Interaction parameters" }], fieldset: true, blocks: [

@@ -392,7 +392,7 @@ function deferredReanswer() {
 }
 
 describe("Studio form history boundaries", () => {
-	test("reports the legacy questions re-answer limit before navigating or manufacturing HTML", async () => {
+	test("navigates historical Ask questions without rewriting the stored arguments", async () => {
 		let navigated = 0;
 		const legacy = { questions: [{ id: "old", question: "Old question?", options: [{ label: "A" }] }] };
 		const session = {
@@ -426,8 +426,8 @@ describe("Studio form history boundaries", () => {
 				"legacy",
 				{ targetId: "old-result" },
 			),
-		).rejects.toMatchObject({ code: "INVALID_ARGUMENT", message: expect.stringContaining("legacy questions") });
-		expect(navigated).toBe(0);
+		).resolves.toMatchObject({ cancelled: false });
+		expect(navigated).toBe(1);
 		expect(legacy).not.toHaveProperty("html");
 	});
 

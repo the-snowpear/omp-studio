@@ -47,7 +47,9 @@ test("real turns capture their boundaries and exact restores persist while keepi
 	});
 	try {
 		await session.prompt("first request");
+		await session.waitForRunEnd();
 		await session.prompt("later request");
+		await session.waitForRunEnd();
 		expect(points.map(point => point.phase)).toEqual(["before", "after", "before", "after"]);
 		const firstLeaf = points[1]!.leafId!;
 		const laterLeaf = points[3]!.leafId!;
@@ -94,6 +96,7 @@ test("real turns capture their boundaries and exact restores persist while keepi
 		const aborting = session.abort();
 		abortRelease.resolve();
 		await Promise.all([aborting, abortRun]);
+		await session.waitForRunEnd();
 		expect(points.slice(beforeAbort).map(point => point.phase)).toEqual(["before", "after"]);
 		await tree.navigate("root", { targetId: "root", exactLeaf: true, restoreRoot: true });
 		reopened = await SessionManager.open(manager.getSessionFile()!);

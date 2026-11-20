@@ -1606,6 +1606,8 @@ function projectEntry(entry: ArchiveEntry): ConversationItem | undefined {
       createdAt,
       role,
       content: role === "advisor" ? projectAdvisorContent(entry.details, entry.content) : projectContent(entry.content, `extension:${entry.id}`),
+      ...(entry.excludeFromContext === true ? { excludeFromContext: true } : {}),
+      ...(entry.customType === "async-notify" ? { asyncNotify: true } : {}),
     };
   }
   if (entry.type === "message") {
@@ -1623,6 +1625,8 @@ function projectEntry(entry: ArchiveEntry): ConversationItem | undefined {
       createdAt,
       role,
       content: role === "advisor" ? projectAdvisorContent(message.details, message.content) : projectContent(message.content, `tool:${entry.id}`),
+      ...(message.role === "custom" && message.excludeFromContext === true ? { excludeFromContext: true } : {}),
+      ...(message.role === "custom" && message.customType === "async-notify" ? { asyncNotify: true } : {}),
     };
   }
   if (entry.type === "compaction" && typeof entry.summary === "string") {

@@ -27,6 +27,7 @@ export type RemoteInteractionRequest =
       kind: "input";
       placeholder?: string;
       secret?: boolean;
+      riskAcknowledgement?: boolean;
     })
   | (InteractionBase & {
       kind: "editor";

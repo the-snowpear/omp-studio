@@ -11,7 +11,7 @@ export const MEDIA_INTENT_KEY = "omp.mediaIntent";
 
 export type McTab = "providers" | "roles" | "subagents" | "websearch" | "presets" | "accounts";
 export type McIntent = { tab?: McTab; edit?: string; role?: string; assign?: string; agent?: string };
-export type CapTab = "skills" | "plugins" | "mcp" | "slash" | "ida" | "resources";
+export type CapTab = "skills" | "plugins" | "mcp" | "slash" | "disassembler" | "resources";
 export type CapIntent = { tab?: CapTab; name?: string };
 export type SettingsGroupId = "general" | "appearance" | "interaction" | "voice" | "permissions" | "context" | "files" | "tasks" | "models" | "maintenance" | "unsupported" | "background" | "advanced" | "native";
 export type SettingsIntent = { group: SettingsGroupId; setting?: string };
@@ -19,7 +19,7 @@ export type DiagnosticsIntent = "check-update" | "reconnect" | "restart";
 export type HubTab = "overview" | "transcript" | "jobs" | "messages" | "btw";
 export type HubIntentTab = HubTab | "chat";
 
-const CAP_TABS: ReadonlyArray<CapTab> = ["skills", "plugins", "mcp", "slash", "ida", "resources"];
+const CAP_TABS: ReadonlyArray<CapTab> = ["skills", "plugins", "mcp", "slash", "disassembler", "resources"];
 const SETTINGS_GROUPS: ReadonlyArray<SettingsGroupId> = ["general", "appearance", "interaction", "voice", "permissions", "context", "files", "tasks", "models", "maintenance", "unsupported", "background", "advanced", "native"];
 const DIAGNOSTICS_INTENTS: ReadonlySet<string> = new Set(["check-update", "reconnect", "restart"]);
 

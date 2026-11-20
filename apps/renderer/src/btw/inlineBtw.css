@@ -1,0 +1,12 @@
+.btw-inline { margin: var(--sp-8) 0; border-inline-start: 2px solid var(--accent); background: var(--accent-softer); border-radius: var(--r-sm); }
+.btw-inline-summary, .btw-inline-body form, .btw-inline-actions { display: flex; align-items: center; gap: var(--sp-8); }
+.btw-inline-summary { width: 100%; padding: var(--sp-8) var(--sp-12); background: transparent; color: var(--text); border: 0; text-align: start; cursor: pointer; }
+.btw-inline-summary span, .btw-inline-body input { flex: 1; min-width: 0; }
+.btw-inline-body { padding: 0 var(--sp-12) var(--sp-8); }
+.btw-inline-body p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.btw-inline-actions { flex-wrap: wrap; margin-block: var(--sp-8); }
+.btw-inline-actions button { color: var(--text-2); background: transparent; border: 0; cursor: pointer; }
+.composer.btw-mode { border-color: var(--accent); }
+.composer-mode-hint { padding: var(--sp-4) var(--sp-12); color: var(--accent); font-size: var(--fs-11); }
+
+.composer-hint-progress { display: flex; align-items: center; gap: var(--sp-6); color: var(--text-3); font-size: var(--fs-11); padding: var(--sp-4) var(--sp-8); }

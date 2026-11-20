@@ -52,7 +52,7 @@ export type FileMenuTarget = {
 
 /** 「打开」对文件 = 系统默认程序（Main shell.openPath）；对目录 = 树内展开/收起（caller 本地执行）。 */
 export type FileMenuAction =
-  | { readonly type: "ida" }
+  | { readonly type: "disassembler" }
   | { readonly type: "open" }
   | { readonly type: "openSystem" }
   | { readonly type: "openWith"; readonly openerId: string }
@@ -184,7 +184,7 @@ export function FileMenuContent({ target, openers, onRun, desktopActionsReason }
         onPick={(openerId) => onRun({ type: "openWith", openerId })}
       />
       <div className="menu-sep" />
-      {kind !== "wsl" && target.kind==="file"&&(/\.(exe|dll|so|dylib|bin|elf|i64|idb|sys|o|a)$/i.test(target.path)||(PLATFORM==="darwin"&&!target.name.includes(".")))?<MenuItem icon="code" onClick={()=>onRun({type:"ida"})} {...desktopOnly}>IDA</MenuItem>:null}
+      {kind !== "wsl" && target.kind==="file"&&(/\.(exe|dll|so|dylib|bin|elf|i64|idb|sys|o|a)$/i.test(target.path)||(PLATFORM==="darwin"&&!target.name.includes(".")))?<MenuItem icon="code" onClick={()=>onRun({type:"disassembler"})} {...desktopOnly}>{t("capabilities.disassemblerTab")}</MenuItem>:null}
       <MenuItem icon="folder-open" onClick={() => onRun({ type: "reveal" })} {...desktopOnly}>
         {t("shell.fileRevealInExplorer", { fileManager: fileManagerName(t) })}
       </MenuItem>

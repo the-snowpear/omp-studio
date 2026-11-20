@@ -216,7 +216,6 @@ test("nine concurrent Studio agents reach native workers and retain conversation
 		parentAgentId: MAIN_AGENT_ID,
 		taskDepth: 0,
 		modelOverride: "studio-test/model",
-		structured: false,
 		settings,
 		authStorage: auth,
 		modelRegistry: registry,

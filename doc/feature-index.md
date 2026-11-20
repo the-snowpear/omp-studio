@@ -4,6 +4,20 @@
 
 这是 **功能 → 文件** 的地图，不是架构愿景。协议形状以类型为准，不在这里复述。搬家后改这一份，不要在 `AGENTS.md` 复制表格。
 
+## OMP 19.0.1 适配入口
+
+运行时版本、验收证据与平台覆盖见 [19.0.1 迁移报告](../docs/migrations/omp-19.0.1.md)。
+
+| 功能 | Runtime / Host / 契约 | Renderer / 预览 |
+| --- | --- | --- |
+| 反汇编器 | overlay `services/disassembler-service.ts`、`disassembler-protocol.ts`；`contracts/disassembler.ts`；原生 `src/disasm/` | `capabilities/DisassemblerPane.tsx`、`DisassemblerDatabaseTools.tsx`；`preview/disassemblerPreview.ts`；`dock/model.ts` 迁移旧布局 |
+| 会话本地文件 | overlay `services/resource-service.ts`；`resource.local.ensureDir`、`resource.read` | `capabilities/LocalFilesPane.tsx`、`ResourcesPane.tsx`；`preview/resourcesPreview.ts` |
+| 后台交接与 Daemon | overlay `services/{handoff-service,runtime-queue-service,workbench-service}.ts`、`state-projector.ts`；原生 `daemon/` | 队列和活动条、`ServicesPane.tsx`；`preview/{runtimeQueuePreview,servicesPreview}.ts` |
+| Plan、Ask、BTW | overlay `services/{mode-control-service,interaction-port,btw-service}.ts`；`form-protocol.ts` | `deck/{PlanCard,FormCard}.tsx`、`workbench/WorkbenchCanvas.tsx`、`btw/useBtwSession.ts` |
+| Kiro、Claude 与统计 | overlay `services/{model-auth-service,account-status-service}.ts`、`session-telemetry.ts`；Host `omp-usage-adapter.ts` | `models/{NativeModelAccessPane,AccountStatusPane}.tsx`、`usage/TokenUsagePanel.tsx` |
+| Live 与扩展设置 | overlay `services/{live-audio-service,feature-settings-service,runtime-catalog-service}.ts`；`provider-yaml-draft.ts` | `media/LiveAudioPane.tsx`、`capabilities/McpRuntimePane.tsx`、模型与交互设置 |
+| Agent 协作与工作树 | overlay `services/{agent-hub-service,tan-service,session-worktrees-service}.ts`；原生 `irc/mesh.ts`、`worktree/` | `agents/deck/AgentInspector.tsx`、`history/ResumeScopePane.tsx`、工作树面板 |
+
 ## OMP 18.20.2 适配入口
 
 数据语义见[前端交接](../docs/migrations/omp-18.20.2-frontend-handoff.md)，分阶段版本见[迁移报告](../docs/migrations/omp-18.20.2.md)，当前修复与验收边界见[前端复核收尾](../docs/reviews/omp-18.20.2-frontend-fixes-2026-11-16.md)。
@@ -506,7 +520,7 @@ GUI 适配及本地验收记录：[实施记录](../docs/migrations/omp-18.4.4-g
 | MCP instructions 策略 | `CapabilitiesPage.tsx` MCP 行；预览 `capabilitiesPreview.ts` | `mcp.setInstructions` → `omp-mcp-adapter.ts`，只修改生效的原生来源，保留连接信息，新会话加载 |
 | Bedrock Messages 请求兼容 | `ModelConfigPage.tsx` 模型高级设置 | `ModelOverridePatch.bedrockMessagesApi` → `omp-models-adapter.ts` 的 `compat.bedrockMessagesApi`；`provider-yaml-draft.ts` 保持 YAML 预览与写入一致 |
 | 子代理 BTW、独立话题与追问 | `btw/AgentBtwPane.tsx`；Agent Hub BTW 标签、`agents/AgentDetailPanel.tsx` 与侧栏入口；预览 `preview/agentBtwPreview.ts` | `agent.btw.read/ask/abort` → Workbench `services/agent-btw-service.ts`；原生 child AgentSession + `StudioBtwService`，父会话/目标实例凭据绑定，目标失效中止；不使用主 BTW 状态槽 |
-| IDA 数据库、分页视图及修改确认 | `capabilities/IdaPane.tsx`；预览 `preview/idaPreview.ts`；文件树二进制入口 | `contracts/ida.ts` → `services/ida-service.ts`；原生 Python worker 在串行执行边界校验数据库身份与版本，单次 review token，读取和执行可取消 |
+| 反汇编数据库、分页视图及修改确认 | `capabilities/DisassemblerPane.tsx`；预览 `preview/disassemblerPreview.ts`；文件树二进制入口 | `contracts/disassembler.ts` → `services/disassembler-service.ts`；原生 Python worker 在串行执行边界校验数据库身份与版本，单次 review token，读取和执行可取消 |
 | Ask 回答与备注图片 | `deck/AskImages.tsx`、`AskCard.tsx`、`QueuedDeck.tsx`、`askContent.ts`；复用 `composer/ChipComposer.tsx`；预览 `preview/deckFixtures.ts` | `contracts/ask-attachments.ts`；正文按光标混排图片胶囊，独立缩略图预览；渲染层文档保留位置，按原生 `[Image #N]` 顺序提交；转换期间禁止提交/换题，过期卸载丢弃未完成读取 |
 | 分页会话资源 | `capabilities/ResourcesPane.tsx`、`LocalFilesPane.tsx`、`resources.css`；共享 `CapabilityEditor.tsx`；预览 `preview/resourcesPreview.ts` | `contracts/resources.ts` → `services/resource-service.ts`；原生 local/omp/attachment/conflict handler，内容版本绑定、文件越界拒绝 |
 | 无付费调用 Electron 验收 | `scripts/full-gui-e2e.mjs` | 独立应用配置、原生配置与工作区；签名握手、真实读取、预览操作、CDP 中文组合输入；证据 `outputs/full-gui-e2e/` |
@@ -527,7 +541,7 @@ GUI 适配及本地验收记录：[实施记录](../docs/migrations/omp-18.4.4-g
 | 浏览器元素引用与链接 | `composer/browserReference.ts`、`referenceCodec.ts`（浏览器 / GitHub / Git commit 共用长度帧编解码）、`{ChipComposer,serialize,ingest,types}`；`browser/{browserLinks.tsx,terminalBrowserLinks.ts}`；`conversation/markdown.tsx`、`TerminalPane.tsx` | 固定 Desktop 选择事件提供定位与截图；`workbench/WorkbenchCanvas.tsx`（`insertBrowserReferences`）将引用与图片加入 Composer；消息 / 终端链接由 `BrowserDockInstances` 接住，可直接打开时新建网页标签，否则在新标签页上「接管并打开」，菜单可选系统浏览器 |
 | 兼容浏览器观察 | `browser/BrowserPane.tsx` 的 LegacyBrowserPane | `browser-observation-service.ts`、`browser-tab-control.ts`；Desktop `browser-observation.ts` 固定 IPC，Web / SSH / 旧 Runtime 按现有能力显示 |
 | Computer Use | `browser/ComputerPane.tsx` 兼容入口、`computer/{ComputerWorkspace,ComputerFrameView,ComputerActivity,ComputerStructure,ComputerSettings}.tsx`、`computer/workspaceSource.ts`；共享 `composer/ImagePreview.tsx`；`conversation/ToolBody.tsx` 同帧联动 | 新版 `computer-workspace-protocol.ts` / `computer-workspace-service.ts`、native computer run/action/frame 事件与停止策略；Host 独立 query/event；Desktop `computer-frames.ts` 私有资源与保留；旧 `computer-observation-service.ts` 保留。说明 `docs/computer-use.md`，隔离验收 `computer-harness.html` |
-| IDA 管理与编辑 | `capabilities/IdaPane.tsx`、`IdaDatabaseTools.tsx`、`ida.css`、`CapabilityEditor.tsx`；数据库列表、版本化分页视图、确认编辑与 Python 控制台 | ida-details-service.ts 新管理接口、ida-service.ts 保留发布协议；同一原生 IDA Broker |
+| 反汇编器管理与编辑 | `capabilities/DisassemblerPane.tsx`、`DisassemblerDatabaseTools.tsx`、`disassembler.css`、`CapabilityEditor.tsx`；数据库列表、版本化分页视图、确认编辑与 Python 控制台 | `disassembler-service.ts`；统一 Daemon 管理的 IDA 或 Ghidra 数据库 |
 | Ratchet | evaluation/RatchetPane.tsx | ratchet-service.ts、ratchet-boundary.ts；原生隔离、审批与评分 |
 | 图形预览 | `graphics/{GraphicPreview,GraphicScene,SvgFigureImage}.tsx`、`previewActivity.ts`、`graphic-result-cache.ts`、`conversation/{NumericMarkdownTable,LazyMermaid}.tsx` | Worker 与 GPU 限制并发。解析 Worker 用 `indexed-normals.ts` 补齐索引 PLY 的法线，去重转移 WRL/X3D 缓冲区。32 MiB / 12 项几何缓存支持回看。离屏且滚动结束后释放 GPU，保留最后一帧和视口高度。Three/X_ITE、本地资源包、Desktop `chrome-artifacts.ts` |
 | 录制与标注 | recordings/RecordingPlayer.tsx、annotations/Annotations.tsx、terminalTheme.ts | 既有产物库、录制和标注协议；隐藏页面释放媒体资源 |
@@ -559,7 +573,7 @@ GUI 适配及本地验收记录：[实施记录](../docs/migrations/omp-18.4.4-g
 | 作业树 / 详情 / widget / wait tile | `AgentHub.tsx`、`conversation/JobWidget.tsx`、`JobInspector.tsx`、`jobTree.ts`、`ToolBody.tsx` | `services/job-service.ts`、`state-projector.ts`（`jobAgents`、widget 订阅）、`jobs.inspect` → `services/job-inspect.ts` |
 | 等待后台作业、MCP 进度、Eval 视图 | `workbench/WorkbenchCanvas.tsx` 活动行、`ToolBody.tsx` McpBody / EvalBody | `services/conversation-live-projector.ts`（`awaitingAsyncWork`、`tool.updated.progress`、`cells[].views`） |
 | MCP 重新授权 / 退出 / 重连 | `capabilities/McpAuthActions.tsx` | `mcp.auth.*` → `services/mcp-auth-service.ts`（上游 `oauth-reauth.ts`） |
-| Seance 只读咨询 | `HistoryPage.tsx`、`history/SeanceDialog.tsx` | `seance.ask` → `services/seance-service.ts`（task 工具 + seance agent） |
+| Seance | OMP 19.0.1 已移除 | 历史页仍可打开原会话记录 |
 | 会话构建来源 | `DiagnosticsPage.tsx` | `state-projector.ts` `runtimeIdentity` |
 | 新设置、`widget` 角色、`imageCountBudget`、`structured` | `NativePreferencesPane.tsx`、`FeatureSettingsPane.tsx`、`ModelConfigPage.tsx`、`SubagentsPanel.tsx` | 两组设置白名单、`model-kinds.ts`、`omp-models-adapter.ts`、`omp-agent-definitions-adapter.ts` |
 

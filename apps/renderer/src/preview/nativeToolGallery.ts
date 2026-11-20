@@ -115,7 +115,7 @@ export function getNativeToolGallery(zh = isZh()): readonly { readonly [key: str
     },
     {
       kind: "browser", name: "Browser", target: "run · waitForSelector", status: "done", dur: "1.9s",
-      action: "run", tab: "omp-web", url: "http://127.0.0.1:30141",
+      action: "run", tab: "omp-web", nativeWindowIds: ["w17"], url: "http://127.0.0.1:30141",
       code: "await page.waitForSelector(\".mermaid\")",
       output: "ok · 1 node",
     },
@@ -267,7 +267,7 @@ export function getNativeToolGallery(zh = isZh()): readonly { readonly [key: str
     {
       kind: "tts", name: "Speech Generation", target: "out/sync-done.wav", status: "done", dur: "2.8s",
       args: { text: zh ? "同步完成" : "Sync completed", output_path: "out/sync-done.wav", voice_id: "af_heart" },
-      output: "wrote 248 KB wav · kokoro",
+      output: "wrote 248 KB wav · Phonon 31M",
     },
     {
       kind: "vibe", name: "Vibe Wait", target: "wait · preview-bot", status: "done", dur: "9.4s",

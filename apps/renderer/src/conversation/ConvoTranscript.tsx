@@ -1,3 +1,4 @@
+import { InlineBtwNotes } from "../btw/InlineBtwNote";
 import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { useI18n } from "../i18n";
 import { AssistantRunView, ConversationItemView, type AssistantRunEntry, type RowPlanBind } from "./ConversationItemView";
@@ -467,7 +468,9 @@ export function ConvoTranscript({
       }
       const cached = itemCache.current.get(visualItem.key);
       if (cached !== undefined && sameDeps(cached.deps, deps)) return cached.element;
-      const element = buildItem(visualItem);
+      const anchoredRows = visualItem.kind === "assistantRun" ? rows.slice(visualItem.start, visualItem.end + 1) : [rows[visualItem.index]!];
+      const ids = anchoredRows.flatMap(row => "itemId" in row ? [row.itemId] : []);
+      const element = <>{buildItem(visualItem)}<InlineBtwNotes itemIds={ids} /></>;
       itemCache.current.set(visualItem.key, { deps, element });
       return element;
     },

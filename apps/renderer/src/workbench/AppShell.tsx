@@ -2218,7 +2218,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   };
 
   // Explorer 文件「更多」菜单：本机编辑器清单只在真实 workspace 且桌面 chrome 可用时拉取一次。
-  const { fileOpeners, fileShellUnavailable, runFileShellAction } = useWorkspaceFileActions({ workspace: realActiveWorkspace, remote: executionTarget.kind === "local" ? false : executionTarget.kind, targetId: executionTarget.id, onNotice: setShellNotice, onOpenIda: absolute => { setCapIntent("ida", absolute); setCapNonce(value => value + 1); go("capabilities"); } });
+  const { fileOpeners, fileShellUnavailable, runFileShellAction } = useWorkspaceFileActions({ workspace: realActiveWorkspace, remote: executionTarget.kind === "local" ? false : executionTarget.kind, targetId: executionTarget.id, onNotice: setShellNotice, onOpenDisassembler: absolute => { setCapIntent("disassembler", absolute); setCapNonce(value => value + 1); go("capabilities"); } });
   // File windows reuse the Explorer shell actions and the Composer capsule chain; a line range follows the capsule as plain text.
   const fileViewerActions: FileViewerActions = {
     contextWorkspaceId: realActiveWorkspace?.workspaceId,

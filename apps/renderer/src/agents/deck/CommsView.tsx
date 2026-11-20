@@ -1,3 +1,4 @@
+import { useI18n } from "../../i18n";
 import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../../icons";
 import { AgentSigil } from "./AgentSigil";
@@ -130,7 +131,7 @@ function CommsBoard({ messages, rows, now, replay, query, selectedId, onSelect, 
               <Icon name="arrow-r" extra="xs" />
               <span className="ad-post-to">{recipients}</span>
               {message.progress ? <span className="ad-post-tag">{d("comms.progress")}</span> : null}
-              <span className="ad-post-meta"><span>#{index.get(message.id)}</span><time dateTime={new Date(message.at).toISOString()} title={new Date(message.at).toLocaleString()}>{relative(message.at, now, d)}</time></span>
+              <span className="ad-post-meta">{message.peer && <PeerBadge instance={message.peerInstance} />}<span>#{index.get(message.id)}</span><time dateTime={new Date(message.at).toISOString()} title={new Date(message.at).toLocaleString()}>{relative(message.at, now, d)}</time></span>
             </header>
             {parent ? <blockquote className="ad-post-quote"><span>{d("comms.replyTo", { name: name(parent.from) })}</span><Body text={parent.body.length > 90 ? `${parent.body.slice(0, 89)}…` : parent.body} /></blockquote> : null}
             <p className="ad-post-body" data-clamped={long && !expanded || undefined}><Body text={message.body} /></p>
@@ -145,4 +146,9 @@ function CommsBoard({ messages, rows, now, replay, query, selectedId, onSelect, 
       <Icon name="arrow-d" extra="sm" />{unseen > 0 ? d("comms.newCount", { count: unseen }) : d("comms.latest")}
     </button> : null}
   </div>;
+}
+
+function PeerBadge({ instance }: { instance: string | undefined }) {
+  const zh = useI18n().resolvedLanguage === "zh";
+  return <span className="chip xs gray" title={instance ?? "agent://peers"}>{zh ? "跨实例" : "Peer instance"}{instance && ` · ${instance}`}</span>;
 }

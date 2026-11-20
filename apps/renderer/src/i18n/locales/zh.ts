@@ -1101,7 +1101,7 @@ const zhRaw = {
     "demoRestoreToast": "演示：已执行「{desc}」"
   },
   "capabilities": {
-    "idaTab": "IDA",
+    "disassemblerTab": "反汇编器",
     "title": "能力中心",
     "subtitle": "Slash 命令、技能与 MCP 工具服务",
     "slashTab": "Slash Commands",

@@ -1101,7 +1101,7 @@ export const en: LocaleDictionary = {
     "demoRestoreToast": "Demo: Executed \"{desc}\""
   },
   "capabilities": {
-    "idaTab": "IDA",
+    "disassemblerTab": "Disassembler",
     "title": "Capabilities",
     "subtitle": "Slash commands, skills, and MCP tool servers",
     "slashTab": "Slash Commands",

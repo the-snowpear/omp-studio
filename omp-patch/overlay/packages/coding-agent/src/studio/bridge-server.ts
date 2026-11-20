@@ -24,14 +24,14 @@ import {
 import { StudioStateProjector } from "./state-projector";
 import type { StudioBridgeLifecycle, StudioHostRuntime } from "./studio-host-mode";
 
-const UPSTREAM_COMMIT = "7c49c11aa5bbaf3f418406583096168ad5b8c6dc";
+const UPSTREAM_COMMIT = "f40f335845f0b136453d12fec8d6057011082766";
 /**
  * Must match `omp-patch/patches/series.json` `patchsetVersion`. The Runtime
  * reports `${VERSION}-${PATCHSET_VERSION}` in its Studio Hello, and packaging
  * refuses to sign an artifact whose probed identity disagrees with the series,
  * so a stale value here fails the build (see `scripts/build-omp-host.mjs`).
  */
-const PATCHSET_VERSION = "studio.16";
+const PATCHSET_VERSION = "studio.1";
 
 /** Reads and interrupts must not wait for `core.prompt` to finish. Prompt holds
  *  `#dispatchQueue` for the whole turn, including 503 auto-retry backoff. */

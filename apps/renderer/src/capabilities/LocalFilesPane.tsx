@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { StudioClient } from "@omp-studio/client-contract";
 import type { LocalResourceResultMap, LocalResourceRow } from "@omp-studio/studio-protocol";
 import { usePreviewMode } from "../preview/PreviewContext";
-import { createPreviewLocalFiles } from "../preview/resourcesPreview";
+import { createPreviewLocalFiles, PREVIEW_LOCAL_ROOT } from "../preview/resourcesPreview";
 import { useI18n } from "../i18n";
 import { hostErrorMessage, waitReceipt } from "../hostError";
+import { useExecutionTarget } from "../workspaces/ExecutionTargets";
 import { Icon } from "../icons";
 import { WorkspaceDialog, WorkspaceEmpty } from "../workspaces/Workspace";
 import { CapabilityEditor } from "./CapabilityEditor";
@@ -26,11 +27,14 @@ export function resourceLanguage(uri: string): "python" | "markdown" | "cpp" | "
 export function LocalFilesPane({ client, sessionId, available, initialName }: {
   client: StudioClient; sessionId?: string | undefined; available: boolean; initialName?: string;
 }) {
+  const target = useExecutionTarget();
   const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [files, setFiles] = useState<LocalResourceRow[]>([]);
   const [truncated, setTruncated] = useState(false);
+  const [localRoot, setLocalRoot] = useState("");
+  const [directoryMessage, setDirectoryMessage] = useState("");
   const [document, setDocument] = useState<LocalDocument>();
   const [draft, setDraft] = useState("");
   const [search, setSearch] = useState("");
@@ -52,7 +56,7 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
   const visibleFiles = files.filter(file => `${file.name} ${file.uri}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
 
   async function listFiles(): Promise<LocalResourceResultMap["resource.local.list"]> {
-    if (preview) return { files: previewFiles.current.map(({ text: _text, version: _version, ...file }) => file), truncated: false };
+    if (preview) return { localRootPath: PREVIEW_LOCAL_ROOT, files: previewFiles.current.map(({ text: _text, version: _version, ...file }) => file), truncated: false };
     if (!sessionId) throw new Error(zh ? "尚未选择活动会话" : "No active session");
     const handle = await client.command("resource.local.list", { sessionId });
     return (await waitReceipt<{ result: LocalResourceResultMap["resource.local.list"] }>(client, handle.requestId)).result;
@@ -75,6 +79,7 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
 
   useEffect(() => {
     const generation = ++epoch.current;
+    setLocalRoot(""); setDirectoryMessage("");
     lock.current = true;
     previewFiles.current = createPreviewLocalFiles(zh);
     handledInitial.current = initial.current;
@@ -90,7 +95,7 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
         setBusy("listing");
         const result = await listFiles();
         if (generation !== epoch.current) return;
-        setFiles(result.files); setTruncated(result.truncated);
+        setLocalRoot(result.localRootPath ?? ""); setFiles(result.files); setTruncated(result.truncated);
         handledInitial.current = initial.current;
         const selected = initial.current
           ? result.files.find(file => file.name === initial.current || file.uri === initial.current)
@@ -210,8 +215,38 @@ export function LocalFilesPane({ client, sessionId, available, initialName }: {
     : zh ? "这些文件属于当前会话，不会复制到工作区。" : "These files belong to this session and are not copied into the workspace.";
   const chosen = files.find(file => file.uri === document?.uri);
 
+  async function directoryAction(action: "copy" | "open") {
+    const generation = epoch.current;
+    try {
+      let path = PREVIEW_LOCAL_ROOT;
+      if (!preview) {
+        const handle = await client.command("resource.local.ensureDir", { sessionId: sessionId! });
+        path = (await waitReceipt<{ result: { localRootPath: string } }>(client, handle.requestId)).result.localRootPath;
+      }
+      if (generation !== epoch.current) return;
+      setLocalRoot(path);
+      if (action === "copy") {
+        await navigator.clipboard.writeText(path);
+        if (generation === epoch.current) setDirectoryMessage("copied");
+      } else if (preview) {
+        setDirectoryMessage(path);
+      } else {
+        const result = await globalThis.ompStudioChrome?.systemFileOpen({ path });
+        if (generation === epoch.current) setDirectoryMessage(result?.status === "failed" ? result.message : "");
+      }
+    } catch (cause) {
+      if (generation === epoch.current) setDirectoryMessage(hostErrorMessage(cause, zh ? "目录操作失败" : "Directory action failed"));
+    }
+  }
+
   return <section className="resources-local" aria-label={zh ? "本地会话文件" : "Session-local files"}>
     <div className="resources-local-intro"><Icon name="folder" /><p>{zh ? "原位编辑会话文件" : "Edit session files in place"}<span>{zh ? "UTF-8 文本 · 最大 512 KiB · 保存校验版本" : "UTF-8 text · up to 512 KiB · version-checked saves"}</span></p>{preview && marks ? <span className="resources-demo">{zh ? "演示" : "Demo"}</span> : null}</div>
+    {supported && <div className="resources-root">
+      <code title={localRoot}>{localRoot || "local://"}</code>
+      <button className="btn small outline" onClick={() => void directoryAction("copy")}><Icon name="copy" />{zh ? "复制目录路径" : "Copy local path"}</button>
+      <button className="btn small outline" disabled={!preview && (target.kind !== "local" || !globalThis.ompStudioChrome?.systemFileOpen)} title={target.kind !== "local" && !preview ? (zh ? "目录位于远端运行环境" : "The directory is on the remote runtime") : undefined} onClick={() => void directoryAction("open")}><Icon name="folder" />{zh ? "打开目录" : "Open folder"}</button>
+      {directoryMessage && <span role="status">{directoryMessage === "copied" ? (zh ? "路径已复制" : "Path copied") : directoryMessage}</span>}
+    </div>}
     <div className="resources-split">
       <aside className="resources-sidebar" aria-label={zh ? "文件导航" : "File navigation"}>
         <header className="resources-sidebar-head"><h3>{zh ? "本地文件" : "Local files"}</h3><button type="button" className="icon-btn" aria-label={zh ? "刷新本地文件" : "Refresh local files"} data-tip={zh ? "刷新本地文件" : "Refresh local files"} disabled={!!busy || !supported || !!pending} onClick={() => requestNavigation({ kind: "refresh" })}><Icon name="refresh" /></button></header>

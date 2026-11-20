@@ -4,6 +4,7 @@ const PANEL_ZH_LABELS: Record<string, { title?: string; menuTitle?: string }> = 
   "file-browser": { title: "文件浏览器", menuTitle: "文件浏览器 · File Browser" },
   "git-quick": { menuTitle: "Git 快捷卡" },
   commit: { title: "提交", menuTitle: "选择性提交" },
+  disassembler: { title: "反汇编器", menuTitle: "反汇编器" },
   computer: { menuTitle: "电脑 · Computer" },
   jobs: { menuTitle: "后台任务 · Background tasks" },
   "agent-detail": { title: "子 Agent" },
@@ -19,6 +20,7 @@ export function localizePanelDefinition(definition: PanelDefinition, zh: boolean
 }
 
 export const WORKBENCH_PANELS: readonly PanelDefinition[] = [
+  { id: "disassembler", title: "Disassembler", icon: "cpu", minHeight: 320, initialHeight: 540 },
   { id: "files", title: "Explorer", icon: "file-tree" },
   { id: "file-browser", title: "File Browser", icon: "drive", minHeight: 260, initialHeight: 420 },
   { id: "changes", title: "Changes", icon: "diff", meter: true },

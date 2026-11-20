@@ -48,14 +48,14 @@ function waitingLight() {
 
 it("lights a real Plan review as waiting without a pending interaction", async () => {
   await mount(false);
-  await screen.findByRole("button", { name: /Approve and execute/i });
+  await screen.findByRole("button", { name: /批准并执行|Approve and execute/i });
   await waitFor(waitingLight);
 });
 
 it("keeps preview Plan and Ask cards lit while they await a response", async () => {
   await mount(true);
   fireEvent.click(screen.getByRole("button", { name: /Mermaid/ }));
-  const approve = await screen.findByRole("button", { name: /Approve and execute/i });
+  const approve = await screen.findByRole("button", { name: /批准并执行|Approve and execute/i });
   await waitFor(waitingLight);
   fireEvent.click(approve);
   await screen.findAllByRole("radiogroup");

@@ -81,9 +81,9 @@ export const PlanAnnotatedBody = forwardRef<PlanAnnotatedBodyHandle, {
     onNotesChange(copy);
   };
 
-  const startDraft = (index: number) => {
+  const startDraft = (index: number, quote = "") => {
     setDraftIndex(index);
-    setDraft("");
+    setDraft(quote ? quote.split("\n").map(line => `> ${line}`).join("\n") + "\n\n" : "");
   };
 
   const saveDraft = () => {
@@ -117,7 +117,13 @@ export const PlanAnnotatedBody = forwardRef<PlanAnnotatedBodyHandle, {
                 className="btn small outline"
                 disabled={disabled === true || drafting}
                 aria-label={zh ? `批注 ${title}` : `Annotate ${title}`}
-                onClick={() => startDraft(index)}
+                onMouseDown={event => event.preventDefault()}
+                onClick={event => {
+                  const selection = event.currentTarget.ownerDocument.getSelection();
+                  const section = event.currentTarget.closest("section");
+                  const quote = selection?.rangeCount && section?.contains(selection.getRangeAt(0).commonAncestorContainer) ? selection.toString().trim() : "";
+                  startDraft(index, quote);
+                }}
               >
                 {zh ? "批注" : "Annotate"}
               </button>

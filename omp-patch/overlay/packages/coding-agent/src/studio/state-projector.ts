@@ -1,3 +1,6 @@
+import { onAgentMeshRosterChanged } from "../irc/mesh";
+import { onDownloadActivity } from "../downloads/activity";
+import { StudioHandoffService } from "./services/handoff-service";
 import { pauseWorkStatus } from "../slash-commands/builtin-control";
 import { cfgToolsApprovalMode } from "../tools/settings";
 import { cfgHindsightApiToken } from "../hindsight/settings";
@@ -102,6 +105,9 @@ export class StudioStateProjector {
 	readonly #unsubscribeLive: () => void;
 	readonly #unsubscribeModes: () => void;
 	readonly #unsubscribeModel: () => void;
+	readonly #unsubscribeHints: () => void;
+	readonly #unsubscribePeers: () => void;
+	readonly #hintJobs = new Map<number, "skills" | "mcp">();
 	readonly #unsubscribeTaskModel: () => void;
 	readonly #unsubscribeAgents: () => void;
 	#unsubscribeJobs: () => void = () => {};
@@ -156,6 +162,24 @@ export class StudioStateProjector {
 		this.#unsubscribeModes = this.#modeService.onChange(() => this.commitStateChange());
 		// The model pill must stay truthful no matter who switched: Bridge, the
 		// `studio-host` TUI, a Plan-role transition, or a retry fallback.
+		this.#unsubscribePeers = onAgentMeshRosterChanged(() => {
+			this.#agentsRevision++;
+			this.commitStateChange();
+		});
+		this.#unsubscribeHints = onDownloadActivity(activity => {
+			const kind =
+				activity.label === "Optimizing skills"
+					? "skills"
+					: activity.label.startsWith("Optimizing MCP: ")
+						? "mcp"
+						: undefined;
+			if (!kind) return;
+			if (activity.state === "running") {
+				if (this.#hintJobs.has(activity.id)) return;
+				this.#hintJobs.set(activity.id, kind);
+			} else if (!this.#hintJobs.delete(activity.id)) return;
+			this.commitStateChange();
+		});
 		this.#unsubscribeModel =
 			runtime.session.subscribe?.(event => {
 				if (event.type === "auto_retry_start") {
@@ -176,10 +200,10 @@ export class StudioStateProjector {
 						this.commitStateChange();
 					}
 				}
-				if (event.type === "agent_start" || event.type === "agent_end") {
+				if (event.type === "agent_start" || event.type === "agent_pause" || event.type === "agent_end") {
 					// A non-terminal end that only a background-job result resumes is
 					// not a finished run: surface it until a run starts or settles.
-					const awaiting = event.type === "agent_end" && event.awaitingAsyncWork === true;
+					const awaiting = event.type === "agent_pause" && event.awaiting;
 					if (awaiting !== this.#awaitingAsyncWork) {
 						this.#awaitingAsyncWork = awaiting;
 						this.commitStateChange();
@@ -206,7 +230,7 @@ export class StudioStateProjector {
 			};
 			// Widgets refresh in the background while shown; their registry pushes
 			// those repaints separately from job state changes.
-			const unsubscribeJobs = manager?.onChange(onJobsChanged) ?? (() => {});
+			const unsubscribeJobs = manager?.onJobsChanged(onJobsChanged) ?? (() => {});
 			const unsubscribeWidgets = manager?.widgets?.subscribe(onJobsChanged) ?? (() => {});
 			unsubscribeJobManager = () => {
 				unsubscribeJobs();
@@ -319,8 +343,7 @@ export class StudioStateProjector {
 		const rootAgentId = this.#runtime.session.getAgentId() ?? "Main";
 		const jobs = this.#runtime.services.jobs.list({ callerAgentId: rootAgentId, includeRecent: true });
 		const jobAgents = jobs.length === 0 ? [] : this.#runtime.services.jobs.agentLinks(jobs, rootAgentId);
-		const awaitingAsyncWork =
-			this.#awaitingAsyncWork && jobs.some(job => job.status === "running" || job.status === "queued");
+		const awaitingAsyncWork = this.#awaitingAsyncWork && this.#runtime.session.isRunActive;
 		const runtimeIdentity = this.#runtimeIdentity();
 		const lastTurnOutcome = this.#runtime.session.isStreaming ? undefined : this.#lastTurnOutcome();
 		const snapshot: StudioOperatorStateSnapshot = {
@@ -338,6 +361,19 @@ export class StudioStateProjector {
 			...(sessionManager?.titleSource === undefined ? {} : { sessionTitleSource: sessionManager.titleSource }),
 			isStreaming: this.#runtime.session.isStreaming,
 			isCompacting: this.#runtime.session.isCompacting,
+			...(this.#hintJobs.size
+				? {
+						hintCompression: {
+							skills: [...this.#hintJobs.values()].filter(kind => kind === "skills").length,
+							mcp: [...this.#hintJobs.values()].filter(kind => kind === "mcp").length,
+						},
+					}
+				: {}),
+			compactionMode: StudioHandoffService.running(this.#runtime.session)
+				? "handoff"
+				: this.#runtime.session.isCompacting || this.#runtime.session.isBackgroundCompacting
+					? "normal"
+					: undefined,
 			activeMode,
 			approvalMode: this.#runtime.services.permissions?.state() ?? this.#approvalMode(),
 			pause:
@@ -718,6 +754,8 @@ export class StudioStateProjector {
 		this.#unsubscribeLive();
 		this.#unsubscribeModes();
 		this.#unsubscribeModel();
+		this.#unsubscribeHints();
+		this.#unsubscribePeers();
 		this.#unsubscribeTaskModel();
 		this.#unsubscribeAgents();
 		this.#unsubscribeJobs();

@@ -8,7 +8,6 @@ import { clearApprovalGrants } from "../../tools/approval-cache";
 import { type RuntimeFeatureOperation } from "../runtime-features-protocol";
 import { inspectStudioJob } from "./job-inspect";
 import { StudioMcpAuthService } from "./mcp-auth-service";
-import { askStudioSeance } from "./seance-service";
 import { SessionControlError } from "./session-control-service";
 import { ownedStudioSessions } from "./owned-sessions";
 
@@ -75,8 +74,6 @@ export class StudioRuntimeFeatureService {
 				return this.mcpAuth.unauth(operation.name);
 			case "mcp.auth.reconnect":
 				return this.mcpAuth.reconnect(operation.name);
-			case "seance.ask":
-				return askStudioSeance(this.session, operation);
 		}
 	}
 }

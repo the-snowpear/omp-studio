@@ -1,3 +1,20 @@
+import {
+	cfgProvidersWebKeyless,
+	cfgProvidersCacheWarming,
+	cfgProvidersCacheWarmingStrategy,
+	cfgProvidersCacheWarmingCompactPercent,
+	cfgProvidersCacheWarmingCompactTokens,
+} from "../../session/settings";
+import { cfgDisassembler, cfgDisasmMaxOpen, cfgDisasmIdleCloseSec } from "../../disasm/settings";
+import { cfgMcpBuiltinTransforms, cfgMcpEvalNamespaces } from "../../mcp/settings";
+import { cfgTaskCrossInstance, cfgTaskAgentPrewalkAuto, cfgTaskEnableLsp } from "../../task/settings";
+import {
+	cfgMnemopiRecallRelevance,
+	cfgMnemopiEmbeddingQueryPrefix,
+	cfgMnemopiEmbeddingInputType,
+} from "../../mnemopi/settings";
+import { cfgToolsIntentTracing } from "../../tools/settings";
+import { cfgLiveEndpoint, cfgLiveApiKey, cfgLiveVoice } from "../../live/settings";
 import { outRepliesActive } from "../../internal-urls/out-protocol";
 import { cfgMagicKeyword, cfgMagicKeywordsEnabled } from "../../modes/settings";
 import { cfgOutEnabled, cfgToolsXdevNotices } from "../../tools/settings";
@@ -96,6 +113,26 @@ import { SessionControlError } from "./session-control-service";
 import { StudioSessionCompactionService } from "./session-compaction-service";
 
 const HANDLES: Record<FeatureSettingKey, AnySetting> = {
+	"providers.webKeyless": cfgProvidersWebKeyless,
+	"disassembler.backend": cfgDisassembler,
+	"disassembler.maxOpen": cfgDisasmMaxOpen,
+	"disassembler.idleCloseSec": cfgDisasmIdleCloseSec,
+	"mcp.builtinTransforms": cfgMcpBuiltinTransforms,
+	"mcp.evalNamespaces": cfgMcpEvalNamespaces,
+	"task.crossInstance": cfgTaskCrossInstance,
+	"task.agentPrewalkAuto": cfgTaskAgentPrewalkAuto,
+	"task.enableLsp": cfgTaskEnableLsp,
+	"providers.cacheWarming": cfgProvidersCacheWarming,
+	"providers.cacheWarmingStrategy": cfgProvidersCacheWarmingStrategy,
+	"providers.cacheWarmingCompactPercent": cfgProvidersCacheWarmingCompactPercent,
+	"providers.cacheWarmingCompactTokens": cfgProvidersCacheWarmingCompactTokens,
+	"mnemopi.recallRelevance": cfgMnemopiRecallRelevance,
+	"mnemopi.embeddingQueryPrefix": cfgMnemopiEmbeddingQueryPrefix,
+	"mnemopi.embeddingInputType": cfgMnemopiEmbeddingInputType,
+	"tools.intentTracing": cfgToolsIntentTracing,
+	"live.endpoint": cfgLiveEndpoint,
+	"live.apiKey": cfgLiveApiKey,
+	"live.voice": cfgLiveVoice,
 	"models.noJudge": cfgNoJudge,
 	"models.noSpotlight": cfgNoSpotlight,
 	"models.offline": cfgOffline,
@@ -194,7 +231,9 @@ export class StudioFeatureSettingsService {
 			value =
 				key === "out.enabled"
 					? outRepliesActive(this.session.settings, this.session.studioToolSession?.replyTranscript === true)
-					: structuredClone(setting.get(this.session.settings) ?? null);
+					: key === "live.apiKey"
+						? ""
+						: structuredClone(setting.get(this.session.settings) ?? null);
 		// A merged/path-resolved rule list is not an editable global configuration:
 		// copying it back would promote project grants and erase path restrictions.
 		const globalBash =

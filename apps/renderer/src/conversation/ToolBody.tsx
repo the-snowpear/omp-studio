@@ -1073,11 +1073,14 @@ function InspectBody({ tool }: { tool: ToolView }) {
 }
 
 function BrowserBody({ tool }: { tool: ToolView }) {
+  const zh = useI18n().resolvedLanguage === "zh";
   const fields = toolFields(tool);
   const code = jsonString(fields.code);
   const output = fields.output;
   return (
     <>
+      {Array.isArray(fields.nativeWindowIds) && fields.nativeWindowIds.length > 0 && <div className="tc-note"><strong>{zh ? "原生窗口" : "Native windows"}</strong>
+        {fields.nativeWindowIds.map(id => <code key={String(id)}>computer.window({String(id)})</code>)}<small>{zh ? "可在电脑面板中检查这些窗口。" : "Inspect these windows in the Computer panel."}</small></div>}
       <Kv pairs={[["action", fields.action], ["tab", fields.tab], ["url", fields.url ?? fields.target], ["element", fields.elementHandle ?? fields.handle]]} />
       {code ? (
         <>

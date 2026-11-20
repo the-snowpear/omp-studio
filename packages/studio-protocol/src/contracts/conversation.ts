@@ -38,6 +38,8 @@ export type ConversationMessageItem = {
   createdAt: string;
   role: ConversationRole;
   content: readonly ConversationContentBlock[];
+  excludeFromContext?: boolean;
+  asyncNotify?: boolean;
 };
 
 export type ConversationCompactionItem = {

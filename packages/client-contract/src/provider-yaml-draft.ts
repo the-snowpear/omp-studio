@@ -146,7 +146,7 @@ function bedrockCompatNode(previous:Record<string,unknown>|undefined,enabled:boo
 
 export function providerModelYamlNode(model: ModelCatalogEntry | ModelProviderModelInput, previous: Record<string, unknown> | undefined): Record<string, unknown> {
   const row: Record<string, unknown> = { ...previous, id: model.id };
-  for (const key of ["name", "kind", "webSearch", "api", "baseUrl", "contextWindow", "maxContextWindow", "maxTokens", "reasoning", "input", "supportsTools", "cost", "omitMaxOutputTokens", "preferWebsockets", "premiumMultiplier", "imageCountBudget", "headers", "contextPromotionTarget", "compactionModel", "remoteCompaction", "thinking"]) delete row[key];
+  for (const key of ["name", "kind", "webSearch", "api", "baseUrl", "contextWindow", "maxContextWindow", "maxTokens", "reasoning", "input", "supportsTools", "cost", "omitMaxOutputTokens", "preferWebsockets", "premiumMultiplier", "imageCountBudget", "headers", "contextPromotionTarget", "compactionModel", "remoteCompaction", "snapcompactShape", "thinking"]) delete row[key];
   const parameters = modelParameterValues(model);
   Object.assign(row,bedrockCompatNode(previous,model.bedrockMessagesApi));
   const compat = { ...nestedNode(row.compat) };
@@ -173,6 +173,7 @@ export function providerModelYamlNode(model: ModelCatalogEntry | ModelProviderMo
   if (model.imageCountBudget !== undefined) row.imageCountBudget = model.imageCountBudget;
   if (model.headers && Object.keys(model.headers).length > 0) row.headers = { ...model.headers };
   if (model.contextPromotionTarget) row.contextPromotionTarget = model.contextPromotionTarget;
+  if (model.snapcompactShape) row.snapcompactShape = { ...model.snapcompactShape };
   if (model.compactionModel) row.compactionModel = model.compactionModel;
   const rc = remoteCompactionNode(model.remoteCompaction);
   if (rc) row.remoteCompaction = rc;
@@ -184,7 +185,7 @@ export function providerModelYamlNode(model: ModelCatalogEntry | ModelProviderMo
 /** One `modelOverrides:` row, sparse like the Host writer. */
 export function providerOverrideYamlNode(override: ModelOverridePatch, previous: Record<string, unknown> | undefined): Record<string, unknown> {
   const row: Record<string, unknown> = { ...previous };
-  for (const key of ["name", "contextWindow", "maxContextWindow", "maxTokens", "reasoning", "thinking", "supportsTools", "input", "cost", "omitMaxOutputTokens", "preferWebsockets", "premiumMultiplier", "imageCountBudget", "headers", "contextPromotionTarget", "compactionModel", "remoteCompaction"]) delete row[key];
+  for (const key of ["name", "contextWindow", "maxContextWindow", "maxTokens", "reasoning", "thinking", "supportsTools", "input", "cost", "omitMaxOutputTokens", "preferWebsockets", "premiumMultiplier", "imageCountBudget", "headers", "contextPromotionTarget", "compactionModel", "remoteCompaction", "snapcompactShape"]) delete row[key];
   Object.assign(row,bedrockCompatNode(previous,override.bedrockMessagesApi));
   const compat = { ...nestedNode(row.compat) };
   for (const key of ["requiresThinkingPresence", "extendedCacheTtlBeta", "statefulResponses"] as const) {
@@ -207,6 +208,7 @@ export function providerOverrideYamlNode(override: ModelOverridePatch, previous:
   if (override.imageCountBudget !== undefined) row.imageCountBudget = override.imageCountBudget;
   if (override.headers && Object.keys(override.headers).length > 0) row.headers = { ...override.headers };
   if (override.contextPromotionTarget) row.contextPromotionTarget = override.contextPromotionTarget;
+  if (override.snapcompactShape) row.snapcompactShape = { ...override.snapcompactShape };
   if (override.compactionModel) row.compactionModel = override.compactionModel;
   const rc = remoteCompactionNode(override.remoteCompaction);
   if (rc) row.remoteCompaction = rc;

@@ -5,7 +5,6 @@ import {
 	type AgentBtwOperation,
 	type AgentBtwResultMap,
 } from "./agent-btw-protocol";
-import { IDA_KINDS, isIdaKind, validateIdaOperation, type IdaOperation, type IdaResultMap } from "./ida-protocol";
 import { validateResourceOperation, type ResourceOperation, type ResourcePage } from "./resources-protocol";
 export type SessionTier = "standard" | "slow" | "priority" | "ultrafast";
 export interface SessionTierState {
@@ -54,7 +53,6 @@ export interface RuntimeSkillIdentity {
 }
 export type SessionGuiOperation =
 	| ResourceOperation
-	| IdaOperation
 	| AgentBtwOperation
 	| { kind: "prediction.control"; sessionId: string; action: PredictionControlAction }
 	| { kind: "session.queue.list"; sessionId: string; offset?: number }
@@ -65,7 +63,7 @@ export type SessionGuiOperation =
 	| { kind: "session.tier.get"; sessionId: string }
 	| { kind: "session.tier.set"; sessionId: string; selector: string; tier: SessionTier }
 	| { kind: "session.skills.list"; sessionId: string };
-export interface SessionGuiResultMap extends AgentBtwResultMap, IdaResultMap {
+export interface SessionGuiResultMap extends AgentBtwResultMap {
 	"resource.read": ResourcePage;
 	"prediction.control": PredictionControlState;
 	"session.queue.list": SessionQueueSnapshot;
@@ -79,7 +77,6 @@ export interface SessionGuiResultMap extends AgentBtwResultMap, IdaResultMap {
 }
 export const SESSION_GUI_KINDS = [
 	"resource.read",
-	...IDA_KINDS,
 	...AGENT_BTW_KINDS,
 	"prediction.control",
 	"session.queue.list",
@@ -93,10 +90,6 @@ export const SESSION_GUI_KINDS = [
 ] as const;
 export const SESSION_GUI_READ_KINDS = [
 	"resource.read",
-	"ida.status",
-	"ida.view",
-	"ida.prepare",
-	"ida.cancel",
 	"agent.btw.read",
 	"session.queue.list",
 	"session.tier.get",
@@ -122,10 +115,6 @@ function tier(value: unknown): void {
 export function validateSessionGuiOperation(value: unknown): asserts value is SessionGuiOperation {
 	if ((value as { kind?: string })?.kind === "resource.read") {
 		validateResourceOperation(value);
-		return;
-	}
-	if (isIdaKind((value as { kind?: string })?.kind ?? "")) {
-		validateIdaOperation(value);
 		return;
 	}
 	if (isAgentBtwKind((value as { kind?: string })?.kind ?? "")) {

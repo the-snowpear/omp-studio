@@ -112,7 +112,7 @@ export function useNativePlanReview(
       setErrorCause(undefined);
     }
     void (async () => {
-      const handle = await client.command("mode.plan.review.details", { sessionId });
+      const handle = await client.command("mode.plan.review.details", { sessionId, ...(role ? { role } : {}) });
       const result = (await waitReceipt<{ result: NativePlanReview }>(client, handle.requestId)).result;
       if (!current) return;
       settledSession.current = sessionId;
@@ -145,7 +145,7 @@ export function useNativePlanReview(
     return () => {
       current = false;
     };
-  }, [client, sessionId, enabled, active, stateVersion]);
+  }, [client, sessionId, enabled, active, stateVersion, role]);
   const error = errorCause !== undefined
     ? hostErrorMessage(errorCause, zh ? "无法读取计划执行档位" : "Cannot read plan execution tiers")
     : "";
@@ -429,10 +429,11 @@ export function PlanExecutionPicker({
           {selectedTier && selectedMeta ? (
             <span className="plan-exec-summary">
               <span className="plan-exec-primary">
-                <span className="plan-exec-model">{selectedTier.name}</span>
+                <span className="plan-exec-model">{selectedTier.name}{selectedTier.contextWindow ? ` · ${Math.round(selectedTier.contextWindow / 1000)}k` : ""}</span>
                 <span className="plan-exec-role-pill" data-tint={selectedMeta.tint}>
                   {selectedMeta.label}
                 </span>
+                {details?.contextRatio !== undefined && <small>{zh ? "上下文" : "Context"} {Math.round(details.contextRatio * 100)}%</small>}
                 {selectedThinking ? (
                   <span className="plan-exec-think-pill">
                     <Icon name="brain" extra="sm" />

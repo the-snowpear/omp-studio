@@ -1,3 +1,4 @@
+import { SpillLink, isSpillUri, linkSpillText } from "./SpillLink";
 import { FileLink, LocalFileImage } from "../files/fileLinks";
 import { parseFileReference } from "../files/fileTypes";
 import { NumericMarkdownTable } from "./NumericMarkdownTable";
@@ -95,10 +96,11 @@ function componentsFor(streaming: boolean, magic: boolean, highlightEligible = f
   if (cached !== undefined) return cached;
   const prose = (children: ReactNode) => magic ? withMagicKeywordChildren(children) : children;
   const components: Components = {
-    p: ({ children }) => <p>{prose(children)}</p>,
-    li: ({ children }) => <li>{prose(children)}</li>,
+    p: ({ children }) => <p>{prose(linkSpillText(children))}</p>,
+    li: ({ children }) => <li>{prose(linkSpillText(children))}</li>,
     a: ({ href, children }) => {
       const url = typeof href === "string" ? href.trim() : "";
+      if (isSpillUri(url)) return <SpillLink uri={url}>{children}</SpillLink>;
       return parseFileReference(url, true) ? <FileLink href={url}>{prose(children)}</FileLink> : <ExtensionAwareLink href={url} safe={isSafeMarkdownUrl(url)}>{prose(children)}</ExtensionAwareLink>;
     },
     img: ({ src, alt }) => {

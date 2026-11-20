@@ -16,6 +16,17 @@ import { TaskDelegationSettings, TASK_DELEGATION_SETTINGS_DEFINITIONS } from "./
 type Group = "interaction" | "context" | "tasks" | "voice" | "dictation" | "maintenance" | "permissions" | "models" | "experimental" | "auxiliary" | "shell";
 export type Definition = { key: FeatureSettingKey; group: Group; zh: string; en: string; hint: string; hintEn: string; options?: Array<[string, string, string]>; text?: boolean; list?: boolean; rules?: boolean; billed?: boolean; min?: number; max?: number; step?: number };
 export const FEATURE_SETTINGS_DEFINITIONS: Definition[] = [
+  { key: "providers.webKeyless", group: "models", zh: "免密钥联网服务", en: "Keyless web services", hint: "允许联网搜索和网页读取使用公共服务。", hintEn: "Allow search and page reading to use public services without a key." },
+  { key: "mcp.builtinTransforms", group: "permissions", zh: "内置 MCP 转换", en: "Built-in MCP transforms", hint: "可用时使用内置工具替代 MCP 服务。", hintEn: "Use built-in tool implementations for supported servers." },
+  { key: "mcp.evalNamespaces", group: "permissions", zh: "MCP Eval 命名空间", en: "MCP eval namespaces", hint: "将已连接服务器的工具提供给 JavaScript 和 Python Eval。", hintEn: "Expose connected server tools to JavaScript and Python eval." },
+  { key: "task.agentPrewalkAuto", group: "tasks", zh: "子代理预走查规则", en: "Subagent prewalk rules", hint: "按代理名称设置 on、off 或模型模式。", hintEn: "Map each agent name to on, off or a model pattern." },
+  { key: "task.crossInstance", group: "tasks", zh: "同目录实例发现", en: "Discover peer instances", hint: "在 agent://peers 中显示同一项目的其他 OMP 实例。", hintEn: "Discover other OMP instances in this project through agent://peers." },
+  { key: "task.enableLsp", group: "tasks", zh: "子代理编辑时格式化与诊断", en: "Format and diagnose subagent edits", hint: "子代理始终可用共享 LSP 工具。此项控制编辑后的自动操作。", hintEn: "Subagents share LSP tools. This setting controls automatic actions after edits." },
+  { key: "mnemopi.recallRelevance", group: "context", zh: "记忆召回相关性", en: "Memory recall relevance", hint: "使用评判模型筛选自动召回的记忆。", hintEn: "Use the judge model to filter automatically recalled memories.", options: [["off","关闭","Off"],["auto","自动","Auto"],["on","开启","On"]] },
+  { key: "mnemopi.embeddingQueryPrefix", group: "context", zh: "嵌入查询前缀", en: "Embedding query prefix", hint: "给检索查询附加模型需要的指令前缀。", hintEn: "Prefix retrieval queries with the instruction expected by your embedding model.", text: true },
+  { key: "mnemopi.embeddingInputType", group: "context", zh: "嵌入输入类型", en: "Embedding input type", hint: "传给嵌入供应商的 input_type。", hintEn: "The input_type sent to the embedding provider.", text: true },
+  { key: "tools.intentTracing", group: "permissions", zh: "工具意图追踪", en: "Tool intent tracing", hint: "记录工具调用的意图。", hintEn: "Record the intent behind tool calls." },
+  { key: "providers.cacheWarmingStrategy", group: "models", zh: "缓存预热策略", en: "Cache warming strategy", hint: "控制长工具调用期间的续期和缓存到期前的压缩。", hintEn: "Choose how to keep caches warm during long tool calls and before expiry.", options: [["auto","自动","Auto"],["keepalive","续期","Keep alive"],["compact","压缩","Compact"]] },
   ...RUNTIME_18202_SETTINGS,
   ...RUNTIME_18180_SETTINGS,
   ...TASK_DELEGATION_SETTINGS_DEFINITIONS,
@@ -25,13 +36,13 @@ export const FEATURE_SETTINGS_DEFINITIONS: Definition[] = [
   { key: "task.structured", group: "tasks", zh: "结构化任务结果", en: "Structured task results", hint: "允许 task 使用结果 schema 和 yield；关闭时任务返回普通文本。", hintEn: "Enable task schemas and yield. When off, tasks return plain text." },
   { key: "bash.gitGuard", group: "tasks", zh: "保护共享 Git 工作区", en: "Protect shared Git checkouts", hint: "由原生 Bash 检查可能覆盖工作区文件的 Git 操作。", hintEn: "Native Bash checks Git operations that could overwrite workspace files." },
   { key: "worktree.onStart", group: "tasks", zh: "新会话工作目录", en: "New session directory", hint: "在当前目录开始，或创建独立 Worktree。已有会话不受影响。", hintEn: "Start here or create a dedicated worktree. Existing sessions are unchanged.", options: [["off", "当前工作区", "Current checkout"], ["ask", "创建时询问", "Ask when starting"], ["create", "创建独立 Worktree", "Create worktree"]] },
-  { key: "worktree.onExit", group: "tasks", zh: "结束时的 Worktree", en: "Worktree on exit", hint: "清理前检查改动与提交。退出应用后无法确认的目录会保留；可在下方检查移除。", hintEn: "Check changes and commits before cleanup. If the app exits before confirmation, keep the directory; review removal below.", options: [["keep", "保留", "Keep"], ["ask", "询问", "Ask"], ["remove", "清理安全项，其余询问", "Remove clean; ask otherwise"]] },
+  { key: "worktree.onExit", group: "tasks", zh: "结束时的 Worktree", en: "Worktree on exit", hint: "强制移除会丢弃未提交改动及忽略的文件。分支上的提交仍保留。", hintEn: "Force removal discards uncommitted changes and ignored files. Commits on the branch remain.", options: [["keep", "保留", "Keep"], ["ask", "询问", "Ask"], ["remove", "清理安全项，其余询问", "Remove clean; ask otherwise"], ["force", "强制移除（丢弃未提交改动）", "Force remove (discard uncommitted changes)"]] },
   { key: "prewalk.auto", group: "tasks", zh: "自动 Prewalk", en: "Automatic prewalk", hint: "用 judge 角色判断每个新任务是否把难点集中在前面；开启后在第一次编辑时交给目标模型继续。需要原生 judge，会额外调用模型。", hintEn: "The judge role classifies whether each new task front-loads its hard reasoning; when on, the turn hands off to the target model at the first edit. Needs a native judge; billed separately.", options: [["off", "关闭", "Off"], ["suggest", "只判断不切换", "Suggest only"], ["on", "自动切换", "On"]] },
   { key: "prewalk.autoTarget", group: "tasks", zh: "Prewalk 目标模型", en: "Prewalk target", hint: "自动 Prewalk 在第一次编辑/写入时交接的模型或角色，例如 @smol 或 provider/model。", hintEn: "Model or role auto-prewalk hands off to at the first edit/write, e.g. @smol or provider/model.", text: true },
   { key: "async.widgets", group: "tasks", zh: "后台任务实时小组件", en: "Live job widgets", hint: "为运行中的后台任务绘制实时图表/进度；由 widget 角色模型（默认 smol）为每个任务生成一次规格。", hintEn: "Draw live charts and meters for running background jobs. The widget model role (default smol) writes one spec per job." },
   ...COMPUTER_SETTING_DEFINITIONS.map(definition => ({ ...definition, group: "tasks" as const })),
-  { key: "speech.speed", group: "voice", zh: "实时朗读速度", en: "Live speech speed", hint: "本地 Kokoro 朗读速度，1× 为正常速度。", hintEn: "Local Kokoro speech speed; 1× is normal.", min: .5, max: 2.5, step: .1 },
-  { key: "tts.localSpeed", group: "voice", zh: "本地语音生成速度", en: "Local TTS speed", hint: "用于本地 TTS 生成，不改变云端语音服务。", hintEn: "Applies to local TTS, leaving cloud speech settings unchanged.", min: .5, max: 2.5, step: .1 },
+  { key: "speech.speed", group: "voice", zh: "实时朗读速度", en: "Live speech speed", hint: "本地 Phonon 31M 朗读速度，1× 为正常速度。", hintEn: "Local Phonon 31M speech speed; 1× is normal.", min: .8, max: 1.3, step: .1 },
+  { key: "tts.localSpeed", group: "voice", zh: "本地语音生成速度", en: "Local TTS speed", hint: "用于本地 TTS 生成，不改变云端语音服务。", hintEn: "Applies to local TTS, leaving cloud speech settings unchanged.", min: .8, max: 1.3, step: .1 },
   { key: "gc.compress", group: "maintenance", zh: "维护时压缩闲置会话", en: "Compress idle sessions during maintenance", hint: "使用 NTFS/APFS 透明压缩，压缩后仍可恢复和搜索；启用不会立即开始扫描。", hintEn: "Use NTFS/APFS compression. Sessions remain resumable and searchable; enabling does not start a scan." },
   { key: "gc.compressAfterDays", group: "maintenance", zh: "闲置天数", en: "Idle days", hint: "只处理超过此天数未活动的会话。", hintEn: "Only consider sessions idle for this many days.", min: 1, max: 3650, step: 1 },
   { key: "tools.restrictedFolders", group: "permissions", zh: "逐次审批的受限目录", en: "Restricted folders", hint: "每行一个目录。目录及其后代的操作每次都需明确批准，yolo、记住授权和会话批准也不能绕过；从父目录递归搜索同样可能触发。删除限制仅在显式保存后生效。", hintEn: "One folder per line. Every action in its tree needs explicit approval, even in yolo or with remembered grants. Recursive searches from a parent can also require approval. Removal applies only after saving.", list: true },
@@ -71,11 +82,13 @@ export function FeatureSettingsPane(props: FeatureSettingsProps & { group: Group
 }
 function FeatureRow({ definition: d, scope, row, disabled, zh, save, clear }: { definition: Definition; scope: "global" | "session"; row?: FeatureSettingRow | undefined; disabled: boolean; zh: boolean; save(value: FeatureSettingValue): void; clear(): void }) {
   const [draft, setDraft] = useState("");
-  useEffect(() => { setDraft(Array.isArray(row?.value) ? row.value.join("\n") : String(row?.value ?? "")); }, [row?.value]);
+  const [jsonError, setJsonError] = useState(false);
+  useEffect(() => { setDraft(d.key === "task.agentPrewalkAuto" ? JSON.stringify(row?.value ?? {}, null, 2) : Array.isArray(row?.value) ? row.value.join("\n") : String(row?.value ?? "")); }, [row?.value]);
   const label = zh ? d.zh : d.en;
   return <SettingRow wide={d.rules === true} label={label} desc={zh ? d.hint : d.hintEn} source={row ? (row.source === "global" ? "user" : row.source === "project" ? "project" : row.source === "default" ? "default" : "runtime") : "unavailable"}>
     <div className={d.rules ? "feature-control is-wide" : "feature-control"}>
-      {d.rules ? <>
+      {d.key === "task.agentPrewalkAuto" ? <><textarea className="input mono" aria-label={label} rows={4} disabled={disabled || !row} value={draft} onChange={event => { setDraft(event.target.value); setJsonError(false); }} />
+        <button className="btn small outline" disabled={disabled || !row} onClick={() => { try { save(JSON.parse(draft)); } catch { setJsonError(true); } }}>{zh ? "保存规则" : "Save rules"}</button>{jsonError && <p role="alert">{zh ? "请检查 JSON 语法。" : "Check the JSON syntax."}</p>}</> : d.rules ? <>
         <p className="feature-status">{scope === "global"
           ? zh ? "只编辑用户配置中原始的规则；项目规则不会被复制进来，路径分组保留原结构。" : "Edit only rules authored in user settings. Project rules are not copied in; path groups keep their structure."
           : zh ? "只编辑当前会话的规则覆盖；保存会替代继承规则，清除会话覆盖可恢复继承。" : "Edit this session's rule override. Saving replaces inherited rules; clear the session override to inherit again."}</p>

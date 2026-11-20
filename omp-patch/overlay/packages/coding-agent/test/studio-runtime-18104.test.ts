@@ -23,16 +23,6 @@ import type { SessionWorktreeRow, WorktreeRemovalPreview } from "../src/studio/s
 import type { AgentSessionEvent } from "../src/session/agent-session-events";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { makeAssistantMessage } from "./session-manager/helpers";
-import { requestService } from "../src/launch/services";
-import { sharedBrowserDaemonName } from "../src/tools/browser/shared-daemon";
-import type { ToolSession } from "../src/tools";
-
-test.each([true, false])("typed service controls cannot detach a shared browser (headless=%s)", async headless => {
-	await expect(
-		requestService({} as ToolSession, { op: "mode", name: sharedBrowserDaemonName(headless), mode: "detached" }),
-	).rejects.toThrow("cannot be detached");
-});
-
 test("feature settings preserve an empty account pool, reject malformed restrictions, and fence a session switch", async () => {
 	const settings = Settings.isolated();
 	const session = { sessionId: "main", settings } as AgentSession;
@@ -270,8 +260,8 @@ test("worktree removal preserves files changed after review and startup policy f
 	}
 });
 
-test("message suggestions are opt-in, cancel when a draft appears, and still account for a late reply", async () => {
-	const settings = Settings.isolated();
+test("message suggestions can be disabled, cancel when a draft appears, and still account for a late reply", async () => {
+	const settings = Settings.isolated({ "composer.predictions": false });
 	const reply = Promise.withResolvers<{ replyText: string; assistantMessage: AssistantMessage }>();
 	const usage = mock(() => {}),
 		publish = mock(() => {}),

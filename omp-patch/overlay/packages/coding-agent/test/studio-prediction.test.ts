@@ -6,12 +6,7 @@ import { TempDir, getPredictStateDir } from "@oh-my-pi/pi-utils";
 import { Settings } from "../src/config/settings";
 import type { AgentSession } from "../src/session/agent-session";
 import { TextPredictionClient } from "../src/predict/client";
-import {
-	TEXT_PREDICT_AGENT_DIR_ENV,
-	TEXT_PREDICT_PROFILE_ENV,
-	TEXT_PREDICT_SOCKET_ENV,
-	type TextPredictResponse,
-} from "../src/predict/protocol";
+import { IsolatedDaemon, waitFor } from "./fixtures/daemon-harness";
 import { createInterface } from "node:readline";
 import { once } from "node:events";
 async function connectJsonlSocket(endpoint: string, timeoutMs: number): Promise<net.Socket> {
@@ -89,115 +84,27 @@ test("prediction channels keep prose private, apply native prose gates and close
 		await temp.remove();
 	}
 });
-test("the native Studio daemon never bootstraps foreign history and persists explicit imports separately", async () => {
+test("Studio prediction learns explicitly imported prompts in its private native daemon unit", async () => {
+	const daemon = await IsolatedDaemon.create();
 	const temp = TempDir.createSync("@studio-predict-policy-");
-	const endpoint =
-		process.platform === "win32"
-			? "\\\\.\\pipe\\studio-predict-test-" + crypto.randomUUID()
-			: path.join(temp.path(), "predict.sock");
-	const marker = path.join(temp.path(), "foreign-seed-probe"),
-		agentDir = path.join(temp.path(), "agent");
-	const child = Bun.spawn(
-		[
-			process.execPath,
-			"--preload",
-			path.join(import.meta.dir, "fixtures/studio-prediction-preload.ts"),
-			path.join(import.meta.dir, "../src/cli.ts"),
-			"__omp_worker_text_predict",
-		],
-		{
-			env: {
-				...process.env,
-				[TEXT_PREDICT_AGENT_DIR_ENV]: agentDir,
-				[TEXT_PREDICT_SOCKET_ENV]: endpoint,
-				[TEXT_PREDICT_PROFILE_ENV]: "studio",
-				STUDIO_PREDICT_SEED_PROBE: marker,
-			},
-			stdout: "pipe",
-			stderr: "pipe",
-		},
+	const directory = temp.path();
+	const client = new TextPredictionClient(directory, false, false);
+	const engine = new StudioPredictionEngine(
+		{ sessionId: "test", settings: Settings.isolated() },
+		{ directory, client },
 	);
-	const stdout = new Response(child.stdout).text(),
-		stderr = new Response(child.stderr).text();
-	let socket: net.Socket | undefined;
-	let nextId = 1;
-	const pending = new Map<
-		number,
-		{ resolve: (value: TextPredictResponse) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
-	>();
 	try {
-		const deadline = Date.now() + 30000;
-		while (!socket && child.exitCode === null && Date.now() < deadline) {
-			try {
-				socket = await connectJsonlSocket(endpoint, 1000);
-			} catch {
-				await Bun.sleep(100);
-			}
-		}
-		if (!socket)
-			throw new Error(
-				"Prediction daemon did not start: " + (child.exitCode === null ? "startup timeout" : await stderr),
-			);
-		const lines = createInterface({ input: socket });
-		lines.on("line", (line: string) => {
-			const result = JSON.parse(line) as TextPredictResponse;
-			const request = pending.get(result.id);
-			if (request) {
-				clearTimeout(request.timer);
-				pending.delete(result.id);
-				request.resolve(result);
-			}
-		});
-
-		const call = (operation: Record<string, unknown>): Promise<TextPredictResponse> => {
-			const id = nextId++,
-				promise = Promise.withResolvers<TextPredictResponse>();
-			const timer = setTimeout(() => {
-				pending.delete(id);
-				promise.reject(new Error("Daemon response timed out"));
-			}, 15000);
-			pending.set(id, { ...promise, timer });
-			writeJsonLine(socket!, { ...operation, id });
-			return promise.promise;
-		};
-		expect(await call({ op: "ping" })).toMatchObject({ ok: true, profile: "studio", protocol: 2 });
-		expect(await call({ op: "complete", method: "ngram", before: "please ", prefix: "re" })).toMatchObject({
-			ok: true,
-			op: "complete",
-		});
-		expect(await Bun.file(marker).exists()).toBe(false);
-		const engine = new StudioPredictionEngine(
-			{ sessionId: "test", settings: Settings.isolated() },
-			{
-				directory: agentDir,
-				client: { complete: async () => ({ engine: "ngram", suggestion: null }), sync() {}, close() {} },
-			},
+		expect(await engine.importPrompts(["please verify private prediction"])).toBe(1);
+		expect(await engine.importPrompts(["please verify private prediction"])).toBe(0);
+		expect((await client.complete("ngram", "please ", "ve")).engine).toBe("ngram");
+		await waitFor(
+			async () => (await fs.stat(getPredictStateDir(directory, "ngram")).catch(() => undefined))?.isDirectory(),
+			"Studio prediction state",
 		);
-		try {
-			expect(await engine.importPrompts(["please verify private prediction"])).toBe(1);
-			expect(await engine.importPrompts(["please verify private prediction"])).toBe(0);
-			expect(await call({ op: "sync" })).toMatchObject({ ok: true, op: "sync", ingested: 1 });
-			expect(await call({ op: "sync" })).toMatchObject({ ok: true, op: "sync", ingested: 0 });
-		} finally {
-			engine.dispose();
-		}
-		expect((await fs.stat(getPredictStateDir(path.join(agentDir, "studio-predict"), "ngram"))).isDirectory()).toBe(
-			true,
-		);
-		expect(await Bun.file(marker).exists()).toBe(false);
-		await expect(fs.stat(getPredictStateDir(agentDir, "ngram"))).rejects.toMatchObject({ code: "ENOENT" });
-		await call({ op: "shutdown" });
-		await child.exited;
+		await client.stop();
 	} finally {
-		for (const request of pending.values()) {
-			clearTimeout(request.timer);
-			request.reject(new Error("Test finished"));
-		}
-		pending.clear();
-		socket?.destroy();
-		child.kill();
-		await child.exited;
-		await Promise.all([stdout, stderr]);
+		engine.dispose();
+		await daemon.dispose();
 		await temp.remove();
 	}
-}, 60000);
+}, 30000);

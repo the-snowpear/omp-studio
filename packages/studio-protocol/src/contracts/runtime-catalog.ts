@@ -3,6 +3,8 @@ export interface McpRuntimeStatus {
   available: boolean; startupTimeoutMs: number; ready: boolean; settled: boolean;
   servers: Array<{
     name: string;
+    replacedByBuiltin?: string;
+    evalNamespaceUri?: string;
     state: "ready" | "pending" | "failed" | "disconnected";
     tools: number;
     transport?: "stdio" | "http" | "sse";

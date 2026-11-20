@@ -85,7 +85,9 @@ export function HubDossierHead({
       <div className="hub-dossier-id" key={agent.id}>
         <HubSigil agent={agent} size={44} ring />
         <div className="hub-dossier-name">
-          <h3 title={agent.name}>{agent.name}</h3>
+          <h3 title={agent.name}>{agent.name}</h3>{agent.peer && <code>agent://peers</code>}
+          {!!agent.waitingOn?.length && <p>{zh ? "正在等待" : "Waiting for"} · {agent.waitingOn.join(" → ")}</p>}
+          {!!agent.waiters?.length && <p>{zh ? "等待此代理" : "Waiters"} · {agent.waiters.map(waiter => [waiter.waiter, ...waiter.via].join(" → ")).join(", ")}</p>}
           <div className="hub-dossier-line">
             <HubStatusPill agent={agent} zh={zh} />
             <span className="hub-dossier-meta">

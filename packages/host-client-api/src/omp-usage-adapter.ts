@@ -25,6 +25,10 @@ const execFileAsync = promisify(execFile);
 
 const OTHER_MODEL_ID = "其他";
 const TOP_MODEL_COUNT = 5;
+const DECISION_APIS = new Set([
+  "typesafe", "openrouter-decisions", "workers-ai-systemone", "openai-decisions",
+  "google-decisions", "liquid-systemone", "nace-systemone",
+]);
 const MODEL_ID_MAX = 64;
 const SYNC_THROTTLE_MS = 30_000;
 const SYNC_TIMEOUT_MS = 60_000;
@@ -248,11 +252,12 @@ async function readUsageDb(dbPath: string, nowMs: number): Promise<TokenUsageRea
     const todayStart = startOfLocalDay(nowMs);
     const yearStartDate = `${new Date(nowMs).getFullYear()}-01-01`;
 
+    const hasPurpose = db.prepare("PRAGMA table_info(messages)").all().some(column => column.name === "purpose");
     const dayRows = db
       .prepare(
         `SELECT timestamp AS timestamp, model AS model, total_tokens AS tokens
          FROM messages
-         WHERE timestamp >= ?`,
+         WHERE timestamp >= ?${hasPurpose ? " AND (purpose IS NULL OR purpose = 'discarded-turn')" : ""}`,
       )
       .all(cutoff) as Array<{ timestamp: number; model: string; tokens: number }>;
 
@@ -288,8 +293,31 @@ async function readUsageDb(dbPath: string, nowMs: number): Promise<TokenUsageRea
       .sort((left, right) => left[0].localeCompare(right[0]))
       .map(([date, totalTokens]) => ({ date, totalTokens }));
 
+    const sideChannels = hasPurpose ? db.prepare(
+      "SELECT purpose, api, provider, model, COUNT(*) AS requests, SUM(total_tokens) AS tokens FROM messages WHERE timestamp >= ? AND purpose IS NOT NULL AND purpose != 'discarded-turn' GROUP BY purpose, api, provider, model",
+    ).all(cutoff) : [];
+    const totals = new Map<string, NonNullable<TokenUsageReadModel["offTranscript"]>[number]>();
+    const decisions: NonNullable<TokenUsageReadModel["decisionModels"]>[number][] = [];
+    for (const row of sideChannels) {
+      const purpose = String(row.purpose);
+      const base = purpose.split(":")[0]!;
+      const kind = ["title", "title-fork", "title-drift"].includes(base) ? "title"
+        : ["job-caption", "job-widget", "task-completion-probe"].includes(base) ? "jobCaption"
+        : ["judge", "judge_batch"].includes(base) ? "judge"
+        : base === "cache-warm" ? "cacheWarming" : undefined;
+      const requests = Number(row.requests), tokens = Number(row.tokens);
+      if (kind) {
+        const previous = totals.get(kind);
+        totals.set(kind, { kind, requests: requests + (previous?.requests ?? 0), tokens: tokens + (previous?.tokens ?? 0) });
+      }
+      if (typeof row.api === "string" && DECISION_APIS.has(row.api)) {
+        decisions.push({ purpose: labelModel(purpose), provider: labelModel(String(row.provider)), model: labelModel(String(row.model)), requests, tokens });
+      }
+    }
     return {
       generatedAt: isoNow(nowMs),
+      offTranscript: [...totals.values()],
+      decisionModels: decisions.sort((a, b) => b.tokens - a.tokens).slice(0, 32),
       days,
       models: collapsed.models.map((id) => ({ id })),
       byModel: collapsed.byModel,

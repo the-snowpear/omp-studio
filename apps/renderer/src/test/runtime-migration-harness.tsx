@@ -1,3 +1,11 @@
+import { LiveAudioPane } from "../media/LiveAudioPane";
+import { TokenUsagePanel } from "../usage/TokenUsagePanel";
+import { AccountStatusPane } from "../models/AccountStatusPane";
+import { NativeModelAccessPane } from "../models/NativeModelAccessPane";
+import { useModelAuth } from "../models/useModelAuth";
+import { usePreviewMode } from "../preview/PreviewContext";
+import { DisassemblerPane } from "../capabilities/DisassemblerPane";
+import { PlanCard } from "../deck/PlanCard";
 // Isolated QA entry; excluded from packaged inputs and never connects to a Host.
 import { ResumeScopePane } from "../history/ResumeScopePane";
 import { AdvisorConfigPane } from "../settings/AdvisorConfigPane";
@@ -32,11 +40,23 @@ import "../App.css";
 import "../models/sessionOptions.css";
 
 const client = new StudioClientImpl(createContractFixtureApi() as never);
+function AccountHarness() {
+  const { preview } = usePreviewMode();
+  const [selected, setSelected] = useState("kiro");
+  const context = {client, available: false};
+  const auth = useModelAuth(context, preview, true);
+  return <NativeModelAccessPane context={context} auth={auth} visible selected={selected} onSelect={setSelected} />;
+}
+
 function Surface() {
   const { store, layout } = useDock();
   const [answer, setAnswer] = useState<DeckAskAnswer>({ picked: ["保留", "压缩"], custom: "", note: "只压缩旧日志", noteOption: "压缩" });
   const [result, setResult] = useState("");
   const view = approvalFromInteraction({ kind: "approval", interactionId: "qa", sessionId: "qa", leaseGeneration: 1, title: "受限目录操作", approvalType: "read", detail: { source: "restriction", path: "private/credentials", reason: "每次都需批准" } } as never);
+  if (new URLSearchParams(location.search).get("surface") === "accounts") return <main><AccountHarness /><AccountStatusPane standalone client={client} available={false} /><LiveAudioPane client={client} available={false} /><TokenUsagePanel telemetry={null} view={undefined} onOpenCounter={() => {}} onClose={() => {}} /></main>;
+  if (new URLSearchParams(location.search).get("surface") === "19") return <main style={{ padding: 24, display: "grid", gap: 24 }}>
+    <DisassemblerPane client={client} available={false} /><PlanCard title="PLAN.md" body={"## Scope\n\nInspect the binary header."} onAction={() => {}} />
+  </main>;
   return <main className="adaptive-workbench" style={{ padding: 24, minHeight: "100vh", display: "grid", gap: 24 }}>
     <h1>OMP 18.13.2 · 隔离迁移验收</h1><p>以下控件使用正式组件与预览 fixture；不连接 Host、不写真实配置、不调用模型。</p>
     <button className="btn outline" onClick={() => store.dispatch({ type: "open", panel: "context-viewer" })}>打开上下文查看器</button><DockPanel id="context-viewer">{visibility => <ContextInspector client={client} sessionId="demo-context" opened={!!locatePanel(layout, "context-viewer")} width={visibility.width} height={visibility.height} />}</DockPanel><DockFloatingLayer />
@@ -55,5 +75,9 @@ function Surface() {
 }
 const mounted = createRoot(document.getElementById("root")!);
 document.documentElement.dataset.theme = new URLSearchParams(location.search).get("theme") === "dark" ? "dark" : "light";
-mounted.render(<I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled={new URLSearchParams(location.search).get("preview") === "1"}><DockProvider definitions={WORKBENCH_PANELS} store={new DockStore(null)}><Surface /></DockProvider></PreviewModeProvider></I18nProvider>);
+function Harness() {
+  const [language, setLanguage] = useState<"zh" | "en">("zh");
+  return <I18nProvider forcedLanguage={language}><button className="btn small outline" onClick={() => setLanguage(old => old === "zh" ? "en" : "zh")}>{language === "zh" ? "English" : "中文"}</button><PreviewModeProvider switchEnabled={new URLSearchParams(location.search).get("preview") === "1"}><DockProvider definitions={WORKBENCH_PANELS} store={new DockStore(null)}><Surface /></DockProvider></PreviewModeProvider></I18nProvider>;
+}
+mounted.render(<Harness />);
 import.meta.hot?.dispose(() => mounted.unmount());

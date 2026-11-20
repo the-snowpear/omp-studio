@@ -11,6 +11,7 @@ export type InteractionFormBlock =
 	| { kind: "media-unavailable"; alt: string; reason: string };
 
 export interface InteractionForm {
+	acceptImages?: boolean;
 	sections: Array<{ title: FormSpan[]; blocks: InteractionFormBlock[]; fieldset: boolean }>;
 	fields: InteractionFormField[];
 	hidden: [name: string, value: string][];
@@ -18,6 +19,7 @@ export interface InteractionForm {
 }
 
 export interface FormSubmitValue {
+	abandoned?: boolean;
 	data: HtmlFormData;
 	notes?: OptionNote[];
 	timedOut?: boolean;

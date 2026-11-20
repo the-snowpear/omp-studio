@@ -34,7 +34,7 @@ describe("Studio read-only account status", () => {
 			throw new Error("must never redeem");
 		});
 		const auth = {
-			credentials: { list: () => [{ provider: "anthropic", key: "private-key" }] },
+			credentials: { list: () => [{ provider: "anthropic", credential: { type: "oauth", access: "private-key" } }] },
 			keys: { source: () => ({ concrete: true }) },
 			oauth: {
 				policy: () => undefined,
@@ -79,7 +79,7 @@ describe("Studio read-only account status", () => {
 		expect(result.unassigned[0]?.limits[0]?.usedFraction).toBe(0.75);
 		expect(result.accounts[0]?.resets.availableCount).toBe(2);
 		const wire = JSON.stringify(result);
-		for (const secret of ["private-key", "private-credit-id", '"credentialId"', '"raw"', "secret"])
+		for (const secret of ["private-key", "private-credit-id", '"raw"', "secret"])
 			expect(wire.includes(secret)).toBe(false);
 		service.dispose();
 	});
@@ -99,7 +99,11 @@ it("signs out the exact native credential when account labels are duplicated, re
 	const refreshProvider = mock(async () => {}),
 		refreshScopedModels = mock(async () => {});
 	const auth = {
-		credentials: { list: () => [{ provider: "anthropic" }], reload: async () => {}, removeById },
+		credentials: {
+			list: () => [{ provider: "anthropic", credential: { type: "oauth" } }],
+			reload: async () => {},
+			removeById,
+		},
 		oauth: { accounts: () => accounts, policy: () => undefined },
 		keys: { source: () => undefined, describe: () => undefined },
 	};
@@ -148,7 +152,7 @@ it("LiteLLM key and user USD budgets belong to one calling account and absent bu
 		throw new Error("must not redeem");
 	});
 	const auth = {
-		credentials: { list: () => [{ provider: "litellm" }] },
+		credentials: { list: () => [{ provider: "litellm", credential: { type: "oauth" } }] },
 		keys: { source: (provider: string) => (provider === "litellm" ? { concrete: true } : undefined) },
 		oauth: { accounts: () => [], policy: () => undefined },
 		usage: { invalidate: async () => {}, reports },
@@ -174,7 +178,12 @@ it("legacy reset consent is read through native migration without extending it t
 	const reports = mock(async () => []),
 		resets = mock(async () => []);
 	const auth = {
-		credentials: { list: () => [{ provider: "anthropic" }, { provider: "openai-codex" }] },
+		credentials: {
+			list: () => [
+				{ provider: "anthropic", credential: { type: "oauth" } },
+				{ provider: "openai-codex", credential: { type: "oauth" } },
+			],
+		},
 		keys: { source: () => undefined },
 		oauth: {
 			policy: () => undefined,

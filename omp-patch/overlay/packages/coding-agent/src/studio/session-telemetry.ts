@@ -11,6 +11,8 @@
  * live and recomputed numbers must stay byte-identical for identical inputs.
  */
 
+import { isJudgmentApi } from "@oh-my-pi/pi-ai";
+import type { SessionEntry } from "../session/session-entries";
 import { cfgSessionWarnCost, cfgSessionMaxCost } from "../session/settings";
 import type { Settings } from "../config/settings";
 import type { StudioSessionTelemetry } from "./bridge-protocol";
@@ -26,6 +28,7 @@ export const STUDIO_SESSION_TELEMETRY_PROBE_ARG = "--studio-session-telemetry-pr
  * available port degrades to zeros instead of throwing.
  */
 export interface StudioTelemetrySessionPort {
+	sessionManager?: { getEntriesView(): readonly SessionEntry[] };
 	readonly settings?: Settings;
 	readonly costGate?: { spent: number; check(): unknown };
 	getAdvisorCost?(): number;
@@ -97,6 +100,71 @@ function usageValue(value: number | undefined): number {
 	return finiteNonNegative(typeof value === "number" ? value : 0);
 }
 
+type UsageBreakdown = Pick<StudioSessionTelemetry, "offTranscript" | "decisionModels">;
+const auxiliaryKind = (purpose: string): "title" | "jobCaption" | "judge" | "cacheWarming" | undefined => {
+	switch (purpose.split(":")[0]) {
+		case "title":
+		case "title-fork":
+		case "title-drift":
+			return "title";
+		case "job-caption":
+		case "job-widget":
+		case "task-completion-probe":
+			return "jobCaption";
+		case "judge":
+		case "judge_batch":
+			return "judge";
+		case "cache-warm":
+			return "cacheWarming";
+	}
+};
+const usageBreakdowns = new WeakMap<
+	readonly SessionEntry[],
+	{
+		count: number;
+		lastId?: string;
+		auxiliary: Map<string, NonNullable<UsageBreakdown["offTranscript"]>[number]>;
+		decisions: Map<string, NonNullable<UsageBreakdown["decisionModels"]>[number]>;
+	}
+>();
+
+function usageBreakdown(entries: readonly SessionEntry[] | undefined): UsageBreakdown {
+	if (!entries) return {};
+	let cursor = usageBreakdowns.get(entries);
+	if (!cursor || entries.length < cursor.count || entries[cursor.count - 1]?.id !== cursor.lastId) {
+		cursor = { count: 0, auxiliary: new Map(), decisions: new Map() };
+		usageBreakdowns.set(entries, cursor);
+	}
+	for (let index = cursor.count; index < entries.length; index++) {
+		const entry = entries[index];
+		if (entry?.type !== "model_usage" || entry.purpose === "discarded-turn") continue;
+		const tokens = entry.usage.totalTokens;
+		const kind = auxiliaryKind(entry.purpose);
+		if (kind !== undefined) {
+			const row = cursor.auxiliary.get(kind);
+			cursor.auxiliary.set(kind, { kind, requests: (row?.requests ?? 0) + 1, tokens: (row?.tokens ?? 0) + tokens });
+		}
+		if (isJudgmentApi(entry.api)) {
+			const { purpose, provider, model } = entry;
+			const id = JSON.stringify([purpose, provider, model]);
+			const row = cursor.decisions.get(id);
+			cursor.decisions.set(id, {
+				purpose,
+				provider,
+				model,
+				requests: (row?.requests ?? 0) + 1,
+				tokens: (row?.tokens ?? 0) + tokens,
+			});
+		}
+	}
+	cursor.count = entries.length;
+	cursor.lastId = entries.at(-1)?.id;
+	return {
+		offTranscript: [...cursor.auxiliary.values()],
+		decisionModels: [...cursor.decisions.values()].sort((left, right) => right.tokens - left.tokens).slice(0, 32),
+	};
+}
+
 export function buildStudioSessionTelemetry(input: BuildStudioSessionTelemetryInput): StudioSessionTelemetry {
 	const session = input.session;
 	const stats =
@@ -119,6 +187,7 @@ export function buildStudioSessionTelemetry(input: BuildStudioSessionTelemetryIn
 	const telemetry: StudioSessionTelemetry = {
 		sessionId: input.sessionId,
 		capturedAt: input.capturedAt,
+		...usageBreakdown(session.sessionManager?.getEntriesView?.()),
 		...(session.costGate ? { treeCost: finiteNonNegative(session.costGate.spent) } : {}),
 		...(session.settings && session.costGate
 			? {

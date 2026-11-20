@@ -18,7 +18,7 @@ export function createDefaultLayout(): DockLayout {
     right: { visible: false, size: 480, ratio: 0.5, groups: [] },
     bottom: { visible: false, expanded: false, size: 240, ratio: 0.5, groups: [{ id: "bottom-main", panels: ["terminal", "problems", "tests", "output", "logs", "pvlogs"], active: "logs" }] },
     floats: [],
-    hidden: { changes: { region: "right", groupId: "right-main", index: 0 }, git: { region: "right", groupId: "right-main", index: 1 }, browser: { region: "right", groupId: "right-main", index: 2 }, computer: { region: "right", groupId: "right-main", index: 3 }, commit: { region: "right", groupId: "right-main", index: 4 }, btw: { region: "float", rect: { ...FLOAT_RECT } }, "agent-detail": { region: "right" }, "context-viewer": { region: "float" }, annotations: { region: "float" }, "token-counter": { region: "float", rect: { x: 120, y: 90, width: 420, height: 460 } }, "file-browser": { region: "float", rect: { x: 96, y: 64, width: 960, height: 600 } } },
+    hidden: { changes: { region: "right", groupId: "right-main", index: 0 }, git: { region: "right", groupId: "right-main", index: 1 }, browser: { region: "right", groupId: "right-main", index: 2 }, computer: { region: "right", groupId: "right-main", index: 3 }, commit: { region: "right", groupId: "right-main", index: 4 }, disassembler: { region: "right" }, btw: { region: "float", rect: { ...FLOAT_RECT } }, "agent-detail": { region: "right" }, "context-viewer": { region: "float" }, annotations: { region: "float" }, "token-counter": { region: "float", rect: { x: 120, y: 90, width: 420, height: 460 } }, "file-browser": { region: "float", rect: { x: 96, y: 64, width: 960, height: 600 } } },
     cards: Object.fromEntries(PANEL_IDS.map(id => [id, { collapsed: id === "context" || id === "git-quick" || id === "agents", height: id === "browser" || id === "computer" ? 320 : id === "terminal" ? 240 : null }])) as DockLayout["cards"],
     agentPanels: {},
     browserPages: {},
@@ -695,7 +695,7 @@ export function normalizeLayout(value: unknown): DockLayout {
   const validPanel = (id: unknown): id is PanelId => isPanel(id) || typeof id === "string" && (isAgentPanelId(id) && !!layout.agentPanels[id] || isBrowserPagePanelId(id) && !!layout.browserPages[id] || isConversationPanelId(id) || isFilePanelId(id) && !!layout.fileViews[id] || isScopedPanelId(id));
   const seen = new Set<PanelId>();
   const ids = new Set<string>();
-  const panels = (value: unknown): PanelId[] => Array.isArray(value) ? value.filter((id): id is PanelId => {
+  const panels = (value: unknown): PanelId[] => Array.isArray(value) ? value.map(id => id === "ida" ? "disassembler" : id).filter((id): id is PanelId => {
     if (!validPanel(id) || seen.has(id)) return false;
     seen.add(id);
     return true;
@@ -712,7 +712,8 @@ export function normalizeLayout(value: unknown): DockLayout {
     if (!Array.isArray(value)) return [];
     const result: DockGroup[] = [];
     for (const item of value) {
-      const group = record(item);
+      const group = { ...record(item) };
+      if (group.active === "ida") group.active = "disassembler";
       const members = panels(group.panels);
       if (!members.length) continue;
       if (result.length === 2) result[1]!.panels.push(...members);
@@ -729,7 +730,8 @@ export function normalizeLayout(value: unknown): DockLayout {
   layout.bottom = { visible: bool(bottom.visible, true), expanded: bool(bottom.expanded, false), size: Math.max(120, number(bottom.size, 240)), ratio: clamp(number(bottom.ratio, 0.5), 0.15, 0.85), groups: groups(bottom.groups, "bottom") };
   layout.floats = [];
   if (Array.isArray(raw.floats)) for (const item of raw.floats) {
-    const group = record(item);
+    const group = { ...record(item) };
+      if (group.active === "ida") group.active = "disassembler";
     const members = panels(group.panels);
     if (members.length) layout.floats.push({ id: readId(group.id, "float"), panels: members, active: validPanel(group.active) && members.includes(group.active) ? group.active : members[0]!, rect: readRect(group.rect), minimized: bool(group.minimized, false), maximized: bool(group.maximized, false) });
   }
@@ -780,10 +782,10 @@ export function normalizeLayout(value: unknown): DockLayout {
   for (const id of Object.keys(record(raw.cards))) if (isScopedPanelId(id)) scoped.add(id);
   for (const id of [...PANEL_IDS, ...scoped, ...Object.keys(layout.agentPanels) as AgentPanelId[], ...new Set([...Object.keys(record(raw.cards)), ...seen].filter(isConversationPanelId))]) {
     const base = panelBaseId(id);
-    const card = record(record(raw.cards)[migrateGitCard && !quickWasPlaced && id === "git-quick" ? "git" : id]);
+    const card = record(record(raw.cards)[migrateGitCard && !quickWasPlaced && id === "git-quick" ? "git" : id] ?? (id === "disassembler" ? record(raw.cards).ida : undefined));
     layout.cards[id] = { collapsed: bool(card.collapsed, false), height: card.height === null ? null : typeof card.height === "number" && Number.isFinite(card.height) ? Math.max(base === "terminal" ? 240 : 80, card.height) : defaults.cards[base]?.height ?? null };
     if (seen.has(id)) continue;
-    const old = record(hidden[id]);
+    const old = record(hidden[id] ?? (id === "disassembler" ? hidden.ida : undefined));
     const fallback = locatePanel(defaults, id) ?? defaults.hidden[id] ?? { region: "right" as const };
     if (id === "git" && (migrateGitCard || old.region === "rail")) layout.hidden[id] = { region: "right", ...(layout.right.groups[0] ? { groupId: layout.right.groups[0].id } : {}) };
     else if (!["left", "rail", "right", "bottom", "float"].includes(String(old!.region))) layout.hidden[id] = fallback;

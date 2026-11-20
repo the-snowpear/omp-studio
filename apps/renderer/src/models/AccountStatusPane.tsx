@@ -217,11 +217,11 @@ export function AccountStatusPane({
         const tone = limit.status === "exhausted" || (used ?? 0) >= 0.95 ? "danger" : limit.status === "warning" || (used ?? 0) >= 0.8 ? "warn" : "";
         return <div key={limit.id} className={`account-quota is-${limit.status}`}>
           <div className="account-quota-head">
-            <span className="account-quota-label">{limit.label}{limit.model ? <span className="muted"> · {limit.model}</span> : null}</span>
+            <span className="account-quota-label">{limit.id.startsWith("kiro:") ? limit.id === "kiro:credits" ? (zh ? "月度计划额度" : "Monthly plan") : limit.id.startsWith("kiro:bonus") ? (zh ? "赠送额度" : "Bonus credits") : limit.id.startsWith("kiro:add-on") ? (zh ? "已购额度" : "Purchased credits") : limit.id === "kiro:overage" ? (zh ? "超额用量" : "Overage") : limit.label : limit.label}{limit.model ? <span className="muted"> · {limit.model}</span> : null}</span>
             <span className="account-quota-value mono">{used === undefined ? (zh ? "未知" : "Unknown") : `${(used * 100).toFixed(1)}%`}</span>
           </div>
           {used === undefined ? <span className="meter is-unknown" aria-hidden />
-            : <span className={`meter${tone ? ` ${tone}` : ""}`} role="meter" aria-label={limit.label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(Math.min(1, used) * 100)}><i style={{ width: `${Math.min(1, used) * 100}%` }} /></span>}
+            : <span className={`meter${tone ? ` ${tone}` : ""}`} role="meter" aria-label={limit.id.startsWith("kiro:") ? limit.id === "kiro:credits" ? (zh ? "月度计划额度" : "Monthly plan") : limit.id.startsWith("kiro:bonus") ? (zh ? "赠送额度" : "Bonus credits") : limit.id.startsWith("kiro:add-on") ? (zh ? "已购额度" : "Purchased credits") : limit.id === "kiro:overage" ? (zh ? "超额用量" : "Overage") : limit.label : limit.label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(Math.min(1, used) * 100)}><i style={{ width: `${Math.min(1, used) * 100}%` }} /></span>}
           <span className="account-quota-status">
             <span className={`account-quota-dot is-${limit.status}`} aria-hidden />
             {statusLabel(limit.status)}
@@ -293,6 +293,9 @@ export function AccountStatusPane({
                 {account.organization ? <span className="small muted">{account.organization}</span> : null}
                 <span className="chip gray xs">{account.source}</span>
                 {account.active ? <span className="chip blue xs">{zh ? "当前会话" : "Current session"}</span> : null}
+                {account.subscriptionPlan && <span className="chip xs purple">{account.subscriptionPlan}</span>}
+                {account.activeCredential && <span className="chip xs green">{zh ? "当前会话" : "Current session"}</span>}
+                {account.credentialId !== undefined && <code>#{account.credentialId}</code>}
                 {account.source === "oauth" ? (
                   <button className="btn small ghost danger account-signout" disabled={busy || !canLogout} onClick={() => setLogoutTarget({ id: account.id, label: account.label })}>
                     {zh ? "退出登录" : "Sign out"}

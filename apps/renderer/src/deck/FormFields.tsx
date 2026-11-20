@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, useSync
 import type { FormChoiceField, FormSpan, FormTextField, InteractionForm, InteractionFormBlock, InteractionFormField } from "@omp-studio/studio-protocol";
 import { spansText } from "@oh-my-pi/pi-tui/html-form/model";
 import { OTHER_LABEL } from "@oh-my-pi/pi-tui/html-form/data";
+import { askImage } from "./AskImages";
 import { AppSelect } from "../AppSelect";
 import { SvgFigureImage } from "../graphics/SvgFigureImage";
 import { useI18n } from "../i18n";
@@ -15,12 +16,19 @@ export function FormSpans({ spans }: { spans: readonly FormSpan[] }) {
     : span.style === "em" ? <em key={index}>{span.text}</em> : <span key={index}>{span.text}</span>)}</>;
 }
 
-export function FormFields({ form, session, pages, current, disabled }: {
-  form: InteractionForm; session: FormSession; pages: FormPage[]; current: number; disabled?: boolean | undefined;
+export function FormFields({ form, session, pages, current, disabled, jump }: {
+  form: InteractionForm; session: FormSession; pages: FormPage[]; current: number; jump: (page: number) => void; disabled?: boolean | undefined;
 }) {
   const fields = useMemo(() => new Map(form.fields.map(field => [field.id, field])), [form]);
   const locked = useSyncExternalStore(session.subscribeMeta, () => session.getMeta().phase !== "open", () => true);
-  return <>{pages.map((page, pageIndex) => <div className="form-page" key={pageIndex} hidden={pageIndex !== current}>{page.sections.map((group, index) => {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  return <div role={pages.length > 1 ? "navigation" : undefined} aria-label={zh ? "表单题组" : "Form sections"}>{pages.map((page, pageIndex) => <div key={pageIndex} className="form-stack-section">
+    {pages.length > 1 && <button type="button" className="form-stack-summary" aria-current={pageIndex === current ? "step" : undefined} aria-expanded={pageIndex === current} onClick={() => jump(pageIndex)}>
+      <span className="form-stack-index">{pageIndex + 1}</span><strong>{page.label || (zh ? "问题" : "Question")}</strong>
+      {pageIndex !== current && page.fields.map(field => <FieldSummary key={field.id} field={field} session={session} />)}
+    </button>}
+    <div className="form-page" hidden={pageIndex !== current}>{page.sections.map((group, index) => {
     const content = group.blocks.map((block, at) => block.kind === "field" ? (
       <FormFieldView key={at} field={fields.get(block.fieldId)!} session={session} disabled={disabled || locked} />
     ) : <FormContextBlock key={at} block={block} />);
@@ -30,7 +38,7 @@ export function FormFields({ form, session, pages, current, disabled }: {
     return <section key={index} className="form-section form-loose">
       {group.title.length ? <h3><FormSpans spans={group.title} /></h3> : null}{content}
     </section>;
-  })}</div>)}</>;
+  })}</div></div>)}{pages.length > 1 && <button type="button" className="form-stack-summary" aria-current={current === pages.length ? "step" : undefined} onClick={() => jump(pages.length)}>{zh ? "核对答案" : "Review answers"}</button>}</div>;
 }
 
 const FormContextBlock = memo(function FormContextBlock({ block }: { block: Exclude<InteractionFormBlock, { kind: "field" }> }) {
@@ -62,6 +70,13 @@ function useFieldDraft(session: FormSession, id: string) {
   const subscribe = useCallback((listener: () => void) => session.subscribeField(id, listener), [session, id]);
   const snapshot = useCallback(() => session.getDraft(id), [session, id]);
   return useSyncExternalStore(subscribe, snapshot, snapshot);
+}
+
+function FieldSummary({ field, session }: { field: InteractionFormField; session: FormSession }) {
+  const draft = useFieldDraft(session, field.id);
+  const answer = field.kind === "text" ? (field.type === "password" ? "•".repeat(draft.text.length) : draft.text)
+    : draft.checked.map(index => spansText(field.options[index]?.label ?? [])).join(", ");
+  return <>{answer && <span className="form-answer-chip">{answer}</span>}{Object.values(draft.noteImages).flat().map((image, index) => <img key={index} alt="" width="24" height="24" src={`data:${image.mimeType};base64,${image.data}`} />)}</>;
 }
 
 const FormFieldView = memo(function FormFieldView({ field, session, disabled }: {
@@ -122,6 +137,7 @@ function ChoiceFormField({ field, session, disabled, inputId, errorId }: {
     session.choose(field.id, index);
     host.current?.querySelector<HTMLButtonElement>(`[data-form-option="${index}"]`)?.focus();
   };
+  const [pasteError, setPasteError] = useState("");
   const noteFor = (index: number): ReactNode => {
     if (!picked.includes(index) || field.options[index]?.disabled) return null;
     const option = field.options[index]!;
@@ -129,7 +145,19 @@ function ChoiceFormField({ field, session, disabled, inputId, errorId }: {
     return <div className="form-option-note">
       {draft.noteOpen[index] || draft.notes[index] ? <label>
         <span className="form-note-label">{zh ? `附注 · ${label}` : `Note · ${label}`}<span>{zh ? "可选，不替代选项" : "optional, does not replace selection"}</span></span>
-        <textarea className="input form-textarea form-note-input" rows={2} value={draft.notes[index] ?? ""} data-form-note={index} aria-label={zh ? `附注：${label}` : `Note: ${label}`} disabled={disabled} placeholder={zh ? "补充这个选项的细节…" : "Add details for this option…"} onChange={event => session.setNote(field.id, index, event.target.value)} />
+        <textarea className="input form-textarea form-note-input" rows={2} value={draft.notes[index] ?? ""} data-form-note={index} aria-label={zh ? `附注：${label}` : `Note: ${label}`} disabled={disabled} placeholder={zh ? "补充这个选项的细节…" : "Add details for this option…"} onChange={event => session.setNote(field.id, index, event.target.value)} onPaste={async event => {
+          const files = Array.from(event.clipboardData.files).filter(file => file.type.startsWith("image/"));
+          if (!files.length) return;
+          event.preventDefault();
+          if (!session.form?.acceptImages) { setPasteError("unsupported"); return; }
+          try {
+            const images = await Promise.all(files.map(file => askImage(file, zh)));
+            session.setNoteImages(field.id, index, [...(session.getDraft(field.id).noteImages[index] ?? []), ...images]);
+            setPasteError("");
+          } catch (cause) { setPasteError(String(cause)); }
+        }} />
+        {pasteError && <small role="status">{pasteError === "unsupported" ? zh ? "此提问不接受图片" : "This question does not accept images" : pasteError}</small>}
+        {(draft.noteImages[index] ?? []).map((image, at) => <button key={at} type="button" className="form-note-thumbnail" aria-label={zh ? `移除图片 ${at + 1}` : `Remove image ${at + 1}`} disabled={disabled} onClick={() => session.setNoteImages(field.id, index, draft.noteImages[index]!.filter((_, n) => n !== at))}><img alt="" width="40" height="40" src={`data:${image.mimeType};base64,${image.data}`} /> ×</button>)}
       </label> : <button type="button" className="btn small ghost" aria-label={zh ? `添加附注：${label}` : `Add note: ${label}`} disabled={disabled} onClick={() => {
         session.openNote(field.id, index);
         queueMicrotask(() => host.current?.querySelector<HTMLTextAreaElement>(`[data-form-note="${index}"]`)?.focus());

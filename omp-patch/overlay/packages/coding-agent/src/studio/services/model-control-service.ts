@@ -72,8 +72,8 @@ export class StudioModelControlService {
 			return this.#project(model, this.#pending.thinking);
 		}
 		if (this.#pending?.model !== undefined) {
-			const defaultLevel = this.#pending.model.thinking?.defaultLevel;
-			return defaultLevel === undefined ? this.#identity(model) : this.#project(model, defaultLevel);
+			const level = this.session.configuredThinkingLevel() ?? model.thinking?.defaultLevel;
+			return level === undefined ? this.#identity(model) : this.#project(model, level);
 		}
 		return this.#projectLive(model);
 	}

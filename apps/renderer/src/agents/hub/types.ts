@@ -23,6 +23,9 @@ export type Notice = { kind: "ok" | "warn" | "err"; text: string };
 export type Modal = { kind: "spawn" } | { kind: "kill"; agentId: string };
 
 export type HubAgent = {
+  peer?: boolean;
+  waitingOn?: string[];
+  waiters?: Array<{waiter:string; since:number; via:string[]}>;
   id: string;
   name: string;
   kind: string;

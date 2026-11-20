@@ -29,6 +29,9 @@ export interface AccountResetStatus {
 export interface AccountRoutingPolicy { priority: number; reservePct: number; reserveSource: "global" | "override"; state: "eligible" | "inside-reserve" | "exhausted" | "unknown"; remainingPct?: number; reclaimAbovePct?: number }
 export interface StudioAccountStatus {
   policy?: AccountRoutingPolicy;
+  subscriptionPlan?: string;
+  credentialId?: number;
+  activeCredential?: boolean;
   resetPolicies?: AccountResetPolicy[];
   id: string; provider: string; label: string; organization?: string;
   source: "oauth" | "api-key" | "ambient"; active: boolean;

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { ClientInteraction } from "@omp-studio/client-contract";
 import type {
-  FormAnswerData, FormAnswerValue, FormChoiceField, FormOptionNote, FormSubmitValue,
+  AskImage, FormAnswerData, FormAnswerValue, FormChoiceField, FormOptionNote, FormSubmitValue,
   InteractionForm, InteractionFormField,
 } from "@omp-studio/studio-protocol";
 import { choiceValue, fieldError, textValue } from "@oh-my-pi/pi-tui/html-form/data";
@@ -19,6 +19,7 @@ export interface FormFieldDraft {
   readonly other: string;
   readonly otherEditing: boolean;
   readonly notes: Readonly<Record<number, string>>;
+  readonly noteImages: Readonly<Record<number, AskImage[]>>;
   readonly noteOpen: Readonly<Record<number, boolean>>;
   readonly error?: string | undefined;
 }
@@ -42,7 +43,7 @@ export interface FormMetaState {
 
 type Listener = () => void;
 type Surface = { respond: FormResponder; disabled: boolean; active: boolean };
-const EMPTY_DRAFT: FormFieldDraft = { text: "", checked: [], other: "", otherEditing: false, notes: {}, noteOpen: {} };
+const EMPTY_DRAFT: FormFieldDraft = { text: "", checked: [], other: "", otherEditing: false, notes: {}, noteImages: {}, noteOpen: {} };
 
 /** One transient owner per native interaction. No persistence, input transport or second timeout owner. */
 export class FormSession {
@@ -156,6 +157,9 @@ export class FormSession {
     this.#edit(id, { other, otherEditing: true, ...(!field.multi && changed && other.trim() ? { checked: [] } : {}) });
   }
   openNote(id: string, index: number): void { this.#edit(id, { noteOpen: { ...this.getDraft(id).noteOpen, [index]: true } }); }
+  setNoteImages(id: string, index: number, images: AskImage[]): void {
+    this.#edit(id, { noteImages: { ...this.getDraft(id).noteImages, [index]: images } });
+  }
   setNote(id: string, index: number, text: string): void {
     this.#edit(id, { notes: { ...this.getDraft(id).notes, [index]: text } });
   }
@@ -184,9 +188,10 @@ export class FormSession {
       if (field.kind !== "choice") continue;
       const draft = this.getDraft(field.id);
       field.options.forEach((option, index) => {
-        const text = draft.notes[index]?.trim();
+        const images = draft.noteImages[index] ?? [];
+        const text = [draft.notes[index]?.trim(), ...images.map((_, i) => `[Image #${i + 1}]`)].filter(Boolean).join(" ");
         if (!draft.checked.includes(index) || option.disabled || !text) return;
-        notes.push({ name: field.name, question: field.question, option: spansText(option.label).replace(/\s+/g, " ").trim() || option.value, value: option.value, text });
+        notes.push({ name: field.name, question: field.question, option: spansText(option.label).replace(/\s+/g, " ").trim() || option.value, value: option.value, text, ...(images.length ? { images } : {}) });
       });
     }
     return { data, ...(notes.length ? { notes } : {}), ...(timedOut ? { timedOut: true } : {}) };
@@ -310,6 +315,10 @@ export class FormSession {
 /** Active owners and small, scrubbed tombstones prevent an exit/remount from reviving a terminal identity. */
 const liveSessions = new Map<string, FormSession>();
 const interactionKey = (interaction: Pick<FormInteraction, "sessionId" | "interactionId" | "leaseGeneration">) => `${interaction.sessionId}:${interaction.interactionId}:${interaction.leaseGeneration}`;
+
+export function partialFormResponse(interaction: FormInteraction): FormSubmitValue | undefined {
+  return liveSessions.get(interactionKey(interaction))?.payload();
+}
 
 export function closeFormSession(interaction: Pick<FormInteraction, "sessionId" | "interactionId" | "leaseGeneration">): void {
   liveSessions.get(interactionKey(interaction))?.close();

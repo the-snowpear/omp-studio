@@ -15,6 +15,8 @@ export interface TokenUsageData {
   cacheHit: string;
   parts: { kind: "input" | "output" | "cache"; value: string; weight: number }[];
   rows: UsageRow[];
+  offTranscript?: readonly {kind: string; requests: number; tokens: number}[] | undefined;
+  decisionModels?: readonly {purpose: string; provider: string; model: string; requests: number; tokens: number}[] | undefined;
   details: UsageRow[];
 }
 
@@ -54,6 +56,7 @@ function liveTokenUsage(telemetry: SessionTelemetrySnapshot, zh: boolean): Token
   }
   return {
     total: fmtTokens(tokens.total),
+    offTranscript: telemetry.offTranscript, decisionModels: telemetry.decisionModels,
     turn: turn ? fmtTokens(turn.total) : "—",
     cost: formatCost(tokens.cost),
     cacheHit: `${tokens.cacheRead + tokens.input > 0 ? Math.round(tokens.cacheRead / (tokens.cacheRead + tokens.input) * 100) : 0}%`,
@@ -112,6 +115,13 @@ export function TokenUsagePanel({ telemetry, view, onOpenCounter, onClose }: {
           </div>)}</dl>
         </section>
         <div className="usage-round"><UsageRows rows={data.rows} /></div>
+        {[
+          {title: zh ? "旁路辅助调用" : "Off-transcript calls", rows: data.offTranscript?.map(row => ({
+            label: ({ title: zh ? "会话标题" : "Session title", jobCaption: zh ? "作业摘要" : "Job caption", judge: zh ? "评判" : "Judge", cacheWarming: zh ? "缓存预热" : "Cache warming" } as Record<string, string>)[row.kind] ?? row.kind, ...row }))},
+          {title: zh ? "评判模型" : "Decision models", rows: data.decisionModels?.map(row => ({ label: `${row.provider}/${row.model} · ${row.purpose}`, ...row }))},
+        ].map(group => group.rows?.length ? <details key={group.title} className="usage-disclosure">
+          <summary>{group.title}</summary><dl>{group.rows.map(row => <div key={row.label}><dt>{row.label}</dt><dd>{row.requests} {zh ? "次" : "requests"} · {fmtTokens(row.tokens)} tokens</dd></div>)}</dl>
+        </details> : null)}
         <details className="usage-disclosure">
           <summary><Icon name="chart" extra="sm" /><span>{zh ? "更多用量明细" : "More usage details"}</span><Icon name="chevron-r" extra="sm usage-chevron" /></summary>
           <div className="usage-disclosure-body"><UsageRows rows={data.details} /></div>

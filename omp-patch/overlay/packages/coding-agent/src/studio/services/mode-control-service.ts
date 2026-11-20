@@ -11,6 +11,10 @@ import { logger, prompt } from "@oh-my-pi/pi-utils";
 import { cfgCycleOrder, cfgModelRoles } from "../../config/model-settings";
 import type { PlanReviewChoice, PlanReviewRequestedEvent } from "../../extensibility/extensions/types";
 import type { NativePlanReview, NativePlanReviewOperation } from "../plan-review-protocol";
+import { resolvePlanFilePath } from "../../plan-mode/plan-files";
+import { sessionLocalProtocolOptions } from "../../internal-urls/context";
+import { writeFileAtomically } from "../../utils/atomic-file";
+import { runtimeText } from "../locale";
 import type { StudioInteractionGateway } from "./interaction-port";
 import type { PlanApprovalDetails } from "../../plan-mode/approved-plan";
 import { autosaveApprovedPlan } from "../../plan-mode/plan-autosave";
@@ -195,7 +199,7 @@ export class StudioModeControlService {
 	#reviewTiers() {
 		return this.session.getRoleModelCycle?.(cfgCycleOrder.get(this.session.settings))?.models ?? [];
 	}
-	reviewDetails(): NativePlanReview {
+	reviewDetails(role?: string): NativePlanReview {
 		const review = this.#review;
 		if (!review || !this.#pendingPlan || review.request.sessionId !== this.session.sessionId)
 			return { available: false, tiers: [] };
@@ -206,24 +210,87 @@ export class StudioModeControlService {
 				provider: entry.model.provider,
 				model: entry.model.id,
 				name: entry.model.name || entry.model.id,
+				contextWindow: entry.model.contextWindow ?? undefined,
 				...(entry.explicitThinkingLevel && entry.thinkingLevel ? { thinkingLevel: entry.thinkingLevel } : {}),
 			}));
+		const selected =
+			tiers.find(tier => tier.role === role) ?? tiers.find(tier => tier.role === "default") ?? tiers[0];
+		const usage = this.#executionContext(role ?? (tiers.length > 1 ? selected?.role : undefined));
 		return {
 			available: !review.claimed,
 			reviewId: review.request.reviewId,
 			tiers,
-			...(tiers.length ? { selectedRole: tiers.find(tier => tier.role === "default")?.role ?? tiers[0]!.role } : {}),
+			selectedRole: selected?.role,
+			contextRatio: usage === undefined ? undefined : usage.percent / 100,
+			options: [...this.#reviewOptions(usage)],
 		};
 	}
 	async executeReview(operation: NativePlanReviewOperation): Promise<unknown> {
 		if (operation.sessionId !== this.session.sessionId)
 			throw new StudioModeError("COMMAND_BLOCKED", "Plan session changed");
-		if (operation.kind === "mode.plan.review.details") return this.reviewDetails();
+		if (operation.kind === "mode.plan.review.details") return this.reviewDetails(operation.role);
 		if (!this.#review || this.#review.request.reviewId !== operation.reviewId)
 			throw new StudioModeError("COMMAND_BLOCKED", "Plan review was replaced; reopen the review");
+		if (operation.kind === "mode.plan.review.save") return this.#saveReview(this.#review, operation.markdown);
+		if (operation.decision === "save") {
+			await this.#saveReview(this.#review, this.#pendingPlan?.body ?? "");
+			return { resolved: true };
+		}
 		await this.respondPlanReview(operation.decision, operation.feedback, operation.role);
 		return { resolved: true };
 	}
+	#executionContext(role?: string) {
+		const model =
+			this.#reviewTiers().find(entry => entry.role === role)?.model ??
+			this.#planPreviousModelState?.model ??
+			this.session.model;
+		const window = model?.contextWindow;
+		return this.session.getContextUsage?.(typeof window === "number" ? { contextWindow: window } : undefined);
+	}
+
+	#reviewOptions(usage: ReturnType<AgentSession["getContextUsage"]>) {
+		const disabled = usage !== undefined && usage.percent > 95;
+		return [
+			{ kind: "execute", label: runtimeText("批准并执行", "Approve and execute") },
+			{ kind: "compact", label: runtimeText("批准并压缩上下文", "Approve and compact context") },
+			{
+				kind: "keep",
+				label: runtimeText("批准并保留上下文", "Approve and keep context"),
+				disabled,
+				description: disabled
+					? runtimeText("目标模型的上下文已超过 95%", "The execution model's context is over 95% full")
+					: undefined,
+			},
+			{ kind: "refine", label: runtimeText("修改计划", "Refine plan") },
+			{ kind: "save", label: runtimeText("保存计划", "Save plan") },
+		] as const;
+	}
+
+	async #saveReview(review: NativeReviewRecord, markdown: string): Promise<{ saved: true }> {
+		const plan = this.#pendingPlan;
+		if (!plan || review.claimed) throw new StudioModeError("COMMAND_BLOCKED", "There is no editable plan review");
+		review.claimed = true;
+		try {
+			const cwd = this.session.sessionManager.getCwd();
+			const filename = plan.planFilePath.startsWith("local://")
+				? resolvePlanFilePath(plan.planFilePath, {
+						cwd,
+						localProtocolOptions: sessionLocalProtocolOptions(this.session.sessionManager),
+					})
+				: resolveStudioPlanSavePath(plan.planFilePath, cwd).absolutePath;
+			await mkdir(dirname(filename), { recursive: true });
+			await writeFileAtomically(filename, markdown);
+			if (this.#review === review) {
+				plan.body = markdown;
+				review.request.planContent = markdown;
+				this.#notify();
+			}
+			return { saved: true };
+		} finally {
+			review.claimed = false;
+		}
+	}
+
 	#bindReviewActions(): void {
 		this.#releaseReviewActions?.();
 		this.#releaseReviewActions = this.session.extensionRunner?.bindPlanReviewActions({
@@ -260,17 +327,8 @@ export class StudioModeControlService {
 					.then(async () => {
 						if (this.#review !== review) return;
 						if (choice === "save") {
-							const file = await this.interaction?.input({
-								commandId: "plan-save:" + id,
-								title: "Save plan and exit",
-								placeholder: "PLAN.md",
-							});
-							if (this.#review !== review) return;
-							if (!file) {
-								review.claimed = false;
-								return;
-							}
-							await this.savePlanAndQuit(file, true);
+							review.claimed = false;
+							await this.#saveReview(review, this.#pendingPlan?.body ?? "");
 						} else await this.#runReview(review, choice, input?.feedback, input?.role, "extension");
 					})
 					.catch(error => {
@@ -337,6 +395,14 @@ export class StudioModeControlService {
 					...(entry.thinkingLevel ? { thinkingLevel: entry.thinkingLevel } : {}),
 				};
 			}
+			if (
+				(decision === "keep" || decision === "approve") &&
+				this.#reviewOptions(this.#executionContext(role)).some(option => option.kind === "keep" && option.disabled)
+			)
+				throw new StudioModeError(
+					"COMMAND_BLOCKED",
+					runtimeText("目标模型的上下文已满，请先压缩", "Compact the context before approving with this model"),
+				);
 			const result = await this.#respondPlanReview(decision, feedback);
 			this.#finishReview(
 				review,
@@ -1027,10 +1093,12 @@ export class StudioModeControlService {
 				title: details.title,
 				planFilePath: details.planFilePath,
 				planContent: details.planContent ?? "",
-				options: ["execute", "compact", "keep", "refine", "save"].map(id => ({
-					id: id as PlanReviewChoice,
-					label: id,
-					disabled: false,
+				options: this.#reviewOptions(
+					this.#executionContext(tiers.length > 1 ? tiers.find(tier => tier.role === "default")?.role : undefined),
+				).map(option => ({
+					id: option.kind as PlanReviewChoice,
+					label: option.label,
+					disabled: "disabled" in option && option.disabled,
 				})),
 				...(tiers.length > 1 ? { tiers } : {}),
 			},

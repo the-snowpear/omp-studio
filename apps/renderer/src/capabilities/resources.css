@@ -107,3 +107,9 @@
   .resources-pagination > span { flex-basis: 100%; }
   .resources-state { white-space: normal; }
 }
+
+.resources-root { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
+.resources-root code { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; }
+.resources-root [role="status"] { flex-basis: 100%; font-size: .85em; }
+
+.md-spill-link { padding: 0; border: none; background: transparent; color: var(--accent); text-decoration: underline; cursor: pointer; font: inherit; }

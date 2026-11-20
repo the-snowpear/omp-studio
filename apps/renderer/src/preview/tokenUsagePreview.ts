@@ -5,6 +5,8 @@ export function previewTokenUsage(zh: boolean): TokenUsageData {
   const usage = getPreviewTelemetry(zh);
   return {
     total: usage.totalBurn,
+    offTranscript: [{kind:"title", requests:1, tokens:184}, {kind:"jobCaption", requests:3, tokens:322}, {kind:"judge", requests:2, tokens:624}, {kind:"cacheWarming", requests:4, tokens:96}],
+    decisionModels: [{purpose:"recall", provider:"openai", model:"gpt-5-mini", requests:2, tokens:624}],
     turn: usage.turnBurn,
     cost: usage.cost,
     cacheHit: usage.cacheHitRate,

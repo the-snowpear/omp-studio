@@ -91,6 +91,7 @@ export function ComposerModelMenu({
   isModelSelected,
   onChooseRole,
   onChooseModel,
+  chooseEffort,
   onClose,
 }: {
   data: ModelConfigReadModel | null;
@@ -111,10 +112,12 @@ export function ComposerModelMenu({
   isRoleSelected: (role: ModelRoleRecord) => boolean;
   isModelSelected: (selector: string) => boolean;
   onChooseRole: (role: ModelRoleRecord) => void;
-  onChooseModel: (selector: string) => void;
+  onChooseModel: (selector: string, thinking?: SessionThinkingSelector) => void;
+  chooseEffort?: boolean;
   onClose: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const { marks } = usePreviewMode();
   const [moreOpen, setMoreOpen] = useState(false);
   const [flyoutSide, setFlyoutSide] = useState<"right" | "left">("right");
@@ -150,6 +153,16 @@ export function ComposerModelMenu({
     [data],
   );
 
+  const [search, setSearch] = useState("");
+  const [scope, setScope] = useState<string | undefined>();
+  const [effortIndex, setEffortIndex] = useState(0);
+  const query = search.trim().toLowerCase();
+  const slash = query.indexOf("/");
+  const groupQuery = slash < 0 ? scope : query.slice(0, slash);
+  const modelQuery = slash < 0 ? query : query.slice(slash + 1);
+  const filtered = groups.filter(group => !groupQuery || group.providerId.toLowerCase() === groupQuery)
+    .map(group => ({ ...group, models: group.models.filter(model => (model.name + " " + model.id).toLowerCase().includes(modelQuery)) })).filter(group => group.models.length);
+  const effort = SESSION_THINKING_SELECTORS[effortIndex - 1];
   const scheduleFlyoutClose = () => {
     window.clearTimeout(flyoutTimer.current);
     flyoutTimer.current = window.setTimeout(() => setMoreOpen(false), FLYOUT_CLOSE_GRACE_MS);
@@ -264,10 +277,17 @@ export function ComposerModelMenu({
             onMouseEnter={keepFlyoutOpen}
             onMouseLeave={scheduleFlyoutClose}
           >
-            {groups.length === 0 ? (
+            <div className="cmp-model-filter">
+              <input className="input" aria-label={zh ? "搜索模型" : "Search models"} placeholder={zh ? "搜索模型或 provider/model" : "Search model or provider/model"} value={search} onChange={event => setSearch(event.target.value)} />
+              <div className="cmp-model-scopes">{groups.map(group => <button type="button" key={group.providerId} aria-pressed={scope === group.providerId} onClick={() => setScope(value => value === group.providerId ? undefined : group.providerId.toLowerCase())}>{group.providerName}</button>)}</div>
+              {chooseEffort && <label className="cmp-model-effort"><span>{zh ? "思考强度" : "Thinking effort"} · {effort ?? (zh ? "保留当前" : "Keep current")}</span>
+                <input type="range" min={0} max={SESSION_THINKING_SELECTORS.length} value={effortIndex} onChange={event => setEffortIndex(Number(event.target.value))} />
+              </label>}
+            </div>
+            {filtered.length === 0 ? (
               <div className="rms-empty">{t("composer.noAvailableModels")}</div>
             ) : (
-              groups.map((group) => (
+              filtered.map((group) => (
                 <div className="rms-group" key={group.providerId} role="group" aria-label={group.providerName}>
                   <div className="rms-group-label">
                     <span className="rms-brand" aria-hidden="true">
@@ -286,7 +306,7 @@ export function ComposerModelMenu({
                         aria-selected={on}
                         className={`menu-item rms-option${on ? " is-on" : ""}`}
                         disabled={disabled}
-                        onClick={() => onChooseModel(model.selector)}
+                        onClick={() => onChooseModel(model.selector, effort)}
                       >
                         <span className="rms-option-copy">
                           <b>{model.name}</b>
@@ -447,7 +467,7 @@ export function ComposerModelPicker({
   const modelLabel = pick
     ? selectedModel?.name ?? modelShortName(pick.selector)
     : "—";
-  const thinkingLabel = thinking.items.find((item) => item.id === thinking.value)?.label ?? "—";
+  const thinkingLabel = selectedModel?.thinkingConfig?.unverified ? (resolvedLanguage === "zh" ? "待探测" : "Awaiting probe") : thinking.items.find((item) => item.id === thinking.value)?.label ?? "—";
 
   const closeAll = () => {
     setMenu("none");
@@ -485,16 +505,15 @@ export function ComposerModelPicker({
       : { selector: role.primary, thinking });
   };
 
-  const chooseModel = (selector: string) => {
+  const chooseModel = (selector: string, effort?: SessionThinkingSelector) => {
     closeAll();
     if (!modelReady) return;
     if (preview) {
       const model = bySelector.get(selector);
-      setPreviewPick((prev) => pickWith(null, selector, clampRoleThinking(prev?.thinking, model) || undefined));
+      setPreviewPick((prev) => pickWith(null, selector, clampRoleThinking(effort ?? prev?.thinking, model) || undefined));
       return;
     }
-    // 不带 thinking：由目标模型自己的默认档位决定，别把上一个模型的档位硬塞过去。
-    apply("session.model.set", { selector });
+    apply("session.model.set", { selector, ...(effort ? { thinking: effort } : {}) });
   };
 
   const chooseThinking = (id: string) => {
@@ -603,6 +622,7 @@ export function ComposerModelPicker({
                   isModelSelected: (selector: string) => pick?.selector === selector,
                   onChooseRole: chooseRole,
                   onChooseModel: chooseModel,
+                  chooseEffort: true,
                 })}
             {...(preview || (modelReady && !nextTurnOnly) || taskPicking
               ? {}

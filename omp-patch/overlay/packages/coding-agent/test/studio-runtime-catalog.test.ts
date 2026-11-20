@@ -66,6 +66,7 @@ it("reports native startup readiness without connecting, probing or exposing cre
 		sessionManager: { getCwd: () => "." },
 		settings: Settings.isolated({ "mcp.startupTimeoutMs": 250 }),
 		studioToolSession: { mcpManager: manager },
+		mcpEvalNamespaceForServer: (name: string) => (name === "ready" ? name : undefined),
 		getAllToolInfos: () => [
 			{
 				name: "tool",
@@ -86,6 +87,7 @@ it("reports native startup readiness without connecting, probing or exposing cre
 	expect(result.settled).toBe(false);
 	expect(result.servers.find(row => row.name === "ready")).toMatchObject({
 		name: "ready",
+		evalNamespaceUri: "xd://eval/ready",
 		state: "ready",
 		tools: 1,
 		transport: "stdio",

@@ -9,6 +9,7 @@ export interface RuntimeQueueEntry {
   editable: boolean;
 }
 export interface RuntimeQueueResult {
+  compactionMode?: "normal" | "handoff";
   compactionError?: string;
   entries: RuntimeQueueEntry[];
   total: number;

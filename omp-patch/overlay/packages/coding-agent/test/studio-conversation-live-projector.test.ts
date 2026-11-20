@@ -166,11 +166,10 @@ test("a run that only background jobs can resume keeps its turn open into the re
 		projector.project({ type: "message_start", message: first });
 		projector.project({ type: "message_end", message: first });
 		projector.project({
-			type: "agent_end",
+			type: "agent_pause",
 			messages: [first],
-			isTerminal: false,
 			yielded: true,
-			awaitingAsyncWork: true,
+			awaiting: true,
 		});
 		expect(events.some(event => event.kind === "conversation.turn.completed")).toBe(false);
 		// The job result wakes the session: same logical turn, then a terminal end closes it.
@@ -923,7 +922,7 @@ describe("ConversationLiveProjector", () => {
 		session.emit({ type: "agent_start" });
 		session.emit({ type: "message_start", message: first });
 		session.emit({ type: "message_end", message: first });
-		session.emit({ type: "agent_end", messages: [], isTerminal: false });
+		session.emit({ type: "agent_pause", messages: [], awaiting: false, yielded: false });
 		expect(events.some(event => event.kind === "conversation.turn.completed")).toBe(false);
 		session.emit({
 			type: "notice",

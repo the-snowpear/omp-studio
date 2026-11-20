@@ -258,7 +258,7 @@ describe("native selective commit confirmation", () => {
 		await git(f.root, ["commit", "-q", "--allow-empty", "-m", "intervening", "--only"]);
 		await expect(f.service.execute(executeOperation(f, draft, prepared))).rejects.toThrow(/HEAD/);
 		const cli = prelude(f);
-		await cli.commit.invoke(
+		await cli.commit.invoke!(
 			{ action: "commit", draft: native.id, subject: "explicit other unit" },
 			{ session: cli.session, toolCallId: "commit-test" },
 		);

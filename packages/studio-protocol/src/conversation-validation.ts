@@ -251,7 +251,7 @@ export function parseConversationItem(value: unknown, path: string): Conversatio
   const parentId = parseParentId(input.parentId, `${path}.parentId`);
   const createdAt = nonEmptyString(input.createdAt, `${path}.createdAt`);
   if (kind === "message") {
-    exactKeys(input, ["kind", "itemId", "parentId", "createdAt", "role", "content"], path);
+    exactKeys(input, ["kind", "itemId", "parentId", "createdAt", "role", "content", "excludeFromContext", "asyncNotify"], path);
     if (!Array.isArray(input.content)) {
       throw new ContractValidationError("expected an array", `${path}.content`);
     }
@@ -265,6 +265,8 @@ export function parseConversationItem(value: unknown, path: string): Conversatio
       createdAt,
       role: parseRole(input.role, `${path}.role`),
       content,
+      ...(input.excludeFromContext === true ? { excludeFromContext: true } : {}),
+      ...(input.asyncNotify === true ? { asyncNotify: true } : {}),
     } satisfies ConversationMessageItem;
   }
   if (kind === "compaction") {

@@ -111,6 +111,7 @@ export type ClientInteraction =
       readonly kind: "input";
       readonly placeholder?: string;
       readonly secret: boolean;
+      readonly riskAcknowledgement?: boolean;
     })
   | (ClientInteractionBase & {
       readonly kind: "editor";

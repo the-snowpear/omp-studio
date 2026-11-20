@@ -13,7 +13,7 @@ import { resolveSpeechCandidates } from "../../tools/tts";
 import { sttClient } from "../../stt/asr-client";
 import { resolveSttModelSpec } from "../../stt/models";
 import { ttsClient } from "../../tts/tts-client";
-import { DEFAULT_TTS_VOICE, KOKORO_VOICES } from "../../tts/models";
+import { DEFAULT_TTS_VOICE, TTS_LOCAL_VOICES } from "../../tts/models";
 import { encodeWav } from "../../tts/wav";
 import {
 	type MediaDetail,
@@ -147,7 +147,7 @@ export function describeMediaModel(model: Model): MediaModelChoice | undefined {
 					? ["mp3", "wav"]
 					: ["mp3", "wav", "pcm", "opus", "aac", "flac"],
 			...(base.local
-				? { voices: [...KOKORO_VOICES] }
+				? { voices: [...TTS_LOCAL_VOICES] }
 				: model.api === "xai-tts"
 					? { voices: ["ara", "eve", "leo", "rex", "sal"].map(id => ({ id, label: id })) }
 					: {}),

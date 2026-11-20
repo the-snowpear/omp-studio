@@ -68,3 +68,15 @@
   .form-compact { flex-wrap: wrap; }
   .form-option-note, .form-other-input { padding-left: var(--sp-8); }
 }
+
+.form-stack-section + .form-stack-section { border-top: 1px solid var(--border); }
+.form-stack-summary { width: 100%; display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-8) 0; text-align: left; color: var(--text-2); background: transparent; border: 0; cursor: pointer; }
+.form-stack-summary strong { flex: 1; }
+.form-stack-index { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.form-stack-summary[aria-expanded="true"] .form-stack-index { color: var(--accent); }
+.form-answer-chip { max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--accent-softer); border-radius: var(--r-full); padding: 2px 8px; }
+.form-note-thumbnail img, .form-stack-summary img { object-fit: cover; border-radius: var(--r-sm); }
+
+.plan-inline-editor { display: grid; gap: var(--sp-8); padding: var(--sp-8) var(--sp-12); }
+.plan-inline-editor > button { justify-self: start; }
+.plan-inline-editor textarea { width: 100%; resize: vertical; }

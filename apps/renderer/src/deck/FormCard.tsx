@@ -7,10 +7,9 @@ import { useSurfaceDocument } from "../dock/SurfaceContext";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { demoMark, PromptHead, QueueNav, type DeckQueue } from "./PromptHead";
 import { FormFields } from "./FormFields";
-import { formPages, type FormPage } from "./formPages";
+import { formPages } from "./formPages";
 import { QuestionHeightHandle } from "./QuestionHeightHandle";
 import { FormSession, type FormResponder } from "./FormSession";
-import { StepNode } from "../conversation/StepRail";
 import "./form.css";
 
 /** One Session and the same field DOM survive collapse, section navigation and queue/layout changes. */
@@ -40,7 +39,7 @@ export function FormCard({ session, title, summary, meta, demo, queue, disabled,
   useLayoutEffect(() => {
     if (!active || view.collapsed || !view.focusVersion) return;
     if (!view.focusField) {
-      root.current?.querySelector<HTMLElement>('.form-step[aria-current="step"]')?.focus();
+      root.current?.querySelector<HTMLElement>('.form-stack-summary[aria-current="step"]')?.focus();
       return;
     }
     const escaped = typeof CSS !== "undefined" && typeof CSS.escape === "function"
@@ -70,6 +69,11 @@ export function FormCard({ session, title, summary, meta, demo, queue, disabled,
     if (disabled || !active || event.nativeEvent.isComposing || event.defaultPrevented) return;
     if (event.key === "Escape") { if (view.collapsed) return; event.preventDefault(); event.stopPropagation(); void session.cancel(); }
     else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); event.stopPropagation(); void session.submit(); }
+    else if (event.key === "Enter" && !event.shiftKey && !view.collapsed && !review && (event.target as HTMLElement).closest('[role="radio"][aria-checked="true"]')) {
+      event.preventDefault(); event.stopPropagation();
+      if (tabbed && current < pages.length - 1) jump(current + 1);
+      else void session.submit();
+    }
     else if (tabbed && !view.collapsed && (event.key === "PageDown" || event.key === "PageUp")) {
       event.preventDefault();
       jump(Math.max(0, Math.min(pages.length, current + (event.key === "PageDown" ? 1 : -1))));
@@ -88,42 +92,16 @@ export function FormCard({ session, title, summary, meta, demo, queue, disabled,
         <button className="icon-btn small" type="button" aria-label={view.expanded ? (zh ? "收回表单" : "Restore form size") : (zh ? "放大表单" : "Expand form")} data-tip={view.expanded ? (zh ? "收回表单" : "Restore form size") : (zh ? "放大表单" : "Expand form")} onClick={() => session.setExpanded(!view.expanded)}><Icon name={view.expanded ? "contract" : "expand"} extra="sm" /></button>
         <button className="icon-btn small" type="button" aria-label={zh ? "收起表单" : "Collapse form"} data-tip={PLATFORM === "darwin" ? (zh ? "收起 · ⌥H" : "Hide · ⌥H") : (zh ? "收起 · Alt+H" : "Hide · Alt+H")} onClick={() => session.setCollapsed(true)}><Icon name="minimize" extra="sm" /></button>
       </span>} />
-      {tabbed ? <FormSectionNav session={session} pages={pages} current={current} jump={jump} /> : null}
+
       <FormProgress session={session} />
     </div>
     <div ref={body} className="ask-body form-body" hidden={view.collapsed}>
-      {loading ? <p className="muted small" role="status">{zh ? "正在读取表单…" : "Loading form…"}</p> : form ? <FormFields form={form} session={session} pages={pages} current={current} disabled={disabled} /> : null}
+      {loading ? <p className="muted small" role="status">{zh ? "正在读取表单…" : "Loading form…"}</p> : form ? <FormFields jump={jump} form={form} session={session} pages={pages} current={current} disabled={disabled} /> : null}
       {review && form ? <FormReview session={session} /> : null}
     </div>
     <FormError session={session} />
     <FormFooter session={session} disabled={disabled} hidden={view.collapsed} onNext={tabbed && !review ? () => jump(current + 1) : undefined} canSubmit={current >= pages.length - 1} />
   </div>;
-}
-
-/** Section stepper: each group shows whether every field in it holds an answer. Re-renders on the filled count only. */
-function FormSectionNav({ session, pages, current, jump }: { session: FormSession; pages: FormPage[]; current: number; jump: (index: number) => void }) {
-  const { resolvedLanguage } = useI18n();
-  const zh = resolvedLanguage === "zh";
-  useSyncExternalStore(session.subscribeMeta, () => session.getMeta().filled, () => 0);
-  const nav = useRef<HTMLElement>(null);
-  const labels = pages.map((page, index) => page.label || (zh ? `问题 ${index + 1}` : `Question ${index + 1}`));
-  labels.push(zh ? "核对答案" : "Review answers");
-  useLayoutEffect(() => {
-    nav.current?.querySelector('[aria-current="step"]')?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-  }, [current]);
-  return <nav ref={nav} className="form-section-nav" aria-label={zh ? "表单题组" : "Form sections"} onKeyDown={event => {
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-    event.preventDefault();
-    const index = event.key === "Home" ? 0 : event.key === "End" ? pages.length : current + (event.key === "ArrowLeft" ? -1 : 1);
-    jump(Math.max(0, Math.min(pages.length, index)));
-  }}>{labels.map((label, index) => {
-    const done = pages[index]?.fields.every(field => session.isFieldFilled(field.id)) ?? false;
-    return <button key={index} type="button" className={`form-step${index === current ? " active" : ""}${done ? " is-done" : ""}`} aria-current={index === current ? "step" : undefined} onClick={() => jump(index)}>
-      <StepNode tone={index === current ? "active" : done ? "done" : "pending"} label={index + 1} icon={index === pages.length ? "check" : undefined} />
-      {index < pages.length ? <span className="sr-only">{index + 1}</span> : null}
-      <span className="form-step-label">{label}</span>
-    </button>;
-  })}</nav>;
 }
 
 function FormReview({ session }: { session: FormSession }) {

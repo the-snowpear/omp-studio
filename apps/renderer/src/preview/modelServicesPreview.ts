@@ -2,6 +2,7 @@ import type { ModelAntigravityReadiness, ModelAuthProvider, ModelProviderRoster,
 import type { ModelAvailability } from "@omp-studio/client-contract";
 
 export const PREVIEW_MODEL_AUTH: ModelAuthProvider[] = [
+  { id: "kiro", name: "Kiro", available: true, authenticated: true, kind: "oauth", loginBehavior: "add-account", credentials: [{ id: -5, label: "Studio · Builder ID", type: "oauth" }, { id: -6, label: "Team · IAM Identity Center", type: "oauth" }] },
   { id: "anthropic", name: "Anthropic", available: true, authenticated: true, kind: "oauth", credentials: [{ id: -1, label: "mira@studio.dev", type: "oauth" }] },
   { id: "antigravity-cli", name: "Antigravity CLI", available: true, authenticated: true, kind: "oauth", credentials: [{ id: -4, label: "mira@studio.dev", type: "oauth" }] },
   { id: "openai-codex", name: "OpenAI Codex", available: true, authenticated: true, kind: "oauth", credentials: [{ id: -5, label: "mira@studio.dev", type: "oauth" }], paused: true, pauseReason: "Usage limit reached on 2026-11-15 09:12. Requests stay paused until you resume them." },

@@ -2934,6 +2934,10 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   max-height: var(--deck-cap);
   overflow: visible;
 }
+.composer-region:has(> .composer .composer-mode-hint) > .deck.is-ask {
+  bottom: calc(100% - var(--sp-4));
+  --deck-limit: min(420px, 46dvh);
+}
 .deck.preview-queue .deck-card {
   position: relative;
   top: auto;
@@ -3511,10 +3515,13 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   padding: var(--sp-10) var(--sp-20);
 }
 /* Deck 激活时被覆盖的 composer：变暗并禁止交互（参照 ver1） */
-.composer-region:has(.deck.active) .composer {
+.composer-region:has(.deck.active) .composer:not(:has(.composer-mode-hint)) {
   opacity: 0.35;
   pointer-events: none;
   box-shadow: none;
+}
+.composer-region:has(.deck.is-ask) .composer:has(.composer-mode-hint) {
+  pointer-events: auto;
 }
 .composer {
   max-width: var(--doc-max-w);
@@ -7427,3 +7434,9 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   width: 24px;
   height: 24px;
 }
+
+.cmp-model-filter { padding: var(--sp-8); display: grid; gap: var(--sp-8); border-bottom: 1px solid var(--border); }
+.cmp-model-scopes { display: flex; flex-wrap: wrap; gap: var(--sp-4); max-height: 5rem; overflow-y: auto; }
+.cmp-model-scopes button { font: inherit; font-size: var(--fs-11); color: var(--text-2); border: 1px solid var(--border); border-radius: var(--r-full); background: transparent; padding: 2px 6px; cursor: pointer; }
+.cmp-model-scopes button[aria-pressed="true"] { color: var(--accent); background: var(--accent-softer); }
+.cmp-model-effort { display: grid; gap: var(--sp-4); color: var(--text-2); font-size: var(--fs-11); }

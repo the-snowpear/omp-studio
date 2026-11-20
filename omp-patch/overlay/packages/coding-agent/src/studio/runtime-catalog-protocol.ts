@@ -12,6 +12,8 @@ export interface McpRuntimeStatus {
 	settled: boolean;
 	servers: Array<{
 		name: string;
+		replacedByBuiltin?: string;
+		evalNamespaceUri?: string;
 		state: "ready" | "pending" | "failed" | "disconnected";
 		tools: number;
 		transport?: "stdio" | "http" | "sse";

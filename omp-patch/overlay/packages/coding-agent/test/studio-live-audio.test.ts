@@ -1,3 +1,4 @@
+import { Settings } from "../src/config/settings";
 import { expect, it } from "bun:test";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -21,7 +22,7 @@ async function waitFor(check: () => boolean): Promise<void> {
 it("authenticates local PCM, uses the existing session, and releases on disconnect without reconnecting", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "studio-live-audio-"));
 	const socketDirectory = await shortSocketDirectory();
-	const session = { sessionId: "one" } as AgentSession;
+	const session = { sessionId: "one", settings: Settings.isolated() } as AgentSession;
 	let starts = 0,
 		stops = 0,
 		frames = 0;
@@ -137,7 +138,7 @@ it("authenticates local PCM, uses the existing session, and releases on disconne
 it("preparation expiry never opens a provider connection", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "studio-live-expiry-"));
 	const socketDirectory = await shortSocketDirectory();
-	const audio = new StudioLiveAudioService({ sessionId: "one" } as AgentSession, {
+	const audio = new StudioLiveAudioService({ sessionId: "one", settings: Settings.isolated() } as AgentSession, {
 		directory,
 		socketDirectory,
 		prepareTimeoutMs: 50,
@@ -169,7 +170,7 @@ it.skipIf(process.platform === "win32")(
 	"reports audio unavailable instead of failing to bind without a short socket directory",
 	async () => {
 		const directory = await mkdtemp(join(tmpdir(), "studio-live-nosocket-"));
-		const session = { sessionId: "one" } as AgentSession;
+		const session = { sessionId: "one", settings: Settings.isolated() } as AgentSession;
 		const missing = new StudioLiveAudioService(session, { directory, socketDirectory: "" });
 		const tooLong = new StudioLiveAudioService(session, {
 			directory,

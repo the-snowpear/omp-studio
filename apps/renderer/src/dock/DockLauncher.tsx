@@ -29,6 +29,7 @@ const TOOL_COPY: Partial<Record<PanelId, ToolCopy>> = {
   commit: { name: ["选择性提交", "Selective commit"], detail: ["按改动归属挑选后再提交", "Pick changes by ownership, then commit"], tint: "teal" },
   agents: { name: ["Agents", "Agents"], detail: ["跟踪子 Agent 的运行状态", "Follow subagent runs"], tint: "teal" },
   btw: { name: ["BTW", "BTW"], detail: ["旁路提问，不打断主对话", "Ask aside without interrupting"], tint: "pink" },
+  disassembler: { name: ["反汇编器", "Disassembler"], detail: ["查看文件头、函数和引用", "Inspect headers, functions and references"], tint: "indigo" },
   computer: { name: ["电脑", "Computer"], detail: ["查看并操控桌面", "View and control the desktop"], tint: "indigo" },
   environment: { name: ["环境", "Environment"], detail: ["运行时与工具链信息", "Runtime and toolchain"], tint: "cyan" },
   context: { name: ["上下文", "Context"], detail: ["上下文窗口占用", "Context window usage"], tint: "indigo" },

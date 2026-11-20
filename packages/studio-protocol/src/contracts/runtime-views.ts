@@ -21,6 +21,8 @@ export interface PromptCacheStatus {
 
 /** One agent-to-agent message, as the recipient's session recorded it. */
 export interface StudioAgentMessage {
+  peer?: boolean;
+  peerInstance?: string;
   id: string;
   from: string;
   to: string;

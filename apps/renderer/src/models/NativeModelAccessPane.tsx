@@ -1,3 +1,4 @@
+import { ThinkingProbe } from "./modelPresentation";
 import { useEffect, useId, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import type { ModelAntigravityReadiness, ModelProviderRoster } from "@omp-studio/studio-protocol";
 import { AppSelect } from "../AppSelect";
@@ -187,6 +188,7 @@ export function NativeModelAccessPane({ context, auth, visible, selected, onSele
       <button className="btn small outline" disabled={!auth.canUnpause || !!auth.busyProvider} onClick={() => setResume(true)}>{tr("恢复使用…", "Resume…")}</button>
     </div> : null}
     {provider?.id === ANTIGRAVITY_CLI ? <AntigravityReadiness context={context} visible={visible} zh={zh} /> : null}
+    {provider?.loginBehavior === "add-account" && <p className="small muted">{tr("每次登录都会新增一个账号。现有账号继续可用。", "Each sign-in adds an account. Existing accounts stay available.")}</p>}
     {provider?.warning ? <p className="model-native-warning"><Icon name="alert" extra="sm" /><span>{provider.warning}</span></p> : null}
     {!auth.supported ? <p className="small muted">{tr("连接支持原生 GUI challenge 的 Runtime 后可操作；没有读取模型时保持空态。", "Connect a Runtime with the native GUI challenge channel to continue. No read model is substituted.")}</p> : null}
     {panelError && keyStatus !== "unconfirmed" ? <p role="alert">{panelError}</p> : null}
@@ -195,6 +197,7 @@ export function NativeModelAccessPane({ context, auth, visible, selected, onSele
       {roster.models.map(model => <div className="model-native-model" key={model.selector}>
         <span><b>{model.name}</b><code>{model.selector}</code></span><span className="chip gray xs">{model.kind}</span><code>{model.api}</code>
         <span className="small muted">{model.contextWindow === undefined ? tr("上下文未知", "Context unknown") : `${model.contextWindow.toLocaleString()} tokens`}</span>
+        <ThinkingProbe config={model.thinkingConfig} />
         {model.kind === "chat" ? <button className="btn small outline" onClick={() => setInspected(model.selector)}>{tr("系统提示详情", "System prompt details")}</button> : <span className="small muted">{tr("用于对应原生角色，不作为聊天参数", "Native role runner, not chat parameters")}</span>}
       </div>)}
       {roster.truncated ? <p className="small muted">{tr(`当前显示前 ${roster.models.length} / ${roster.total ?? "未知"} 个授权模型；角色选择器仍读取完整的有界分页目录。`, `Showing the first ${roster.models.length} / ${roster.total ?? "unknown"} authorized models. Role pickers still read the bounded paginated catalog.`)}</p> : null}

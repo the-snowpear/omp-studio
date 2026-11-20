@@ -16,7 +16,7 @@ export interface SessionWarmingState {
   state: "unavailable" | "inactive" | "scheduled" | "refreshing";
   reason?: string;
   nextWarmAt?: number;
-  decision?: { phase: "streaming" | "idle"; warmCost: number; missCost: number; expectedSavings: number; continuationProbability: number; economicsAvailable: boolean; action: "warm" | "stop" };
+  decision?: { phase: "streaming" | "idle"; warmCost: number; missCost: number; expectedSavings: number; continuationProbability: number; economicsAvailable: boolean; action: "warm" | "stop" | "compact"; method?: "prewarm" | "replay"; compactCost?: number; spentCost?: number };
 }
 export interface ModelPresetRow {
   name: string; source: StudioSettingScope; active: boolean;

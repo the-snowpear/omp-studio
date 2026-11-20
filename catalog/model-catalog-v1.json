@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "version": "a6df552d314c84dd",
-  "upstreamCommit": "7c49c11aa5bbaf3f418406583096168ad5b8c6dc",
+  "version": "2158180a04b26aae",
+  "upstreamCommit": "f40f335845f0b136453d12fec8d6057011082766",
   "entries": [
     {
       "key": "abliteration/openai-responses/abliterated-model",
@@ -9682,6 +9682,29 @@
       }
     },
     {
+      "key": "antigravity-cli/antigravity-acp/gemini-4-neon",
+      "provider": "antigravity-cli",
+      "id": "gemini-4-neon",
+      "name": "Gemini 4 Neon",
+      "api": "antigravity-acp",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 262144,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "defaultLevel": "high",
+          "requiresEffort": true
+        }
+      }
+    },
+    {
       "key": "antigravity-cli/antigravity-acp/gpt-oss-120b-medium",
       "provider": "antigravity-cli",
       "id": "gpt-oss-120b-medium",
@@ -14290,8 +14313,9 @@
       "values": {
         "contextWindow": 1000000,
         "maxTokens": 65536,
-        "reasoning": false
-      }
+        "reasoning": true
+      },
+      "limitation": "native-thinking"
     },
     {
       "key": "commandcode/anthropic-messages/claude-haiku-4-5-20251001",
@@ -14316,8 +14340,9 @@
       "values": {
         "contextWindow": 1000000,
         "maxTokens": 65536,
-        "reasoning": false
-      }
+        "reasoning": true
+      },
+      "limitation": "native-thinking"
     },
     {
       "key": "commandcode/anthropic-messages/claude-opus-4-7",
@@ -14487,18 +14512,6 @@
       }
     },
     {
-      "key": "commandcode/openai-completions/deepseek/deepseek-v4.1-flash-ultrafast",
-      "provider": "commandcode",
-      "id": "deepseek/deepseek-v4.1-flash-ultrafast",
-      "name": "DeepSeek V4.1 Flash Ultrafast",
-      "api": "openai-completions",
-      "values": {
-        "contextWindow": 1048576,
-        "maxTokens": 65536,
-        "reasoning": false
-      }
-    },
-    {
       "key": "commandcode/openai-completions/google/gemini-3.7-flash",
       "provider": "commandcode",
       "id": "google/gemini-3.7-flash",
@@ -14541,51 +14554,6 @@
       }
     },
     {
-      "key": "commandcode/openai-completions/google/gemini-4-carbon",
-      "provider": "commandcode",
-      "id": "google/gemini-4-carbon",
-      "name": "Gemini 4 Carbon",
-      "api": "openai-completions",
-      "values": {
-        "contextWindow": 1000000,
-        "maxTokens": 65536,
-        "reasoning": true,
-        "thinkingConfig": {
-          "mode": "effort",
-          "efforts": [
-            "low",
-            "medium",
-            "high"
-          ],
-          "requiresEffort": true
-        }
-      }
-    },
-    {
-      "key": "commandcode/openai-completions/gpt-6.1-sol",
-      "provider": "commandcode",
-      "id": "gpt-6.1-sol",
-      "name": "GPT-6.1 Sol",
-      "api": "openai-completions",
-      "values": {
-        "contextWindow": 1050000,
-        "maxTokens": 65536,
-        "reasoning": false
-      }
-    },
-    {
-      "key": "commandcode/openai-completions/gpt-6.1-terra",
-      "provider": "commandcode",
-      "id": "gpt-6.1-terra",
-      "name": "GPT-6.1 Terra",
-      "api": "openai-completions",
-      "values": {
-        "contextWindow": 1050000,
-        "maxTokens": 65536,
-        "reasoning": false
-      }
-    },
-    {
       "key": "commandcode/openai-completions/inclusionai/ling-3.1-flash",
       "provider": "commandcode",
       "id": "inclusionai/ling-3.1-flash",
@@ -14594,7 +14562,15 @@
       "values": {
         "contextWindow": 262144,
         "maxTokens": 65536,
-        "reasoning": false
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
       }
     },
     {
@@ -14606,7 +14582,15 @@
       "values": {
         "contextWindow": 1000000,
         "maxTokens": 65536,
-        "reasoning": false
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
       }
     },
     {
@@ -14631,42 +14615,6 @@
       }
     },
     {
-      "key": "commandcode/openai-completions/meta/muse-ember",
-      "provider": "commandcode",
-      "id": "meta/muse-ember",
-      "name": "Muse Ember",
-      "api": "openai-completions",
-      "values": {
-        "contextWindow": 1048576,
-        "maxTokens": 65536,
-        "reasoning": false
-      }
-    },
-    {
-      "key": "commandcode/openai-completions/meta/muse-spark-open",
-      "provider": "commandcode",
-      "id": "meta/muse-spark-open",
-      "name": "Muse Spark Open",
-      "api": "openai-completions",
-      "values": {
-        "contextWindow": 1048576,
-        "maxTokens": 65536,
-        "reasoning": false
-      }
-    },
-    {
-      "key": "commandcode/openai-completions/meta/muse-wonder-1.0",
-      "provider": "commandcode",
-      "id": "meta/muse-wonder-1.0",
-      "name": "Muse Wonder",
-      "api": "openai-completions",
-      "values": {
-        "contextWindow": 1048576,
-        "maxTokens": 65536,
-        "reasoning": false
-      }
-    },
-    {
       "key": "commandcode/openai-completions/minimax/minimax-m3.1-flash",
       "provider": "commandcode",
       "id": "minimax/minimax-m3.1-flash",
@@ -14675,7 +14623,17 @@
       "values": {
         "contextWindow": 1000000,
         "maxTokens": 65536,
-        "reasoning": false
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
       }
     },
     {
@@ -14698,18 +14656,6 @@
       "api": "openai-completions",
       "values": {
         "contextWindow": 200000,
-        "maxTokens": 65536,
-        "reasoning": false
-      }
-    },
-    {
-      "key": "commandcode/openai-completions/mistral/mistral-large-4",
-      "provider": "commandcode",
-      "id": "mistral/mistral-large-4",
-      "name": "Mistral Large 4",
-      "api": "openai-completions",
-      "values": {
-        "contextWindow": 524288,
         "maxTokens": 65536,
         "reasoning": false
       }
@@ -14763,18 +14709,6 @@
       }
     },
     {
-      "key": "commandcode/openai-completions/moonshotai/Kimi-K3.1-Pro",
-      "provider": "commandcode",
-      "id": "moonshotai/Kimi-K3.1-Pro",
-      "name": "Kimi K3.1 Pro",
-      "api": "openai-completions",
-      "values": {
-        "contextWindow": 1048576,
-        "maxTokens": 65536,
-        "reasoning": false
-      }
-    },
-    {
       "key": "commandcode/openai-completions/nvidia/nemotron-3-ultra-550b-a55b",
       "provider": "commandcode",
       "id": "nvidia/nemotron-3-ultra-550b-a55b",
@@ -14793,18 +14727,6 @@
             "high"
           ]
         }
-      }
-    },
-    {
-      "key": "commandcode/openai-completions/nvidia/nemotron-3.5-super-vl",
-      "provider": "commandcode",
-      "id": "nvidia/nemotron-3.5-super-vl",
-      "name": "Nemotron 3.5 Super VL",
-      "api": "openai-completions",
-      "values": {
-        "contextWindow": 262144,
-        "maxTokens": 65536,
-        "reasoning": false
       }
     },
     {
@@ -14968,7 +14890,15 @@
       "values": {
         "contextWindow": 1000000,
         "maxTokens": 65536,
-        "reasoning": false
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "xhigh"
+          ]
+        }
       }
     },
     {
@@ -14992,22 +14922,21 @@
       }
     },
     {
-      "key": "commandcode/openai-completions/stealth/glyph-cluster:free",
+      "key": "commandcode/openai-completions/Qwen/Qwen4-Max",
       "provider": "commandcode",
-      "id": "stealth/glyph-cluster:free",
-      "name": "Glyph Cluster",
+      "id": "Qwen/Qwen4-Max",
+      "name": "Qwen 4 Max",
       "api": "openai-completions",
       "values": {
-        "contextWindow": 256000,
+        "contextWindow": 1000000,
         "maxTokens": 65536,
         "reasoning": true,
         "thinkingConfig": {
           "mode": "effort",
           "efforts": [
-            "minimal",
             "low",
-            "medium",
-            "high"
+            "high",
+            "xhigh"
           ]
         }
       }
@@ -15107,7 +15036,16 @@
       "values": {
         "contextWindow": 1048576,
         "maxTokens": 65536,
-        "reasoning": false
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "max"
+          ]
+        }
       }
     },
     {
@@ -15323,6 +15261,26 @@
       }
     },
     {
+      "key": "commandcode/openai-responses/deepseek/deepseek-v4.1-flash-ultrafast",
+      "provider": "commandcode",
+      "id": "deepseek/deepseek-v4.1-flash-ultrafast",
+      "name": "DeepSeek V4.1 Flash Ultrafast",
+      "api": "openai-responses",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ]
+        }
+      }
+    },
+    {
       "key": "commandcode/openai-responses/google/gemini-3.1-flash-lite",
       "provider": "commandcode",
       "id": "google/gemini-3.1-flash-lite",
@@ -15428,6 +15386,27 @@
       }
     },
     {
+      "key": "commandcode/openai-responses/google/gemini-4-carbon",
+      "provider": "commandcode",
+      "id": "google/gemini-4-carbon",
+      "name": "Gemini 4 Carbon",
+      "api": "openai-responses",
+      "values": {
+        "contextWindow": 1000000,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "requiresEffort": true
+        }
+      }
+    },
+    {
       "key": "commandcode/openai-responses/gpt-5.3-codex",
       "provider": "commandcode",
       "id": "gpt-5.3-codex",
@@ -15457,7 +15436,7 @@
       "api": "openai-responses",
       "webSearch": "openai",
       "values": {
-        "contextWindow": 1000000,
+        "contextWindow": 400000,
         "maxTokens": 65536,
         "reasoning": true,
         "thinkingConfig": {
@@ -15653,6 +15632,74 @@
       }
     },
     {
+      "key": "commandcode/openai-responses/gpt-6.1-sol",
+      "provider": "commandcode",
+      "id": "gpt-6.1-sol",
+      "name": "GPT-6.1 Sol",
+      "api": "openai-responses",
+      "webSearch": "openai",
+      "values": {
+        "contextWindow": 1050000,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "key": "commandcode/openai-responses/gpt-6.1-terra",
+      "provider": "commandcode",
+      "id": "gpt-6.1-terra",
+      "name": "GPT-6.1 Terra",
+      "api": "openai-responses",
+      "webSearch": "openai",
+      "values": {
+        "contextWindow": 1050000,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "key": "commandcode/openai-responses/meta/muse-ember",
+      "provider": "commandcode",
+      "id": "meta/muse-ember",
+      "name": "Muse Ember",
+      "api": "openai-responses",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      }
+    },
+    {
       "key": "commandcode/openai-responses/meta/muse-spark-1.1",
       "provider": "commandcode",
       "id": "meta/muse-spark-1.1",
@@ -15759,6 +15806,47 @@
       }
     },
     {
+      "key": "commandcode/openai-responses/meta/muse-spark-open",
+      "provider": "commandcode",
+      "id": "meta/muse-spark-open",
+      "name": "Muse Spark Open",
+      "api": "openai-responses",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    {
+      "key": "commandcode/openai-responses/meta/muse-wonder-1.0",
+      "provider": "commandcode",
+      "id": "meta/muse-wonder-1.0",
+      "name": "Muse Wonder",
+      "api": "openai-responses",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
       "key": "commandcode/openai-responses/MiniMaxAI/MiniMax-M3",
       "provider": "commandcode",
       "id": "MiniMaxAI/MiniMax-M3",
@@ -15766,6 +15854,26 @@
       "api": "openai-responses",
       "values": {
         "contextWindow": 1000000,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    {
+      "key": "commandcode/openai-responses/mistral/mistral-large-4",
+      "provider": "commandcode",
+      "id": "mistral/mistral-large-4",
+      "name": "Mistral Large 4",
+      "api": "openai-responses",
+      "values": {
+        "contextWindow": 524288,
         "maxTokens": 65536,
         "reasoning": true,
         "thinkingConfig": {
@@ -15804,6 +15912,51 @@
       }
     },
     {
+      "key": "commandcode/openai-responses/moonshotai/Kimi-K3.1-Pro",
+      "provider": "commandcode",
+      "id": "moonshotai/Kimi-K3.1-Pro",
+      "name": "Kimi K3.1 Pro",
+      "api": "openai-responses",
+      "values": {
+        "contextWindow": 1048576,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "high",
+            "max"
+          ],
+          "defaultLevel": "max",
+          "effortMap": {
+            "max": "max"
+          },
+          "requiresEffort": true
+        }
+      }
+    },
+    {
+      "key": "commandcode/openai-responses/nvidia/nemotron-3.5-super-vl",
+      "provider": "commandcode",
+      "id": "nvidia/nemotron-3.5-super-vl",
+      "name": "Nemotron 3.5 Super VL",
+      "api": "openai-responses",
+      "values": {
+        "contextWindow": 262144,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    {
       "key": "commandcode/openai-responses/sakana/fugu-ultra",
       "provider": "commandcode",
       "id": "sakana/fugu-ultra",
@@ -15816,6 +15969,27 @@
         "thinkingConfig": {
           "mode": "effort",
           "efforts": [
+            "high",
+            "xhigh"
+          ]
+        }
+      }
+    },
+    {
+      "key": "commandcode/openai-responses/stealth/glyph-cluster:free",
+      "provider": "commandcode",
+      "id": "stealth/glyph-cluster:free",
+      "name": "Glyph Cluster",
+      "api": "openai-responses",
+      "values": {
+        "contextWindow": 256000,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
             "high",
             "xhigh"
           ]
@@ -15837,6 +16011,24 @@
           "efforts": [
             "low",
             "medium",
+            "high"
+          ]
+        }
+      }
+    },
+    {
+      "key": "commandcode/openai-responses/tencent/hy4-flash",
+      "provider": "commandcode",
+      "id": "tencent/hy4-flash",
+      "name": "Tencent Hy4 Flash",
+      "api": "openai-responses",
+      "values": {
+        "contextWindow": 1024000,
+        "maxTokens": 65536,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
             "high"
           ]
         }
@@ -39731,6 +39923,30 @@
       }
     },
     {
+      "key": "liquid/liquid-systemone/d1.2",
+      "provider": "liquid",
+      "id": "d1.2",
+      "name": "d1.2",
+      "api": "liquid-systemone",
+      "kind": "judge",
+      "values": {
+        "contextWindow": 65536,
+        "reasoning": false
+      }
+    },
+    {
+      "key": "liquid/liquid-systemone/d1.2-ultra",
+      "provider": "liquid",
+      "id": "d1.2-ultra",
+      "name": "d1.2-ultra",
+      "api": "liquid-systemone",
+      "kind": "judge",
+      "values": {
+        "contextWindow": 65536,
+        "reasoning": false
+      }
+    },
+    {
       "key": "local/local-inference/falcon-h1-90m",
       "provider": "local",
       "id": "falcon-h1-90m",
@@ -39748,17 +39964,6 @@
       "name": "Gemma 3 1B",
       "api": "local-inference",
       "kind": "tiny",
-      "values": {
-        "reasoning": false
-      }
-    },
-    {
-      "key": "local/local-inference/kokoro",
-      "provider": "local",
-      "id": "kokoro",
-      "name": "Kokoro-82M",
-      "api": "local-inference",
-      "kind": "tts",
       "values": {
         "reasoning": false
       }
@@ -39825,6 +40030,17 @@
       "name": "Parakeet TDT 0.6B v3",
       "api": "local-inference",
       "kind": "stt",
+      "values": {
+        "reasoning": false
+      }
+    },
+    {
+      "key": "local/local-inference/phonon-31m",
+      "provider": "local",
+      "id": "phonon-31m",
+      "name": "Phonon 31M",
+      "api": "local-inference",
+      "kind": "tts",
       "values": {
         "reasoning": false
       }
@@ -41412,11 +41628,9 @@
         "thinkingConfig": {
           "mode": "effort",
           "efforts": [
-            "minimal",
             "low",
             "medium",
-            "high",
-            "xhigh"
+            "high"
           ]
         }
       }
@@ -41433,11 +41647,9 @@
         "thinkingConfig": {
           "mode": "effort",
           "efforts": [
-            "minimal",
             "low",
             "medium",
-            "high",
-            "xhigh"
+            "high"
           ]
         }
       }
@@ -41455,11 +41667,9 @@
         "thinkingConfig": {
           "mode": "effort",
           "efforts": [
-            "minimal",
             "low",
             "medium",
-            "high",
-            "xhigh"
+            "high"
           ]
         }
       }
@@ -41743,12 +41953,12 @@
         "thinkingConfig": {
           "mode": "effort",
           "efforts": [
-            "minimal",
             "low",
-            "medium",
             "high",
-            "xhigh"
-          ]
+            "max"
+          ],
+          "defaultLevel": "max",
+          "requiresEffort": true
         }
       }
     },
@@ -41765,12 +41975,12 @@
         "thinkingConfig": {
           "mode": "effort",
           "efforts": [
-            "minimal",
             "low",
-            "medium",
             "high",
-            "xhigh"
-          ]
+            "max"
+          ],
+          "defaultLevel": "max",
+          "requiresEffort": true
         }
       }
     },
@@ -69688,6 +69898,52 @@
       "provider": "openai",
       "id": "gpt-6.1-terra",
       "name": "GPT-6.1 Terra",
+      "api": "openai-responses",
+      "webSearch": "openai",
+      "values": {
+        "contextWindow": 1050000,
+        "maxTokens": 128000,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "key": "openai/openai-responses/gpt-6.2-astra",
+      "provider": "openai",
+      "id": "gpt-6.2-astra",
+      "name": "GPT-6.2 Astra",
+      "api": "openai-responses",
+      "webSearch": "openai",
+      "values": {
+        "contextWindow": 1050000,
+        "maxTokens": 128000,
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "key": "openai/openai-responses/gpt-6.2-sol",
+      "provider": "openai",
+      "id": "gpt-6.2-sol",
+      "name": "GPT-6.2 Sol",
       "api": "openai-responses",
       "webSearch": "openai",
       "values": {
@@ -105165,7 +105421,21 @@
       "values": {
         "contextWindow": 200000,
         "maxTokens": 200000,
-        "reasoning": false
+        "reasoning": true,
+        "thinkingConfig": {
+          "mode": "effort",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "effortMap": {
+            "minimal": "minimal",
+            "xhigh": "xhigh"
+          }
+        }
       }
     },
     {
@@ -113197,6 +113467,14 @@
       ]
     },
     {
+      "id": "bifrost",
+      "name": "Bifrost",
+      "credentialScoped": true,
+      "authoritative": true,
+      "endpoint": "http://localhost:8080/v1",
+      "kinds": []
+    },
+    {
       "id": "cerebras",
       "name": "Cerebras",
       "credentialScoped": false,
@@ -113528,6 +113806,13 @@
       ]
     },
     {
+      "id": "kiro",
+      "name": "Kiro",
+      "credentialScoped": true,
+      "authoritative": true,
+      "kinds": []
+    },
+    {
       "id": "liquid",
       "name": "Liquid AI",
       "credentialScoped": false,
@@ -113562,8 +113847,8 @@
       "endpoint": "local://inference",
       "kinds": [
         "tiny",
-        "tts",
-        "stt"
+        "stt",
+        "tts"
       ]
     },
     {
@@ -113620,6 +113905,14 @@
       "kinds": [
         "chat"
       ]
+    },
+    {
+      "id": "modal",
+      "name": "Modal",
+      "credentialScoped": true,
+      "authoritative": true,
+      "endpoint": "https://inference.us-west.modal.direct/v1",
+      "kinds": []
     },
     {
       "id": "modular",
@@ -114191,6 +114484,8 @@
       "openrouter/google/gemini-3-pro-image",
       "google/gemini-3-pro-image",
       "deepinfra/black-forest-labs/FLUX-2-pro",
+      "factory-droid/gpt-image-2.6-sunburst",
+      "factory-droid/gpt-image-2.6-flare",
       "factory-droid/gpt-image-2.5-sunburst",
       "factory-droid/gpt-image-2.5-flare",
       "factory-droid/gemini-3-pro-image-preview"
@@ -114209,7 +114504,7 @@
       "web/public"
     ],
     "speech": [
-      "local/kokoro",
+      "local/phonon-31m",
       "xai/grok-tts",
       "xai-oauth/grok-tts"
     ],

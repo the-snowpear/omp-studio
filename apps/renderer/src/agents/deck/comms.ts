@@ -16,6 +16,8 @@ export type SwarmMessage = {
   readonly from: string;
   readonly to: readonly string[];
   readonly body: string;
+  readonly peer?: boolean;
+  readonly peerInstance?: string;
   readonly at: number;
   readonly replyTo?: string;
   /** The main agent's message to everyone; `to` lists the legs that reached someone. */
@@ -71,6 +73,8 @@ export function swarmMessages(records: readonly StudioAgentMessage[]): SwarmMess
       id, from: record.from, to: [record.to], body: record.body, at: record.at,
       ...(record.replyTo ? { replyTo: record.replyTo } : {}),
       ...(record.broadcast ? { broadcast: true } : {}),
+      ...(record.peer ? {peer:true} : {}),
+      ...(record.peerInstance ? {peerInstance:record.peerInstance} : {}),
       ...(record.progress ? { progress: true } : {}),
     });
   }

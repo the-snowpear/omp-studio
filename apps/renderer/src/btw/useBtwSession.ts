@@ -69,7 +69,7 @@ export interface BtwSessionApi {
   readonly pending: boolean;
   readonly error: string | undefined;
   readonly notice: string | undefined;
-  ask(question: string, newTopic?: boolean, images?: import("@omp-studio/client-contract").PromptImageInput[], command?: { name: string; arguments: string }): Promise<boolean>;
+  ask(question: string, newTopic?: boolean, images?: import("@omp-studio/client-contract").PromptImageInput[], command?: { name: string; arguments: string }, onTopic?: (topicId: string) => void): Promise<boolean>;
   abort(): Promise<void>;
   branch(): Promise<void>;
   inject?(id?: string): Promise<void>;
@@ -321,7 +321,7 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
   );
 
   const ask = useCallback(
-    async (text: string, forceNewTopic = false, images?: import("@omp-studio/client-contract").PromptImageInput[], command?: { name: string; arguments: string }): Promise<boolean> => {
+    async (text: string, forceNewTopic = false, images?: import("@omp-studio/client-contract").PromptImageInput[], command?: { name: string; arguments: string }, onTopic?: (topicId: string) => void): Promise<boolean> => {
       const trimmed = text.trim();
       if (trimmed.length === 0) {
         setError(zhRef.current ? "先写下要问的问题" : "Enter a question first");
@@ -335,7 +335,7 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
         const demoAnswer = getPreviewBtwTurns(zhRef.current)[1]!.answer;
         const rows = [...(demoHistory.current.get(topicId) ?? []), { question: trimmed, ...(images?.length ? { images } : {}), answer: demoAnswer, status: "complete" as const, createdAt: Date.now(), updatedAt: Date.now() }];
         demoHistory.current.set(topicId, rows);
-        setNewTopicDraft(false); setSelectedTopicId(topicId); setQuestionImages(images ?? []);
+        onTopic?.(topicId); setNewTopicDraft(false); setSelectedTopicId(topicId); setQuestionImages(images ?? []);
         setDemoSnapshot({ ephemeralId: `demo-round-${++demoSequence.current}`, topicId, question: trimmed, status: "completed", turnIndex: rows.length - 1, text: demoAnswer });
         setTurns(rows);
         setTopics(previous => [{ topicId, question: rows[0]!.question, status: "complete", updatedAt: Date.now(), turnCount: rows.length }, ...previous.filter(row => row.topicId !== topicId)]);
@@ -371,7 +371,7 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
         const outcome = await dispatch<BtwAskOutcome>("btw.ask", { question: trimmed, ...(images?.length ? { images } : {}), ...(command ? { command } : {}) });
         if (generation !== selectionGeneration.current) return false;
         setTurns([]); setQuestionImages(images ?? []);
-        setSelectedTopicId(historyAvailable ? outcome.ephemeralId : null);
+        onTopic?.(outcome.ephemeralId); setSelectedTopicId(historyAvailable ? outcome.ephemeralId : null);
         setHistorySnapshot({ ephemeralId: outcome.ephemeralId, topicId: outcome.ephemeralId, question: trimmed, status: "running", text: "", turnIndex: 0 });
         setBranchToken(outcome.branchToken);
         setTokenEphemeralId(outcome.ephemeralId);

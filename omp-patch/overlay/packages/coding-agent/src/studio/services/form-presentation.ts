@@ -1,5 +1,5 @@
 import { defaultFormData, fieldQuestions } from "@oh-my-pi/pi-tui/html-form/data";
-import { isSvgMedia, loadFormImage, svgMedia, type FormMediaOptions } from "@oh-my-pi/pi-tui/html-form/media";
+import { isSvgMedia, loadMedia, svgMedia, type MediaOptions } from "@oh-my-pi/pi-tui/media";
 import type { FormBlock, HtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
 import { resizeImage } from "../../utils/image-resize";
 import type { InteractionForm, InteractionFormBlock } from "../form-protocol";
@@ -11,7 +11,10 @@ export const FORM_DTO_MAX_BYTES = 768 * 1024;
 const FORM_RASTER_MAX_BYTES = 192 * 1024;
 
 /** Native parser owns structure, captions and defaults. Only media and field references change for the wire. */
-export async function presentHtmlForm(form: HtmlForm, options: FormMediaOptions): Promise<InteractionForm> {
+export async function presentHtmlForm(
+	form: HtmlForm,
+	options: MediaOptions & { acceptImages?: boolean },
+): Promise<InteractionForm> {
 	const questions = fieldQuestions(form);
 	const ids = new Map(form.fields.map((field, index) => [field, `field:${index}`]));
 	const mediaBlocks: Array<{ block: Extract<FormBlock, { kind: "image" | "svg" }>; section: number; index: number }> =
@@ -41,6 +44,7 @@ export async function presentHtmlForm(form: HtmlForm, options: FormMediaOptions)
 			id: ids.get(field)!,
 			question: questions.get(field) ?? field.name,
 		})),
+		acceptImages: options.acceptImages,
 		hidden: form.hidden,
 		defaults: defaultFormData(form),
 	};
@@ -58,7 +62,7 @@ export async function presentHtmlForm(form: HtmlForm, options: FormMediaOptions)
 		let next: InteractionFormBlock;
 		try {
 			const media =
-				slot.block.kind === "svg" ? svgMedia(slot.block.markup) : await loadFormImage(slot.block.src, options);
+				slot.block.kind === "svg" ? svgMedia(slot.block.markup) : await loadMedia(slot.block.src, options);
 			if (isSvgMedia(media)) {
 				next = {
 					kind: "graphic",

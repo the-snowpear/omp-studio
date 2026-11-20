@@ -3,7 +3,7 @@ import { cfgRetryUsageReservePct, resetWindowSettings } from "../../session/sett
 import { logoutCredential } from "../../slash-commands/helpers/logout";
 import { createHash } from "node:crypto";
 import type { OAuthAccountSummary, ResetCreditAccountStatus, UsageReport } from "@oh-my-pi/pi-ai";
-import { resolveUsedFraction } from "@oh-my-pi/pi-ai/usage";
+import { resolveUsedFraction, usageSubscriptionPlan } from "@oh-my-pi/pi-ai/usage";
 import type { AgentSession } from "../../session/agent-session";
 import type {
 	AccountQuotaWindow,
@@ -30,6 +30,7 @@ const accountId = (provider: string, identity: string) =>
 		.slice(0, 32);
 export function accountMatchesReport(account: OAuthAccountSummary, report: UsageReport): boolean {
 	const metadata = report.metadata ?? {};
+	if (typeof metadata.credentialId === "number") return metadata.credentialId === account.credentialId;
 	if (typeof metadata.orgId === "string" && metadata.orgId !== account.orgId) return false;
 	if (typeof metadata.accountId === "string") return metadata.accountId === account.accountId;
 	if (typeof metadata.email === "string") return metadata.email === account.email;
@@ -205,6 +206,7 @@ export class StudioAccountStatusService {
 		const assigned = new Set<UsageReport>();
 		for (const provider of providers) {
 			const native = auth.oauth.accounts(provider, this.session.sessionId);
+			const stickyId = auth.sessions?.sticky?.(provider, this.session.sessionId)?.credentialId;
 			for (const account of native) {
 				const matches = this.#reports.filter(
 					report =>
@@ -225,8 +227,11 @@ export class StudioAccountStatusService {
 					...(account.orgName ? { organization: clean(account.orgName) } : {}),
 					source: "oauth",
 					active: account.active,
+					activeCredential: account.active,
+					credentialId: account.credentialId,
+					subscriptionPlan: usageSubscriptionPlan(report),
 					resetPolicies: this.#resetPolicies(provider),
-					limits: report ? projectQuota(report, details) : [],
+					limits: report ? projectQuota(report, details || provider === "kiro") : [],
 					...(report ? { reportedAt: report.fetchedAt } : {}),
 					resets: resetStatus(
 						this.#resets.find(item => item.provider === provider && item.credentialId === account.credentialId),
@@ -235,18 +240,25 @@ export class StudioAccountStatusService {
 				});
 			}
 			const source = auth.keys.source(provider);
-			if (!native.length && source) {
-				// Key/user budgets are two scopes of the calling key's report, not two fake OAuth accounts.
-				const reports = this.#reports.filter(report => report.provider === provider);
-				const report = reports.sort((left, right) => right.fetchedAt - left.fetchedAt)[0];
-				if (report) reports.forEach(row => assigned.add(row));
+			const keyReports = this.#reports.filter(report => report.provider === provider && !assigned.has(report));
+			const keys = auth.credentials.list(provider).filter(row => row.credential.type === "api_key");
+			for (const key of keys.length ? keys : !native.length && source ? [undefined] : []) {
+				const credentialId = key?.id;
+				const matches = keyReports.filter(report => report.metadata?.credentialId === credentialId);
+				const report = matches.sort((left, right) => right.fetchedAt - left.fetchedAt)[0];
+				if (report) matches.forEach(row => assigned.add(row));
+				const active =
+					credentialId === undefined ? this.session.model?.provider === provider : credentialId === stickyId;
 				accounts.push({
-					id: accountId(provider, "key"),
+					id: accountId(provider, credentialId === undefined ? "key" : String(credentialId)),
 					provider,
 					label: typeof report?.metadata?.email === "string" ? clean(report.metadata.email) : provider,
-					source: source.concrete ? "api-key" : "ambient",
-					active: this.session.model?.provider === provider,
-					limits: report ? projectQuota(report, details) : [],
+					source: key || source?.concrete ? "api-key" : "ambient",
+					active,
+					activeCredential: active,
+					credentialId,
+					subscriptionPlan: usageSubscriptionPlan(report),
+					limits: report ? projectQuota(report, details || provider === "kiro") : [],
 					...(report ? { reportedAt: report.fetchedAt } : {}),
 					resets: { state: "unfetched", credits: [] },
 				});

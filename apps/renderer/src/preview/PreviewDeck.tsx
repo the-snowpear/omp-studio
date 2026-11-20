@@ -13,10 +13,12 @@ import { usePreviewMode } from "./PreviewContext";
  */
 export function PreviewDeck({
   onCurrentKind,
+  skipSignal,
   planExpanded,
   onPlanExpandedChange,
   planOriginRef,
 }: {
+  skipSignal?: number;
   onCurrentKind?: (kind: "plan" | "ask" | null) => void;
   planExpanded?: boolean;
   onPlanExpandedChange?: (open: boolean) => void;
@@ -61,7 +63,7 @@ export function PreviewDeck({
     }); };
   }, []);
   return (
-    <QueuedDeck
+    <QueuedDeck skipSignal={skipSignal}
       items={items}
       demo={marks}
       previewMark={marks}

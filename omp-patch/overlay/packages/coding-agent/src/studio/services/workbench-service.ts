@@ -26,7 +26,7 @@ import { StudioSessionPortabilityService } from "./session-portability-service";
 import { isSessionPortabilityKind, type SessionPortabilityOperation } from "../session-portability-protocol";
 import { StudioFeatureSettingsService } from "./feature-settings-service";
 import { isFeatureSettingsKind, type FeatureSettingsOperation } from "../feature-settings-protocol";
-import { StudioIdaDetailsService } from "./ida-details-service";
+import { StudioDisassemblerService } from "./disassembler-service";
 import { StudioSessionTitlesService } from "./session-titles-service";
 import { isSessionTitlesKind, type SessionTitlesOperation } from "../session-titles-protocol";
 import { StudioPredictionService } from "./prediction-service";
@@ -48,7 +48,6 @@ import { isRatchetKind, type RatchetOperation } from "../ratchet-protocol";
 import { cfgLaunchEnabled } from "../../tools/settings";
 import { StudioSessionGuiService } from "./session-gui-service";
 import { StudioAgentBtwService } from "./agent-btw-service";
-import { StudioIdaService } from "./ida-service";
 import { StudioResourceService } from "./resource-service";
 import { StudioSkillshareService } from "./skillshare-service";
 import { StudioLiveAudioService } from "./live-audio-service";
@@ -66,7 +65,7 @@ import { StudioComputerWorkspaceService } from "./computer-workspace-service";
 import { isComputerWorkspaceCommand, type ComputerWorkspaceCommand } from "../computer-workspace-protocol";
 import { isComputerObservationKind, type ComputerObservationOperation } from "../computer-observation-protocol";
 import { isBrowserObservationKind, type BrowserObservationOperation } from "../browser-observation-protocol";
-import { isIdaOperationKind, type StudioIdaOperation } from "../ida-details-protocol";
+import { isDisassemblerKind, type DisassemblerOperation } from "../disassembler-protocol";
 import { isSessionOptionsKind, type SessionOptionsOperation } from "../session-options-protocol";
 import { type JudgmentOperation } from "../judgments-protocol";
 import { isRuntimeFeatureKind, type RuntimeFeatureOperation } from "../runtime-features-protocol";
@@ -79,9 +78,9 @@ import { StudioAccountStatusService } from "./account-status-service";
 import * as path from "node:path";
 import { realpath } from "node:fs/promises";
 import { Encoding, countTokens } from "@oh-my-pi/pi-natives";
-import type { DaemonSnapshot } from "../../launch/protocol";
+import type { UnitSnapshot } from "../../daemon/protocol";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
-import { listServices, requestService, startService } from "../../launch/services";
+import { listServices, modeService, requestService, startService } from "../../launch/services";
 import type { AgentSession } from "../../session/agent-session";
 import type { StudioServiceRow, WorkbenchOperation } from "../workbench-protocol";
 import { SessionControlError } from "./session-control-service";
@@ -108,11 +107,11 @@ function isMaintenanceOperation(operation: WorkbenchOperation): operation is Mai
 function isArchiveOperation(operation: WorkbenchOperation): operation is ArchiveOperation {
 	return isArchiveOperationKind(operation.kind);
 }
+function isDisassemblerOperation(operation: WorkbenchOperation): operation is DisassemblerOperation {
+	return isDisassemblerKind(operation.kind);
+}
 function isSessionOptionsOperation(operation: WorkbenchOperation): operation is SessionOptionsOperation {
 	return isSessionOptionsKind(operation.kind);
-}
-function isIdaOperation(operation: WorkbenchOperation): operation is StudioIdaOperation {
-	return isIdaOperationKind(operation.kind);
 }
 function isBrowserObservationOperation(operation: WorkbenchOperation): operation is BrowserObservationOperation {
 	return isBrowserObservationKind(operation.kind);
@@ -135,21 +134,27 @@ function isRatchetOperation(operation: WorkbenchOperation): operation is Ratchet
 function isNativePreferenceOperation(operation: WorkbenchOperation): operation is NativePreferenceOperation {
 	return isNativePreferenceKind(operation.kind);
 }
-export function projectService(daemon: DaemonSnapshot): StudioServiceRow {
+export function projectService(daemon: UnitSnapshot, sessionId?: string): StudioServiceRow {
 	return {
-		name: daemon.name,
-		instanceId: daemon.id + ":" + daemon.startedAt,
+		name: daemon.key,
+		scope:
+			daemon.scope.kind === "project" && daemon.owner === sessionId && sessionId !== undefined
+				? "session"
+				: daemon.scope.kind,
+		instanceId: daemon.id + ":" + daemon.generation,
 		state: daemon.state,
 		startedAt: daemon.startedAt,
-		...(daemon.previewUrl === undefined ? {} : { previewUrl: daemon.previewUrl }),
-		...(daemon.pid === undefined ? {} : { pid: daemon.pid }),
-		...(daemon.readyAt === undefined ? {} : { readyAt: daemon.readyAt }),
-		...(daemon.exitedAt === undefined ? {} : { exitedAt: daemon.exitedAt }),
-		...(daemon.exitCode === undefined ? {} : { exitCode: daemon.exitCode }),
+		previewUrl: daemon.previewUrl,
+		pid: daemon.pids[0],
+		readyAt: daemon.readyAt,
+		exitedAt: daemon.exitedAt,
+		exitCode: daemon.exitCode,
 		restartCount: daemon.restartCount,
 		outputBytes: daemon.outputBytes,
 		...(daemon.owner === undefined ? {} : { ownerId: daemon.owner, ownerAgentId: daemon.owner }),
-		mode: daemon.detached ? "detached" : daemon.persist ? "persist" : "session",
+		mode:
+			daemon.policy.survive === "detached" ? "detached" : daemon.policy.hold === "persist" ? "persist" : "session",
+		manageable: daemon.kind === "proc" && daemon.scope.kind !== "global",
 	};
 }
 
@@ -174,7 +179,6 @@ export class StudioWorkbenchService {
 	readonly evaluations: StudioEvaluationWorkspaceService;
 	readonly ratchet: StudioRatchetService;
 	readonly resources: StudioResourceService;
-	readonly ida: StudioIdaService;
 	readonly agentBtw: StudioAgentBtwService;
 	readonly sessionGui: StudioSessionGuiService;
 	readonly skillshare: StudioSkillshareService;
@@ -192,7 +196,7 @@ export class StudioWorkbenchService {
 	readonly accounts: StudioAccountStatusService;
 	readonly annotations: StudioAnnotationService;
 	readonly sessionOptions: StudioSessionOptionsService;
-	readonly idaDetails: StudioIdaDetailsService;
+	readonly disassembler: StudioDisassemblerService;
 	readonly browserObservation: StudioBrowserObservationService;
 	readonly managedBrowser: StudioManagedBrowserService;
 	readonly computerObservation: StudioComputerObservationService;
@@ -225,7 +229,6 @@ export class StudioWorkbenchService {
 		this.skillshare = new StudioSkillshareService(session);
 		this.sessionGui = new StudioSessionGuiService(session);
 		this.agentBtw = new StudioAgentBtwService(session);
-		this.ida = new StudioIdaService(session);
 		this.resources = new StudioResourceService(session);
 		this.accounts = new StudioAccountStatusService(session);
 		this.judgments = new StudioJudgmentService(session);
@@ -243,7 +246,7 @@ export class StudioWorkbenchService {
 		this.media = new StudioMediaService(session);
 		this.annotations = new StudioAnnotationService(session);
 		this.sessionOptions = new StudioSessionOptionsService(session);
-		this.idaDetails = new StudioIdaDetailsService(session);
+		this.disassembler = new StudioDisassemblerService(session);
 		this.browserObservation = new StudioBrowserObservationService(session);
 		this.managedBrowser = new StudioManagedBrowserService(session);
 		this.computerObservation = new StudioComputerObservationService(session, undefined, this.computerWorkspace);
@@ -269,8 +272,7 @@ export class StudioWorkbenchService {
 		void this.computerWorkspace.dispose().catch(() => {});
 		this.browserObservation.dispose();
 		this.managedBrowser.dispose();
-		this.idaDetails.dispose();
-		this.ida.dispose();
+		this.disassembler.dispose();
 		this.agentBtw.dispose();
 		this.skillshare.dispose();
 		this.accounts.dispose();
@@ -338,17 +340,9 @@ export class StudioWorkbenchService {
 		if (operation.kind === "browser.webmcp.invoke") return this.managedBrowser.webMcpInvoke(operation);
 		if (operation.kind === "extensions.links.activate") return activateStudioExtensionLink(this.session, operation);
 		if (isBrowserObservationOperation(operation)) return this.browserObservation.execute(operation);
-		if (isIdaOperation(operation)) return this.idaDetails.execute(operation);
+		if (isDisassemblerOperation(operation)) return this.disassembler.execute(operation);
 		if (isSessionOptionsOperation(operation)) return this.sessionOptions.execute(operation);
 		if (operation.kind === "resource.read") return this.resources.read(operation);
-		if (
-			operation.kind === "ida.status" ||
-			operation.kind === "ida.view" ||
-			operation.kind === "ida.prepare" ||
-			operation.kind === "ida.commit" ||
-			operation.kind === "ida.cancel"
-		)
-			return this.ida.execute(operation);
 		if (
 			operation.kind === "agent.btw.read" ||
 			operation.kind === "agent.btw.ask" ||
@@ -469,15 +463,18 @@ export class StudioWorkbenchService {
 		const session = this.session.studioToolSession;
 		if (!session) throw new SessionControlError("COMMAND_BLOCKED", "Service context is unavailable");
 		const enabled = cfgLaunchEnabled.get(session.settings);
-		if (operation.kind === "services.list")
-			return { enabled, services: (await listServices(session)).slice(0, 500).map(projectService) };
-		// An older broker silently ignores unknown fence fields. Never send it a GUI mutation.
-		const ping = await requestService(session, { op: "ping" });
-		if (ping.op !== "ping" || !ping.instanceFencing)
-			throw new SessionControlError(
-				"COMMAND_BLOCKED",
-				"This project broker needs to be restarted with the updated Runtime before controlling services",
-			);
+		if (operation.kind === "services.list") {
+			const [project, global] = await Promise.all([
+				listServices(session),
+				requestService(session, { op: "list", scope: { kind: "global" } }),
+			]);
+			return {
+				enabled,
+				services: [...project, ...global.units]
+					.slice(0, 500)
+					.map(unit => projectService(unit, this.session.sessionId)),
+			};
+		}
 		if (operation.kind === "services.start") {
 			const spec = operation.spec;
 			const root = await realpath(session.cwd);
@@ -492,9 +489,14 @@ export class StudioWorkbenchService {
 				awaitReady: false,
 				...(spec.ready ? { ready: { ...spec.ready, timeout: spec.ready.timeoutMs / 1000 } } : {}),
 			});
-			return { service: projectService(result.daemon), readyTimedOut: result.readyTimedOut };
+			return { service: projectService(result.daemon, this.session.sessionId), readyTimedOut: result.readyTimedOut };
 		}
-		const named = { name: operation.name, expectedInstanceId: operation.instanceId };
+		const target = (await listServices(session)).find(
+			unit => unit.key === operation.name && projectService(unit).instanceId === operation.instanceId,
+		);
+		if (!target)
+			throw new SessionControlError("COMMAND_BLOCKED", "Service instance changed; refresh before trying again");
+		const named = { unit: target.id, generation: target.generation };
 		if (operation.kind === "services.logs") {
 			const result = await requestService(session, {
 				op: "logs",
@@ -504,28 +506,30 @@ export class StudioWorkbenchService {
 				follow: false,
 				timeoutMs: 1000,
 				cursor: operation.cursor,
-				renderTerminalRows: true,
 			});
-			if (result.op !== "logs") throw new Error("Unexpected service logs response");
 			return {
 				instanceId: operation.instanceId,
-				text: sanitizeText(result.terminalRows?.join("\n") ?? result.text).slice(-65536),
+				text: sanitizeText(result.terminalOutput || result.text).slice(-65536),
 				cursor: result.cursor,
-				state: result.state,
+				state: result.unit.state,
 			};
 		}
-		const result = await requestService(
-			session,
-			operation.kind === "services.stop"
-				? { op: "stop", ...named, timeoutMs: 5000 }
-				: operation.kind === "services.restart"
-					? { op: "restart", ...named }
-					: operation.kind === "services.mode.set"
-						? { op: "mode", ...named, mode: operation.mode }
-						: { op: "send", ...named, data: operation.text },
-		);
-		if (!("daemon" in result)) throw new Error("Unexpected service response");
-		return { service: projectService(result.daemon) };
+		const unit =
+			operation.kind === "services.mode.set"
+				? await modeService(session, operation.name, operation.mode, undefined, named)
+				: (
+						await requestService(
+							session,
+							operation.kind === "services.stop"
+								? { op: "stop", ...named, timeoutMs: 5000 }
+								: operation.kind === "services.restart"
+									? { op: "restart", ...named }
+									: { op: "send", ...named, data: operation.text },
+						)
+					).unit;
+		if (operation.kind === "services.stop" && unit.generation !== named.generation)
+			throw new SessionControlError("COMMAND_BLOCKED", "Service instance changed; refresh before trying again");
+		return { service: projectService(unit, this.session.sessionId) };
 	}
 }
 
@@ -543,6 +547,7 @@ export function projectRuntimeModel(model: Model, includeExecution = false): Run
 		kind: model.kind ?? "chat",
 		image: model.input.includes("image"),
 		reasoning: model.reasoning,
+		snapcompactShape: model.snapcompactShape,
 		...(model.contextWindow === null ? {} : { contextWindow: model.contextWindow }),
 		...(model.maxTokens === null ? {} : { maxTokens: model.maxTokens }),
 		...(model.webSearch ? { webSearch: model.webSearch } : {}),

@@ -34,12 +34,14 @@ export interface ComputerFrame {
 
 /** Native takeover focus report, not inferred from requested input mode. */
 export interface ComputerFocusReturn {
+  keyboard?: "handedBack" | "leftAsChosen" | "kept" | "frontOnly" | "notSent";
   handedBack: boolean;
   previousPid?: number;
   frontPid?: number;
 }
 
 export interface ComputerAction {
+  nativeWindowIds?: string[];
   unconfirmed?: string;
   focusReturn?: ComputerFocusReturn;
   id: string;

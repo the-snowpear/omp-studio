@@ -63,6 +63,8 @@ export type DraftOverrideForm = {
   premiumMultiplier: string;
   imageCountBudget: string;
   headersText: string;
+  snapcompactVariant: string;
+  snapcompactFrame: string;
   contextPromotionTarget: string;
   compactionModel: string;
   rcEnabled: "" | "true" | "false";
@@ -90,6 +92,8 @@ export type CustomModelForm = {
   premiumMultiplier: string;
   imageCountBudget: string;
   headersText: string;
+  snapcompactVariant: string;
+  snapcompactFrame: string;
   contextPromotionTarget: string;
   compactionModel: string;
   baseUrl: string;

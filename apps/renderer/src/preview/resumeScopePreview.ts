@@ -7,7 +7,7 @@ export const PREVIEW_RESUME_STRANDED_CWD = "D:/work/omp-studio-wt/dictation-poli
 
 export function getPreviewResumeSessions(zh = isZh()): SessionResumeRow[] {
   const stranded: SessionResumeRow = {
-    sessionId: PREVIEW_RESUME_STRANDED_ID, modifiedAt: "2026-10-27T09:40:00Z", currentDirectory: false, directoryName: "dictation-policy", messageCount: 9, status: "interrupted",
+    sessionId: PREVIEW_RESUME_STRANDED_ID, modifiedAt: "2026-10-27T09:40:00Z", backend: "ovnfs", sourceDirectory: "/workspace/studio", currentDirectory: false, directoryName: "dictation-policy", messageCount: 9, status: "interrupted",
     title: zh ? "语音 Provider 政策核对" : "Dictation provider policy check",
     firstMessage: zh ? "核对 models.offline 开启后语音转写是否只走当前 Provider。" : "Check that dictation only uses the session provider while models.offline is on.",
     conversationExcerpt: zh ? "已确认转写模型不在当前 Provider 时会阻止上传。该 Worktree 已在本机清理，恢复时需要选择继续执行的工作区。" : "Confirmed uploads are blocked when the dictation model is on another provider. This worktree was cleaned up locally, so resuming asks where to continue.",

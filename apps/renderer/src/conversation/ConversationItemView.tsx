@@ -620,7 +620,7 @@ export const ConversationItemView = memo(function ConversationItemView({
   const { resolvedLanguage } = useI18n();
   if (row.type === "advisor") return <AdvisorMessage row={row} />;
   if (row.type === "extension") return <div className="ev ev-extension" data-item-id={row.itemId}>
-    <div className="ev-head"><span className="who">{resolvedLanguage === "zh" ? "扩展通知" : "Extension notice"}</span><span>{formatTime(row.createdAt)}</span></div>
+    <div className="ev-head"><span className="who">{row.asyncNotify ? resolvedLanguage === "zh" ? "后台输出通知" : "Background output" : resolvedLanguage === "zh" ? "扩展通知" : "Extension notice"}</span>{row.excludeFromContext && <span className="chip gray xs">{resolvedLanguage === "zh" ? "仅界面可见 · 不入模型上下文" : "Excluded from model context"}</span>}<span>{formatTime(row.createdAt)}</span></div>
     <MessageBody text={row.text} copyText={row.text} />
   </div>;
   if (row.type === "user") {

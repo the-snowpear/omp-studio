@@ -81,18 +81,6 @@ export interface McpAuthResult {
 	message?: string;
 }
 
-export interface SeanceResult {
-	/** The answer text of the read-only consult. */
-	text: string;
-	sourceSessionId: string;
-	/** Agent id to send follow-up questions to, when the consult stays addressable. */
-	agentId?: string;
-	model?: string;
-	/** `running` when `async.enabled` detached the consult into a background job (`text` is then a notice). */
-	state: "completed" | "running";
-	jobId?: string;
-}
-
 export type RuntimeFeatureOperation =
 	| { kind: "agent.spawn.options"; sessionId: string; definition: string }
 	| { kind: "btw.inject"; sessionId: string; injectId: string }
@@ -103,8 +91,7 @@ export type RuntimeFeatureOperation =
 	| { kind: "jobs.inspect"; sessionId: string; jobId: string }
 	| { kind: "mcp.auth.reauth"; sessionId: string; name: string }
 	| { kind: "mcp.auth.unauth"; sessionId: string; name: string }
-	| { kind: "mcp.auth.reconnect"; sessionId: string; name: string }
-	| { kind: "seance.ask"; sessionId: string; source: string; task: string; model?: string };
+	| { kind: "mcp.auth.reconnect"; sessionId: string; name: string };
 export interface RuntimeFeatureResultMap {
 	"agent.spawn.options": {
 		stepsAdvertised: boolean;
@@ -123,7 +110,6 @@ export interface RuntimeFeatureResultMap {
 	"mcp.auth.reauth": McpAuthResult;
 	"mcp.auth.unauth": McpAuthResult;
 	"mcp.auth.reconnect": McpAuthResult;
-	"seance.ask": SeanceResult;
 }
 export const RUNTIME_FEATURE_KINDS = [
 	"agent.spawn.options",
@@ -136,7 +122,6 @@ export const RUNTIME_FEATURE_KINDS = [
 	"mcp.auth.reauth",
 	"mcp.auth.unauth",
 	"mcp.auth.reconnect",
-	"seance.ask",
 ] as const;
 export const RUNTIME_FEATURE_READ_KINDS = [
 	"agent.spawn.options",
@@ -162,9 +147,4 @@ export function validateRuntimeFeatureOperation(value: unknown): asserts value i
 	text(input.sessionId, "sessionId");
 	if (kind === "jobs.inspect") text(input.jobId, "jobId");
 	if (kind.startsWith("mcp.auth.")) text(input.name, "name");
-	if (kind === "seance.ask") {
-		text(input.source, "source", 4096);
-		text(input.task, "task", 32000);
-		if (input.model !== undefined) text(input.model, "model");
-	}
 }

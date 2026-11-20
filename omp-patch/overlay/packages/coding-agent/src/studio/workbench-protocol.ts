@@ -35,6 +35,7 @@ import {
 import {
 	LOCAL_RESOURCE_KINDS,
 	isLocalResourceKind,
+	validateLocalResourceOperation,
 	type LocalResourceOperation,
 	type LocalResourceResultMap,
 } from "./local-resources-protocol";
@@ -165,12 +166,12 @@ import {
 	type BrowserObservationResultMap,
 } from "./browser-observation-protocol";
 import {
-	IDA_OPERATION_KINDS,
-	isIdaOperationKind,
-	validateStudioIdaOperation,
-	type StudioIdaOperation,
-	type StudioIdaResultMap,
-} from "./ida-details-protocol";
+	DISASSEMBLER_KINDS,
+	isDisassemblerKind,
+	validateDisassemblerOperation,
+	type DisassemblerOperation,
+	type DisassemblerResultMap,
+} from "./disassembler-protocol";
 import {
 	SESSION_OPTIONS_KINDS,
 	isSessionOptionsKind,
@@ -258,6 +259,8 @@ export interface StudioServiceSpec {
 }
 export interface StudioServiceRow {
 	name: string;
+	scope?: "session" | "project" | "global";
+	manageable?: boolean;
 	instanceId: string;
 	state: "starting" | "running" | "ready" | "restarting" | "stopping" | "exited" | "failed";
 	startedAt: number;
@@ -276,6 +279,7 @@ export interface StudioServiceRow {
 	mode: "session" | "persist" | "detached";
 }
 export interface RuntimeModelChoice {
+	snapcompactShape?: { variant: string; frameSize?: number };
 	serviceTiers?: string[];
 	promptCache?: { short?: number; long?: number };
 	promptCacheConfig?: { short?: number; long?: number };
@@ -331,7 +335,7 @@ export type WorkbenchOperation =
 	| ComputerObservationOperation
 	| ComputerWorkspaceCommand
 	| BrowserObservationOperation
-	| StudioIdaOperation
+	| DisassemblerOperation
 	| SessionOptionsOperation
 	| SessionGuiOperation
 	| SkillshareOperation
@@ -379,7 +383,7 @@ export interface WorkbenchResultMap
 		ComputerObservationResultMap,
 		Pick<ComputerWorkspaceResultMap, ComputerWorkspaceCommand["kind"]>,
 		BrowserObservationResultMap,
-		StudioIdaResultMap,
+		DisassemblerResultMap,
 		SessionOptionsResultMap,
 		AdvisorConfigResultMap,
 		LocalResourceResultMap,
@@ -434,7 +438,7 @@ export const WORKBENCH_OPERATION_KINDS = [
 	...COMPUTER_OBSERVATION_KINDS,
 	...COMPUTER_WORKSPACE_COMMAND_KINDS,
 	...BROWSER_OBSERVATION_KINDS,
-	...IDA_OPERATION_KINDS,
+	...DISASSEMBLER_KINDS,
 	...SESSION_OPTIONS_KINDS,
 	...SESSION_GUI_KINDS,
 	...SKILLSHARE_OPERATION_KINDS,
@@ -500,8 +504,11 @@ export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
 	"browser.tabs.get",
 	"browser.observe.prepare",
 	"browser.managed.prepare",
-	"ida.status.details",
-	"ida.database.cancel",
+	"disassembler.status",
+	"disassembler.metadata.read",
+	"disassembler.query",
+	"disassembler.edit.prepare",
+	"disassembler.cancel",
 	"session.speed.get",
 	"session.budget.get",
 	"session.warming.get",
@@ -602,7 +609,8 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 	if (kind === "extensions.links.activate" || kind === "browser.webmcp.invoke") return;
 	if (isComputerWorkspaceCommand(kind)) return;
 	if (isEvaluationWorkspaceKind(kind)) return;
-	if (isAdvisorConfigKind(kind) || isLocalResourceKind(kind) || isDictationKind(kind)) return;
+	if (isLocalResourceKind(kind)) return validateLocalResourceOperation(value);
+	if (isAdvisorConfigKind(kind) || isDictationKind(kind)) return;
 	if (isSessionTitlesKind(kind)) {
 		validateSessionTitlesOperation(value);
 		return;
@@ -682,8 +690,8 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 		validateBrowserObservationOperation(value);
 		return;
 	}
-	if (isIdaOperationKind(kind)) {
-		validateStudioIdaOperation(value);
+	if (isDisassemblerKind(kind)) {
+		validateDisassemblerOperation(value);
 		return;
 	}
 	if (isSessionOptionsKind(kind)) {
@@ -751,7 +759,7 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 			| ComputerObservationOperation["kind"]
 			| ComputerWorkspaceCommand["kind"]
 			| BrowserObservationOperation["kind"]
-			| StudioIdaOperation["kind"]
+			| DisassemblerOperation["kind"]
 			| SessionOptionsOperation["kind"]
 			| SessionGuiOperation["kind"]
 			| SkillshareOperation["kind"]

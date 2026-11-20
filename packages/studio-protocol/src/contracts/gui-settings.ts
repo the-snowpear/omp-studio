@@ -153,35 +153,24 @@ export const GUI_SETTING_DEFINITIONS = {
     "zh": "Codex 到期利用窗口（小时）",
     "en": "Codex reset expiry horizon (hours)"
   },
-  "ida.enabled": {
-    "type": "boolean",
-    "default": true,
-    "zh": "启用 IDA",
-    "en": "Enable IDA"
+  "disassembler.backend": {
+    "type": "enum",
+    "values": ["auto", "ida", "ghidra", "none"],
+    "default": "auto",
+    "zh": "反汇编后端",
+    "en": "Disassembler backend",
   },
-  "ida.python": {
-    "type": "string",
-    "default": "",
-    "zh": "IDA Python 路径",
-    "en": "IDA Python path"
-  },
-  "ida.installDir": {
-    "type": "string",
-    "default": "",
-    "zh": "IDA 安装目录",
-    "en": "IDA installation"
-  },
-  "ida.maxOpen": {
+  "disassembler.maxOpen": {
     "type": "number",
     "default": 4,
-    "zh": "同时打开的 IDA 数据库上限",
-    "en": "Maximum open IDA databases"
+    "zh": "同时打开的数据库上限",
+    "en": "Maximum open databases",
   },
-  "ida.idleCloseSec": {
+  "disassembler.idleCloseSec": {
     "type": "number",
     "default": 900,
-    "zh": "IDA 空闲关闭时间（秒）",
-    "en": "IDA idle timeout (seconds)"
+    "zh": "空闲关闭时间（秒）",
+    "en": "Idle close timeout (seconds)",
   },
   "spelling.autocomplete": {
     "type": "enum",

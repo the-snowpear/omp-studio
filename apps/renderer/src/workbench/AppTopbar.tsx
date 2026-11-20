@@ -354,9 +354,9 @@ export function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpe
         ><Icon name="fork" /></button>
         <button
           className="icon-btn"
-          data-tip={sessionLive && !sessionBusy ? t("shell.tipHandoffThread") : sessionActionReason}
+          data-tip={sessionLive && !liveSnapshot?.isCompacting ? t("shell.tipHandoffThread") : sessionActionReason}
           aria-label={t("shell.handoffThread")}
-          disabled={!sessionLive || sessionBusy}
+          disabled={!sessionLive || liveSnapshot?.isCompacting}
           onClick={() => run(chrome.onHandoffThread)}
         ><Icon name="handoff" /></button>
       </div>}
@@ -450,7 +450,7 @@ export function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpe
       source={{ project: crumbProject, branch: crumbBranch, path: preview ? previewProject?.path : realActiveWorkspace?.root, connection: executionTarget.id === null ? undefined : executionTarget.name }}
       status={floatingStatus} onDetailsChange={setFloatingDetails}
       windowed={windowed} projectMenu={close => projectMenu(action => { close(); run(action); }, true)} branchMenu={close => branchMenu(action => { close(); run(action); }, true)}
-      threadActions={{ disabled: preview || !sessionLive || sessionBusy, forkDisabled: preview || !sessionLive || forkBusy, reason: preview ? t("common.unavailableInPreview") : sessionActionReason, onFork: () => run(chrome.onForkThread), onHandoff: () => run(chrome.onHandoffThread) }}
+      threadActions={{ disabled: preview || !sessionLive || !!liveSnapshot?.isCompacting, forkDisabled: preview || !sessionLive || forkBusy, reason: preview ? t("common.unavailableInPreview") : sessionActionReason, onFork: () => run(chrome.onForkThread), onHandoff: () => run(chrome.onHandoffThread) }}
       sessionMenu={close => {
         const finish = (action: () => void) => { close(); run(action); };
         return <><ThreadActionMenuItems live={!preview && sessionLive} busy={sessionBusy} forkBusy={forkBusy} compacting={liveSnapshot?.isCompacting === true} compactPending={chrome.compactPending} reason={preview ? t("common.unavailableInPreview") : sessionActionReason}
