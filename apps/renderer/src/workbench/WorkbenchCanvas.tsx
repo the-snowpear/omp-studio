@@ -1210,11 +1210,11 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     () => (preview
       ? (previewThreadId === "t1" ? getPreviewRunActivity(zh).status : null)
       : snapshot?.pause?.paused
-        ? { phase: "waiting" as const, label: snapshot.pause.unsettledTurns || snapshot.pause.unfinishedJobs ? (zh ? `暂停收尾 / Draining · ${snapshot.pause.unsettledTurns ?? 0} turns · ${snapshot.pause.unfinishedJobs ?? 0} jobs` : `Draining · ${snapshot.pause.unsettledTurns ?? 0} turns · ${snapshot.pause.unfinishedJobs ?? 0} jobs`) : (zh ? "已停稳 / Safely paused" : "Safely paused") }
+        ? { phase: "waiting" as const, glyph: "working" as const, label: snapshot.pause.unsettledTurns || snapshot.pause.unfinishedJobs ? (zh ? `暂停收尾 / Draining · ${snapshot.pause.unsettledTurns ?? 0} turns · ${snapshot.pause.unfinishedJobs ?? 0} jobs` : `Draining · ${snapshot.pause.unsettledTurns ?? 0} turns · ${snapshot.pause.unfinishedJobs ?? 0} jobs`) : (zh ? "已停稳 / Safely paused" : "Safely paused") }
       : optimisticPrompt !== undefined
-        ? { phase: "waiting" as const, label: PROMPT_SEND_PHASE_LABEL[optimisticPrompt.phase] }
+        ? { phase: "waiting" as const, glyph: "working" as const, label: PROMPT_SEND_PHASE_LABEL[optimisticPrompt.phase] }
         : executionMatches && snapshot?.awaitingAsyncWork === true && !sessionStreaming
-          ? { phase: "waiting" as const, label: zh ? "等待后台任务 / Waiting for background jobs" : "Waiting for background jobs" }
+          ? { phase: "waiting" as const, glyph: "working" as const, label: zh ? "等待后台任务 / Waiting for background jobs" : "Waiting for background jobs" }
           : deriveActivityStatus({
           state: convo.state,
           streaming: sessionStreaming,

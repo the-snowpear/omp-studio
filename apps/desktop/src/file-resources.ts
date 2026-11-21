@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import { createReadStream, createWriteStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { Readable } from "node:stream";
@@ -33,6 +34,7 @@ export class FileResources {
   }
   releaseOwner(owner: number): void { for (const [id, lease] of this.leases) if (lease.owner === owner) this.release(id); }
   setPdf(id: string, path: string): void { this.get(id).pdf = path; }
+  activePdfPaths(): ReadonlySet<string> { return new Set([...this.leases.values()].flatMap(lease => lease.pdf ? [resolve(lease.pdf)] : [])); }
   async *bytes(id: string, start = 0, end?: number, signal?: AbortSignal): AsyncGenerator<Uint8Array> {
     const lease = this.get(id), limit = Math.min(end ?? lease.file.size - 1, lease.file.size - 1);
     for (let offset = start; offset <= limit;) {

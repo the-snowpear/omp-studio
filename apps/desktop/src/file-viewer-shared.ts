@@ -4,7 +4,7 @@ export interface FileResourceTarget { targetId: string | null; workspaceId: stri
 export interface FileResource { id: string; url: string; file: SystemFileInfo }
 export interface OfficeComponentState {
   id: "office-preview";
-  status: "not-installed" | "ready" | "checking" | "downloading" | "installing" | "error";
+  status: "not-installed" | "ready" | "checking" | "downloading" | "installing" | "unsupported" | "error";
   installedVersion?: string;
   availableVersion?: string;
   downloadBytes?: number;

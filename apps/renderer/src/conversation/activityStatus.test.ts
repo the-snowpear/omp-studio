@@ -111,6 +111,7 @@ describe("deriveActivityStatus", () => {
     const state = emptyConversationState(1);
     expect(deriveActivityStatus({ state, streaming: true, pendingMessages: 0 })).toEqual({
       phase: "waiting",
+      glyph: "working",
       label: WORKING_LABEL,
     });
     expect(deriveActivityStatus({ state, streaming: false, pendingMessages: 0 })).toBeNull();

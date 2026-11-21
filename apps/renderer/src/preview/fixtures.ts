@@ -254,7 +254,7 @@ export const PREVIEW_QUEUED_MESSAGES: readonly { id: number; text: string }[] = 
  */
 export function getPreviewRunActivity(zh = isZh()) {
   return {
-    status: { phase: "tool", label: zh ? "正在运行" : "Running", detail: "npm run check" },
+    status: { phase: "tool", glyph: "bash", label: zh ? "正在运行" : "Running", detail: "npm run check" },
   } as const;
 }
 

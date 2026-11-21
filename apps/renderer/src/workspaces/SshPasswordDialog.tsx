@@ -1,9 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { RemoteConnectionProfile } from "../../../desktop/src/remote/shared";
 import { Icon } from "../icons";
 import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
+import { SshDialogHead, SshField } from "./sshParts";
 import "./ssh.css";
 
 export function SshPasswordDialog({ profile, demo = false, onSubmit, onCancel }: { profile: RemoteConnectionProfile; demo?: boolean; onSubmit(password: string): void; onCancel(): void }) {
@@ -12,6 +13,7 @@ export function SshPasswordDialog({ profile, demo = false, onSubmit, onCancel }:
   const { marks } = usePreviewMode();
   const dialog = useRef<HTMLDialogElement>(null);
   const password = useRef<HTMLInputElement>(null);
+  const [visible, setVisible] = useState(false);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const input = password.current;
@@ -20,8 +22,8 @@ export function SshPasswordDialog({ profile, demo = false, onSubmit, onCancel }:
     return () => { if (input) input.value = ""; previous?.focus(); };
   }, []);
   const cancel = () => { if (password.current) password.current.value = ""; onCancel(); };
-  return createPortal(<dialog ref={dialog} className="ssh-dialog" aria-labelledby="ssh-password-title" onCancel={event => { event.preventDefault(); cancel(); }}>
-    <div className="ssh-dialog-head"><h2 id="ssh-password-title">{zh ? "连接 SSH" : "Connect SSH"} · {profile.name}</h2><button type="button" className="icon-btn" aria-label={zh ? "取消连接" : "Cancel connection"} onClick={cancel}><Icon name="x" /></button></div>
+  const account = `${profile.user}@${profile.host}`;
+  return createPortal(<dialog ref={dialog} className="ssh-dialog is-compact" aria-labelledby="ssh-password-title" onCancel={event => { event.preventDefault(); cancel(); }}>
     <form autoComplete="off" onSubmit={event => {
       event.preventDefault();
       let value = password.current?.value ?? "";
@@ -30,11 +32,25 @@ export function SshPasswordDialog({ profile, demo = false, onSubmit, onCancel }:
       onSubmit(value);
       value = "";
     }}>
-      <p className="muted small">{profile.user}@{profile.host}{profile.port ? `:${profile.port}` : ""}</p>
-      <label>{zh ? "SSH 密码" : "SSH password"}<input ref={password} type="password" required autoComplete="off" autoCapitalize="off" spellCheck={false} maxLength={4096} /></label>
-      <p className="muted small">{demo && marks ? (zh ? "演示模式：不连接服务器，请勿输入真实密码。" : "Preview mode: does not connect to any server. Do not enter a real password.") : (zh ? "只在本次连接期间保留于主进程内存，断开后清除。不会保存到连接配置、写入命令行或复制到远端文件。" : "Kept only in main-process memory during this connection and cleared on disconnect. Never saved to connection profiles, command lines, or remote files.")}</p>
-      <p className="muted small">{zh ? "首次主机信任仍需在系统 SSH 完成。暂不支持密码变更、验证码或多因素登录。" : "First-time host trust must still be accepted via system SSH. Password changes, one-time codes, and MFA are not supported yet."}</p>
-      <div className="ssh-dialog-actions"><button type="button" className="btn outline" onClick={cancel}>{zh ? "取消" : "Cancel"}</button><button className="btn primary">{zh ? "连接" : "Connect"}</button></div>
+      <SshDialogHead icon="lock" titleId="ssh-password-title" title={zh ? `连接 ${profile.name}` : `Connect to ${profile.name}`}
+        sub={<><code>{account}</code>{profile.port ? <span className="ssh-tag">:{profile.port}</span> : null}</>}
+        closeLabel={zh ? "取消连接" : "Cancel connection"} onClose={cancel} />
+      <div className="ssh-dialog-body">
+        <SshField label={zh ? "SSH 密码" : "SSH password"} htmlFor="ssh-password-input">
+          <div className="ssh-input-affix">
+            <Icon name="key" extra="sm" />
+            <input id="ssh-password-input" ref={password} className="ssh-input has-action" type={visible ? "text" : "password"} required autoComplete="off" autoCapitalize="off" spellCheck={false} maxLength={4096} />
+            <button type="button" className="icon-btn" aria-label={visible ? (zh ? "隐藏密码" : "Hide password") : (zh ? "显示密码" : "Show password")} aria-pressed={visible} onClick={() => { setVisible(value => !value); password.current?.focus(); }}><Icon name={visible ? "eye-off" : "eye"} extra="sm" /></button>
+          </div>
+        </SshField>
+        {demo && marks
+          ? <p className="ssh-alert is-warn"><Icon name="alert" extra="sm" />{zh ? "演示模式不会连接服务器，请勿输入真实密码。" : "Preview mode does not connect anywhere. Do not enter a real password."}</p>
+          : <p className="ssh-note"><Icon name="shield" extra="sm" />{zh ? "仅在本次连接期间保留，不会保存。" : "Kept only for this connection, never saved."}</p>}
+      </div>
+      <footer className="ssh-dialog-foot">
+        <button type="button" className="btn outline" onClick={cancel}>{zh ? "取消" : "Cancel"}</button>
+        <button className="btn primary">{zh ? "连接" : "Connect"}</button>
+      </footer>
     </form>
   </dialog>, document.body);
 }

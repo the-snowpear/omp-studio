@@ -1,12 +1,12 @@
-import { createReadStream } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { randomUUID, createHash } from "node:crypto";
+import { join, posix, win32 } from "node:path";
+import { randomUUID } from "node:crypto";
 import { extractRuntimeArchive, verifySignedArtifact, parseRuntimeInstallationManifest, RUNTIME_ARTIFACT_LAYOUT } from "@omp-studio/runtime-installer";
 import { runSsh } from "./deploy.js";
 import { remoteNodeCommand } from "./remote-command.js";
 import { hasActiveRemoteWork } from "./server.js";
+import { uploadRemoteFile } from "./file-transfer.js";
 import type { RemoteConnectionManager, RemoteMaintenance } from "./manager.js";
 import { desktopText } from "../desktop-language-shared.js";
 
@@ -18,6 +18,7 @@ async function install(manager: RemoteConnectionManager, id: string, archive: st
   const remote = manager.get(id);
   const profile = manager.profile(id);
   const authentication = manager.authentication(id);
+  const remotePath = remote.environment.platform === "win32" ? win32 : posix;
   const temp = await mkdtemp(join(tmpdir(), "omp-remote-runtime-"));
   const stageName = `runtime-upload-${randomUUID()}`;
   let installDispatched = false;
@@ -30,21 +31,8 @@ async function install(manager: RemoteConnectionManager, id: string, archive: st
     for (const name of ["runtime-manifest.json", "checksums.json", "runtime-signature.json", manifest.entrypoint]) {
       controls.progress(desktopText(`正在上传 ${name}`, `Uploading ${name}`));
       const file = join(temp, "artifact", name);
-      const digest = createHash("sha256");
-      for await (const chunk of createReadStream(file)) digest.update(chunk);
-      const hash = digest.digest("hex");
-      await runSsh(profile, remoteNodeCommand(remote.environment, `
-        const fs=require('node:fs'),p=require('node:path'),crypto=require('node:crypto'),{pipeline}=require('node:stream');
-        const dir=p.join(${JSON.stringify(remote.state)},${JSON.stringify(stageName)});
-        fs.mkdirSync(dir,{recursive:true,mode:448});
-        const file=p.join(dir,${JSON.stringify(name)}),out=fs.createWriteStream(file,{flags:'wx',mode:448}),hash=crypto.createHash('sha256');
-        process.stdin.on('data',data=>hash.update(data));
-        pipeline(process.stdin,out,error=>{
-          if(error){process.stderr.write(error.message);process.exitCode=1;return;}
-          if(hash.digest('hex')!==${JSON.stringify(hash)}){process.stderr.write('Upload checksum mismatch');process.exitCode=1;return;}
-          process.stdout.write('ok');
-        });
-      `, remote.node), createReadStream(file), 600_000, undefined, authentication);
+      const remoteFile = remotePath.join(remote.state, stageName, name);
+      await uploadRemoteFile({ connection: profile, platform: remote.environment.platform, localPath: file, remoteDirectory: remotePath.join(remote.state, stageName), remotePath: remoteFile, ...(authentication ? { authentication } : {}) });
     }
     controls.progress(desktopText("正在停止空闲 Host 并安装 Runtime", "Stopping idle Host and installing Runtime"));
     shutdownRequested = true;
