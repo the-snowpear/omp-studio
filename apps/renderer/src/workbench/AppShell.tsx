@@ -23,7 +23,7 @@ import { useWorkbenchLayout } from "../layout/useWorkbenchLayout";
 import { beforeConversationLayoutChange } from "../conversation/conversationReflow";
 import { layoutPanelForRegion, type DockRegion } from "../layout/workbenchLayout";
 import { CLIENT_CONTRACT_VERSION } from "@omp-studio/client-contract";
-import type { CommandName, CommandInput, OperatorInvokeOutcome, SessionHistoryEntry, SessionHistoryReadModel, SessionId, ThreadId, StudioRuntimeSettingKey, StudioRuntimeSettingValue, WorkspaceId, WorkspaceListReadModel } from "@omp-studio/client-contract";
+import type { CommandName, CommandInput, CommandResult, OperatorInvokeOutcome, SessionHistoryEntry, SessionHistoryReadModel, SessionId, StudioClient, ThreadId, StudioRuntimeSettingKey, StudioRuntimeSettingValue, WorkspaceId, WorkspaceListReadModel } from "@omp-studio/client-contract";
 import type { ApprovalMode, OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 import { AppIcon, Icon, type IconName } from "../icons";
 import { useI18n } from "../i18n";
@@ -65,7 +65,7 @@ import { AppNavRail, type NavRailRoute } from "../NavRail";
 import { useIdentityFlight } from "../useIdentityFlight";
 import { useAppUpdate } from "../settings/appUpdate";
 import { useOperatorProfile } from "../settings/operatorProfile";
-import { getPreviewAppUpdate, defaultPreviewSelection, findPreviewProject, findPreviewThread } from "../preview/fixtures";
+import { getPreviewAppUpdate, defaultPreviewSelection, findPreviewProject, findPreviewThread, PREVIEW_HISTORY_THREADS } from "../preview/fixtures";
 import { getPreviewBtwQuestion, PREVIEW_BTW_SNAPSHOTS, previewBtwSnapshot } from "../preview/btwPreview";
 import { useBtwSession } from "../btw/useBtwSession";
 import { usableCapabilityManifest } from "../deck/interactionGate";
@@ -90,6 +90,8 @@ import { AppTopbar } from "./AppTopbar";
 import { WorkbenchCanvas } from "./WorkbenchCanvas";
 import { clampBottomHeight } from "./BottomPanelChrome";
 import { useSessionRename } from "../history/useSessionRename";
+import { DeleteSessionDialog } from "../history/DeleteSessionDialog";
+import { type ArchivedDeleteOutcome, type DeleteArchivedSessions } from "../history/sessionDeletion";
 
 const HomePage = lazyPanel(() => import("../HomePage").then(module => ({ default: module.HomePage })));
 
@@ -123,6 +125,15 @@ class SessionSwitchCancelledError extends Error {
     this.name = "SessionSwitchCancelledError";
   }
 }
+
+type SidebarDelete =
+  | { readonly kind: "preview"; readonly threadId: string }
+  | { readonly kind: "real"; readonly entry: SessionHistoryEntry; readonly workspaceId?: WorkspaceId | undefined }
+  | { readonly kind: "provisional"; readonly thread: ProvisionalProjectThread };
+
+const EMPTY_IDS: ReadonlySet<string> = new Set();
+const emptyIds = () => EMPTY_IDS;
+const noSubscription = () => () => {};
 
 export function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSelectThread, onNewThread, projectsLoading, onWorkspacesChange, onHistoryChange }: {
   state: ViewState;
@@ -247,6 +258,8 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     refresh: refreshProjectHistory,
     loadMore: loadMoreProjectHistory,
     applySessionTitle: applyProjectSessionTitle,
+    deletedSessions,
+    removeSessions: removeHistorySessions,
   } = projectHistories;
   const expandProject = useCallback((workspaceId: string) => {
     setExpandedProjects((current) => {
@@ -271,8 +284,27 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   }, [expandedProjects, previewMode.preview]);
   /** 预览模式「归档」演示隐藏的会话 id（仅本地，不碰 Host）。 */
   const [hiddenPreviewThreads, setHiddenPreviewThreads] = useState<ReadonlySet<string>>(() => new Set());
+  const [localPreviewDeletes, setLocalPreviewDeletes] = useState<ReadonlySet<string>>(EMPTY_IDS);
+  const sharedPreviewDeletes = useSyncExternalStore(mdi?.store.subscribe ?? noSubscription, mdi ? () => mdi.store.deletedPreviewSessions : emptyIds);
+  const previewDeletes = mdi ? sharedPreviewDeletes : localPreviewDeletes;
+  const previewHiddenThreads = useMemo(() => new Set([
+    ...hiddenPreviewThreads, ...[...previewDeletes].filter(id => !id.startsWith("ph")),
+  ]), [hiddenPreviewThreads, previewDeletes]);
+  const previewDeletedHistoryIds = useMemo(() => new Set([
+    ...previewDeletes,
+    ...Object.keys(PREVIEW_HISTORY_THREADS).filter(id => previewDeletes.has(PREVIEW_HISTORY_THREADS[id]!)),
+  ]), [previewDeletes]);
+  const [sidebarDelete, setSidebarDelete] = useState<SidebarDelete | null>(null);
+  const [sidebarDeleting, setSidebarDeleting] = useState(false);
+  const sidebarDeleteBusy = useRef(false);
+  const [sidebarDeleteError, setSidebarDeleteError] = useState<unknown>();
+  const [archiveRevision, setArchiveRevision] = useState(0);
+  const historyWorkspaceId = state.model.workspaces?.activeWorkspaceId ?? state.bootstrap?.selected.workspaceId ?? (mdi?.document.ref.workspaceId as WorkspaceId | undefined);
+  const historyWorkspaceRef = useRef(historyWorkspaceId);
+  historyWorkspaceRef.current = historyWorkspaceId;
   /** 历史页的全量会话模型（含已归档）；进入历史页时懒加载，归档动作后刷新。 */
-  const [historyAll, setHistoryAll] = useState<SessionHistoryReadModel | undefined>(undefined);
+  const [historyCatalog, setHistoryCatalog] = useState<{ workspaceId: WorkspaceId | undefined; model: SessionHistoryReadModel }>();
+  const historyAll = historyCatalog?.workspaceId === historyWorkspaceId ? historyCatalog?.model : undefined;
   const initialPreview = defaultPreviewSelection();
   const [previewProjectId, setPreviewProjectId] = useState(mdi?.document.ref.previewProjectId ?? initialPreview.projectId);
   const [previewThreadId, setPreviewThreadId] = useState(mdi?.document.ref.previewThreadId ?? initialPreview.threadId);
@@ -483,6 +515,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     }
   }, [previewMode.preview, client, hubFileIndex, zh]);
   const selected = (() => {
+    if (selectedHistoryId && deletedSessions.has(selectedHistoryId)) return undefined;
     const fromModel = state.model.history?.entries.find((entry) => entry.historyId === selectedHistoryId);
     const fromAll = historyAll?.entries.find((entry) => entry.historyId === selectedHistoryId);
     const fromProject = Object.values(projectHistoryCache)
@@ -493,6 +526,8 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     return [fromProject, fromModel, fromAll].find((entry) => entry !== undefined && !isPlaceholderSessionTitle(entry.title)) ?? base;
   })();
   const viewedSessionId = selected?.sessionId ?? snapshot?.sessionId;
+  const deletionView = useRef({ historyId: selectedHistoryId, sessionId: dockSelection.draft ? undefined : dockSelection.session });
+  deletionView.current = { historyId: selectedHistoryId, sessionId: selectedProvisionalSessionId ?? (dockSelection.draft ? undefined : dockSelection.session) };
   const btwTargetId = selectedProvisionalSessionId ?? viewedSessionId;
   const btwTargetRef = useRef({ sessionId: btwTargetId, threadId: selected?.threadId });
   btwTargetRef.current = { sessionId: btwTargetId, threadId: selected?.threadId };
@@ -625,9 +660,9 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   useEffect(() => {
     if (!wantHistoryAll) return;
     let cancelled = false;
-    void client.query("history.list", { limit: PROJECT_THREADS_QUERY_MAX })
+    void client.query("history.list", { limit: PROJECT_THREADS_QUERY_MAX, ...(historyWorkspaceId === undefined ? {} : { workspaceId: historyWorkspaceId }) })
       .then((all) => {
-        if (!cancelled) setHistoryAll(all);
+        if (!cancelled) setHistoryCatalog({ workspaceId: historyWorkspaceId, model: all });
       })
       .catch(() => {
         // 加载失败保留现有模型；归档/取消归档动作后也会刷新。
@@ -635,7 +670,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     return () => {
       cancelled = true;
     };
-  }, [wantHistoryAll, client]);
+  }, [wantHistoryAll, client, historyWorkspaceId]);
   const previewThread = findPreviewThread(previewThreadId, zh);
   /** 顶栏「归档」目标：当前选中的历史会话，或驻留 Runtime 上的会话。
       进行中的会话也可以归档：Host 会先停止再移走文件。 */
@@ -1138,14 +1173,17 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       return refreshed;
     }
     const loaded = state.model.history?.entries.length ?? 20;
+    const workspaceAtRead = historyWorkspaceRef.current;
+    const scope = workspaceAtRead === undefined ? {} : { workspaceId: workspaceAtRead };
     invalidateProjectHistoryReads(client);
     try {
       const [active, all] = await Promise.all([
-        client.query("history.list", { limit: Math.min(Math.max(loaded, 20), PROJECT_THREADS_QUERY_MAX), status: "active" }),
-        client.query("history.list", { limit: PROJECT_THREADS_QUERY_MAX }),
+        client.query("history.list", { ...scope, limit: Math.min(Math.max(loaded, 20), PROJECT_THREADS_QUERY_MAX), status: "active" }),
+        client.query("history.list", { ...scope, limit: PROJECT_THREADS_QUERY_MAX }),
       ]);
+      if (historyWorkspaceRef.current !== workspaceAtRead) return undefined;
       onHistoryChange(active);
-      setHistoryAll(all);
+      setHistoryCatalog({ workspaceId: workspaceAtRead, model: all });
       return active;
     } catch {
       // 刷新失败保留现有条目；下次进入历史页会重查。
@@ -1238,11 +1276,11 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         entries: currentHistory.entries.map((entry) => entry.sessionId === sessionId ? { ...entry, title } : entry),
       });
     }
-    setHistoryAll((previous) => {
-      if (!previous?.entries.some((entry) => entry.sessionId === sessionId && entry.title !== title)) return previous;
+    setHistoryCatalog((previous) => {
+      if (!previous?.model.entries.some((entry) => entry.sessionId === sessionId && entry.title !== title)) return previous;
       return {
         ...previous,
-        entries: previous.entries.map((entry) => entry.sessionId === sessionId ? { ...entry, title } : entry),
+        model: { ...previous.model, entries: previous.model.entries.map((entry) => entry.sessionId === sessionId ? { ...entry, title } : entry) },
       };
     });
     setProvisionalThreadsBySession((current) => {
@@ -1297,6 +1335,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       await ensureWorkspaceActive(workspaceId);
       const handle = await client.command("session.archive", { threadId: entry.threadId });
       await waitReceipt(client, handle.requestId);
+      setArchiveRevision(revision => revision + 1);
       if (entry.sessionId !== undefined) {
         provisionalStore.exclude(String(entry.sessionId));
         setProvisionalThreadsBySession((current) => {
@@ -1361,6 +1400,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         await ensureWorkspaceActive(targetWorkspaceId);
         const handle = await client.command("session.unarchive", { threadId: entry.threadId });
         await waitReceipt(client, handle.requestId);
+        setArchiveRevision(revision => revision + 1);
         if (entry.sessionId !== undefined) {
           provisionalStore.unexclude(String(entry.sessionId));
         }
@@ -1376,43 +1416,166 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     });
   };
 
-  /** 真实模式「删除会话」：session.delete 永久删除本地文件与相关残留。 */
-  const deleteSessionThread = (entry: SessionHistoryEntry, deleteManagedArtifacts = false): Promise<boolean> => {
-    return workspaceActionQueue.enqueue(async () => {
-      try {
-        const cachedWorkspaceId = Object.entries(projectHistoryCache).find(([, value]) =>
-          value.model?.entries.some((candidate) => candidate.historyId === entry.historyId),
-        )?.[0] as WorkspaceId | undefined;
-        const targetWorkspaceId = cachedWorkspaceId
-          ?? residentForSession(residentModel, entry.sessionId)?.workspaceId;
-        await ensureWorkspaceActive(targetWorkspaceId);
-        const handle = await client.command("session.delete", { threadId: entry.threadId, deleteManagedArtifacts });
-        const removal = await waitReceipt<{ message?: string; cleanup?: "complete" | "partial" }>(client, handle.requestId);
-        if (entry.sessionId) dock.store.deleteSession({ target: executionTarget.id ?? "local", project: targetWorkspaceId ?? null, session: entry.sessionId });
-        if (entry.sessionId !== undefined) {
-          provisionalStore.exclude(String(entry.sessionId));
-          setProvisionalThreadsBySession((current) => {
-            const key = String(entry.sessionId);
-            if (current[key] === undefined) return current;
-            const next = { ...current };
-            delete next[key];
-            return next;
-          });
-          // 删除该会话的 IndexedDB 缩略图预览字节，避免 UI 残留。
-          await getDefaultThumbStore().dropSession(String(entry.sessionId)).catch(() => {});
-        }
-        if (selectedHistoryId === entry.historyId) onNewThread();
-        await refreshHistoryModels(targetWorkspaceId);
-        // A partial cleanup keeps the Host's full explanation on screen until dismissed.
-        setShellNotice(removal?.cleanup === "partial"
-          ? { text: "", partialDeletion: { title: entry.title ?? "", details: removal.message ?? "" }, icon: "alert", sticky: true }
-          : { text: zhRef.current ? `已删除会话「${entry.title}」` : `Deleted conversation "${entry.title}"`, icon: "trash" });
-        return true;
-      } catch (error) {
-        setShellNotice({ text: hostErrorMessage(error, zhRef.current ? "删除会话失败" : "Failed to delete conversation"), icon: "alert" });
-        return false;
-      }
+  const sessionWillStop = (sessionId: SessionId | string | undefined) => {
+    if (!sessionId) return false;
+    const resident = residentForSession(residentModel, sessionId);
+    return (resident !== undefined && resident.phase !== "idle")
+      || (sessionId === snapshot?.sessionId && (snapshot.isStreaming || snapshot.isCompacting || snapshot.pendingInteraction !== undefined));
+  };
+
+  const withDeletionClient = async <T,>(workspaceId: WorkspaceId | undefined, run: (scoped: StudioClient) => Promise<T>): Promise<T> => {
+    if (workspaceId === undefined || workspaceId === historyWorkspaceRef.current) return run(client);
+    const target = await fileTargets.readyClient(executionTarget.id);
+    if (!target.openContext || target.supportsContexts === false) throw new Error(t("history.deleteNeedsScopedHost"));
+    const scoped = await target.openContext({ workspaceId });
+    try {
+      return await run(scoped);
+    } finally {
+      await scoped.close().catch(() => {});
+    }
+  };
+
+  const removeDeletedSessionViews = (entries: readonly SessionHistoryEntry[], workspaceId: WorkspaceId | undefined, keepHistory: boolean) => {
+    if (entries.length === 0) return;
+    removeHistorySessions(entries);
+    const deleted = new Set<string>(entries.flatMap(entry => entry.sessionId ? [entry.historyId, entry.sessionId] : [entry.historyId]));
+    const view = deletionView.current;
+    if (deleted.has(view.historyId ?? "") || deleted.has(view.sessionId ?? "")) {
+      onNewThread();
+      setSelectedProvisionalSessionId(undefined);
+      if (!mdi || keepHistory) beginDockDraft(workspaceId ?? null);
+      if (!mdi && !keepHistory) go("workbench");
+    }
+    for (const entry of entries) {
+      const id = entry.sessionId;
+      if (!id) continue;
+      dock.store.deleteSession({ target: executionTarget.id ?? "local", project: workspaceId ?? null, session: id });
+      provisionalStore.exclude(String(id));
+      void getDefaultThumbStore().dropSession(String(id)).catch(() => {});
+    }
+    setProvisionalThreadsBySession(current => Object.fromEntries(Object.entries(current).filter(([id]) => !deleted.has(id))));
+    mdi?.store.removeDeletedSessions(executionTarget.id, workspaceId, deleted, t("menu.newThread"), keepHistory ? mdi.document.id : undefined);
+  };
+
+  const refreshAfterDeletion = async (workspaceId: WorkspaceId | undefined) => {
+    if (workspaceId === undefined) {
+      await refreshHistoryModels();
+      setArchiveRevision(revision => revision + 1);
+      return;
+    }
+    await Promise.all([
+      refreshHistoryModels(workspaceId),
+      client.query("history.list", { workspaceId, limit: PROJECT_THREADS_QUERY_MAX }).then(model => {
+        if (historyWorkspaceRef.current === workspaceId) setHistoryCatalog({ workspaceId, model });
+      }).catch(() => {}),
+    ]);
+    if (historyWorkspaceRef.current === workspaceId) setArchiveRevision(revision => revision + 1);
+  };
+
+  const deleteSessionThread = (
+    entry: SessionHistoryEntry, deleteManagedArtifacts: boolean, workspaceId: WorkspaceId | undefined, keepHistory: boolean,
+  ): Promise<boolean> => workspaceActionQueue.enqueue(async () => {
+    const removal = await withDeletionClient(workspaceId, async scoped => {
+      const handle = await scoped.command("session.delete", { threadId: entry.threadId, deleteManagedArtifacts });
+      return await waitReceipt<CommandResult<"session.delete">>(scoped, handle.requestId);
     });
+    const title = entry.title?.trim() || t("conversation.untitledSession");
+    const cleanupWarning = removal.cleanup === "partial" ? removal.message ?? "" : undefined;
+    if (mdi) {
+      mdi.store.setDeletionNotice({ title, cleanupWarning });
+    } else {
+      setShellNotice(cleanupWarning !== undefined
+        ? { text: "", partialDeletion: { title, details: cleanupWarning }, icon: "alert", sticky: true }
+        : { text: t("history.deletedSession", { title }), icon: "trash" });
+    }
+    removeDeletedSessionViews([entry], workspaceId, keepHistory);
+    await refreshAfterDeletion(workspaceId);
+    return true;
+  });
+
+  const deleteArchivedSessions: DeleteArchivedSessions = (entries, onProgress) => {
+    const workspaceId = historyWorkspaceId;
+    return workspaceActionQueue.enqueue(async () => {
+      const outcomes: ArchivedDeleteOutcome[] = [];
+      const removed: SessionHistoryEntry[] = [];
+      await withDeletionClient(workspaceId, async scoped => {
+        for (const entry of entries) {
+          try {
+            const handle = await scoped.command("session.deleteArchived", { threadId: entry.threadId });
+            const result = await waitReceipt<CommandResult<"session.deleteArchived">>(scoped, handle.requestId);
+            removed.push(entry);
+            outcomes.push({
+              threadId: entry.threadId,
+              status: "deleted",
+              ...(result.cleanup === "partial" ? { cleanupWarning: result.message ?? "" } : {}),
+            });
+          } catch (error) {
+            const reason = hostErrorMessage(error, t("history.deleteSessionFailed"));
+              if (outcomes.length === 0 && ((error as { code?: string } | null)?.code === "CAPABILITY_UNAVAILABLE" || reason.includes("session.deleteArchived"))) {
+              throw new Error(t("history.batchDeleteNeedsUpdate"));
+            }
+            outcomes.push({ threadId: entry.threadId, status: "failed", reason });
+          }
+          onProgress(outcomes.length);
+        }
+      });
+      removeDeletedSessionViews(removed, workspaceId, true);
+      await refreshAfterDeletion(workspaceId);
+      return outcomes;
+    });
+  };
+
+  const recordPreviewDeletion = (ids: readonly string[], keepHistory: boolean) => {
+    const threads = new Set(ids.map(id => PREVIEW_HISTORY_THREADS[id] ?? id));
+    if (mdi) {
+      mdi.store.recordPreviewDeletion([...threads]);
+      mdi.store.removeDeletedSessions(executionTarget.id, previewProjectId, threads, t("menu.newThread"), keepHistory ? mdi.document.id : undefined);
+    } else {
+      setLocalPreviewDeletes(current => new Set([...current, ...threads]));
+    }
+    if (threads.has(previewThreadId)) setPreviewThreadId("t0");
+  };
+
+  const requestSidebarDelete = (target: SidebarDelete) => {
+    if (sidebarDeleteBusy.current) return;
+    setSidebarDeleteError(undefined);
+    setSidebarDelete(target);
+  };
+  const sidebarPreviewThread = sidebarDelete?.kind === "preview" ? findPreviewThread(sidebarDelete.threadId, zh)?.thread : undefined;
+  const sidebarDeleteTarget = sidebarDelete === null ? undefined
+    : sidebarDelete.kind === "preview"
+      ? { title: sidebarPreviewThread?.title ?? t("conversation.untitledSession"), stopping: sidebarPreviewThread?.status === "running" || sidebarPreviewThread?.wait !== undefined }
+      : sidebarDelete.kind === "provisional"
+        ? { title: sidebarDelete.thread.title, stopping: sidebarDelete.thread.running || sessionWillStop(sidebarDelete.thread.sessionId) }
+        : { title: sidebarDelete.entry.title?.trim() || t("conversation.untitledSession"), stopping: sessionWillStop(sidebarDelete.entry.sessionId) };
+
+  const confirmSidebarDelete = async (deleteManagedArtifacts: boolean) => {
+    if (sidebarDelete === null || sidebarDeleteBusy.current) return;
+    if (sidebarDelete.kind === "preview") {
+      const title = sidebarDeleteTarget?.title ?? t("conversation.untitledSession");
+      if (previewMode.marks) {
+        if (mdi) mdi.store.setDeletionNotice({ title, preview: true });
+        else setShellNotice({ text: t("history.demoDeleteToast", { title }), icon: "trash" });
+      }
+      recordPreviewDeletion([sidebarDelete.threadId], false);
+      setSidebarDelete(null);
+      return;
+    }
+    sidebarDeleteBusy.current = true;
+    setSidebarDeleting(true);
+    setSidebarDeleteError(undefined);
+    try {
+      const entry = sidebarDelete.kind === "real" ? sidebarDelete.entry : await resolveProvisionalHistoryEntry(sidebarDelete.thread);
+      if (!entry) throw new Error(t("history.deleteHistoryPending"));
+      const workspaceId = sidebarDelete.kind === "real" ? sidebarDelete.workspaceId : sidebarDelete.thread.workspaceId;
+      await deleteSessionThread(entry, deleteManagedArtifacts, workspaceId, false);
+      setSidebarDelete(null);
+    } catch (error) {
+      setSidebarDeleteError(error);
+    } finally {
+      sidebarDeleteBusy.current = false;
+      setSidebarDeleting(false);
+    }
   };
 
   /** 顶栏「对话选项」Fork：Runtime 切换身份（快照 sessionId 变为新会话），
@@ -1551,6 +1714,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
           if (!snapshot?.sessionId || !entry.sessionId) throw new Error(zhRef.current ? "请先连接 Runtime" : "Connect a Runtime first");
           const handle = await client.command("session.history.pin", { sessionId: snapshot.sessionId, targetSessionId: entry.sessionId, pinned: !entry.pinned });
           await waitReceipt(client, handle.requestId);
+          setArchiveRevision(revision => revision + 1);
           await refreshHistoryModels();
           return;
         }
@@ -1886,8 +2050,8 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         .flatMap((historyState) => historyState.model?.entries ?? [])
         .find((entry) => entry.sessionId === thread.sessionId);
     if (known !== undefined) return known;
-    const refreshed = await loadProjectHistory(thread.workspaceId, PROJECT_THREADS_QUERY_MAX);
-    return refreshed?.entries.find((entry) => entry.sessionId === thread.sessionId);
+    const refreshed = await client.query("history.list", { workspaceId: thread.workspaceId, sessionId: thread.sessionId, limit: 1 });
+    return refreshed.entries[0];
   };
 
   const openProvisionalThread = (thread: ProvisionalProjectThread) => {
@@ -2346,7 +2510,9 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     onArchiveThread: requestArchiveThread,
     onArchiveProvisionalThread: requestArchiveProvisionalThread,
     onUnarchiveThread: unarchiveThread,
-    onDeleteSessionThread: deleteSessionThread,
+    onDeleteThread: (entry, workspaceId) => requestSidebarDelete({ kind: "real", entry, workspaceId }),
+    onDeleteProvisionalThread: thread => requestSidebarDelete({ kind: "provisional", thread }),
+    onDeletePreviewThread: threadId => requestSidebarDelete({ kind: "preview", threadId }),
     // 显式无参包装：防止未来被直接挂到 onClick 时把事件对象当成 initialTitle/target。
     onRenameThread: () => openRenameDialog(),
     onForkThread: forkThread,
@@ -2361,7 +2527,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     residentSessionId,
     onLoadMoreThreads: loadMoreThreads,
     projectThreadLimits,
-    hiddenPreviewThreads,
+    hiddenPreviewThreads: previewHiddenThreads,
     onSelectPreviewProject: (id) => {
       setPreviewProjectId(id);
       const project = findPreviewProject(id, zh);
@@ -2447,7 +2613,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     if (!mdi?.active || !windowAction) return;
     mdi.store.takeAction(mdi.document.id);
     if (windowAction.kind === "archive") requestArchiveThread(windowAction.entry, windowAction.workspaceId as WorkspaceId);
-    else if (windowAction.kind === "delete") void deleteSessionThread(windowAction.entry);
+    else if (windowAction.kind === "delete") requestSidebarDelete({ kind: "real", entry: windowAction.entry, workspaceId: windowAction.workspaceId as WorkspaceId });
     else runThreadRowAction(windowAction.entry, windowAction.workspaceId as WorkspaceId, windowAction.kind);
   }, [mdi?.active, windowAction?.id]);
   const snapshotStarted = snapshot !== undefined && (
@@ -2463,8 +2629,10 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   );
   useEffect(() => {
     if (!mdi || state.loading) return;
-    const existing = mdi.store.getSnapshot().documents.find(doc => doc.id === mdi.document.id)!;
-    const sessionId = selected?.sessionId ?? existing.ref.sessionId ?? (snapshotStarted ? snapshot?.sessionId : undefined);
+    const existing = mdi.store.getSnapshot().documents.find(doc => doc.id === mdi.document.id);
+    if (!existing) return;
+    const snapshotId = snapshotStarted && !deletedSessions.has(snapshot?.sessionId ?? "") ? snapshot?.sessionId : undefined;
+    const sessionId = selected?.sessionId ?? existing.ref.sessionId ?? snapshotId;
     const ref = { ...existing.ref, targetId: executionTarget.id,
       ...(previewMode.preview ? { workspaceId: previewProjectId, previewProjectId, previewThreadId } : {
         ...(dockSelection.project ? { workspaceId: dockSelection.project } : {}),
@@ -2472,7 +2640,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         ...(selected?.threadId ? { threadId: selected.threadId, historyId: selected.historyId } : {}),
       }) };
     mdi.store.updateDocument(mdi.document.id, { ref, title: threadTitle, projectName: previewMode.preview ? findPreviewProject(previewProjectId, zh)?.name : selectedProject?.name });
-  }, [mdi?.document.id, threadTitle, snapshot?.sessionId, snapshotStarted, dockSelection.project, selected?.sessionId, selected?.threadId, selected?.historyId, previewProjectId, previewThreadId, previewMode.preview, previewMode.preview ? zh : false, executionTarget.id, selectedProject?.name, state.loading]);
+  }, [mdi?.document.id, threadTitle, snapshot?.sessionId, snapshotStarted, deletedSessions, dockSelection.project, selected?.sessionId, selected?.threadId, selected?.historyId, previewProjectId, previewThreadId, previewMode.preview, previewMode.preview ? zh : false, executionTarget.id, selectedProject?.name, state.loading]);
   const canvasSessionId = selectedProvisionalSessionId ?? selected?.sessionId ?? mdi?.document.ref.sessionId;
   const railPresented = !dock.railHiddenByDefault && dock.layout.rail.mode !== "hidden";
   const flushDockHosts = useCallback(() => {
@@ -2675,7 +2843,9 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
               return (
                 <HistoryPage
                   nativeContext={{ sessionId:snapshot?.sessionId, available:hubRuntimeConnected, capabilities }}
-                  workspaceId={hubWorkspaceId}
+                  workspaceId={historyWorkspaceId}
+                  active={state.route === "history"}
+                  archiveRevision={archiveRevision}
                   client={client}
                   onImported={() => void refreshHistoryModels()}
                   onNativeResume={async (threadId, workspaceId) => {
@@ -2693,7 +2863,12 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
                   onRoute={go}
                   onSelectThread={chrome.onSelectThread}
                   onUnarchive={chrome.onUnarchiveThread}
-                  onDeleteSession={chrome.onDeleteSessionThread}
+                  onDeleteSession={(entry, deleteManagedArtifacts = false) => deleteSessionThread(entry, deleteManagedArtifacts, historyWorkspaceId, true)}
+                  onDeleteArchivedSessions={deleteArchivedSessions}
+                  onDeletePreviewSessions={ids => recordPreviewDeletion(ids, true)}
+                  deletedPreviewSessionIds={previewDeletedHistoryIds}
+                  deletedSessions={deletedSessions}
+                  sessionWillStop={entry => sessionWillStop(entry.sessionId)}
                   onRenameSession={entry => runThreadRowAction(entry, undefined, "rename")}
                   onPinSession={entry => runThreadRowAction(entry, undefined, "pin")}
                 />
@@ -2944,6 +3119,15 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
             </div>
           </section>
         </div>
+      ) : null}
+      {sidebarDeleteTarget && (!mdi || mdi.active) ? (
+        <DeleteSessionDialog
+          target={sidebarDeleteTarget}
+          busy={sidebarDeleting}
+          error={sidebarDeleteError === undefined ? undefined : hostErrorMessage(sidebarDeleteError, t("history.deleteSessionFailed"))}
+          onConfirm={deleteManagedArtifacts => { void confirmSidebarDelete(deleteManagedArtifacts); }}
+          onCancel={() => { if (!sidebarDeleteBusy.current) setSidebarDelete(null); }}
+        />
       ) : null}
       {dialog ? (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setDialog(null)}>

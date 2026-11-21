@@ -34,13 +34,15 @@ import { acquireProjectReads, cachedProjectReads } from "./projectReads";
 import { WorkspaceEmpty } from "./WorkspaceEmpty";
 import { ToolWindowTabs, WindowTabAdd, WindowTabs } from "./Tabs";
 import { ConversationLayoutPreview } from "./LayoutPreview";
+import { ToastHost } from "../ToastHost";
+import { partialSessionDeletionNotice } from "../workbench/sessionActions";
 import { useWorkbenchPageMotion } from "./pageMotion";
 import { sessionSwitchPerformance } from "../sessionSwitchPerformance";
 import "./workspace.css";
 
 export function ConversationWorkspace({ client, renderDocument }: { client: StudioClient; renderDocument: (client: StudioClient) => ReactNode }) {
   const { preview } = usePreviewMode();
-  const { resolvedLanguage } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const visited = useRef({ real: !preview, demo: preview });
   if (preview) visited.current.demo = true; else visited.current.real = true;
@@ -49,6 +51,10 @@ export function ConversationWorkspace({ client, renderDocument }: { client: Stud
   const store = preview ? demo : real;
   if (!preview) real.enablePersistence();
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const removed = store.deletionNotice;
+  const removalMessage = !removed ? null : removed.cleanupWarning !== undefined
+    ? partialSessionDeletionNotice(removed.title, removed.cleanupWarning, zh)
+    : t(removed.preview ? "history.demoDeleteToast" : "history.deletedSession", { title: removed.title });
   const activeDocument = state.documents.find(record => record.id === state.activeDocumentId);
   const pageVisible = activeDocument?.page === true;
   useWorkbenchPageMotion(pageVisible, activeDocument?.pagePhase ?? "in");
@@ -86,6 +92,7 @@ export function ConversationWorkspace({ client, renderDocument }: { client: Stud
   const context = useMemo(() => ({ store, slots, snapLayer, titleRow }), [store, slots, snapLayer, titleRow]);
   const rootStyle = { "--sidebar-w": `${state.sidebarVisible ? state.sidebarWidth : 0}px`, "--panel-w": `${state.panelWidth}px`, "--cw-bottom-height": `${state.bottomHeight}px` } as CSSProperties;
   return <WindowFocusContext.Provider value={store.windows}><WorkspaceContext.Provider value={context}>
+    <ToastHost message={removalMessage} icon={removed?.cleanupWarning !== undefined ? "alert" : "trash"} onDismiss={() => store.setDeletionNotice(null)} />
     <div className={`conversation-workspace${state.views.some(view => view.placement !== "main") ? " has-conversation-windows" : ""}`} style={rootStyle}>
       <div ref={slotRefs.background} />
       <div className="cw-title-slot" ref={slotRefs.title} />

@@ -19,7 +19,7 @@ import type {
 } from "@omp-studio/host-client-api";
 import { threadIdFor, formatRuntimeMissingMessage, type HostRuntimeDisconnect, type HostRuntimeUnavailable } from "@omp-studio/host-client-api";
 import { desktopText } from "./desktop-language-shared.js";
-import { scanSessionCatalog, StudioHostError, removeSessionPin, type StudioSessionArchiveService, type StudioSessionDeleteService } from "@omp-studio/studio-host";
+import { scanSessionCatalog, SessionDeleteServiceError, StudioHostError, removeSessionPin, type StudioSessionArchiveService, type StudioSessionDeleteService } from "@omp-studio/studio-host";
 import type { ApprovalMode, RequestId, StudioOperation, ThreadId } from "@omp-studio/studio-protocol";
 import type {
   ConfigWriteResult,
@@ -176,6 +176,8 @@ export function createDesktopSemanticCommands(options: {
   readonly archive?: () => StudioSessionArchiveService;
   /** Lazy factory: the delete service is rebuilt when the workspace changes. */
   readonly deleteService?: () => StudioSessionDeleteService;
+  /** Shared by the root Host and all of its scoped conversation clients. */
+  readonly sessionFileOperations?: Map<ThreadId, Promise<unknown>>;
   readonly finishManagedArtifacts?: (sessionId: string, deleteManagedArtifacts: boolean) => Promise<void>;
   /** Lazy telemetry store so deleted sessions leave no telemetry record. */
   readonly telemetryStore?: () => { readonly remove?: (sessionId: string) => Promise<void> | void };
@@ -205,6 +207,15 @@ export function createDesktopSemanticCommands(options: {
   };
 }): HostSemanticCommandService {
   const archiveFactory = options.archive;
+  const sessionFileOperations = options.sessionFileOperations ?? new Map();
+  function withSessionFileOperation<T>(threadId: ThreadId, run: () => Promise<T>): Promise<T> {
+    const previous = sessionFileOperations.get(threadId) ?? Promise.resolve();
+    const pending = previous.catch(() => undefined).then(run);
+    sessionFileOperations.set(threadId, pending);
+    return pending.finally(() => {
+      if (sessionFileOperations.get(threadId) === pending) sessionFileOperations.delete(threadId);
+    });
+  }
   const resumePreparations = new Map<string, {
     result: SessionResumePreparation;
     workspace?: { workspaceId: string; cwd: string };
@@ -215,43 +226,21 @@ export function createDesktopSemanticCommands(options: {
     const message = formatRuntimeMissingMessage(facts ?? {});
     return new StudioHostError("CAPABILITY_UNAVAILABLE", message === "Runtime is not available" ? fallback : message);
   };
-  return {
-    ...(archiveFactory === undefined
-      ? {}
-      : {
-          archive: async ({ threadId }: { readonly threadId: ThreadId }): Promise<ConfigWriteResult> => {
-            const sessionId = await resolveCatalogSessionId(options, threadId);
-            const releasedWriter = await releaseResidentSession(options, sessionId);
-            // Studio-origin sessions are written only by the managed Runtime
-            // broker. If that broker has no resident writer (or just evacuated
-            // one), a recent mtime is a completed/title flush rather than an
-            // unknown crash tail. CLI/unknown sessions keep the full grace.
-            const discovered = (await options.catalog.list()).find((entry) => entry.sessionId === sessionId);
-            const skipWriteGrace = releasedWriter || discovered?.origin === "studio";
-            try {
-              await archiveFactory().archive(sessionId, { skipWriteGrace });
-            } catch (error) {
-              // A duplicate/stale UI request after a successful move is
-              // idempotent at the product command boundary.
-              if ((error as { readonly code?: string })?.code !== "SESSION_ALREADY_ARCHIVED") throw error;
-            }
-            return { applied: true, runtimeEffect: "immediate", message: "Session archived to the OMP cold archive" };
-          },
-          unarchive: async ({ threadId }: { readonly threadId: ThreadId }): Promise<ConfigWriteResult> => {
-            const sessionId = await resolveCatalogSessionId(options, threadId);
-            await archiveFactory().unarchive(sessionId);
-            return { applied: true, runtimeEffect: "immediate", message: "Session restored from the archive" };
-          },
-        }),
-    delete: async ({ threadId, deleteManagedArtifacts = false }: { readonly threadId: ThreadId; readonly deleteManagedArtifacts?: boolean }): Promise<ConfigWriteResult & { readonly cleanup: "complete" | "partial" }> => {
-      if (options.deleteService === undefined) {
-        throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Session deletion is not available on this Host");
-      }
+  type DeleteResult = ConfigWriteResult & { readonly cleanup: "complete" | "partial" };
+  const removeSession = async (threadId: ThreadId, deleteManagedArtifacts: boolean, archivedOnly: boolean): Promise<DeleteResult> => {
+    if (options.deleteService === undefined) {
+      throw new StudioHostError("CAPABILITY_UNAVAILABLE", desktopText("此 Host 无法删除会话。", "Session deletion is not available on this Host."));
+    }
+    const service = options.deleteService();
+    return await withSessionFileOperation(threadId, async () => {
       const sessionId = await resolveCatalogSessionId(options, threadId);
-      // Abort a streaming turn and switch the Runtime off this file so the
-      // transcript can be removed while no Worker holds it.
-      await releaseResidentSession(options, sessionId);
-      const removed = await options.deleteService().delete(sessionId);
+      if (!archivedOnly) await releaseResidentSession(options, sessionId);
+      const removed = await service.delete(sessionId, { archivedOnly }).catch((error: unknown) => {
+        if (error instanceof SessionDeleteServiceError && error.code === "SESSION_NOT_ARCHIVED") {
+          throw new StudioHostError("INVALID_ARGUMENT", desktopText("此会话已取消归档，已跳过。", "Skipped because the session was unarchived."));
+        }
+        throw error;
+      });
       let artifactsWarning = false;
       await options.finishManagedArtifacts?.(sessionId, deleteManagedArtifacts).catch(() => { artifactsWarning = true; });
       // Best-effort residue cleanup: the transcript/artifacts are the primary
@@ -271,9 +260,43 @@ export function createDesktopSemanticCommands(options: {
           `Native history/stats cleanup is partial (${removed.nativeCleanup.reason}); some native records may remain.`,
         ));
       }
+      if (removed.artifactsCleanupFailed) messages.push(desktopText("会话产物目录清理失败。", "Could not remove the session artifacts directory."));
       if (artifactsWarning) messages.push(desktopText("托管产物清理失败，请检查产物库。", "Managed artifact cleanup failed. Review the artifact library."));
-      const cleanup = removed.nativeCleanup.status === "partial" || artifactsWarning ? "partial" : "complete";
+      const cleanup = removed.nativeCleanup.status === "partial" || removed.artifactsCleanupFailed || artifactsWarning ? "partial" : "complete";
       return { applied: true, runtimeEffect: "immediate", message: messages.join(" "), cleanup };
+    });
+  };
+  return {
+    ...(archiveFactory === undefined
+      ? {}
+      : {
+          archive: ({ threadId }: { readonly threadId: ThreadId }): Promise<ConfigWriteResult> => withSessionFileOperation(threadId, async () => {
+            const sessionId = await resolveCatalogSessionId(options, threadId);
+            const releasedWriter = await releaseResidentSession(options, sessionId);
+            // Studio-origin sessions are written only by the managed Runtime
+            // broker. CLI and unknown sessions keep the full crash-writer grace.
+            const discovered = (await options.catalog.list()).find((entry) => entry.sessionId === sessionId);
+            const skipWriteGrace = releasedWriter || discovered?.origin === "studio";
+            try {
+              await archiveFactory().archive(sessionId, { skipWriteGrace });
+            } catch (error) {
+              // Replaying a completed move is idempotent at the command boundary.
+              if ((error as { readonly code?: string })?.code !== "SESSION_ALREADY_ARCHIVED") throw error;
+            }
+            return { applied: true, runtimeEffect: "immediate", message: "Session archived to the OMP cold archive" };
+          }),
+          unarchive: ({ threadId }: { readonly threadId: ThreadId }): Promise<ConfigWriteResult> => withSessionFileOperation(threadId, async () => {
+            const sessionId = await resolveCatalogSessionId(options, threadId);
+            await archiveFactory().unarchive(sessionId);
+            return { applied: true, runtimeEffect: "immediate", message: "Session restored from the archive" };
+          }),
+        }),
+    delete: ({ threadId, deleteManagedArtifacts = false }) => removeSession(threadId, deleteManagedArtifacts, false),
+    deleteArchived: (input) => {
+      if (typeof input?.threadId !== "string" || input.threadId.length === 0) {
+        throw new StudioHostError("INVALID_ARGUMENT", desktopText("请选择已归档的会话。", "Choose an archived session."));
+      }
+      return removeSession(input.threadId, false, true);
     },
     create: async (input) => {
       if (input?.noContextFiles !== undefined && typeof input.noContextFiles !== "boolean") {

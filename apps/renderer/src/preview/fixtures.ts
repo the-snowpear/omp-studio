@@ -218,7 +218,7 @@ export function getPreviewProjects(zh = isZh()): PreviewProject[] {
       branch: "v0.8.1", worktree: null, dirty: 0, insertions: 0, deletions: 0, running: false,
       attention: false, preview: "stopped",
       threads: [
-        { id: "t6", title: zh ? "对比 v0.8.0 → v0.8.1 变更清单" : "Compare v0.8.0 → v0.8.1 changelog", time: "1d ago", msgs: 22, status: "idle" },
+        { id: "t6", title: zh ? "对比 v0.8.0 → v0.8.1 变更清单" : "Compare v0.8.0 → v0.8.1 changelog", time: "7d ago", msgs: 22, status: "archived" },
       ],
     },
     {
@@ -597,10 +597,21 @@ export function getPreviewHistory(zh = isZh()): PreviewHistoryRow[] {
     { id: "ph4", title: zh ? "选择 gemini3.6flash 随意发送消息后报错…" : "Error after selecting gemini3.6flash and sending a test message…", project: "omp-web", branch: "main", time: "4d ago", model: "gemini-3.6-flash", status: "failed", files: 0, cost: c("0.42"), forkedFrom: null, checkpoints: 0, pinned: false },
     { id: "ph5", title: zh ? "修复 Git Bash 路径未找到问题" : "Fix Git Bash path not found issue", project: "omp-web", branch: "main", time: "4d ago", model: "gpt-5.2-codex", status: "completed", files: 2, cost: c("1.08"), forkedFrom: null, checkpoints: 2, pinned: false },
     { id: "ph6", title: zh ? "重构 session 存储层 (session)" : "Refactor session storage layer (session)", project: "omp-web", branch: "refactor/session-db", time: "6d ago", model: "claude-sonnet-4.5", status: "archived", files: 21, cost: c("22.90"), forkedFrom: null, checkpoints: 9, pinned: false },
+    { id: "ph7", title: zh ? "对比 v0.8.0 → v0.8.1 变更清单" : "Compare v0.8.0 → v0.8.1 changelog", project: "pi-web (upstream)", branch: "v0.8.1", time: "7d ago", model: "gpt-5.2-codex", status: "archived", files: 3, cost: c("1.40"), forkedFrom: null, checkpoints: 4, pinned: false },
   ];
 }
 
 export const PREVIEW_HISTORY: PreviewHistoryRow[] = getPreviewHistory();
+
+/** History and sidebar fixtures that describe the same demo conversation. */
+export const PREVIEW_HISTORY_THREADS: Readonly<Record<string, string>> = {
+  ph1: "t1",
+  ph2: "t7",
+  ph3: "t2",
+  ph5: "t4",
+  ph6: "t5",
+  ph7: "t6",
+};
 
 export function getPreviewTimeTravel(zh = isZh()): PreviewTtNode[] {
   return zh ? [

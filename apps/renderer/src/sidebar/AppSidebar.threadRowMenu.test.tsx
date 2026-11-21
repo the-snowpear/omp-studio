@@ -163,6 +163,7 @@ describe("AppSidebar thread row more menu", () => {
 
   it("opens the same menu at the cursor on row right-click", () => {
     const onThreadRowAction = vi.fn();
+    const onDeleteThread = vi.fn();
     const chrome = {
       ...baseChrome(),
       projectHistories: {
@@ -173,6 +174,7 @@ describe("AppSidebar thread row more menu", () => {
         },
       },
       onThreadRowAction,
+      onDeleteThread,
     } as unknown as ComponentProps<typeof AppSidebar>["chrome"];
     const state = {
       ...baseState(),
@@ -194,8 +196,9 @@ describe("AppSidebar thread row more menu", () => {
     expect(screen.getAllByRole("menu")).toHaveLength(1);
     expect(screen.getByRole("menu").style.top).toBe("88px");
 
-    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Fork 当前对话" }));
-    expect(onThreadRowAction).toHaveBeenCalledWith(historyEntry, workspaceId, "fork");
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "删除会话" }));
+    expect(onDeleteThread).toHaveBeenCalledWith(historyEntry, workspaceId);
+    expect(onThreadRowAction).not.toHaveBeenCalled();
   });
 
   it.each([

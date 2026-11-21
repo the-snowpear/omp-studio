@@ -96,7 +96,7 @@ test("delete removes the transcript, artifacts and nested subagent transcripts",
   }
 });
 
-test("delete removes an archived session (.jsonl.gz) and its archived artifacts", async () => {
+test("archive-only deletion removes the archived session and leaves active files intact", async () => {
   const seed = await fixture();
   try {
     const stem = "2026-08-16T10-00-00-000Z_session-b";
@@ -108,7 +108,10 @@ test("delete removes an archived session (.jsonl.gz) and its archived artifacts"
     await writeFile(join(gzArtifacts, "out.md"), "artifact", "utf8");
 
     const svc = service(seed);
-    await svc.delete("session-b");
+    await assert.rejects(() => svc.delete("session-a", { archivedOnly: true }), { code: "SESSION_NOT_ARCHIVED" });
+    assert.ok(await exists(seed.sessionFile));
+    assert.ok(await exists(seed.artifactsDir));
+    await svc.delete("session-b", { archivedOnly: true });
     assert.ok(!(await exists(gz)), "archived session file is gone");
     assert.ok(!(await exists(gzArtifacts)), "archived artifacts are gone");
   } finally {

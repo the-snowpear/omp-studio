@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type {
+  SessionHistoryEntry,
   SessionId,
   SessionHistoryReadModel,
   StudioClient,
@@ -19,6 +20,11 @@ export type ProjectHistoryState = {
 };
 
 export type ProjectHistoryCache = Readonly<Record<string, ProjectHistoryState>>;
+
+export function withoutDeletedSessions(model: SessionHistoryReadModel, deleted: ReadonlySet<string>): SessionHistoryReadModel {
+  const entries = model.entries.filter(entry => !deleted.has(entry.historyId) && !deleted.has(entry.sessionId ?? ""));
+  return entries.length === model.entries.length ? model : { entries, total: Math.max(0, model.total - (model.entries.length - entries.length)) };
+}
 
 /** Stable effect key for the first streaming snapshot of one project/session.
  * Unrelated token snapshots keep the same key, so they cannot retrigger the
@@ -53,6 +59,7 @@ type HistoryClient = Pick<StudioClient, "query">;
 
 export class ProjectHistoryStore {
   cache: ProjectHistoryCache = {};
+  deletedSessions: ReadonlySet<string> = new Set();
   requests: Record<string, number> = {};
   epoch = 0;
   private listeners = new Set<() => void>();
@@ -88,6 +95,17 @@ export class ProjectHistoryStore {
       return next ?? previous;
     });
   };
+  removeSessions = (entries: readonly SessionHistoryEntry[]): void => {
+    const deleted = new Set(this.deletedSessions);
+    for (const entry of entries) {
+      deleted.add(entry.historyId);
+      if (entry.sessionId) deleted.add(entry.sessionId);
+    }
+    this.deletedSessions = deleted;
+    this.setCache(previous => Object.fromEntries(Object.entries(previous).map(([key, state]) => [
+      key, state.model ? { ...state, model: withoutDeletedSessions(state.model, deleted) } : state,
+    ])));
+  };
 }
 
 /**
@@ -112,6 +130,8 @@ export function useProjectHistories({
   readonly refresh: (workspaceId: WorkspaceId) => Promise<SessionHistoryReadModel | undefined>;
   readonly loadMore: (workspaceId: WorkspaceId) => Promise<SessionHistoryReadModel | undefined>;
   readonly applySessionTitle: (sessionId: SessionId, title: string) => void;
+  readonly deletedSessions: ReadonlySet<string>;
+  readonly removeSessions: (entries: readonly SessionHistoryEntry[]) => void;
   readonly clear: (workspaceId?: WorkspaceId) => void;
 } {
   const [own] = useState(() => new ProjectHistoryStore());
@@ -158,12 +178,13 @@ export function useProjectHistories({
       },
     }));
     try {
-      const model = await client.query("history.list", {
+      const result = await client.query("history.list", {
         workspaceId,
         limit,
         status: "active",
       });
       if (store.epoch !== requestEpoch || requestRef.current[key] !== requestId) return undefined;
+      const model = withoutDeletedSessions(result, store.deletedSessions);
       setCache((previous) => ({
         ...previous,
         [key]: { status: "ready", requestedLimit: limit, model },
@@ -214,5 +235,5 @@ export function useProjectHistories({
     setCache(next);
   }, [store]);
 
-  return { cache, load, refresh, loadMore, applySessionTitle: store.applySessionTitle, clear };
+  return { cache, load, refresh, loadMore, applySessionTitle: store.applySessionTitle, deletedSessions: store.deletedSessions, removeSessions: store.removeSessions, clear };
 }

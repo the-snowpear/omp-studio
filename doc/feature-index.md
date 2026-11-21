@@ -218,7 +218,7 @@ Time Travel：`history/TimeTravel{Activation,Dialog,Pane}.tsx`、`history/useTim
 | 目录扫描 | `studio-host/src/session-catalog.ts` | — |
 | 归档 / 解档 | `studio-host/src/session-archive-service.ts` | 切走 live 文件后再 gzip |
 | Archive / Recap 查询 | `HistoryPage.tsx`、`history/NativeArchivePane.tsx`、`preview/archivePreview.ts` | `archive.sessions.list/recaps.list/prompts.search/session.inspect`；native Archive、限量列表和详情、不接受文件路径 |
-| 永久删除 / 残留清理 | `studio-host/src/session-delete-service.ts`；历史页 `HistoryPage.tsx`「⋮ → 删除会话」 | — |
+| 永久删除 / 残留清理 | `studio-host/src/session-delete-service.ts` 与 Desktop `session-commands.ts`；侧栏与历史页「⋮ → 删除会话」走 `session.delete`，历史页「已归档 → 删除所选」走 `session.deleteArchived`；共用 `history/DeleteSessionDialog.tsx` | — |
 | 线程绑定 | `studio-host/src/thread-binding-store.ts` | — |
 | 多会话经纪 / 居民摘要 | `studio-host/src/session-broker.ts`、`session-registry.ts`；桌面 `runtime-session.ts`、`host-composition.ts`；facade `residents.list` | — |
 | 租约 / 代次 | `studio-host/src/session-lease-store.ts` | overlay `services/interaction-port.ts` |

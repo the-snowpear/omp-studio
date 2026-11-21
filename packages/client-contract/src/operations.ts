@@ -616,6 +616,8 @@ interface CoreCommandInputMap {
    * file first. Destructive and irreversible; the Renderer confirms first.
    */
   "session.delete": { readonly threadId: ThreadId; readonly deleteManagedArtifacts?: boolean };
+  /** Permanently delete a cold-archived thread while retaining its managed artifacts. */
+  "session.deleteArchived": { readonly threadId: ThreadId };
   /** Answer an `interaction_required` prompt issued by the Host. */
   "interaction.respond": {
     readonly interactionId: InteractionId;
@@ -802,6 +804,7 @@ interface CoreCommandResultMap {
   "session.unarchive": ConfigWriteResult;
   /** `cleanup: "partial"` means some native history/stats or artifact residue may remain; `message` says which. */
   "session.delete": ConfigWriteResult & { readonly cleanup?: "complete" | "partial" };
+  "session.deleteArchived": ConfigWriteResult & { readonly cleanup?: "complete" | "partial" };
   "interaction.respond": OperatorStateSnapshot;
   "permissions.mode.set": {
     readonly mode: ApprovalMode;
