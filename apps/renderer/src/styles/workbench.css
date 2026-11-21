@@ -506,7 +506,6 @@
 .ev-advisor-group { display: grid; gap: var(--sp-6); }
 .ev-advisor {
   padding: var(--sp-8) var(--sp-12);
-  border-inline-start: 3px solid var(--amber);
   border-radius: var(--r-8);
   background: var(--amber-soft);
 }
@@ -530,7 +529,6 @@
 .ev-advisor-counts > span { white-space: nowrap; }
 .ev-advisor-counts > span + span::before { content: "·"; margin-inline-end: var(--sp-8); color: var(--text-3); }
 .ev-advisor-counts [data-severity="blocker"] { color: var(--red); font-weight: var(--fw-semibold); }
-.ev-advisor-batch[data-severity="blocker"] { border-inline-start-color: var(--red); }
 .ev-advisor-batch-time { flex: none; font-size: var(--fs-11); color: var(--text-3); }
 .ev-advisor-notes { margin: var(--sp-8) 0 0; padding: 0; list-style: none; border-top: 1px solid var(--border); }
 .ev-advisor-note { padding: var(--sp-8) 0; }
