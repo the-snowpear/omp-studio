@@ -797,6 +797,15 @@ const zhRaw = {
     "minimapExtension": "扩展通知",
     "advisor": "审阅顾问",
     "advisorSeverity": { "nit": "小建议", "concern": "需关注", "blocker": "阻断问题" },
+    "advisorCount": {
+      "blockerOne": "{count} 条阻断问题", "blockerOther": "{count} 条阻断问题",
+      "concernOne": "{count} 条需关注", "concernOther": "{count} 条需关注",
+      "nitOne": "{count} 条小建议", "nitOther": "{count} 条小建议",
+      "noteOne": "{count} 条未分级意见", "noteOther": "{count} 条未分级意见"
+    },
+    "advisorBatch": {
+      "expand": "展开审阅意见：{summary}", "collapse": "收起审阅意见：{summary}", "copy": "复制整组审阅意见"
+    },
     "minimapCompacting": "压缩中",
     "minimapCompactingPreview": "正在压缩当前上下文",
     "minimapCheckpointPreview": "会话在此处重置，更早的消息仍可通过会话归档查看。",

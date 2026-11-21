@@ -371,6 +371,7 @@ export function ConversationPane({
         <RuntimeToolProvider {...runtimeTools} sourceSessionId={state.identity?.sessionId}><ConvoTranscript
           scrollerRef={scrollerRef}
           rows={displayRows}
+          stateScopeKey={state.identity?.sessionId ?? ""}
           demo={demo}
           {...(onRestore === undefined ? {} : { onRestore })}
           {...(onRestoreUserMessage === undefined ? {} : { onRestoreUserMessage })}

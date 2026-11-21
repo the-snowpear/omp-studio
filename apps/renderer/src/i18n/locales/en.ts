@@ -797,6 +797,15 @@ export const en: LocaleDictionary = {
     "minimapExtension": "Extension notice",
     "advisor": "Advisor",
     "advisorSeverity": { "nit": "Nit", "concern": "Concern", "blocker": "Blocker" },
+    "advisorCount": {
+      "blockerOne": "{count} blocker", "blockerOther": "{count} blockers",
+      "concernOne": "{count} concern", "concernOther": "{count} concerns",
+      "nitOne": "{count} nit", "nitOther": "{count} nits",
+      "noteOne": "{count} ungraded note", "noteOther": "{count} ungraded notes"
+    },
+    "advisorBatch": {
+      "expand": "Expand advisor notes: {summary}", "collapse": "Collapse advisor notes: {summary}", "copy": "Copy advisor batch"
+    },
     "minimapCompacting": "Compacting",
     "minimapCompactingPreview": "Compacting the current context",
     "minimapCheckpointPreview": "The session restarts here; earlier messages remain available through the session archive.",

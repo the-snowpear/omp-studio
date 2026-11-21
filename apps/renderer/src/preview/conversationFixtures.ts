@@ -275,8 +275,29 @@ export function getPreviewConvoItems(zh = isZh()): readonly ConversationItem[] {
     },
     {
       kind: "message",
-      itemId: "preview-assistant-1",
+      itemId: "preview-advisor-batch",
       parentId: "preview-advisor-1",
+      createdAt: at(3),
+      role: "advisor",
+      content: [
+        { type: "text", advisor: "upstream-sync", severity: "concern", text: zh
+          ? "同步完成后，确认本地 Studio Bridge 能力仍可正常调用。"
+          : "After syncing, confirm the local Studio Bridge capabilities still work." },
+        { type: "text", advisor: "docs", severity: "nit", text: zh
+          ? "同步文档里的复查命令应与 package.json 保持一致。"
+          : "Keep the verification commands in the sync notes aligned with package.json." },
+        { type: "text", advisor: "upstream-sync", severity: "concern", text: zh
+          ? "回放历史会话，核对同步前后的消息顺序。"
+          : "Replay a historical session and compare message ordering before and after the sync." },
+        { type: "text", advisor: "docs", text: zh
+          ? "在同步记录中注明已经验证的平台。"
+          : "Record the platforms actually verified in the sync notes." },
+      ],
+    },
+    {
+      kind: "message",
+      itemId: "preview-assistant-1",
+      parentId: "preview-advisor-batch",
       createdAt: at(4),
       role: "assistant",
       content: [
@@ -307,6 +328,21 @@ export function getPreviewConvoItems(zh = isZh()): readonly ConversationItem[] {
             "- [x] Update sync notes and README\n- [x] Verify local paths\n- [ ] Recheck type errors\n- [ ] Confirm zoom interaction",
           ]).join("\n\n"),
         },
+      ],
+    },
+    {
+      kind: "message",
+      itemId: "preview-advisor-blocker",
+      parentId: "preview-assistant-1",
+      createdAt: at(5),
+      role: "advisor",
+      content: [
+        { type: "text", advisor: "upstream-sync", severity: "blocker", text: zh
+          ? "类型检查仍未通过，完成修复前不要将本次同步标记为已验收。"
+          : "The type check is still failing. Fix it before marking this sync as verified." },
+        { type: "text", advisor: "upstream-sync", severity: "concern", text: zh
+          ? "修复后重新检查全屏缩放，并将结果补入同步记录。"
+          : "Recheck fullscreen zoom after the fix and add the result to the sync notes." },
       ],
     },
   ];
