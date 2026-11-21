@@ -159,7 +159,10 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
     finally { if (!disposed && token === run) { loadingOlder = false; publish(); metadataSnapshot = { ...store.getMetadataSnapshot(), demo: input.preview, loadingOlder, identityKey: identityKey(store.getMetadataSnapshot().state.identity) }; for (const listener of metadataListeners) listener(); } }
   }
 
-  if (!input.preview && input.canRead && input.client && identity) {
+  // Preview data is already available. Publish it before the first render so
+  // a locale change does not briefly replace the mounted transcript with an empty view.
+  if (input.preview) void hydrate();
+  else if (input.canRead && input.client && identity) {
     const cached = projectReadsFor(input.client)?.page(identity.sessionId, identity.transcriptRevision);
     if (cached) { initialCachedPage = cached; store.hydrate(cached); store.setLoading(true); sessionSwitchPerformance.mark("conversation.cacheDisplay", { rows: cached.items.length }); }
   }
@@ -169,7 +172,12 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
     subscribe(listener) { if (disposed) return () => {}; listeners.add(listener); return () => listeners.delete(listener); },
     getMetadataSnapshot: () => metadataSnapshot,
     subscribeMetadata(listener) { if (disposed) return () => {}; metadataListeners.add(listener); return () => metadataListeners.delete(listener); },
-    start() { if (started || disposed) return; started = true; if (!input.preview && input.client !== null) transportUnsubscribe = createConversationSource(input.client).subscribe(onEvent); void hydrate(); },
+    start() {
+      if (started || disposed || input.preview) return;
+      started = true;
+      if (input.client !== null) transportUnsubscribe = createConversationSource(input.client).subscribe(onEvent);
+      void hydrate();
+    },
     /**
      * Release everything, including the snapshots this engine published.
      *

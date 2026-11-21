@@ -47,7 +47,7 @@
 </p>
 
 > [!NOTE]
-> **0.2.7** upgrades to OMP 19.0.1 with a Plan source editor and live preview, floating session files and logs, a unified disassembler workspace, and improvements to streaming, evaluation pagination and 3D previews. This release bundles Runtime `19.0.1-studio.1`. [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.7) · [Release notes and screenshots](docs/releases/v0.2.7.md)
+> **0.2.8** adds session references with excerpts and bulk archive cleanup, and updates conversation activity, Advisor review groups, Office and spreadsheet previews, and SSH setup. This release bundles Runtime `19.0.1-studio.1`. [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.8) · [Release notes and screenshots](docs/releases/v0.2.8.md)
 
 <table>
 <tr>

@@ -4,6 +4,7 @@ import { AppSelect } from "../AppSelect";
 import { Icon } from "../icons";
 import { useI18n } from "../i18n";
 import { useSurfaceDocument } from "../dock/SurfaceContext";
+import type { SpreadsheetCopyResult } from "./spreadsheet.worker";
 
 type Cell = { row: number; column: number; text: string; formula?: string };
 type Merge = { s: { r: number; c: number }; e: { r: number; c: number } };
@@ -21,6 +22,7 @@ export default function SpreadsheetPane({ url, text }: { url?: string | undefine
   const requests = useRef(new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>());
   const [sheets, setSheets] = useState<string[]>([]), [sheet, setSheet] = useState(0), [workbookVersion, setWorkbookVersion] = useState(0), [meta, setMeta] = useState<Sheet>({ rows: 0, columns: 0, merges: [], truncatedRows: false, truncatedColumns: false });
   const [cells, setCells] = useState<Cell[]>([]), [error, setError] = useState("");
+  const [copyTooLarge, setCopyTooLarge] = useState(false);
   const [selection, setSelection] = useState({ r: 0, c: 0, endR: 0, endC: 0 });
   const request = <T,>(input: object, transfer: Transferable[] = []) => new Promise<T>((resolve, reject) => {
     const instance = worker.current;
@@ -57,7 +59,12 @@ export default function SpreadsheetPane({ url, text }: { url?: string | undefine
     const generation = ++openGeneration.current;
     let active = true;
     setError("");
-    setSheets([]); setCells([]); setSheet(0); setMeta({ rows: 0, columns: 0, merges: [], truncatedRows: false, truncatedColumns: false }); setSelection({ r: 0, c: 0, endR: 0, endC: 0 });
+    setCopyTooLarge(false);
+    if (text === undefined) {
+      setSheets([]); setCells([]); setSheet(0);
+      setMeta({ rows: 0, columns: 0, merges: [], truncatedRows: false, truncatedColumns: false });
+      setSelection({ r: 0, c: 0, endR: 0, endC: 0 });
+    }
     const loadPromise = text !== undefined
       ? request<{ sheets: string[] }>({ kind: "openText", text })
       : fetch(url!, { signal: controller.signal })
@@ -112,8 +119,10 @@ export default function SpreadsheetPane({ url, text }: { url?: string | undefine
     return () => { active = false; };
   }, [sheet, sheets.length, workbookVersion, meta, startRow, endRow, startColumn, endColumn]);
   const copy = async () => {
-    const text = await request<string>({ kind: "copy", sheet, startRow: Math.min(selection.r, selection.endR), endRow: Math.max(selection.r, selection.endR), startColumn: Math.min(selection.c, selection.endC), endColumn: Math.max(selection.c, selection.endC) });
-    await surface.defaultView?.navigator.clipboard.writeText(text);
+    if (!meta.rows) return;
+    const result = await request<SpreadsheetCopyResult>({ kind: "copy", sheet, startRow: Math.min(selection.r, selection.endR), endRow: Math.max(selection.r, selection.endR), startColumn: Math.min(selection.c, selection.endC), endColumn: Math.max(selection.c, selection.endC) });
+    setCopyTooLarge("tooLarge" in result);
+    if ("text" in result) await surface.defaultView?.navigator.clipboard.writeText(result.text);
   };
   const selected = `${columnName(Math.min(selection.c, selection.endC))}${Math.min(selection.r, selection.endR) + 1}${selection.r !== selection.endR || selection.c !== selection.endC ? `:${columnName(Math.max(selection.c, selection.endC))}${Math.max(selection.r, selection.endR) + 1}` : ""}`;
   const activeCell = `${gridId}-cell-${sheet}-${selection.endR}-${selection.endC}`;
@@ -155,6 +164,7 @@ export default function SpreadsheetPane({ url, text }: { url?: string | undefine
   const activeRowVisible = visibleRows.some(row => row.index === selection.endR);
   return <div className="file-spreadsheet"><div className="file-subbar">{sheets.length > 1 ? <AppSelect className="file-sheet-select" aria-label={zh ? "工作表" : "Sheet"} value={String(sheet)} onChange={event => { setCells([]); setMeta({ rows: 0, columns: 0, merges: [], truncatedRows: false, truncatedColumns: false }); setSheet(Number(event.target.value)); }}>{sheets.map((name, index) => <option key={name} value={index}>{name}</option>)}</AppSelect> : <span className="file-subbar-title"><Icon name="table" extra="sm" />{sheets[0] ?? (zh ? "表格" : "Sheet")}</span>}<span className="file-subbar-meta">{zh ? `${meta.rows.toLocaleString()} 行 · ${meta.columns.toLocaleString()} 列` : `${meta.rows.toLocaleString()} rows · ${meta.columns.toLocaleString()} cols`}</span><span className="file-subbar-spacer" /><span className="file-cell-ref" data-tip={zh ? "当前选区" : "Current selection"}>{selected}</span><button type="button" className="icon-btn" aria-label={zh ? "复制选区" : "Copy selection"} data-tip={zh ? "复制选区（Ctrl C）" : "Copy selection (Ctrl C)"} disabled={!sheets.length} onClick={() => { void copy().catch(error => setError(String(error))); }}><Icon name="copy" extra="sm" /></button><span className="file-tag" data-tip={zh ? "公式显示已保存的结果" : "Formulas show saved values"}><Icon name="lock" extra="sm" />{zh ? "只读" : "Read-only"}</span></div>
     {meta.truncatedRows || meta.truncatedColumns ? <div className="file-banner is-warning" role="status">{zh ? `此工作表超出 Excel 的${meta.truncatedRows ? "行" : ""}${meta.truncatedRows && meta.truncatedColumns ? "和" : ""}${meta.truncatedColumns ? "列" : ""}数上限，部分内容未显示。` : `This sheet exceeds Excel's ${meta.truncatedRows ? "row" : ""}${meta.truncatedRows && meta.truncatedColumns ? " and " : ""}${meta.truncatedColumns ? "column" : ""} limit; some content is not shown.`}</div> : null}
+    {copyTooLarge ? <div className="file-banner is-warning" role="status">{zh ? "选区太大，无法一次复制。请缩小选区后重试。" : "The selection is too large to copy at once. Select a smaller range and try again."}</div> : null}
     {error ? <div className="file-banner is-error" role="alert"><Icon name="alert-c" extra="sm" /><span>{error}</span></div> : null}
     {!sheets.length && !error ? <div className="file-empty"><span className="file-badge is-large tone-green is-loading" aria-hidden="true">XLS</span><h3>{zh ? "正在读取表格…" : "Loading spreadsheet…"}</h3></div> : null}
     <div ref={scroll} className="file-grid-scroll" role="grid" tabIndex={0} aria-label={zh ? "文件表格" : "Spreadsheet"} aria-rowcount={meta.rows + 1} aria-colcount={meta.columns + 1} aria-activedescendant={activeCell} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") { event.preventDefault(); void copy().catch(error => setError(String(error))); } else onGridKeyDown(event); }}>

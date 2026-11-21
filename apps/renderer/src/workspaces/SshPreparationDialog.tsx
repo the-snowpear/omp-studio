@@ -23,6 +23,8 @@ export function SshPreparationDialog({ profile, kind = profile.kind, status, dem
   useEffect(() => { const previous = document.activeElement as HTMLElement | null; dialog.current?.showModal(); return () => { dialog.current?.close(); previous?.focus(); }; }, []);
   const wsl = kind === "wsl";
   const confirm = status.state === "awaiting-approval";
+  // showModal() would focus the close button; the footer's main action takes it, again when the phase swaps it out.
+  useEffect(() => { dialog.current?.querySelector<HTMLElement>(".ssh-dialog-foot [data-autofocus]")?.focus(); }, [confirm]);
   const step = Math.max(0, STAGES.indexOf(status.stage ?? "probe"));
   const phase = step === 0 && !confirm ? 0 : 1;
   const percent = status.totalBytes ? Math.min(100, Math.round((status.receivedBytes ?? 0) / status.totalBytes * 100)) : undefined;
@@ -83,8 +85,8 @@ export function SshPreparationDialog({ profile, kind = profile.kind, status, dem
     <footer className="ssh-dialog-foot">
       {confirm ? <>
         <button type="button" className="btn outline" onClick={onCancel}>{zh ? "取消" : "Cancel"}</button>
-        <button type="button" className="btn primary" autoFocus onClick={onApprove}>{zh ? "安装并连接" : "Install & connect"}{demo && marks ? (zh ? "（演示）" : " (Preview)") : ""}</button>
-      </> : <button type="button" className="btn outline" onClick={onCancel}>{zh ? "取消连接" : "Cancel connection"}</button>}
+        <button type="button" className="btn primary" data-autofocus onClick={onApprove}>{zh ? "安装并连接" : "Install & connect"}{demo && marks ? (zh ? "（演示）" : " (Preview)") : ""}</button>
+      </> : <button type="button" className="btn outline" data-autofocus onClick={onCancel}>{zh ? "取消连接" : "Cancel connection"}</button>}
     </footer>
   </dialog>, document.body);
 }

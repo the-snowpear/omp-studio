@@ -2,6 +2,7 @@ import * as XLSX from "xlsx";
 
 type Merge = { s: { r: number; c: number }; e: { r: number; c: number } };
 type SheetBounds = { rows: number; columns: number; merges: Merge[]; truncatedRows: boolean; truncatedColumns: boolean };
+export type SpreadsheetCopyResult = { text: string } | { tooLarge: true };
 export type SpreadsheetWorkerRequest =
   | { id: number; kind: "open"; bytes: ArrayBuffer }
   | { id: number; kind: "openText"; text: string }
@@ -10,6 +11,8 @@ export type SpreadsheetWorkerRequest =
 
 const MAX_SAFE_ROWS = 1_048_576;
 const MAX_SAFE_COLUMNS = 16_384;
+const MAX_COPY_CELLS = 1_000_000;
+const MAX_COPY_CHARACTERS = 8 * 1024 * 1024;
 
 function hasCellContent(cell: XLSX.CellObject | undefined): boolean {
   if (!cell) return false;
@@ -84,19 +87,26 @@ export function createSpreadsheetWorkerRuntime() {
       if (input.kind === "sheet") return { id: input.id, result: bounds };
       const rows: string[][] = [], cells: { row: number; column: number; text: string; formula?: string }[] = [];
       const seen = new Set<string>();
+      let copyCharacters = 0;
       const endRow = Math.min(input.endRow, bounds.rows - 1);
       const endColumn = Math.min(input.endColumn, bounds.columns - 1);
+      if (input.kind === "copy" && (endRow - input.startRow + 1) * (endColumn - input.startColumn + 1) > MAX_COPY_CELLS) {
+        return { id: input.id, result: { tooLarge: true } satisfies SpreadsheetCopyResult };
+      }
       for (let row = input.startRow; row <= endRow; row++) {
         const values: string[] = [];
         for (let column = input.startColumn; column <= endColumn; column++) {
           const { text, formula } = readCellText(sheet, row, column);
-          values.push(text);
-          if (input.kind === "cells") {
+          if (input.kind === "copy") {
+            copyCharacters += text.length + 1;
+            if (copyCharacters > MAX_COPY_CHARACTERS) return { id: input.id, result: { tooLarge: true } satisfies SpreadsheetCopyResult };
+            values.push(text);
+          } else {
             seen.add(`${row}:${column}`);
             cells.push({ row, column, text, ...(formula ? { formula } : {}) });
           }
         }
-        rows.push(values);
+        if (input.kind === "copy") rows.push(values);
       }
       if (input.kind === "cells") {
         for (const merge of bounds.merges) {
@@ -108,7 +118,8 @@ export function createSpreadsheetWorkerRuntime() {
           cells.push({ row: merge.s.r, column: merge.s.c, text, ...(formula ? { formula } : {}) });
         }
       }
-      return { id: input.id, result: input.kind === "copy" ? rows.map(row => row.join("\t")).join("\n") : cells };
+      const result = input.kind === "copy" ? { text: rows.map(row => row.join("\t")).join("\n") } satisfies SpreadsheetCopyResult : cells;
+      return { id: input.id, result };
     } catch (error) {
       return { id: input.id, error: error instanceof Error ? error.message : String(error) };
     }

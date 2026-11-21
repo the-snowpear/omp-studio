@@ -65,7 +65,8 @@ export function ExecutionTargetPicker({ onOpen, otherMenuOpen = false }: { onOpe
   const unavailable = !preview && !target.api;
   const installing = status?.operation === "installing-runtime";
 
-  useEffect(() => { if (modalOpen) dialog.current?.showModal(); else dialog.current?.close(); }, [modalOpen]);
+  // showModal() focuses the first focusable (the close button); hand focus to the field instead.
+  useEffect(() => { if (modalOpen) { dialog.current?.showModal(); dialog.current?.querySelector<HTMLElement>("[data-autofocus]")?.focus(); } else dialog.current?.close(); }, [modalOpen]);
   useEffect(() => { if (open) menu.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus(); }, [open]);
   useEffect(() => { if (otherMenuOpen) setOpen(false); }, [otherMenuOpen]);
   useEffect(() => {
@@ -135,14 +136,21 @@ export function ExecutionTargetPicker({ onOpen, otherMenuOpen = false }: { onOpe
     setError(""); setForm(true);
   };
   const save = () => void run(async () => {
+    const input = {
+      ...(editing ? { id: editing } : {}), name: name.trim() || host.trim(), host: host.trim(), authMode, networkMode,
+      ...(installRoot.trim() ? { installRoot: installRoot.trim() } : {}),
+      ...(localProxyUrl.trim() ? { localProxyUrl: localProxyUrl.trim() } : {}),
+      ...(user.trim() ? { user: user.trim() } : {}),
+      ...(port ? { port: Number(port) } : {}),
+    };
     if (preview) {
       setForm(false);
-      const profile = { id: "demo-password", name: name || host, host, user, platform: "linux" as const, authMode };
+      const profile = { ...input, id: "demo-ssh", platform: "linux" as const };
       if (authMode === "password") setDemoPasswordProfile(profile);
       else setDemoPreparation(profile);
       return;
     }
-    const saved = await target.api!.save({ ...(editing ? { id: editing } : {}), name: name.trim() || host.trim(), host: host.trim(), authMode, networkMode, ...(installRoot.trim() ? { installRoot: installRoot.trim() } : {}), ...(localProxyUrl.trim() ? { localProxyUrl: localProxyUrl.trim() } : {}), ...(user.trim() ? { user: user.trim() } : {}), ...(port ? { port: Number(port) } : {}) });
+    const saved = await target.api!.save(input);
     await target.refresh();
     setForm(false); setEditing(undefined); button.current?.focus();
     setConnectingId(saved.id);
@@ -237,11 +245,11 @@ export function ExecutionTargetPicker({ onOpen, otherMenuOpen = false }: { onOpe
     {modalOpen ? createPortal(<dialog role="dialog" ref={dialog} className="ssh-dialog" aria-labelledby="ssh-dialog-title" onCancel={event => { event.preventDefault(); closeModal(); }}>
       {form ? <form onSubmit={event => { event.preventDefault(); save(); }}>
         <SshDialogHead icon="server" titleId="ssh-dialog-title" title={editing ? (zh ? "编辑 SSH 连接" : "Edit SSH connection") : (zh ? "添加 SSH 连接" : "Add SSH connection")}
-          sub={zh ? "连接后自动识别 Windows、Linux 或 macOS 并准备运行环境" : "Detects Windows, Linux or macOS and prepares the runtime after connecting"}
+          sub={zh ? "连接后自动识别 Windows、Linux 或 macOS 并准备运行环境" : "Detects the OS and prepares the runtime after connecting"}
           closeLabel={zh ? "关闭" : "Close"} closeDisabled={busy} onClose={closeModal} />
         <div className="ssh-dialog-body">
           <div className="ssh-row is-host">
-            <SshField label={zh ? "主机" : "Host"} htmlFor={`${fieldId}-host`}><input id={`${fieldId}-host`} className="ssh-input is-mono" autoFocus required value={host} onChange={event => setHost(event.target.value)} placeholder={zh ? "user@host、IP 或配置别名" : "user@host, IP or config alias"} autoCapitalize="off" spellCheck={false} disabled={busy} /></SshField>
+            <SshField label={zh ? "主机" : "Host"} htmlFor={`${fieldId}-host`}><input id={`${fieldId}-host`} className="ssh-input is-mono" autoFocus data-autofocus required value={host} onChange={event => setHost(event.target.value)} placeholder={zh ? "user@host、IP 或配置别名" : "user@host, IP or config alias"} autoCapitalize="off" spellCheck={false} disabled={busy} /></SshField>
             <SshField label={zh ? "端口" : "Port"} htmlFor={`${fieldId}-port`}><input id={`${fieldId}-port`} className="ssh-input is-mono" type="number" min="1" max="65535" value={port} onChange={event => setPort(event.target.value)} placeholder="22" disabled={busy} /></SshField>
           </div>
           <div className="ssh-row">
@@ -251,6 +259,7 @@ export function ExecutionTargetPicker({ onOpen, otherMenuOpen = false }: { onOpe
           <SshSegmented<"agent" | "password"> label={zh ? "认证方式" : "Authentication"} value={authMode} disabled={busy} onChange={setAuthMode}
             options={[{ value: "agent", label: zh ? "密钥 / Agent" : "Key / Agent", icon: "key" }, { value: "password", label: zh ? "密码" : "Password", icon: "lock" }]}
             hint={authMode === "agent" ? (zh ? "使用系统 SSH 配置、密钥与 ssh-agent" : "Uses your system SSH config, keys and ssh-agent") : (zh ? "连接时询问密码，不会保存" : "Asks for the password when connecting; never saved")} />
+          <div className="ssh-advanced-group">
           <button type="button" className="ssh-disclosure" aria-expanded={advanced} aria-controls={`${fieldId}-advanced`} onClick={() => setAdvanced(value => !value)}>
             <Icon name="chevron-r" extra="sm" />{zh ? "高级设置" : "Advanced"}<small>{advancedSummary}</small>
           </button>
@@ -261,6 +270,7 @@ export function ExecutionTargetPicker({ onOpen, otherMenuOpen = false }: { onOpe
             <SshField label={zh ? "远端安装目录" : "Remote install directory"} optional={zh ? "留空自动选择" : "Auto if empty"} htmlFor={`${fieldId}-root`}><input id={`${fieldId}-root`} className="ssh-input is-mono" value={installRoot} onChange={event => setInstallRoot(event.target.value)} placeholder={zh ? "远端绝对路径" : "Remote absolute path"} spellCheck={false} disabled={busy} /></SshField>
             <SshField label={zh ? "本机上游代理" : "Local upstream proxy"} optional={zh ? "留空使用系统代理" : "System proxy if empty"} htmlFor={`${fieldId}-proxy`}><input id={`${fieldId}-proxy`} className="ssh-input is-mono" value={localProxyUrl} onChange={event => setLocalProxyUrl(event.target.value)} placeholder="http://127.0.0.1:7890" spellCheck={false} disabled={busy} /></SshField>
           </div></div>
+          </div>
           {preview && marks ? <p className="ssh-note"><Icon name="info" extra="sm" />{zh ? "演示模式只修改界面，不连接服务器。" : "Preview mode only changes the UI and connects nowhere."}</p> : null}
           {error ? <p role="alert" className="ssh-alert"><Icon name="alert-c" extra="sm" /><span>{error}</span></p> : null}
         </div>
@@ -276,7 +286,7 @@ export function ExecutionTargetPicker({ onOpen, otherMenuOpen = false }: { onOpe
           <SshField label={wslDirectory ? (zh ? "Linux 绝对路径" : "Linux absolute path") : zh ? "远端绝对路径" : "Remote absolute path"} htmlFor={`${fieldId}-path`}>
             <div className="ssh-path-bar">
               {!preview ? <button type="button" className="btn outline" aria-label={zh ? "上一级" : "Up"} disabled={busy || !directories || directories.parent === directories.path} onClick={() => void run(() => browse(directoryTarget!, directories?.parent))}><Icon name="arrow-u" extra="sm" /></button> : null}
-              <div className="ssh-input-affix"><Icon name="folder" extra="sm" /><input id={`${fieldId}-path`} className="ssh-input is-mono" autoFocus required value={path} onChange={event => setPath(event.target.value)} spellCheck={false} disabled={busy} /></div>
+              <div className="ssh-input-affix"><Icon name="folder" extra="sm" /><input id={`${fieldId}-path`} className="ssh-input is-mono" autoFocus data-autofocus required value={path} onChange={event => setPath(event.target.value)} spellCheck={false} disabled={busy} /></div>
               {!preview ? <button type="button" className="btn outline" disabled={busy || !path} onClick={() => void run(() => browse(directoryTarget!, path))}>{zh ? "前往" : "Go"}</button> : null}
             </div>
           </SshField>
@@ -296,7 +306,7 @@ export function ExecutionTargetPicker({ onOpen, otherMenuOpen = false }: { onOpe
     </dialog>, document.body) : null}
     {preview && demoPasswordProfile ? <SshPasswordDialog demo profile={demoPasswordProfile} onCancel={() => setDemoPasswordProfile(undefined)} onSubmit={() => { setDemoPreparation(demoPasswordProfile); setDemoPasswordProfile(undefined); }} /> : null}
     {preview && demoPreparation ? <SshPreparationDialog demo profile={demoPreparation}
-      status={{ id: demoPreparation.id, state: demoRun === undefined ? "awaiting-approval" : "connecting", stage: "confirmation", platform: "linux", arch: "x64", installRoot: "~/.local/share/omp-studio/remote", ...(demoRun === undefined ? {} : DEMO_RUN[demoRun]) }}
+      status={{ id: demoPreparation.id, state: demoRun === undefined ? "awaiting-approval" : "connecting", stage: "confirmation", platform: "linux", arch: "x64", installRoot: demoPreparation.installRoot ?? "~/.local/share/omp-studio/remote", ...(demoRun === undefined ? {} : DEMO_RUN[demoRun]) }}
       onCancel={() => { setDemoPreparation(undefined); setDemoRun(undefined); }} onApprove={() => setDemoRun(0)} /> : null}
   </span>;
 }

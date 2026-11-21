@@ -64,7 +64,9 @@ function connectionArgs(connection: SshConnection): { options: string[]; login?:
 
 export function sftpArguments(connection: SshConnection): string[] {
   const { options, login } = connectionArgs(connection);
-  return ["-b", "-", ...options, target(connection, login)];
+  // OpenSSH's -b adds BatchMode=yes. The first value wins, so pass our
+  // explicit authentication mode before enabling the SFTP batch input.
+  return [...options, "-b", "-", target(connection, login)];
 }
 
 export function scpLegacyArguments(connection: SshConnection, localPath: string, remotePath: string, platform: RemotePlatform): string[] {

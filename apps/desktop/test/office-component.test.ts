@@ -73,7 +73,7 @@ test("initializing an installed component removes obsolete engines", async () =>
   } finally { component.dispose(); await rm(directory, { recursive: true, force: true }); }
 });
 
-test("installed engine pruning waits until active conversions release the old version", async () => {
+test("finishing a conversion removes only its retired engine while an update is being installed", async () => {
   const directory = await mkdtemp(join(tmpdir(), "omp-office-engine-lease-"));
   const keys = await installManifest(directory, "26.8.2");
   await mkdir(join(directory, "versions", "26.7.0"), { recursive: true });
@@ -83,8 +83,12 @@ test("installed engine pruning waits until active conversions release the old ve
   try {
     assert.equal((await component.getState()).status, "ready");
     await access(join(directory, "versions", "26.7.0"));
+    const incoming = join(directory, "versions", "26.9.0");
+    await mkdir(incoming);
     await internals.releaseEngine("26.7.0");
     await assert.rejects(access(join(directory, "versions", "26.7.0")));
+    await access(incoming);
+    await access(join(directory, "versions", "26.8.2"));
   } finally { component.dispose(); await rm(directory, { recursive: true, force: true }); }
 });
 

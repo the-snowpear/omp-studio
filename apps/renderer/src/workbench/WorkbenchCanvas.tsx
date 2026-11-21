@@ -2330,6 +2330,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
           <CommandBlockProvider workspaceId={workspaceId} sessionId={terminalSessionId} conversationId={terminalConversationId}>
           <ConversationPane
             {...(preview && previewThreadId === "t15" ? { supplement: <ContentGallerySamples /> } : {})}
+            {...(preview && previewThreadId !== undefined ? { previewThreadId } : {})}
             runtimeTools={{ client, actions: client, sessionId: snapshot?.sessionId, enabled: preview || runtimeConnected && executionMatches && can("shell.view.read") }}
             snapshot={convo}
             liveEngine={convo.engine}

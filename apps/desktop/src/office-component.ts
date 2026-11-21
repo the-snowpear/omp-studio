@@ -21,6 +21,7 @@ export class OfficeComponent {
   private available: SignedOfficeComponent | undefined;
   private initialized: Promise<void> | undefined;
   private installing: Promise<OfficeComponentState> | undefined;
+  private installingVersion: string | undefined;
   private controller: AbortController | undefined;
   private conversionQueue: Promise<unknown> = Promise.resolve();
   private conversions = new Map<string, Promise<string>>();
@@ -83,6 +84,7 @@ export class OfficeComponent {
     }
     const staging = join(this.root, `.staging-${randomUUID()}`), archive = join(this.root, `${envelope.manifest.version}.zip`);
     const progress = createProgressThrottle(receivedBytes => this.publish({ receivedBytes }));
+    this.installingVersion = envelope.manifest.version;
     try {
       await assertFreeSpace(this.root, envelope.manifest.archive.bytes * 3);
       await mkdir(staging, { recursive: true });
@@ -105,7 +107,7 @@ export class OfficeComponent {
       await this.removeOwned(archive);
       return this.publish({ status: "ready", installedVersion: envelope.manifest.version, message: "", receivedBytes: envelope.manifest.archive.bytes });
     } catch (error) { return this.publish({ status: this.installed ? "ready" : "error", message: controller.signal.aborted ? desktopText("已取消安装", "Installation cancelled") : error instanceof Error ? error.message : String(error) }); }
-    finally { progress.dispose(); await this.removeOwned(staging); }
+    finally { this.installingVersion = undefined; progress.dispose(); await this.removeOwned(staging); }
   }
   cancel() { this.controller?.abort(); }
   async uninstall(): Promise<OfficeComponentState> {
@@ -131,9 +133,15 @@ export class OfficeComponent {
     }
   }
   private async releaseEngine(version: string): Promise<void> {
-    const users = this.engineUsers.get(version);
-    if (users !== undefined) { if (users <= 1) this.engineUsers.delete(version); else this.engineUsers.set(version, users - 1); }
-    await this.pruneInstalledVersions(this.installed?.manifest.version);
+    const users = this.engineUsers.get(version) ?? 0;
+    if (users > 1) {
+      this.engineUsers.set(version, users - 1);
+      return;
+    }
+    this.engineUsers.delete(version);
+    if (version !== this.installed?.manifest.version && version !== this.installingVersion) {
+      await this.removeOwned(join(this.root, "versions", version)).catch(() => {});
+    }
   }
   private async pruneCache(keepKey: string, resources: FileResources): Promise<void> {
     const cacheDir = join(this.root, "cache");

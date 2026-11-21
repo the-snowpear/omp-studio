@@ -109,6 +109,7 @@
   left: 3px;
   width: calc((100% - 6px) / var(--count));
   translate: calc(100% * var(--index)) 0;
+  box-sizing: border-box;
   border-radius: var(--r-4);
   background: var(--surface);
   border: 1px solid var(--border-strong);
@@ -148,10 +149,14 @@
 .ssh-disclosure[aria-expanded="true"] > small { opacity: 0; }
 .ssh-disclosure:hover { color: var(--text); }
 .ssh-disclosure:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-4); }
-.ssh-advanced { display: grid; grid-template-rows: 0fr; margin-top: calc(var(--sp-14) * -1); transition: grid-template-rows var(--dur-slow) var(--ease-out), margin-top var(--dur-slow) var(--ease-out); }
-.ssh-advanced > div { display: grid; gap: var(--sp-14); min-height: 0; overflow: hidden; opacity: 0; transition: opacity var(--dur) var(--ease); }
-.ssh-advanced.is-open { grid-template-rows: 1fr; margin-top: 0; }
-.ssh-advanced.is-open > div { opacity: 1; padding: 2px; margin: -2px; }
+.ssh-advanced-group { display: grid; }
+.ssh-advanced { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-slow) var(--ease-out); }
+/* The empty first item buys the gap above the first field, inside the clip,
+   so the collapsed group adds no height. The clip margin keeps focus rings. */
+.ssh-advanced > div { display: grid; gap: var(--sp-14); min-height: 0; overflow: clip; overflow-clip-margin: 4px; opacity: 0; transition: opacity var(--dur) var(--ease); }
+.ssh-advanced > div::before { content: ""; margin-bottom: calc(var(--sp-4) * -1); }
+.ssh-advanced.is-open { grid-template-rows: 1fr; }
+.ssh-advanced.is-open > div { opacity: 1; }
 
 .ssh-alert { display: flex; align-items: flex-start; gap: var(--sp-8); margin: 0; padding: var(--sp-10) var(--sp-12); border-radius: var(--r-6); background: var(--red-soft); color: var(--red); font-size: var(--fs-12); line-height: 1.55; overflow-wrap: anywhere; animation: var(--motion-reveal); }
 .ssh-alert.is-warn { background: var(--amber-soft); color: var(--amber); }

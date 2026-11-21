@@ -12,14 +12,15 @@ test("Windows configuration uploads prefer SFTP and retain SCP as the fallback",
 });
 
 test("SFTP and legacy SCP arguments preserve SSH connection options", () => {
-  assert.deepEqual(sftpArguments(connection), ["-b", "-", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ForwardAgent=no", "-o", "ClearAllForwardings=yes", "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-P", "2222", "the_snowpear@deskserver"]);
+  assert.deepEqual(sftpArguments(connection), ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ForwardAgent=no", "-o", "ClearAllForwardings=yes", "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", "-P", "2222", "-b", "-", "the_snowpear@deskserver"]);
   assert.deepEqual(scpLegacyArguments(connection, "C:\\tmp\\package.zip", "C:\\Users\\the_snowpear\\AppData\\Local\\omp-studio\\remote\\package.zip", "win32").slice(-2), ["C:\\tmp\\package.zip", "the_snowpear@deskserver:'C:/Users/the_snowpear/AppData/Local/omp-studio/remote/package.zip'"]);
 });
 
 test("password-mode transfer arguments retain password-only SSH options", () => {
   const passwordConnection = { ...connection, authMode: "password" as const };
   const args = sftpArguments(passwordConnection);
-  assert.ok(args.includes("BatchMode=no"));
+  assert.equal(args[1], "BatchMode=no");
+  assert.deepEqual(args.slice(-3), ["-b", "-", "the_snowpear@deskserver"]);
   assert.ok(args.includes("PreferredAuthentications=password"));
   assert.ok(args.includes("KbdInteractiveAuthentication=no"));
 });

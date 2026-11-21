@@ -47,7 +47,7 @@
 </p>
 
 > [!NOTE]
-> **0.2.7** 升级至 OMP 19.0.1，带来 Plan 源码与实时预览编辑、会话文件与日志浮窗、统一反汇编工作台，以及流式输出、评测翻页和 3D 预览性能优化。内置 Runtime 为 `19.0.1-studio.1`。 [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.7) · [发布说明与界面截图](docs/releases/v0.2.7.md)
+> **0.2.8** 新增会话引用、消息摘录和批量清理归档，并更新对话活动图标、Advisor 折叠、Office 与表格预览以及 SSH 连接流程。内置 Runtime 为 `19.0.1-studio.1`。 [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.8) · [发布说明与界面截图](docs/releases/v0.2.8.md)
 
 <table>
 <tr>

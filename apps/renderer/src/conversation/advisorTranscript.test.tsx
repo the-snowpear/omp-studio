@@ -4,6 +4,7 @@ import { parseConversationTranscriptPage } from "@omp-studio/studio-protocol";
 import { I18nProvider } from "../i18n";
 import { getPreviewConvoItems } from "../preview/conversationFixtures";
 import { ConvoTranscript } from "./ConvoTranscript";
+import { useConversation } from "./useConversation";
 import { buildTimeline, emptyConversationState, type TimelineRow } from "./conversationViewModel";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -73,6 +74,24 @@ it("renders the preview advisor in the current language", () => {
     expect(view.getByRole("button", { name: zh ? /^展开审阅意见：审阅顾问 · 2 条需关注/ : /^Expand advisor notes: Advisor · 2 concerns/ }).getAttribute("aria-expanded")).toBe("false");
     expect(view.getByRole("button", { name: zh ? /^收起审阅意见：.*1 条阻断问题/ : /^Collapse advisor notes:.*1 blocker/ }).getAttribute("aria-expanded")).toBe("true");
   }
+});
+
+it("preserves the expanded preview batch when its conversation engine changes language", () => {
+  function PreviewTranscript() {
+    const conversation = useConversation({ preview: true, client: null, identity: null, canRead: true, runtimeConnected: false, previewThreadId: "t1" });
+    if (conversation.rows.length === 0) return null;
+    return <ConvoTranscript demo rows={conversation.rows} stateScopeKey={conversation.identityKey} />;
+  }
+  const preview = (language: "zh" | "en") => <I18nProvider forcedLanguage={language}><PreviewTranscript /></I18nProvider>;
+  const view = render(preview("zh"));
+  const batch = within(view.container.querySelector<HTMLElement>('[data-item-id="preview-advisor-batch"]')!);
+  const toggle = batch.getByRole("button", { name: /^展开审阅意见/ });
+  fireEvent.click(toggle);
+  view.rerender(preview("en"));
+  expect(batch.getByRole("button", { name: /^Collapse advisor notes/ })).toBe(toggle);
+  expect(batch.getByText(/After syncing, confirm/)).toBeTruthy();
+  view.rerender(preview("zh"));
+  expect(batch.getByRole("button", { name: /^收起审阅意见/ })).toBe(toggle);
 });
 
 it("collapses one original batch, keeps mixed notes in order and copies complete text even while folded", async () => {

@@ -7,9 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-11-22
+
+### Added
+
+- 工作台侧栏和会话历史可直接删除会话。历史页的「已归档」筛选支持分批加载、多选和批量删除，显示逐条处理结果，并保留产物库中的托管产物。单条删除可选择同时清理托管产物。
+- 可以从对话或会话历史复制会话 ID，再粘贴到输入框生成引用。打开引用可查看来源与最近保存的消息，按需选取最多六条摘录随消息发送。
+- 文件窗口内置 `.xlsm`、`.xlsb` 和 `.ods` 预览。表格可用方向键、Home / End、Page Up / Down 导航，按住 Shift 扩展选区并复制，支持 Excel 行列上限内的稀疏数据。可选 Office 组件增加 `.docm` 和 `.pptm` 预览，转换时禁用宏。
+
 ### Changed
 
-- 桌面与 Web 对话中的 Advisor 多条审阅意见按原消息折叠，含阻断问题时默认展开；手动展开状态在新消息、语言切换和虚拟滚动时保持，支持折叠时复制整组意见。单条意见继续内联显示，并移除意见区域左侧的彩色竖条。 [#58](https://github.com/the-snowpear/omp-studio/issues/58)
+- 桌面与 Web 对话为等待、思考、回复、重试和工具执行显示专用活动图标，遵循系统的减弱动效设置。Advisor 多条审阅意见按批折叠，含阻断问题的批次默认展开，可复制整批意见。手动展开状态在新消息、语言切换和虚拟滚动时保持。 [#58](https://github.com/the-snowpear/omp-studio/issues/58)
+- SSH 与 WSL 的连接、认证和准备对话框展示目标、安装目录、网络选项及准备阶段。SSH 文件传输显示远端实际接收进度，校验文件大小与 SHA-256，根据目标系统选择传输方式并在可重试的失败后回退。 [SSH 工作区](docs/ssh-workspaces.md)
+
+### Fixed
+
+- 批量删除时跳过已取消归档的会话。原生统计或产物清理只完成一部分时，界面会报告残留。
+- 修复 SSH 密码认证在 SFTP 批量传输中失效，以及预览连接未沿用所选端口、网络策略和安装目录的问题。
+- 修复表格超大选区复制可能卡住预览、CSV 更新后跳失选区，以及 Office 更新期间收尾的转换可能清掉新组件的问题。Office 缓存清理保留仍被文件窗口使用的 PDF。
+- 修复演示对话实时切换语言时，已展开的 Advisor 批次重新折叠的问题。
 
 ## [0.2.7] - 2026-11-20
 
@@ -645,7 +661,8 @@ Agent 改代码改嗨了、或者聊到第五轮发现方向歪了，以前想�
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.2.7...HEAD
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.2.8...HEAD
+[0.2.8]: https://github.com/the-snowpear/omp-studio/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/the-snowpear/omp-studio/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/the-snowpear/omp-studio/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/the-snowpear/omp-studio/compare/v0.2.4...v0.2.5

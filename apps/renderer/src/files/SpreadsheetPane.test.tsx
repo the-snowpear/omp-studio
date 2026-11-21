@@ -29,7 +29,7 @@ it("navigates with arrows, extends a range, exposes the active cell, and copies 
   const writeText = vi.fn(async () => {});
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
   const rows = ["alpha,beta", "one,two", ...Array.from({ length: 38 }, (_, index) => `row${index + 3},value${index + 3}`)];
-  render(<I18nProvider forcedLanguage="en"><SpreadsheetPane text={rows.join("\n")} /></I18nProvider>);
+  const { rerender } = render(<I18nProvider forcedLanguage="en"><SpreadsheetPane text={rows.join("\n")} /></I18nProvider>);
 
   const grid = await screen.findByRole("grid", { name: "Spreadsheet" });
   await waitFor(() => expect(screen.getByText("alpha")).toBeTruthy());
@@ -50,6 +50,9 @@ it("navigates with arrows, extends a range, exposes the active cell, and copies 
   await waitFor(() => expect(writeText).toHaveBeenCalledWith("alpha\tbeta\none\ttwo"));
   fireEvent.keyDown(grid, { key: "c", ctrlKey: true });
   await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2));
+  rerender(<I18nProvider forcedLanguage="en"><SpreadsheetPane text={rows.join("\n").replace("two", "updated")} /></I18nProvider>);
+  await screen.findByText("updated");
+  expect(screen.getByText("A1:B2")).toBeTruthy();
 
   fireEvent.keyDown(grid, { key: "Home" });
   expect(grid.getAttribute("aria-activedescendant")).toContain("cell-0-1-0");

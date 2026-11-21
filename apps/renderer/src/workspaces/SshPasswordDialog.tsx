@@ -22,7 +22,7 @@ export function SshPasswordDialog({ profile, demo = false, onSubmit, onCancel }:
     return () => { if (input) input.value = ""; previous?.focus(); };
   }, []);
   const cancel = () => { if (password.current) password.current.value = ""; onCancel(); };
-  const account = `${profile.user}@${profile.host}`;
+  const account = profile.user ? `${profile.user}@${profile.host}` : profile.host;
   return createPortal(<dialog ref={dialog} className="ssh-dialog is-compact" aria-labelledby="ssh-password-title" onCancel={event => { event.preventDefault(); cancel(); }}>
     <form autoComplete="off" onSubmit={event => {
       event.preventDefault();

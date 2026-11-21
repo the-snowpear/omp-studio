@@ -1513,7 +1513,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
             });
           } catch (error) {
             const reason = hostErrorMessage(error, t("history.deleteSessionFailed"));
-              if (outcomes.length === 0 && ((error as { code?: string } | null)?.code === "CAPABILITY_UNAVAILABLE" || reason.includes("session.deleteArchived"))) {
+            if (outcomes.length === 0 && ((error as { code?: string } | null)?.code === "CAPABILITY_UNAVAILABLE" || reason.includes("session.deleteArchived"))) {
               throw new Error(t("history.batchDeleteNeedsUpdate"));
             }
             outcomes.push({ threadId: entry.threadId, status: "failed", reason });
