@@ -361,6 +361,11 @@ export interface HostCatalogEntry {
 export interface HostSessionCatalogProvider {
   /** Omit workspaceId to retain the active-workspace compatibility path. */
   list(input?: { readonly workspaceId?: WorkspaceId }): HostCatalogEntry[] | Promise<HostCatalogEntry[]>;
+  locate?(sessionId: string): Promise<readonly {
+    readonly workspaceId: WorkspaceId;
+    readonly workspaceName: string;
+    readonly entry: HostCatalogEntry;
+  }[]>;
 }
 
 /** Runtime-independent persistent transcript reader owned by the Host/Broker. */

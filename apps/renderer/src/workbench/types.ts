@@ -47,6 +47,7 @@ export type ArchivePending =
 export type ThreadRowActionKind = "rename" | "pin" | "fork" | "handoff" | "compact" | "export";
 
 export type ShellChrome = {
+  sessionCopyIdentity?: import("../composer/SessionReferences").SessionIdentity | undefined;
   collapsed: boolean;
   skillsOpen: boolean;
   explorerOpen: boolean;

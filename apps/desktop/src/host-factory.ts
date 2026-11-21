@@ -656,6 +656,7 @@ export function createProductionHostFactory(options?: {
         await ensureRegistry();
         return registry.get(workspaceId)?.canonicalPath;
       },
+      async () => { await ensureRegistry(); return registry.list(); },
     ),
     ...(options?.openUrl === undefined ? {} : { openUrl: options.openUrl }),
     ...(options?.revealDirectory === undefined ? {} : { revealDirectory: options.revealDirectory }),

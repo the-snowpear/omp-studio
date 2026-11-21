@@ -1,9 +1,12 @@
 import { useSurfaceDocument, surfaceWindow } from "../dock/SurfaceContext";
 import { GitHubReferencePreview } from "./GitHubReferencePreview";
+import { SessionReferenceDialog } from "./SessionReferenceDialog";
+import { useSessionReferences } from "./SessionReferences";
+import { isSessionIdCandidate, sameSessionSource, sessionReferenceChip, sessionReferenceLabel, SESSION_REFERENCE_START, type SessionReference } from "./sessionReference";
 import type { GitHubReferenceSnapshot } from "./githubReference";
 import type { GitCommitReferenceSnapshot } from "./gitCommitReference";
 import type { BrowserReferenceSnapshot } from "./browserReference";
-import { parseChipPayload } from "./ingest";
+import { chipPayload, parseChipPayload } from "./ingest";
 import { useExecutionTarget } from "../workspaces/ExecutionTargets";
 import { useWordPrediction, type ComposerPrediction } from "./useWordPrediction";
 import { isPrimaryModifier } from "../keyboard/shortcuts";
@@ -26,18 +29,20 @@ import { isZh, pickLocale, useI18n } from "../i18n";
 import type { ComposerChip, ComposerNode, ComposerSnapshot, MentionCandidate, PromptImage } from "./types";
 import type { PredictionResult } from "@omp-studio/studio-protocol";
 import { emptySnapshot, newChipId } from "./types";
-import { defaultImageChipLabel, localizeImageChipLabel, snapshotFromDoc, snapshotIsEmpty, displayDocFromSerializedText } from "./serialize";
+import { defaultImageChipLabel, localizeImageChipLabel, snapshotFromDoc, snapshotIsEmpty, displayDocFromSerializedText, hasSerializedReference } from "./serialize";
 import { fileToPromptImage, imagePreviewUrl, isImageFile } from "./ingest";
 import { richPasteFromHtml, richPasteHasText, type RichPaste } from "./richPaste";
 import {
   chipRemoveTarget,
   createChipElement,
+  displaySessionChip,
   editorIsEmpty,
   findMentionToken,
   insertNodesAtCaret,
   insertPlainText,
   mentionAtCaret,
   placeCaretAtEnd,
+  placeCaretAfter,
   readDoc,
   removeChipById,
   removeConflictingModeChips,
@@ -89,6 +94,7 @@ type Props = {
   ariaLabel?: string;
   fileAccept?: string;
   resolveImagePaste?: ((text: string) => Promise<readonly PromptImage[] | undefined>) | undefined;
+  sessionReferences?: boolean;
   placeholder?: string;
   disabled?: boolean;
   compact?: boolean;
@@ -184,6 +190,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     ariaLabel,
     fileAccept,
     resolveImagePaste,
+    sessionReferences,
     placeholder,
     disabled,
     compact,
@@ -208,12 +215,15 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   },
   ref,
 ) {
-  const { resolvedLanguage } = useI18n();
+  const { resolvedLanguage, t } = useI18n();
   const zh = resolvedLanguage === "zh";
   const document = useSurfaceDocument(), window = surfaceWindow(document);
   const executionTarget = useExecutionTarget();
   const editorRef = useRef<HTMLDivElement | null>(null);
   const [githubPreview, setGithubPreview] = useState<GitHubReferenceSnapshot | GitCommitReferenceSnapshot | BrowserReferenceSnapshot>();
+  const [sessionPreview, setSessionPreview] = useState<{ chipId: string; reference: SessionReference }>();
+  const access = useSessionReferences();
+  const lookupSessions = sessionReferences ? access : null;
   const savedCaret = useRef<Range | null>(null);
   useEffect(() => {
     const remember = () => {
@@ -326,6 +336,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     // next to a `/plan` chip must not re-measure every capsule twice.
     if (chipSignature(editor) !== chipSignatureRef.current) {
       renumberImageChips(editor, zh);
+      refreshSessionChips(editor);
       chipSignatureRef.current = chipSignature(editor);
       syncChipTruncation(editor);
       // Wrapping/scrollbars settle one frame later; coalesce capsule and resize work.
@@ -363,6 +374,19 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     }
     onChange?.(snapshot);
     return snapshot;
+  };
+
+  const refreshSessionChips = (editor: HTMLElement) => {
+    for (const element of editor.querySelectorAll<HTMLElement>(".cm-chip-session")) {
+      const reference = parseChipPayload(element.dataset.chip ?? "")?.sessionReference;
+      if (!reference) continue;
+      const source = reference.source;
+      const label = source && access?.previewTitle(source, zh) || sessionReferenceLabel(reference, zh);
+      const origin = source && access?.crossEnvironment(source) ? access.environmentName(source.targetId) : "";
+      const count = reference.messages.length;
+      const note = [origin, count ? t("sessionReference.attached", { count }) : ""].filter(Boolean).join(" · ");
+      displaySessionChip(element, label, note, reference.sessionId, zh);
+    }
   };
 
   emitRef.current = emit;
@@ -504,8 +528,10 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     const editor = editorRef.current;
     if (editor) {
       renumberImageChips(editor, zh);
+      refreshSessionChips(editor);
       chipSignatureRef.current = chipSignature(editor);
       imageChipKeyRef.current = imageChipKey(snapshotOf(editor, imagesRef.current));
+      syncChipTruncation(editor);
     }
     setThumbs(current => current.map(thumb => ({ ...thumb, label: localizeImageChipLabel(thumb.label, zh) })));
   }, [zh]);
@@ -565,6 +591,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     },
     clear() {
       attachmentEpoch.current++;
+      setSessionPreview(undefined);
       const editor = editorRef.current;
       if (!editor) return;
       dictationEditorRef.current?.invalidate();
@@ -580,12 +607,14 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     },
     setSnapshot(snapshot, options) {
       attachmentEpoch.current++;
+      setSessionPreview(undefined);
       const editor = editorRef.current;
       if (!editor) return;
       dictationEditorRef.current?.invalidate();
       setDictationSpanActive(false);
       imagesRef.current.clear();
       writeDoc(editor, snapshot.doc, imagesRef.current);
+      refreshSessionChips(editor);
       emit();
       if (!options?.preserveFocus || editor.ownerDocument.activeElement === editor) placeCaretAtEnd(editor);
     },
@@ -857,10 +886,53 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     refreshMention();
   };
 
-  /** Serialized `<github-reference>`-style text keeps its capsules; everything else is plain text. */
+  const sessionChipElements = (editor: HTMLElement) => [...editor.querySelectorAll<HTMLElement>(".cm-chip-session")];
+  const existingSessionChip = (editor: HTMLElement, reference: SessionReference) =>
+    sessionChipElements(editor).find(element => {
+      const existing = parseChipPayload(element.dataset.chip ?? "")?.sessionReference;
+      return existing?.sessionId === reference.sessionId && sameSessionSource(existing.source, reference.source);
+    });
+
+  const pasteSessionId = (editor: HTMLDivElement, text: string): boolean => {
+    if (!lookupSessions) return false;
+    const sessionId = text.trim();
+    const copied = lookupSessions.copiedIdentity(sessionId);
+    if (!copied && !isSessionIdCandidate(sessionId)) return false;
+    const epoch = attachmentEpoch.current;
+    const pasted = document.createTextNode(text);
+    dictationEditorRef.current?.beforeEdit();
+    insertNodesAtCaret(editor, [pasted]);
+    emit();
+    refreshMention();
+    const replace = (reference: SessionReference) => {
+      if (epoch !== attachmentEpoch.current || !editor.contains(pasted) || pasted.data !== text) return;
+      const existing = existingSessionChip(editor, reference);
+      if (existing) pasted.remove();
+      else {
+        const selection = window.getSelection();
+        const caretWasInPaste = selection?.isCollapsed && (
+          selection.anchorNode === pasted || selection.anchorNode?.childNodes[selection.anchorOffset - 1] === pasted
+        );
+        const chip = createChipElement(sessionReferenceChip(reference, zh), document);
+        const space = document.createTextNode(" ");
+        pasted.replaceWith(chip, space);
+        if (caretWasInPaste) placeCaretAfter(space);
+      }
+      emit();
+      refreshMention();
+    };
+    if (copied) replace({ ...copied, messages: [] });
+    else void lookupSessions.locate(sessionId).then(matches => {
+      if (matches.length === 1) replace({ sessionId, source: matches[0], messages: [] });
+      if (matches.length > 1) replace({ sessionId, matches, messages: [] });
+    });
+    return true;
+  };
+
+  /** Serialized references keep their capsules; everything else is plain text. */
   const insertSerializedText = (editor: HTMLDivElement, text: string): void => {
     const normalized = text.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
-    if (normalized.includes("<github-reference ") || normalized.includes("<git-commit-reference ") || normalized.includes("<browser-reference ")) {
+    if (hasSerializedReference(normalized)) {
       const doc = displayDocFromSerializedText(normalized, undefined, zh);
       const seenReferences = new Map<string, HTMLElement>();
       for (const element of editor.querySelectorAll<HTMLElement>(".cm-chip")) {
@@ -878,6 +950,11 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
           return;
         }
         const chip = node.chip;
+        if (chip.sessionReference) {
+          if (existingSessionChip(editor, chip.sessionReference)) return;
+          nodes.push(createChipElement(chip, document));
+          return;
+        }
         if ((chip.kind === "github" || chip.kind === "git-commit" || chip.kind === "browser") && chip.reference) {
           const existing = seenReferences.get(chip.reference.key);
           if (existing) {
@@ -961,6 +1038,16 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     }
     const html = data.getData("text/html");
     const files = Array.from(data.files);
+    if (editor && !files.length && text) {
+      if (text.includes(SESSION_REFERENCE_START)) {
+        dictationEditorRef.current?.beforeEdit();
+        insertSerializedText(editor, text);
+        emit();
+        refreshMention();
+        return;
+      }
+      if (pasteSessionId(editor, text)) return;
+    }
     const rich = editor && html ? richPasteFromHtml(html, text) : null;
     if (files.length > 0 && !(rich && richPasteHasText(rich) && files.every(isImageFile))) {
       void ingestFiles(files);
@@ -998,11 +1085,34 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     void ingestFiles(event.dataTransfer.files);
   };
 
+  const copySessionSelection = (event: ClipboardEvent<HTMLDivElement>) => {
+    const editor = event.currentTarget;
+    const selection = editor.ownerDocument.getSelection();
+    if (!event.clipboardData || !selection?.rangeCount || selection.isCollapsed) return;
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.commonAncestorContainer) || !sessionChipElements(editor).some(chip => range.intersectsNode(chip))) return;
+    const copied = editor.ownerDocument.createElement("div");
+    copied.append(range.cloneContents());
+    const snapshot = snapshotFromDoc(readDoc(copied, imagesRef.current));
+    event.preventDefault();
+    event.clipboardData.setData("text/plain", snapshot.text);
+    if (event.type !== "cut") return;
+    dictationEditorRef.current?.beforeEdit();
+    range.deleteContents();
+    emit();
+    refreshMention();
+  };
+
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if ((event.key === "Enter" || event.key === " ") && event.target instanceof HTMLElement) {
-      const capsule = event.target.closest<HTMLElement>(".cm-chip-github, .cm-chip-git-commit, .cm-chip-browser");
-      const reference = capsule && parseChipPayload(capsule.dataset.chip ?? "")?.reference;
-      if (reference) { event.preventDefault(); setGithubPreview(reference); return; }
+    if ((event.key === "Enter" || event.key === " ") && (event.target as Node).nodeType === 1) {
+      const capsule = (event.target as Element).closest<HTMLElement>(".cm-chip-github, .cm-chip-git-commit, .cm-chip-browser, .cm-chip-session");
+      const payload = capsule && parseChipPayload(capsule.dataset.chip ?? "");
+      if (payload?.reference) { event.preventDefault(); setGithubPreview(payload.reference); return; }
+      if (payload?.sessionReference) {
+        event.preventDefault();
+        setSessionPreview({ chipId: payload.id, reference: payload.sessionReference });
+        return;
+      }
     }
     if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "v") {
       plainPasteRef.current = true;
@@ -1165,6 +1275,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         data-prediction-visible={predictionState.ghost ? "true" : undefined}
         onInput={onInput}
         onPaste={onPaste}
+        onCopy={copySessionSelection}
+        onCut={copySessionSelection}
         onDrop={onDrop}
         onDragOver={(event) => event.preventDefault()}
         onKeyDown={onKeyDown}
@@ -1176,10 +1288,11 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         }}
         onClick={(event) => {
           const target = event.target as HTMLElement;
-          const capsule = target.closest<HTMLElement>(".cm-chip-github, .cm-chip-git-commit, .cm-chip-browser");
+          const capsule = target.closest<HTMLElement>(".cm-chip-github, .cm-chip-git-commit, .cm-chip-browser, .cm-chip-session");
           const payload = capsule ? parseChipPayload(capsule.dataset.chip ?? "") : null;
           if (payload?.reference && !target.closest(".cm-chip-x")) setGithubPreview(payload.reference);
           const chipId = chipRemoveTarget(event.target);
+          if (payload?.sessionReference && chipId === null) setSessionPreview({ chipId: payload.id, reference: payload.sessionReference });
           if (chipId === null) return;
           event.preventDefault();
           removeChip(chipId);
@@ -1257,6 +1370,17 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         />
       ) : null}
     {githubPreview ? <GitHubReferencePreview reference={githubPreview} onSaveBrowser={reference => { insertChip({ kind: "browser", label: reference.title, reference }); }} onClose={() => setGithubPreview(undefined)} /> : null}
+    {sessionPreview ? <SessionReferenceDialog reference={sessionPreview.reference} initialSources={sessionPreview.reference.matches}
+      onClose={() => setSessionPreview(undefined)}
+      onSave={reference => {
+        const editor = editorRef.current;
+        const element = editor && sessionChipElements(editor).find(chip => parseChipPayload(chip.dataset.chip ?? "")?.id === sessionPreview.chipId);
+        if (!editor || !element) return;
+        element.dataset.chip = chipPayload({ ...sessionReferenceChip(reference, zh), id: sessionPreview.chipId });
+        refreshSessionChips(editor);
+        syncChipTruncation(editor);
+        emit();
+      }} /> : null}
     </div>
   );
 });

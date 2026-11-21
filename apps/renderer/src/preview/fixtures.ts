@@ -147,6 +147,7 @@ export type PreviewHistoryStatus = "running" | "completed" | "failed" | "archive
 
 export type PreviewHistoryRow = {
   id: string;
+  threadId?: string;
   title: string;
   project: string;
   branch: string;
@@ -234,6 +235,10 @@ export function getPreviewProjects(zh = isZh()): PreviewProject[] {
 }
 
 export const PREVIEW_PROJECTS: PreviewProject[] = getPreviewProjects();
+
+export function previewSessionId(threadId: string): string {
+  return "preview-session-" + threadId;
+}
 
 /**
  * 排队栏演示（p1 · t1「跟踪上游 pi-web 更新到 omp-web」流式期间）：
@@ -591,12 +596,12 @@ export const PREVIEW_PV_LOGS = getPreviewPvLogs();
 export function getPreviewHistory(zh = isZh()): PreviewHistoryRow[] {
   const c = (usd: string) => (zh ? `¥ ${usd}` : `$ ${usd}`);
   return [
-    { id: "ph1", title: zh ? "跟踪上游 pi-web 更新到 omp-web" : "Track upstream pi-web updates to omp-web", project: "omp-web", branch: "main", time: "32m ago", model: "gemini-3.6-flash", status: "running", files: 4, cost: c("4.62"), forkedFrom: null, checkpoints: 12, pinned: true },
-    { id: "ph2", title: zh ? "Mermaid 渲染优化与全屏缩放拖拽" : "Mermaid rendering optimization and fullscreen zoom & pan", project: "omp-web (feat/mermaid)", branch: "feat/mermaid-zoom", time: "18m ago", model: "gemini-3.6-flash", status: "running", files: 7, cost: c("2.31"), forkedFrom: zh ? "跟踪上游 pi-web 更新…" : "Track upstream pi-web updates…", checkpoints: 5, pinned: false },
-    { id: "ph3", title: "Audit and fix OSS repository issues", project: "omp-web", branch: "main", time: "2h ago", model: "claude-sonnet-4.5", status: "completed", files: 9, cost: c("8.14"), forkedFrom: null, checkpoints: 3, pinned: false },
+    { id: "ph1", threadId: "t1", title: zh ? "跟踪上游 pi-web 更新到 omp-web" : "Track upstream pi-web updates to omp-web", project: "omp-web", branch: "main", time: "32m ago", model: "gemini-3.6-flash", status: "running", files: 4, cost: c("4.62"), forkedFrom: null, checkpoints: 12, pinned: true },
+    { id: "ph2", threadId: "t7", title: zh ? "Mermaid 渲染优化与全屏缩放拖拽" : "Mermaid rendering optimization and fullscreen zoom & pan", project: "omp-web (feat/mermaid)", branch: "feat/mermaid-zoom", time: "18m ago", model: "gemini-3.6-flash", status: "running", files: 7, cost: c("2.31"), forkedFrom: zh ? "跟踪上游 pi-web 更新…" : "Track upstream pi-web updates…", checkpoints: 5, pinned: false },
+    { id: "ph3", threadId: "t2", title: "Audit and fix OSS repository issues", project: "omp-web", branch: "main", time: "2h ago", model: "claude-sonnet-4.5", status: "completed", files: 9, cost: c("8.14"), forkedFrom: null, checkpoints: 3, pinned: false },
     { id: "ph4", title: zh ? "选择 gemini3.6flash 随意发送消息后报错…" : "Error after selecting gemini3.6flash and sending a test message…", project: "omp-web", branch: "main", time: "4d ago", model: "gemini-3.6-flash", status: "failed", files: 0, cost: c("0.42"), forkedFrom: null, checkpoints: 0, pinned: false },
-    { id: "ph5", title: zh ? "修复 Git Bash 路径未找到问题" : "Fix Git Bash path not found issue", project: "omp-web", branch: "main", time: "4d ago", model: "gpt-5.2-codex", status: "completed", files: 2, cost: c("1.08"), forkedFrom: null, checkpoints: 2, pinned: false },
-    { id: "ph6", title: zh ? "重构 session 存储层 (session)" : "Refactor session storage layer (session)", project: "omp-web", branch: "refactor/session-db", time: "6d ago", model: "claude-sonnet-4.5", status: "archived", files: 21, cost: c("22.90"), forkedFrom: null, checkpoints: 9, pinned: false },
+    { id: "ph5", threadId: "t4", title: zh ? "修复 Git Bash 路径未找到问题" : "Fix Git Bash path not found issue", project: "omp-web", branch: "main", time: "4d ago", model: "gpt-5.2-codex", status: "completed", files: 2, cost: c("1.08"), forkedFrom: null, checkpoints: 2, pinned: false },
+    { id: "ph6", threadId: "t5", title: zh ? "重构 session 存储层 (session)" : "Refactor session storage layer (session)", project: "omp-web", branch: "refactor/session-db", time: "6d ago", model: "claude-sonnet-4.5", status: "archived", files: 21, cost: c("22.90"), forkedFrom: null, checkpoints: 9, pinned: false },
     { id: "ph7", title: zh ? "对比 v0.8.0 → v0.8.1 变更清单" : "Compare v0.8.0 → v0.8.1 changelog", project: "pi-web (upstream)", branch: "v0.8.1", time: "7d ago", model: "gpt-5.2-codex", status: "archived", files: 3, cost: c("1.40"), forkedFrom: null, checkpoints: 4, pinned: false },
   ];
 }

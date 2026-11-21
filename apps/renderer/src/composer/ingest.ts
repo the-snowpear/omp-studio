@@ -4,6 +4,7 @@ import { isImageMimeType } from "./types";
 
 export function chipIconName(kind: ComposerChipKind): IconName {
   switch (kind) {
+    case "session": return "message";
     case "browser": return "globe";
     case "github": return "link";
     case "git-commit": return "commit";
@@ -63,6 +64,7 @@ export function chipPayload(chip: ComposerChip): string {
     kind: chip.kind,
     label: chip.label,
     ...(chip.reference ? { reference: chip.reference } : {}),
+    ...(chip.sessionReference ? { sessionReference: chip.sessionReference } : {}),
     ...(chip.path === undefined ? {} : { path: chip.path }),
     ...(chip.name === undefined ? {} : { name: chip.name }),
   });
@@ -74,7 +76,7 @@ export function parseChipPayload(value: string): Omit<ComposerChip, "image"> | n
     if (typeof parsed.id !== "string" || typeof parsed.kind !== "string" || typeof parsed.label !== "string") {
       return null;
     }
-    if (parsed.kind !== "file" && parsed.kind !== "dir" && parsed.kind !== "image" && parsed.kind !== "skill" && parsed.kind !== "agent" && parsed.kind !== "model" && parsed.kind !== "mode" && parsed.kind !== "github" && parsed.kind !== "git-commit" && parsed.kind !== "browser") {
+    if (parsed.kind !== "file" && parsed.kind !== "dir" && parsed.kind !== "image" && parsed.kind !== "skill" && parsed.kind !== "agent" && parsed.kind !== "model" && parsed.kind !== "mode" && parsed.kind !== "github" && parsed.kind !== "git-commit" && parsed.kind !== "browser" && parsed.kind !== "session") {
       return null;
     }
     return {
@@ -82,6 +84,7 @@ export function parseChipPayload(value: string): Omit<ComposerChip, "image"> | n
       kind: parsed.kind,
       label: parsed.label,
       ...((parsed.kind === "github" || parsed.kind === "git-commit" || parsed.kind === "browser") && parsed.reference ? { reference: parsed.reference } : {}),
+      ...(parsed.kind === "session" && parsed.sessionReference ? { sessionReference: parsed.sessionReference } : {}),
       ...(typeof parsed.path === "string" ? { path: parsed.path } : {}),
       ...(typeof parsed.name === "string" ? { name: parsed.name } : {}),
     };

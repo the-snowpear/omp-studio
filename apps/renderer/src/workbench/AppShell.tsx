@@ -40,6 +40,8 @@ import type { FileViewerActions } from "../files/fileActions";
 import { mergeUsedSkills } from "../skills/skillUsage";
 import { RuntimeLossBanner } from "../RuntimeLossBanner";
 import { ToastHost } from "../ToastHost";
+import { SessionReferencesProvider } from "../composer/SessionReferences";
+import { previewSessionId } from "../preview/fixtures";
 import { compactNoticeFromOutput } from "../compactNotice";
 import { CommandPalette, type CommandPaletteHandle } from "../CommandPalette";
 import { buildPaletteGroups, type BottomTab, type PaletteAction, type SideTab } from "../commandPaletteCatalog";
@@ -2429,7 +2431,26 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     },
   };
 
+  const copyWorkspaceId = mdi?.document.ref.workspaceId ?? dockSelection.project ?? state.model.workspaces?.activeWorkspaceId;
+  const copySessionId = selected?.sessionId ?? mdi?.document.ref.sessionId
+    ?? (viewedTitleSessionId && (provisionalThreadsBySession[String(viewedTitleSessionId)]?.submitted
+      || archiveTargetBase?.sessionId === viewedTitleSessionId) ? viewedTitleSessionId : undefined);
   const chrome: ShellChrome = {
+    sessionCopyIdentity: previewMode.preview
+      ? previewThread && previewThread.thread.msgs > 0 ? {
+          sessionId: previewSessionId(previewThread.thread.id),
+          source: {
+            targetId: null, workspaceId: previewThread.project.id as WorkspaceId, workspaceName: previewThread.project.name,
+            previewThreadId: previewThread.thread.id, title: previewThread.thread.title,
+          },
+        } : undefined
+      : copySessionId && !creatingSession ? {
+          sessionId: copySessionId,
+          ...(copyWorkspaceId ? { source: {
+            targetId: executionTarget.id, workspaceId: copyWorkspaceId as WorkspaceId, workspaceName: selectedProject?.name,
+            title: currentThreadTitle, historyId: selected?.historyId, threadId: selected?.threadId,
+          } } : {}),
+        } : undefined,
     collapsed: mdi ? collapsed : !layout.sidebarShown,
     skillsOpen,
     explorerOpen,
@@ -2663,6 +2684,8 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     previewMode.preview ? `preview:${chrome.previewThreadId ?? "current"}` : canvasSessionId ?? snapshot?.sessionId, previewMode.preview);
   return (
     <AnnotationsProvider client={client} workspaceId={hubWorkspaceId} sessionId={viewedSessionId} runtimeSessionId={snapshot?.sessionId} onInsert={insertPreparedPrompt}>
+    <SessionReferencesProvider workspaceId={copyWorkspaceId as WorkspaceId | undefined}
+      onOpenLegacy={(entry, workspaceId) => { void openHistoryEntry(entry, workspaceId); }}>
     <BackgroundProvider key={previewMode.preview ? "background-preview" : "background-real"} preview={previewMode.preview} theme={theme}>
     <div className="app" id="appRoot" aria-busy={state.loading}>
       <SharedSurface region="background"><AppBackgroundLayer route={state.route} theme={theme} /></SharedSurface>
@@ -2846,6 +2869,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
                   workspaceId={historyWorkspaceId}
                   active={state.route === "history"}
                   archiveRevision={archiveRevision}
+                  workspaceName={selectedProject?.name}
                   client={client}
                   onImported={() => void refreshHistoryModels()}
                   onNativeResume={async (threadId, workspaceId) => {
@@ -3208,6 +3232,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     </div>
     {!showPage && healthReady ? <WorkbenchHealth /> : null}
     </BackgroundProvider>
+    </SessionReferencesProvider>
     </AnnotationsProvider>
   );
 }

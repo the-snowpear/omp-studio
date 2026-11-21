@@ -316,7 +316,7 @@ export class StudioSessionArchiveReader {
       throw new SessionArchiveError("CURSOR_INVALID", "Transcript limit is invalid");
     }
     if (input.agentId !== undefined) this.#assertAgentId(input.agentId);
-    const parentFile = await this.#locate(input.sessionId);
+    const parentFile = await this.#locate(input.sessionId, true);
     await this.#assertParentWorkspace(parentFile, input.sessionId);
     const located =
       input.agentId === undefined
@@ -650,7 +650,7 @@ export class StudioSessionArchiveReader {
     return header?.id;
   }
 
-  async #locate(sessionId: string): Promise<string> {
+  async #locate(sessionId: string, workspaceScoped = false): Promise<string> {
     // Hot reads should use the already-built identity index. Directory walking is
     // reserved for a cache miss (new session) or an in-place replacement.
     let matches = this.#index.sessions.get(sessionId) ?? [];
@@ -673,6 +673,15 @@ export class StudioSessionArchiveReader {
       candidates ??= await listSessionFiles({ sessions: this.#sessionsRoot, archive: this.#archiveRoot }, this.#maxScanFiles);
       await this.#ensureIndex(candidates, true);
       matches = this.#index.sessions.get(sessionId) ?? [];
+    }
+    if (workspaceScoped && matches.length > 1) {
+      const headers = await Promise.all(matches.map(path =>
+        readHeader(path, Math.min(this.#maxSessionBytes, 64 * 1024), this.#maxSessionBytes),
+      ));
+      matches = matches.filter((_, index) => {
+        const header = headers[index];
+        return header?.id === sessionId && header.cwd !== undefined && sameWorkspace(header.cwd, this.#allowedCwd);
+      });
     }
     if (matches.length === 0) throw new SessionArchiveError("SESSION_NOT_FOUND", "Session is not available");
     if (matches.length > 1) {

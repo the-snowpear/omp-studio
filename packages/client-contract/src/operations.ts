@@ -88,6 +88,7 @@ import type {
   RuntimeConnection,
   RuntimeInstallState,
   ResidentsReadModel,
+  SessionHistoryMatch,
   SessionHistoryReadModel,
   SessionHistoryStatus,
   TokenUsageReadModel,
@@ -123,6 +124,7 @@ export interface QueryInputMap extends RuntimeViewQueryMap, ContextViewQueryMap,
   "capabilities.get": EmptyInput;
   "commands.getManifest": EmptyInput;
   "diagnostics.get": EmptyInput;
+  "history.locate": { readonly sessionId: SessionId };
   "history.list": {
     readonly limit?: number;
     readonly offset?: number;
@@ -223,6 +225,7 @@ export interface QueryResultMap extends RuntimeViewResultMap, ContextViewResultM
   /** Operator command manifest; reused from the protocol as a public shape. */
   "commands.getManifest": OperatorCommandManifest;
   "diagnostics.get": DiagnosticReadModel;
+  "history.locate": readonly SessionHistoryMatch[];
   "history.list": SessionHistoryReadModel;
   "residents.list": ResidentsReadModel;
   /** Reused from the protocol as a public shape. */

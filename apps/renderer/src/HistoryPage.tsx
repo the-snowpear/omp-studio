@@ -1,4 +1,6 @@
 import { timeTravelPreview } from "./preview/timeTravelPreview";
+import { CopySessionMenuItem, type SessionIdentity } from "./composer/SessionReferences";
+import { useExecutionTarget } from "./workspaces/ExecutionTargets";
 import { ResumeScopePane, type OpenPreparedSession } from "./history/ResumeScopePane";
 import { SessionPortabilityPane } from "./history/SessionPortabilityPane";
 import type { SessionTitleRow } from "@omp-studio/studio-protocol";
@@ -18,6 +20,8 @@ import type { PageRoute } from "./HomePage";
 import { usePreviewMode } from "./preview/PreviewContext";
 import {
   getPreviewHistory,
+  findPreviewThread,
+  previewSessionId,
   type PreviewHistoryRow,
   type PreviewHistoryStatus,
 } from "./preview/fixtures";
@@ -114,6 +118,7 @@ function HistMoreMenu({
   onClose,
   onDelete,
   onRename, onPin, pinned,
+  copyIdentity,
 }: {
   open: boolean;
   rect: { top: number; left: number; width: number; bottom: number } | null;
@@ -122,6 +127,7 @@ function HistMoreMenu({
   onRename?: (() => void) | undefined;
   onPin?: (() => void) | undefined;
   pinned?: boolean | undefined;
+  copyIdentity?: SessionIdentity | undefined;
 }) {
   const { t, resolvedLanguage } = useI18n();
   const doc = useSurfaceDocument();
@@ -174,6 +180,7 @@ function HistMoreMenu({
     >
       {onRename ? <button type="button" role="menuitem" className="menu-item" onClick={onRename}><Icon name="pencil" extra="sm" /><span>{t("conversation.renameThread")}</span></button> : null}
       {onPin ? <button type="button" role="menuitem" className="menu-item" onClick={onPin}><Icon name="pin" extra="sm" /><span>{pinned ? (zh ? "取消置顶" : "Unpin") : (zh ? "置顶" : "Pin")}</span></button> : null}
+      <CopySessionMenuItem identity={copyIdentity} onClose={onClose} />
       {onDelete ? <button type="button" role="menuitem" className="menu-item danger" onClick={onDelete}>
         <Icon name="trash" extra="sm" />
         <span>{t("history.deleteSession")}</span>
@@ -312,6 +319,7 @@ export function HistoryPage({
   nativeContext,
   client, onImportedOpen, onNativeResume, onImported,
   workspaceId,
+  workspaceName,
   history,
   active = true,
   archiveRevision = 0,
@@ -331,6 +339,7 @@ export function HistoryPage({
   workspaceId?: WorkspaceId | undefined;
   active?: boolean;
   archiveRevision?: number;
+  workspaceName?: string | undefined;
   onRenameSession?: (entry: SessionHistoryEntry) => void;
   onPinSession?: (entry: SessionHistoryEntry) => void;
   onImportedOpen?: (sessionId: string, workspaceId: WorkspaceId) => void;
@@ -349,6 +358,7 @@ export function HistoryPage({
   sessionWillStop?: (entry: SessionHistoryEntry) => boolean;
 }) {
   const { preview, marks } = usePreviewMode();
+  const target = useExecutionTarget();
   const timeTravelSettings = useTimeTravelSettings(client);
   const { t, resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
@@ -671,6 +681,28 @@ export function HistoryPage({
         open={menu !== null}
         rect={menu?.rect ?? null}
         onClose={closeMenu}
+        copyIdentity={(() => {
+          if (preview) {
+            const row = previewRows.find(row => row.id === menu?.id);
+            const match = row?.threadId ? findPreviewThread(row.threadId, zh) : undefined;
+            if (!row || !match) return undefined;
+            return {
+              sessionId: previewSessionId(match.thread.id), source: {
+                targetId: null, workspaceId: match.project.id as WorkspaceId, workspaceName: match.project.name,
+                title: row.title, previewThreadId: match.thread.id,
+              },
+            };
+          }
+          const entry = hostRows.find(row => row.historyId === menu?.id);
+          if (!entry?.sessionId) return undefined;
+          return {
+            sessionId: entry.sessionId,
+            ...(workspaceId ? { source: {
+              targetId: target.id, workspaceId: workspaceId as WorkspaceId, workspaceName,
+              title: entry.title, threadId: entry.threadId, historyId: entry.historyId,
+            } } : {}),
+          };
+        })()}
         pinned={preview ? previewRows.find(row => row.id === menu?.id)?.pinned : hostRows.find(row => row.historyId === menu?.id)?.pinned}
         onRename={canMetadata ? () => {
           if (preview) { const row = previewRows.find(row => row.id === menu?.id); if (row) setPreviewRename({ id: row.id, title: row.title }); }

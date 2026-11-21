@@ -86,7 +86,7 @@ export function createChipElement(chip: ComposerChip, document: Document = globa
   const span = document.createElement("span");
   span.className = `cm-chip cm-chip-${chip.kind}`;
   span.contentEditable = "false";
-  if (chip.kind === "github" || chip.kind === "git-commit" || chip.kind === "browser") {
+  if (chip.kind === "github" || chip.kind === "git-commit" || chip.kind === "browser" || chip.kind === "session") {
     span.setAttribute("role", "button");
     span.tabIndex = 0;
     span.setAttribute("aria-label", chip.label);
@@ -96,6 +96,23 @@ export function createChipElement(chip: ComposerChip, document: Document = globa
   const icon = chip.kind === "mode" ? "" : iconSvg(chipIconName(chip.kind), "sm");
   span.innerHTML = `${icon}<span class="cm-chip-label">${chipLabelHtml(chip.label)}</span>${removeButtonHtml(chip.label)}`;
   return span;
+}
+
+export function displaySessionChip(element: HTMLElement, label: string, note: string, sessionId: string, zh: boolean): void {
+  writeChipLabel(element, label);
+  const remove = element.querySelector(".cm-chip-x");
+  remove?.setAttribute("aria-label", removeChipLabel(label, zh));
+  element.setAttribute("aria-label", [label, note].filter(Boolean).join(" · "));
+  element.title = sessionId;
+  const badge = element.querySelector(".session-chip-note");
+  if (badge) badge.remove();
+  if (note) {
+    const elementNote = element.ownerDocument.createElement("span");
+    elementNote.className = "session-chip-note";
+    elementNote.textContent = note;
+    elementNote.setAttribute("aria-hidden", "true");
+    element.insertBefore(elementNote, remove);
+  }
 }
 
 /** Capsule id when the event target sits inside a capsule's × button, else `null`. */
@@ -157,7 +174,7 @@ export function writeDoc(editor: HTMLElement, doc: ComposerDoc, images: Map<stri
     }
     if (node.chip.image) images.set(node.chip.id, node.chip.image);
     editor.append(createChipElement(node.chip, document));
-    if (node.chip.kind !== "mode" && node.chip.kind !== "github" && node.chip.kind !== "git-commit" && node.chip.kind !== "browser") editor.append(document.createTextNode(" "));
+    if (node.chip.kind !== "mode" && node.chip.kind !== "github" && node.chip.kind !== "git-commit" && node.chip.kind !== "browser" && node.chip.kind !== "session") editor.append(document.createTextNode(" "));
   }
 }
 
@@ -200,7 +217,7 @@ function placeCaretBefore(parent: Node, node: ChildNode | null): void {
 }
 
 /** Caret after `node`. Text nodes keep the caret inside so `@` stays a mention. */
-function placeCaretAfter(node: Node): void {
+export function placeCaretAfter(node: Node): void {
   const document = node.ownerDocument!;
   const window = document.defaultView!;
   const selection = window.getSelection();

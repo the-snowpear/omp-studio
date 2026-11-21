@@ -315,6 +315,7 @@ const QUERY_INPUTS = {
   "capabilities.get": {},
   "commands.getManifest": {},
   "diagnostics.get": {},
+  "history.locate": { sessionId: SESSION_ID },
   "history.list": { limit: 5, workspaceId: WORKSPACE_ID },
   "residents.list": {},
   "session.state": {},
@@ -449,6 +450,10 @@ const QUERY_RESPONSES = {
     result: OPERATOR_COMMAND_MANIFEST,
   },
   "diagnostics.get": { ok: true, queryName: "diagnostics.get", result: DIAGNOSTICS },
+  "history.locate": {
+    ok: true, queryName: "history.locate",
+    result: [{ workspaceId: WORKSPACE_ID, workspaceName: "Fixture workspace", entry: HISTORY.entries[0]! }],
+  },
   "history.list": { ok: true, queryName: "history.list", result: HISTORY },
   "residents.list": { ok: true, queryName: "residents.list", result: RESIDENTS },
   "session.state": { ok: true, queryName: "session.state", result: SNAPSHOT },

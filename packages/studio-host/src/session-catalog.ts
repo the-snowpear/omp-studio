@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
 import { readGunzipPrefix } from "./gzip-file.js";
-import { sameWorkspacePath } from "./workspace-path.js";
+import { sameWorkspacePath, workspacePathKey } from "./workspace-path.js";
 
 const STUDIO_SESSION_ORIGIN = "studio-host";
 const SESSION_PINS_FILENAME = "session-pins.json";
@@ -20,6 +20,8 @@ export type CatalogSessionOrigin = "studio" | "cli" | "unknown";
 
 export interface SessionCatalogEntry {
   sessionId: string;
+  /** Present for a lookup across registered workspaces. */
+  workspaceId?: string;
   origin: CatalogSessionOrigin;
   /** True when the entry comes from the OMP cold-archive tree (`.jsonl.gz`). */
   archived: boolean;
@@ -60,6 +62,8 @@ export interface SessionCatalogOptions {
    * returned. The comparison is internal — `cwd` is never copied onto entries.
    */
   allowedCwd?: string;
+  /** Find this exact id across registered workspaces in one catalog scan. */
+  locate?: { readonly sessionId: string; readonly workspaces: readonly { workspaceId: string; canonicalPath: string }[] };
   /** Includes ordinary/unmarked OMP CLI sessions and unknown future origins. */
   includeCliSessions?: boolean;
   maxSessionBytes?: number;
@@ -101,6 +105,11 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
   const archiveRoot = resolve(options.archiveRoot ?? defaultOmpArchiveRoot(root));
   const includeCliSessions = options.includeCliSessions ?? false;
   const allowedCwd = options.allowedCwd;
+  const lookup = options.locate;
+  const workspaceIds = lookup && new Map(lookup.workspaces.map(workspace =>
+    [workspacePathKey(workspace.canonicalPath), workspace.workspaceId],
+  ));
+  if (workspaceIds?.size === 0) return { sessions: [], diagnostics: [] };
   const maxSessionBytes = options.maxSessionBytes ?? DEFAULT_MAX_SESSION_BYTES;
   const prefixBytes = options.prefixBytes ?? DEFAULT_PREFIX_BYTES;
   if (!Number.isSafeInteger(maxSessionBytes) || maxSessionBytes <= 0) throw new TypeError("maxSessionBytes must be positive");
@@ -130,6 +139,9 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
     const header = await cachedSessionHeader(file, metadata, archived ? prefixBytes : Math.min(prefixBytes, metadata.size), maxSessionBytes);
     if (header === undefined) return { note: "CORRUPT_SKIPPED" };
     if (!header.hasConversationMessage) return {};
+    if (lookup && header.id !== lookup.sessionId) return {};
+    const workspaceId = header.cwd === undefined ? undefined : workspaceIds?.get(workspacePathKey(header.cwd));
+    if (lookup && workspaceId === undefined) return {};
     if (allowedCwd !== undefined && (header.cwd === undefined || !sameWorkspaceCwd(header.cwd, allowedCwd))) {
       return {};
     }
@@ -140,6 +152,7 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
     return {
       entry: {
         sessionId: header.id,
+        ...(workspaceId === undefined ? {} : { workspaceId }),
         origin,
         archived,
         pinned: pinnedSessionIds.has(header.id),
@@ -160,12 +173,13 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
     if (result.note !== undefined) note(result.note);
     const entry = result.entry;
     if (entry === undefined) continue;
-    const existing = byId.get(entry.sessionId);
+    const key = entry.workspaceId ?? entry.sessionId;
+    const existing = byId.get(key);
     if (existing !== undefined) {
       note("DUPLICATE_SESSION_ID");
       if (existing.modifiedAt >= entry.modifiedAt) continue;
     }
-    byId.set(entry.sessionId, entry);
+    byId.set(key, entry);
   }
 
   return {

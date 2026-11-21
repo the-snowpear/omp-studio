@@ -43,6 +43,9 @@ import { type Route, type ShellChrome, type ViewState } from "../workbench/types
 import { RealFileTree, type WorkspaceCreationKind } from "./WorkspaceTree";
 import { snapshotFrom } from "../workbench/shellState";
 import { AppMenu, ThreadActionMenuItems, ThreadRowMenu } from "../workbench/menus";
+import { CopySessionMenuItem } from "../composer/SessionReferences";
+import { useExecutionTarget } from "../workspaces/ExecutionTargets";
+import { previewSessionId } from "../preview/fixtures";
 import { PROJECT_THREADS_INITIAL } from "../workbench/sessionSelection";
 
 function relativeTime(iso: string, zh: boolean): string {
@@ -69,6 +72,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
   const { document, window } = useConversationDom();
   const mdi = useConversationView();
   const { t, resolvedLanguage } = useI18n();
+  const executionTarget = useExecutionTarget();
   const zh = resolvedLanguage === "zh";
   const { preview, marks } = usePreviewMode();
   const appUpdate = useAppUpdate();
@@ -625,6 +629,10 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                                   onExport={() => {}}
                                   onHistory={() => runRowAction(() => onRoute("history"))}
                                 />
+                                <CopySessionMenuItem identity={thread.msgs > 0 ? {
+                                  sessionId: previewSessionId(thread.id),
+                                  source: { targetId: null, workspaceId: project.id as WorkspaceId, workspaceName: project.name, previewThreadId: thread.id, title: thread.title },
+                                } : undefined} onClose={() => runRowAction()} />
                                 <div className="menu-sep" />
                                 <MenuItem icon="archive" onClick={() => runRowAction(() => chrome.onArchivePreviewThread(thread.id))}>{t("history.archiveSession")}</MenuItem>
                                 {thread.msgs > 0 ? <button type="button" role="menuitem" className="menu-item danger" onClick={() => runRowAction(() => chrome.onDeletePreviewThread(thread.id))}>
@@ -748,6 +756,10 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                                       onExport={() => runRowAction(chrome.onExportThread)}
                                       onHistory={() => runRowAction(() => onRoute("history"))}
                                     />
+                                    <CopySessionMenuItem identity={{
+                                      sessionId: thread.sessionId,
+                                      source: { targetId: executionTarget.id, workspaceId: thread.workspaceId, workspaceName: workspace.name, title: transientTitle },
+                                    }} onClose={() => runRowAction()} />
                                     <div className="menu-sep" />
                                     <MenuItem icon="archive" onClick={() => runRowAction(() => chrome.onArchiveProvisionalThread(thread))}>{t("history.archiveSession")}</MenuItem>
                                     <button type="button" role="menuitem" className="menu-item danger" onClick={() => runRowAction(() => chrome.onDeleteProvisionalThread(thread))}>
@@ -837,6 +849,13 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                                     onExport={() => runRowAction(() => chrome.onThreadRowAction(entry, workspace.workspaceId as WorkspaceId, "export"))}
                                     onHistory={() => runRowAction(() => onRoute("history"))}
                                   />
+                                  <CopySessionMenuItem identity={entry.sessionId ? {
+                                    sessionId: entry.sessionId,
+                                    source: {
+                                      targetId: executionTarget.id, workspaceId: workspace.workspaceId as WorkspaceId, workspaceName: workspace.name,
+                                      title: entry.title ?? resolvedEntryTitle, historyId: entry.historyId, threadId: entry.threadId,
+                                    },
+                                  } : undefined} onClose={() => runRowAction()} />
                                   <div className="menu-sep" />
                                   <MenuItem icon="archive" onClick={() => runRowAction(() => chrome.onArchiveThread(entry, workspace.workspaceId))}>{t("history.archiveSession")}</MenuItem>
                                   <button type="button" role="menuitem" className="menu-item danger" onClick={() => runRowAction(() => chrome.onDeleteThread(entry, workspace.workspaceId))}>

@@ -229,6 +229,12 @@ export interface SessionHistoryEntry {
   readonly pinned?: boolean;
 }
 
+export interface SessionHistoryMatch {
+  readonly workspaceId: WorkspaceId;
+  readonly workspaceName: string;
+  readonly entry: SessionHistoryEntry;
+}
+
 export interface SessionHistoryReadModel {
   readonly entries: ReadonlyArray<SessionHistoryEntry>;
   readonly total: number;

@@ -1158,7 +1158,10 @@ async function openSessionContext(root: FacadeContext, scope: import("@omp-studi
     seams: { ...root.seams,
       getActiveWorkspace: () => workspace.current,
       getWorkspaceCwd: () => workspace.current.cwd,
-      catalog: createWorkspaceSessionCatalog(() => workspace.current.cwd, async id => (await resolveWorkspace(id)).cwd),
+      catalog: {
+        ...createWorkspaceSessionCatalog(() => workspace.current.cwd, async id => (await resolveWorkspace(id)).cwd),
+        ...(root.seams.catalog?.locate ? { locate: root.seams.catalog.locate.bind(root.seams.catalog) } : {}),
+      },
       ...(root.seams.workspaces ? { workspaces: {
         list,
         ...(root.seams.workspaces.forgetUnavailable ? { forgetUnavailable: () => root.seams.workspaces!.forgetUnavailable!() } : {}),

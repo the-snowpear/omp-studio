@@ -94,6 +94,20 @@ function textOf(item: { readonly kind: string } & Record<string, unknown>): stri
   return content.filter((block) => block.type === "text").map((block) => block.text ?? "").join("");
 }
 
+test("reads a copied session ID from the explicitly selected workspace", async () => {
+  const data = await fixture([userLine("first", "First workspace", null)]);
+  const sessionsRoot = dirname(dirname(data.sessionFile));
+  const second = join(dirname(data.workspace), "second");
+  await mkdir(second);
+  const file = join(dirname(data.sessionFile), "copy_session-a.jsonl");
+  await writeFile(file, JSON.stringify({ ...HEADER, cwd: second }) + "\n" + userLine("second", "Second workspace", null));
+  const reader = new StudioSessionArchiveReader({ allowedCwd: second, sessionsRoot });
+  const page = await reader.readPage({ sessionId: HEADER.id });
+  assert.equal(textOf(page.items[0]!), "Second workspace");
+  const first = await data.reader.readPage({ sessionId: HEADER.id });
+  assert.equal(textOf(first.items[0]!), "First workspace");
+});
+
 test("reopened history places public advisor notes before the assistant's correction", async () => {
   const { reader } = await fixture([
     userLine("question", "Check the run order.", null),

@@ -20,6 +20,7 @@ import type {
 import { threadIdFor, formatRuntimeMissingMessage, type HostRuntimeDisconnect, type HostRuntimeUnavailable } from "@omp-studio/host-client-api";
 import { desktopText } from "./desktop-language-shared.js";
 import { scanSessionCatalog, SessionDeleteServiceError, StudioHostError, removeSessionPin, type StudioSessionArchiveService, type StudioSessionDeleteService } from "@omp-studio/studio-host";
+import type { SessionCatalogEntry, StoredWorkspace } from "@omp-studio/studio-host";
 import type { ApprovalMode, RequestId, StudioOperation, ThreadId } from "@omp-studio/studio-protocol";
 import type {
   ConfigWriteResult,
@@ -114,9 +115,23 @@ export function fencesOnStateVersion(kind: StudioOperation["kind"]): boolean {
   return !LIVE_TURN_OPERATION_KINDS.has(kind);
 }
 
+function toCatalogEntry(entry: SessionCatalogEntry): HostCatalogEntry {
+  return {
+    sessionId: entry.sessionId,
+    modifiedAt: entry.modifiedAt,
+    messageCount: 0,
+    status: entry.archived ? "archived" : "active",
+    origin: entry.origin,
+    pinned: entry.pinned,
+    ...(entry.title === undefined ? {} : { title: entry.title }),
+    ...(entry.createdAt === undefined ? {} : { createdAt: entry.createdAt }),
+  };
+}
+
 export function createWorkspaceSessionCatalog(
   getCwd: () => string | undefined,
   resolveWorkspaceCwd?: (workspaceId: WorkspaceId) => string | undefined | Promise<string | undefined>,
+  listWorkspaces?: () => readonly StoredWorkspace[] | Promise<readonly StoredWorkspace[]>,
 ): HostSessionCatalogProvider {
   // Bootstrap, the expanded sidebar project and title reconciliation can ask
   // for the same workspace simultaneously. One scan already walks the global
@@ -127,16 +142,7 @@ export function createWorkspaceSessionCatalog(
     const existing = scans.get(key);
     if (existing !== undefined) return existing;
     const pending = scanSessionCatalog({ includeCliSessions: true, allowedCwd: cwd })
-      .then((result) => result.sessions.map((entry) => ({
-        sessionId: entry.sessionId,
-        modifiedAt: entry.modifiedAt,
-        messageCount: 0,
-        status: (entry.archived ? "archived" : "active") as HostCatalogEntry["status"],
-        origin: entry.origin,
-        pinned: entry.pinned,
-        ...(entry.title === undefined ? {} : { title: entry.title }),
-        ...(entry.createdAt === undefined ? {} : { createdAt: entry.createdAt }),
-      })))
+      .then(result => result.sessions.map(toCatalogEntry))
       .finally(() => {
         scans.delete(key);
       });
@@ -144,6 +150,15 @@ export function createWorkspaceSessionCatalog(
     return pending;
   };
   return {
+    ...(listWorkspaces && { async locate(sessionId: string) {
+      const workspaces = await listWorkspaces();
+      const byId = new Map(workspaces.map(workspace => [workspace.workspaceId, workspace]));
+      const result = await scanSessionCatalog({ includeCliSessions: true, locate: { sessionId, workspaces } });
+      return result.sessions.map(entry => {
+        const workspace = byId.get(entry.workspaceId!)!;
+        return { workspaceId: workspace.workspaceId as WorkspaceId, workspaceName: workspace.name, entry: toCatalogEntry(entry) };
+      });
+    } }),
     async list(input?: { readonly workspaceId?: WorkspaceId }): Promise<HostCatalogEntry[]> {
       let cwd: string | undefined;
       if (input?.workspaceId !== undefined) {

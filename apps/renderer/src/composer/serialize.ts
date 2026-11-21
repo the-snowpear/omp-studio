@@ -3,6 +3,7 @@ import { nextBrowserReference, serializeBrowserReference } from "./browserRefere
 import { gitCommitReferenceLabel, nextGitCommitReference, serializeGitCommitReference } from "./gitCommitReference";
 import type { ComposerChip, ComposerDoc, ComposerSnapshot, PromptImage } from "./types";
 import { isZh } from "../i18n";
+import { nextSessionReference, serializeSessionReference, sessionReferenceChip, sessionReferenceLabel, SESSION_REFERENCE_START } from "./sessionReference";
 import { emptyDoc, emptySnapshot, fileLabel, newChipId } from "./types";
 
 export function defaultImageChipLabel(index?: number, zh = isZh()): string {
@@ -38,6 +39,7 @@ export function serializeChip(chip: ComposerChip, imageIndex?: number): string {
   switch (chip.kind) {
     case "github": return chip.reference && chip.reference.kind !== "commit" && chip.reference.kind !== "browser" ? serializeGithubReference(chip.reference) : chip.label;
     case "browser": return chip.reference?.kind === "browser" ? serializeBrowserReference(chip.reference) : chip.label;
+    case "session": return chip.sessionReference ? serializeSessionReference(chip.sessionReference) : chip.label;
     case "git-commit": return chip.reference?.kind === "commit" ? serializeGitCommitReference(chip.reference) : chip.label;
     case "file":
       return `@${quoteMentionPath(chip.path ?? chip.label)}`;
@@ -86,9 +88,14 @@ export function snapshotFromDoc(doc: ComposerDoc): ComposerSnapshot {
   return { text, images, doc };
 }
 
+export function hasSerializedReference(text: string): boolean {
+  return text.includes(SESSION_REFERENCE_START) || text.includes("<github-reference ") ||
+    text.includes("<git-commit-reference ") || text.includes("<browser-reference ");
+}
+
 export function snapshotFromText(text: string): ComposerSnapshot {
   if (text.length === 0) return emptySnapshot();
-  if (text.includes("<github-reference ") || text.includes("<git-commit-reference ") || text.includes("<browser-reference ")) return snapshotFromDoc(displayDocFromSerializedText(text));
+  if (hasSerializedReference(text)) return snapshotFromDoc(displayDocFromSerializedText(text));
   if (/(^|\s)\^[^\s^]+\/[^\s^]+/u.test(text)) return snapshotFromDoc(displayDocFromSerializedText(text));
   return { text, images: [], doc: { nodes: [{ type: "text", value: text }] } };
 }
@@ -184,6 +191,8 @@ function nextSerializedToken(
     label: `${github.reference.kind === "pr" ? "PR" : "Issue"} #${github.reference.number} ${github.reference.title}` });
   const commit = nextGitCommitReference(text, from);
   if (commit) consider(commit.start, commit.end, { id: newChipId(), kind: "git-commit", reference: commit.reference, label: gitCommitReferenceLabel(commit.reference) });
+  const session = text.includes(SESSION_REFERENCE_START) ? nextSessionReference(text, from) : null;
+  if (session) consider(session.start, session.end, sessionReferenceChip(session.reference, zh));
   const model = firstMatch(/\^([^\s^]+\/[^\s^]+)/gu.source, "gu", text, from, match => isSkillBoundary(text, match.index));
   if (model?.[1]) consider(model.index, model.index + model[0].length, { id: newChipId(), kind: "model", name: model[1], label: model[1].slice(model[1].indexOf("/") + 1) });
   const image = firstMatch(IMAGE_TOKEN_RE.source, "gu", text, from);
@@ -268,7 +277,13 @@ export function displayDocForUserMessage(
 ): ComposerDoc {
   if (doc !== undefined) {
     const stripped = attachClipboardImages(stripModeChips(doc), images);
-    if (docHasDisplayChips(stripped)) return localizeImageChips(stripped, zh);
+    if (docHasDisplayChips(stripped)) {
+      return { nodes: localizeImageChips(stripped, zh).nodes.map(node => {
+        if (node.type !== "chip" || !node.chip.sessionReference) return node;
+        const label = sessionReferenceLabel(node.chip.sessionReference, zh);
+        return label === node.chip.label ? node : { ...node, chip: { ...node.chip, label } };
+      }) };
+    }
   }
   return displayDocFromSerializedText(text, images, zh);
 }

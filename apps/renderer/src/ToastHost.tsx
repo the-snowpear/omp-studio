@@ -20,12 +20,14 @@ export function ToastHost({
   icon = "info",
   placement = "bottom",
   sticky = false,
+  variant = "default",
   onDismiss,
 }: {
   message: string | null;
   icon?: IconName;
   placement?: "top" | "bottom";
   sticky?: boolean;
+  variant?: "default" | "capsule";
   onDismiss: () => void;
 }) {
   const [leaving, setLeaving] = useState(false);
@@ -56,7 +58,7 @@ export function ToastHost({
   if (!message) return null;
   return createPortal(
     <div className={`toast-wrap${placement === "top" ? " is-top" : ""}`} role="status" aria-live="polite">
-      <div key={message} className={`toast${sticky ? " is-busy" : ""}${leaving ? " leaving" : ""}`}>
+      <div key={message} className={`toast${sticky ? " is-busy" : ""}${leaving ? " leaving" : ""}${variant === "capsule" ? " is-capsule" : ""}`}>
         {sticky ? <span className="spinner" aria-hidden="true" /> : <Icon name={icon} extra="sm" />}
         <span>{message}</span>
       </div>

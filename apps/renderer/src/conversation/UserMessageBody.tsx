@@ -1,4 +1,7 @@
 import { GitHubReferencePreview } from "../composer/GitHubReferencePreview";
+import { SessionReferenceDialog } from "../composer/SessionReferenceDialog";
+import { useSessionReferences } from "../composer/SessionReferences";
+import { sessionReferenceLabel, type SessionReference } from "../composer/sessionReference";
 import { useI18n } from "../i18n";
 import {
   useLayoutEffect,
@@ -39,6 +42,34 @@ function ChipLabel({ label }: { label: string }) {
   );
 }
 
+function SessionUserCapsule({ chip, reference }: { chip: ComposerChip; reference: SessionReference }) {
+  const { t, resolvedLanguage } = useI18n();
+  const access = useSessionReferences();
+  const [open, setOpen] = useState(false);
+  const source = reference.source;
+  const zh = resolvedLanguage === "zh";
+  const label = (source && access?.previewTitle(source, zh)) || sessionReferenceLabel(reference, zh);
+  const count = reference.messages.length;
+  const note = [
+    source && access?.crossEnvironment(source) ? access.environmentName(source.targetId) : "",
+    count ? t("sessionReference.attached", { count }) : "",
+  ].filter(Boolean).join(" · ");
+  return <>
+    <span className="cm-chip cm-chip-session is-static" title={reference.sessionId} data-copy={chipCopyToken(chip)}
+      role="button" tabIndex={0} aria-label={[label, note].filter(Boolean).join(" · ")} onClick={() => setOpen(true)}
+      onKeyDown={event => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        setOpen(true);
+      }}>
+      <Icon name="message" extra="sm" />
+      <ChipLabel label={label} />
+      {note ? <span className="session-chip-note" aria-hidden="true">{note}</span> : null}
+    </span>
+    {open ? <SessionReferenceDialog reference={reference} initialSources={reference.matches} onClose={() => setOpen(false)} /> : null}
+  </>;
+}
+
 function UserCapsule({
   chip,
   onOpenImage,
@@ -46,7 +77,8 @@ function UserCapsule({
   chip: ComposerChip;
   onOpenImage?: (subject: ImagePreviewSubject) => void;
 }) {
-  const [githubOpen, setGithubOpen] = useState(false);
+  const [referenceOpen, setReferenceOpen] = useState(false);
+  if (chip.sessionReference) return <SessionUserCapsule chip={chip} reference={chip.sessionReference} />;
   const copy = chipCopyToken(chip);
   const clickable = chip.kind === "image" && chip.image !== undefined && onOpenImage !== undefined;
   return (<>
@@ -54,8 +86,9 @@ function UserCapsule({
       className={`cm-chip cm-chip-${chip.kind} is-static`}
       title={chip.path ?? chip.name ?? chip.label}
       data-copy={copy}
-      {...(chip.reference ? { role: "button", tabIndex: 0, onClick: () => setGithubOpen(true), onKeyDown: (event: KeyboardEvent<HTMLSpanElement>) => {
-        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setGithubOpen(true); }
+      {...(chip.reference ? { role: "button", tabIndex: 0,
+        onClick: () => setReferenceOpen(true), onKeyDown: (event: KeyboardEvent<HTMLSpanElement>) => {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setReferenceOpen(true); }
       } } : {})}
       {...(clickable
         ? {
@@ -87,7 +120,7 @@ function UserCapsule({
       {chip.kind === "mode" ? null : <Icon name={chipIconName(chip.kind)} extra="sm" />}
       <ChipLabel label={chip.label} />
     </span>
-    {githubOpen && chip.reference ? <GitHubReferencePreview reference={chip.reference} onClose={() => setGithubOpen(false)} /> : null}
+    {referenceOpen && chip.reference ? <GitHubReferencePreview reference={chip.reference} onClose={() => setReferenceOpen(false)} /> : null}
     </>
   );
 }

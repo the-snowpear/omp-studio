@@ -2843,6 +2843,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
                 id="composerInput"
                 disabled={worktreeGated}
                 compact={composerRunning && !composerExpanded}
+                sessionReferences
                 placeholder={queueEdit === undefined ? t("conversation.composerPlaceholder") : t("conversation.editingQueuedMessage")}
                 describedBy="composerHint"
                 {...(workspaceId === undefined ? {} : { workspaceId })}

@@ -70,6 +70,34 @@ test("session catalog hides Runtime metadata-only sessions until the first messa
   assert.deepEqual(started.sessions.map((entry) => entry.sessionId), ["empty-id"]);
 });
 
+test("locates exact session IDs in registered workspaces, including the cold archive", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-studio-catalog-locate-"));
+  const projects = ["one", "two", "unregistered"].map(name => join(root, name));
+  const sessions = join(root, "sessions");
+  const archive = join(root, "archive", "sessions");
+  await mkdir(sessions);
+  await mkdir(archive, { recursive: true });
+  await sessionFile(sessions, "one", { type: "session", id: "same-id", cwd: projects[0], title: "First" });
+  await sessionFile(sessions, "unknown", { type: "session", id: "same-id", cwd: projects[2] });
+  await sessionFile(sessions, "different", { type: "session", id: "same-id-other", cwd: projects[1] });
+  const { gzipSync } = await import("node:zlib");
+  await writeFile(join(archive, "two.jsonl.gz"), gzipSync([
+    JSON.stringify({ type: "session", id: "same-id", cwd: projects[1], title: "Second" }),
+    JSON.stringify({ type: "message", message: { role: "user", content: "archived" } }),
+  ].join("\n") + "\n"));
+  const result = await scanSessionCatalog({
+    sessionsRoot: sessions, archiveRoot: archive, includeCliSessions: true,
+    locate: { sessionId: "same-id", workspaces: [
+      { workspaceId: "ws-one", canonicalPath: projects[0]! },
+      { workspaceId: "ws-two", canonicalPath: projects[1]! },
+    ] },
+  });
+  assert.deepEqual(result.sessions.map(entry => [entry.workspaceId, entry.title, entry.archived]).sort(), [
+    ["ws-one", "First", false], ["ws-two", "Second", true],
+  ]);
+  assert.ok(!JSON.stringify(result).includes("unregistered"));
+});
+
 test("session catalog handles title slots, unknown origins, duplicates, corruption, oversize, and symlinks", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "omp-studio-catalog-edge-"));
   const project = join(root, "project");

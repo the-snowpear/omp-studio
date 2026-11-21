@@ -98,7 +98,7 @@ export async function createRemoteHost(options: RemoteHostOptions): Promise<Remo
         workspaceFiles: createWorkspaceFileService({ registry }),
         systemFiles: createSystemFileService({ registry }),
         git, github,
-        catalog: createWorkspaceSessionCatalog(() => cwd, async workspaceId => registry.get(workspaceId)?.canonicalPath),
+        catalog: createWorkspaceSessionCatalog(() => cwd, workspaceId => registry.get(workspaceId)?.canonicalPath, () => registry.list()),
         getWorkspaceCwd: () => cwd,
         getActiveWorkspace: () => {
           const stored = registry.activeWorkspaceId ? registry.get(registry.activeWorkspaceId) : undefined;

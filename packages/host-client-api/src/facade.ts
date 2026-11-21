@@ -945,6 +945,17 @@ export class StudioHostClientFacade implements ClientTransport {
         const result = await this.#queryDiagnostics();
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
+      case "history.locate": {
+        const { sessionId } = request.input as ClientQueryRequest<"history.locate">["input"];
+        if (typeof sessionId !== "string" || sessionId.length === 0) {
+          throw clientError("INVALID_ARGUMENT", "Session id is required");
+        }
+        const catalog = this.#options.catalog;
+        if (!catalog.locate) throw clientError("CAPABILITY_UNAVAILABLE", "Session lookup is not available on this Host");
+        const matches = this.#options.evaluations?.sessionIds().has(sessionId) ? [] : await catalog.locate(sessionId);
+        const result = matches.map(match => ({ ...match, entry: this.#mapHistoryEntry(match.entry) }));
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
       case "history.list": {
         const result = await this.#queryHistory(request.input as ClientQueryRequest<"history.list">["input"]);
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;

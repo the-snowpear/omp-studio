@@ -20,6 +20,7 @@ import type { SessionId, StudioClient } from "@omp-studio/client-contract";
 import type { SessionTelemetrySnapshot } from "@omp-studio/studio-protocol";
 import { Icon } from "../icons";
 import { MenuItem } from "../menus";
+import { CopySessionMenuItem } from "../composer/SessionReferences";
 import { useI18n } from "../i18n";
 import { useViewedSessionTelemetry, type ViewedSessionTelemetryState } from "../telemetry/useViewedSessionTelemetry";
 import { usePreviewMode } from "../preview/PreviewContext";
@@ -317,6 +318,7 @@ export function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpe
                   onExport={() => run(chrome.onExportThread)}
                   onHistory={() => run(() => onRoute("history"))}
                 />
+                <CopySessionMenuItem identity={chrome.sessionCopyIdentity} onClose={() => setOpenMenu(null)} />
                 <MenuItem
                   icon="archive"
                   disabled={preview ? chrome.hiddenPreviewThreads.has(chrome.previewThreadId) : chrome.archiveTarget === undefined}
@@ -455,6 +457,7 @@ export function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpe
         const finish = (action: () => void) => { close(); run(action); };
         return <><ThreadActionMenuItems live={!preview && sessionLive} busy={sessionBusy} forkBusy={forkBusy} compacting={liveSnapshot?.isCompacting === true} compactPending={chrome.compactPending} reason={preview ? t("common.unavailableInPreview") : sessionActionReason}
           onRename={() => finish(chrome.onRenameThread)} onFork={() => finish(chrome.onForkThread)} onHandoff={() => finish(chrome.onHandoffThread)} onCompact={() => finish(chrome.onCompactThread)} onExport={() => finish(chrome.onExportThread)} onHistory={() => finish(() => { revealMainWindow(); onRoute("history"); })} />
+          <CopySessionMenuItem identity={chrome.sessionCopyIdentity} onClose={close} />
           {chrome.compactPending || liveSnapshot?.isCompacting ? <MenuItem icon="x" disabled={preview || !sessionLive} onClick={() => finish(chrome.onCancelCompact)}>{t("common.cancel")}</MenuItem> : null}
           <MenuItem icon="archive" disabled={preview ? chrome.hiddenPreviewThreads.has(chrome.previewThreadId) : chrome.archiveTarget === undefined} onClick={() => { if (preview) finish(() => chrome.onArchivePreviewThread(chrome.previewThreadId)); else if (chrome.archiveTarget) finish(() => chrome.onArchiveThread(chrome.archiveTarget!)); }}>{t("history.archiveSession")}</MenuItem>
           {windowed ? <><div className="menu-sep" /><ConversationWidthMenu onSelect={close} onOpenSettings={() => { close(); revealMainWindow(); setSettingsIntent("appearance", "conversation.width"); onRoute("settings"); }} /></> : null}

@@ -2,12 +2,13 @@
 export function referenceCodec<T extends { readonly text: string }>(
   tag: string,
   accepts: (metadata: Omit<T, "text">) => boolean,
+  stringifyMetadata: (metadata: Omit<T, "text">) => string = JSON.stringify,
 ) {
   const closing = `\n</${tag}>`;
   return {
     serialize(reference: T): string {
       const { text, ...metadata } = reference;
-      return `<${tag} metadata=${JSON.stringify(metadata)} length=${text.length}>\n${text}${closing}`;
+      return `<${tag} metadata=${stringifyMetadata(metadata)} length=${text.length}>\n${text}${closing}`;
     },
     next(text: string, from: number): { start: number; end: number; reference: T } | null {
       const pattern = new RegExp(`<${tag} metadata=(\\{[^\\n]*?\\}) length=(\\d+)>\\n`, "g");
