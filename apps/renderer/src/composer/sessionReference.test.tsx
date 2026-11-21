@@ -130,7 +130,7 @@ it("reads excerpts in the remote project's context and preserves the selection a
   ] as never);
   const ref = createRef<ChipComposerHandle>();
   const fixture = createContractFixtureApi();
-  const reply = "Keep @example.ts, /skill:review, ^provider/model, and +2k as literal text.";
+  const reply = "Keep @example.ts, /skill:review, ^provider/model, and +2k as literal text.\n\n**Important** review result.";
   let changed = () => {};
   let inventory: RemoteInventory = {
     profiles: [{ id: "ssh", name: "Dev SSH", host: "localhost", platform: "linux" }],
@@ -179,7 +179,9 @@ it("reads excerpts in the remote project's context and preserves the selection a
   expect(planComposerSend(queued)).toMatchObject({ kind: "prompt", snapshot: { text: snapshot.text } });
   await act(async () => { inventory = { ...inventory, statuses: [{ id: "ssh", state: "disconnected" }] }; changed(); });
   fireEvent.click(screen.getByRole("button", { name: /Review changes.*1 attached/u }));
-  await within(await screen.findByRole("dialog")).findByText(reply);
+  const excerpt = within(await screen.findByRole("dialog"));
+  await excerpt.findByText("Important");
+  expect(excerpt.getByText(/Keep @example\.ts/u).textContent).toContain("literal text.");
   expect(screen.getByText("Source environment is unavailable")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   act(() => ref.current!.setSnapshot(queued));

@@ -6,6 +6,7 @@ import { hostErrorMessage } from "../hostError";
 import { Icon } from "../icons";
 import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
+import { MarkdownText } from "../conversation/markdown";
 import { sessionCopyMessage, useSessionReferences, writeSessionId } from "./SessionReferences";
 import { sessionSourceKey, SESSION_REFERENCE_MESSAGE_LIMIT, type SessionReference, type SessionReferenceMessage, type SessionReferenceSource } from "./sessionReference";
 
@@ -181,7 +182,7 @@ export function SessionReferenceDialog({ reference, initialSources, onSave, onCl
             <span>{t("sessionReference." + message.role)}</span>
             {message.truncated ? <span className="session-reference-muted">{t("sessionReference.truncated")}</span> : null}
           </div>
-          <div className="session-reference-excerpt-text">{message.text}</div>
+          <div className="session-reference-excerpt-text"><MarkdownText text={message.text} staticPreview /></div>
         </div>;
         return editable ? <label key={index} className={"session-reference-row" + (checked ? " is-selected" : "")}>
           <input type="checkbox" checked={checked} aria-label={t("sessionReference.selectExcerpt", { index: index + 1 })}

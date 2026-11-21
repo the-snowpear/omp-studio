@@ -91,27 +91,39 @@ function CodeFrame({ language, text, children, streaming }: { language: string; 
 }
 
 const componentCache = new Map<string, Components>();
-function componentsFor(streaming: boolean, magic: boolean, highlightEligible = false): Components {
-  const key = `${streaming}:${magic}:${highlightEligible}`;
+function componentsFor(streaming: boolean, magic: boolean, highlightEligible = false, staticPreview = false): Components {
+  const key = `${streaming}:${magic}:${highlightEligible}:${staticPreview}`;
   const cached = componentCache.get(key);
   if (cached !== undefined) return cached;
   const prose = (children: ReactNode) => magic ? withMagicKeywordChildren(children) : children;
+  const paragraphText = (children: ReactNode) => prose(staticPreview ? children : linkSpillText(children));
   const components: Components = {
-    p: ({ children, node: _node, ...props }) => <p {...props}>{prose(linkSpillText(children))}</p>,
-    li: ({ children, node: _node, ...props }) => <li {...props}>{prose(linkSpillText(children))}</li>,
+    p: ({ children, node: _node, ...props }) => <p {...props}>{paragraphText(children)}</p>,
+    li: ({ children, node: _node, ...props }) => <li {...props}>{paragraphText(children)}</li>,
     a: ({ href, children }) => {
+      if (staticPreview) return <span className="md-static-link">{prose(children)}</span>;
       const url = typeof href === "string" ? href.trim() : "";
       if (isSpillUri(url)) return <SpillLink uri={url}>{children}</SpillLink>;
       return parseFileReference(url, true) ? <FileLink href={url}>{prose(children)}</FileLink> : <ExtensionAwareLink href={url} safe={isSafeMarkdownUrl(url)}>{prose(children)}</ExtensionAwareLink>;
     },
     img: ({ src, alt }) => {
+      if (staticPreview) return alt ? <span className="md-static-image">{alt}</span> : null;
       const url = typeof src === "string" ? src.trim() : "";
       if (parseFileReference(url, true)) return <LocalFileImage src={url} alt={alt ?? ""} />;
       return isSafeMarkdownUrl(url, true) ? <img src={url} alt={alt ?? ""} loading="lazy" decoding="async" referrerPolicy="no-referrer" /> : null;
     },
-    table: ({ children,node }) => <NumericMarkdownTable node={node} streaming={streaming}>{children}</NumericMarkdownTable>,
+    table: ({ children,node }) => staticPreview
+      ? <div className="md-table-wrap"><table>{children}</table></div>
+      : <NumericMarkdownTable node={node} streaming={streaming}>{children}</NumericMarkdownTable>,
+    input: props => {
+      if (!staticPreview) return <input {...props} />;
+      return props.type === "checkbox"
+        ? <span className="md-task-marker" aria-hidden="true">{props.checked ? "✓" : ""}</span>
+        : null;
+    },
     code: ({ className, children }) => {
       if (className) return <code className={className}>{children}</code>;
+      if (staticPreview) return <code className="chip-code">{children}</code>;
       const text = nodeText(children);
       if (isSpillUri(text)) return <code className="chip-code"><SpillLink uri={text}>{children}</SpillLink></code>;
       return <code className="chip-code">{parseFileReference(text) ? <FileLink href={text} inline>{children}</FileLink> : children}</code>;
@@ -121,6 +133,7 @@ function componentsFor(streaming: boolean, magic: boolean, highlightEligible = f
       const props = child && typeof child === "object" && "props" in child ? (child as { props: { className?: string; children?: ReactNode } }).props : {};
       const language = /language-([\w+#.-]+)/.exec(props.className ?? "")?.[1] ?? "";
       const text = nodeText(props.children).replace(/\n$/, "");
+      if (staticPreview) return <pre className="codeblock md-code-pre">{children}</pre>;
       if (language !== "mermaid" && graphicFormat("graphic."+language) && (!streaming || language === "svg")) return <GraphicPreview name={"graphic."+language} text={text}/>;
       if (language === "mermaid" && !streaming) return performanceOptions.boundedMermaid ? <LazyMermaid code={text} /> : <LegacyMermaid key={text} code={text} />;
       if (performanceOptions.highlightWorker && highlightEligible && language && language !== "mermaid") {
@@ -135,24 +148,25 @@ function componentsFor(streaming: boolean, magic: boolean, highlightEligible = f
   return components;
 }
 
-const MarkdownBlock = memo(function MarkdownBlock({ text, streaming, magic, sourceOffset }: { text: string; streaming: boolean; magic: boolean; sourceOffset?: number | undefined }) {
+const MarkdownBlock = memo(function MarkdownBlock({ text, streaming, magic, staticPreview, sourceOffset }: { text: string; streaming: boolean; magic: boolean; staticPreview: boolean; sourceOffset?: number | undefined }) {
   const highlightEligible = !streaming && text.length <= MAX_HIGHLIGHT_CHARS;
   const plugins = highlightEligible && !performanceOptions.highlightWorker ? HIGHLIGHT : undefined;
   const components = useMemo(() => {
-    const base = componentsFor(streaming, magic, highlightEligible);
+    const base = componentsFor(streaming, magic, highlightEligible, staticPreview);
     return sourceOffset === undefined ? base : withMarkdownSource(base, sourceOffset);
-  }, [streaming, magic, highlightEligible, sourceOffset]);
+  }, [streaming, magic, highlightEligible, staticPreview, sourceOffset]);
   return <ReactMarkdown urlTransform={(url, key) => key === "href" || parseFileReference(url, true) ? url : defaultUrlTransform(url)} remarkPlugins={REMARK} rehypePlugins={plugins} components={components}>{text}</ReactMarkdown>;
 });
 
 const NO_CLOSED_BLOCKS: readonly string[] = [];
-const MarkdownBlockList = memo(function MarkdownBlockList({ blocks, magic, scope }: {
+const MarkdownBlockList = memo(function MarkdownBlockList({ blocks, magic, staticPreview, scope }: {
   blocks: readonly string[];
   magic: boolean;
+  staticPreview: boolean;
   scope: "frozen" | "pending";
 }) {
   return <>{blocks.map((block, index) => (
-    <MarkdownBlock key={`${scope}:${index}:${block.length}`} text={block} streaming={false} magic={magic} />
+    <MarkdownBlock key={`${scope}:${index}:${block.length}`} text={block} streaming={false} magic={magic} staticPreview={staticPreview} />
   ))}</>;
 });
 
@@ -163,8 +177,8 @@ type MarkdownRenderParts = {
   readonly openFence?: StreamingCodeFence;
 };
 
-export const MarkdownText = memo(function MarkdownText({ text, streaming = false, truncated = false, mark, magicKeywords = false, sourceOffset }: {
-  text: string; streaming?: boolean; truncated?: boolean; mark?: ReactNode; magicKeywords?: boolean; sourceOffset?: number | undefined;
+export const MarkdownText = memo(function MarkdownText({ text, streaming = false, truncated = false, mark, magicKeywords = false, sourceOffset, staticPreview = false }: {
+  text: string; streaming?: boolean; truncated?: boolean; mark?: ReactNode; magicKeywords?: boolean; sourceOffset?: number | undefined; staticPreview?: boolean;
 }) {
   /* 续扫状态。流式期间正文只在尾部追加，把上一帧的扫描结果传回去，分块代价就只跟
      「这一帧新增的字符」有关，而不是跟已经产出的全文有关。 */
@@ -180,9 +194,9 @@ export const MarkdownText = memo(function MarkdownText({ text, streaming = false
   }, [streaming, text]);
   return <div className="ev-body">
     <div className={`convo-md${streaming ? " is-streaming" : ""}`}>
-      <MarkdownBlockList blocks={parts.frozen} magic={magicKeywords} scope="frozen" />
-      <MarkdownBlockList blocks={parts.pending} magic={magicKeywords} scope="pending" />
-      {parts.tail.length > 0 ? <MarkdownBlock text={parts.tail} streaming={streaming} magic={magicKeywords} sourceOffset={sourceOffset} /> : null}
+      <MarkdownBlockList blocks={parts.frozen} magic={magicKeywords} staticPreview={staticPreview} scope="frozen" />
+      <MarkdownBlockList blocks={parts.pending} magic={magicKeywords} staticPreview={staticPreview} scope="pending" />
+      {parts.tail.length > 0 ? <MarkdownBlock text={parts.tail} streaming={streaming} magic={magicKeywords} staticPreview={staticPreview} sourceOffset={sourceOffset} /> : null}
       {parts.openFence?.language.toLowerCase() === "svg" ? <SvgFigureImage source={parts.openFence.code} alt="SVG" streaming/> : parts.openFence !== undefined ? (
         <CodeFrame language={parts.openFence.language} text={parts.openFence.code} streaming>
           <code className={parts.openFence.language ? `language-${parts.openFence.language}` : undefined}>{parts.openFence.code}</code>
