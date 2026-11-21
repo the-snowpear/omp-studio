@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- 桌面与 Web 对话中的 Advisor 多条审阅意见按原消息折叠，含阻断问题时默认展开；手动展开状态在新消息、语言切换和虚拟滚动时保持，支持折叠时复制整组意见。单条意见继续内联显示，并移除意见区域左侧的彩色竖条。 [#58](https://github.com/the-snowpear/omp-studio/issues/58)
+
 ## [0.2.7] - 2026-11-20
 
 ### Added

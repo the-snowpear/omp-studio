@@ -181,7 +181,7 @@ function SubagentConversationSurface({
               <p>{zh ? "正在读取子 Agent 对话…" : "Loading subagent conversation…"}</p>
             </div>
           ) : (
-            <RuntimeToolProvider client={client} actions={sendClient} sessionId={liveSessionId} sourceSessionId={snapshot.state.identity?.sessionId} agentId={parentSessionId === liveSessionId ? target.agentId : undefined} enabled={visible && (preview || runtimeConnected)}><ConvoTranscript scrollerRef={scrollerRef} rows={snapshot.rows} {...(snapshot.demo ? { demo: true } : {})} /></RuntimeToolProvider>
+            <RuntimeToolProvider client={client} actions={sendClient} sessionId={liveSessionId} sourceSessionId={snapshot.state.identity?.sessionId} agentId={parentSessionId === liveSessionId ? target.agentId : undefined} enabled={visible && (preview || runtimeConnected)}><ConvoTranscript scrollerRef={scrollerRef} rows={snapshot.rows} stateScopeKey={snapshot.state.identity?.sessionId ?? target.agentId} {...(snapshot.demo ? { demo: true } : {})} /></RuntimeToolProvider>
           )}
           {state.hydrateStatus === "resyncing" ? (
             <div className="convo-notice info" role="status">{zh ? "正在同步" : "Syncing"}</div>

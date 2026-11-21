@@ -15,7 +15,7 @@ import {
   type TurnFileChange,
 } from "./toolMeta";
 import { PlanCreatedCard, type PlanCreatedLink } from "../deck/PlanCreatedCard";
-import { useCallback, useEffect, useMemo, useRef, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { CONVERSATION_REVEAL, revealMountedConversationItem, type ConversationRevealRequest } from "./conversationReveal";
 import { ConversationVirtualList } from "./ConversationVirtualList";
 import { usePreviewMode } from "../preview/PreviewContext";
@@ -260,6 +260,7 @@ export function planCreatedBinds(
 export function ConvoTranscript({
   scrollerRef,
   rows,
+  stateScopeKey = "",
   demo,
   onRestore,
   onRestoreUserMessage,
@@ -275,6 +276,8 @@ export function ConvoTranscript({
 }: {
   scrollerRef?: RefObject<HTMLElement | null>;
   rows: readonly TimelineRow[];
+  /** UI disclosure state belongs to one conversation, independently of virtual row mounts. */
+  stateScopeKey?: string;
   demo?: boolean;
   onRestore?: (requestId: string) => void;
   onRestoreUserMessage?: (itemId: string, text: string) => void;
@@ -295,6 +298,20 @@ export function ConvoTranscript({
   // `renderItems` 只按行 type 把行分成 row / assistantRun，与工具集无关，所以挂在
   // shape 令牌上：否则每次工具启停都要对全对话重算一遍分组。
   const shapeToken = timelineShapeToken(rows);
+  const advisorScope = `${demo === true ? "preview" : "real"}:${stateScopeKey}`;
+  const [advisorState, setAdvisorState] = useState(() => ({ scope: advisorScope, overrides: new Map<string, boolean>() }));
+  if (advisorState.scope !== advisorScope) setAdvisorState({ scope: advisorScope, overrides: new Map() });
+  const advisorOverrides = advisorState.overrides;
+  const onToggleAdvisor = useCallback((itemId: string, defaultOpen: boolean) => {
+    setAdvisorState(current => ({ ...current, overrides: new Map(current.overrides).set(itemId, !(current.overrides.get(itemId) ?? defaultOpen)) }));
+  }, []);
+  useEffect(() => {
+    const ids = new Set(rows.filter(row => row.type === "advisor").map(row => row.itemId));
+    setAdvisorState(current => {
+      const overrides = new Map([...current.overrides].filter(([id]) => ids.has(id)));
+      return overrides.size === current.overrides.size ? current : { ...current, overrides };
+    });
+  }, [shapeToken, advisorScope]);
   const turnBindCacheRef = useRef<Map<string, TurnChangeCacheEntry>>(new Map());
   const binds = useMemo(() => turnChangeBinds(rows, turnBindCacheRef.current), [structureToken]);
   const planBindCacheRef = useRef<Map<string, PlanBindCacheEntry>>(new Map());
@@ -411,6 +428,7 @@ export function ConvoTranscript({
       return (
         <ConversationItemView
           row={row}
+          {...(row.type === "advisor" ? { advisorOpen: advisorOverrides.get(row.itemId) ?? row.notes.some(note => note.severity === "blocker"), onToggleAdvisor } : {})}
           {...(visualItem.index === latestAssistant ? {} : { tail: false })}
           {...(demo === true ? { expandAll: true, demo: true } : {})}
           {...(onRestore === undefined ? {} : { onRestore })}
@@ -427,6 +445,8 @@ export function ConvoTranscript({
       );
     },
     [
+      advisorOverrides,
+      onToggleAdvisor,
       binds,
       createdBinds,
       demo,
@@ -454,6 +474,8 @@ export function ConvoTranscript({
           deps.push(rows[rowIndex], binds[rowIndex], createdBinds[rowIndex]);
         }
       } else {
+        const row = rows[visualItem.index]!;
+        if (row.type === "advisor") deps.push(advisorOverrides.get(row.itemId), onToggleAdvisor);
         deps.push(
           visualItem.index === latestAssistant,
           rows[visualItem.index],
@@ -475,6 +497,8 @@ export function ConvoTranscript({
       return element;
     },
     [
+      advisorOverrides,
+      onToggleAdvisor,
       binds,
       buildItem,
       createdBinds,

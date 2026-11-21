@@ -1,5 +1,5 @@
 import { AnnotationButton } from "../annotations/Annotations";
-import { memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { ConversationMessageError } from "@omp-studio/client-contract";
 import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { Icon } from "../icons";
@@ -14,6 +14,7 @@ import { compactRuleLabel, compactSummaryFoldable } from "./compactSummary";
 import type { AssistantSegment, TimelineRow } from "./conversationViewModel";
 import type { SubagentHubTarget, ThinkView, TurnFileChange } from "./toolMeta";
 import { UserMessageBody } from "./UserMessageBody";
+import { afterConversationLayoutChange, beforeConversationLayoutChange } from "./conversationReflow";
 
 function formatTime(iso: string): string {
   if (!iso) return "";
@@ -76,22 +77,73 @@ function MessageBody({
   );
 }
 
-function AdvisorMessage({ row }: { row: Extract<TimelineRow, { type: "advisor" }> }) {
+function AdvisorMessage({ row, open: controlledOpen, onToggle }: {
+  row: Extract<TimelineRow, { type: "advisor" }>;
+  open?: boolean;
+  onToggle?: (itemId: string, defaultOpen: boolean) => void;
+}) {
   const { t } = useI18n();
-  return <div className="ev ev-advisor-group" data-item-id={row.itemId}>
-    {row.notes.map((note, index) => {
-      const severity = note.severity && t(`conversation.advisorSeverity.${note.severity}`);
-      const label = [t("conversation.advisor"), note.advisor, severity].filter(Boolean).join(" · ");
-      return <aside className="ev-advisor" key={index} aria-label={label}>
+  const bodyId = useId();
+  const defaultOpen = row.notes.some(note => note.severity === "blocker");
+  const [localOpen, setLocalOpen] = useState(defaultOpen);
+  const open = controlledOpen ?? localOpen;
+  const previousOpen = useRef(open);
+  useLayoutEffect(() => {
+    if (previousOpen.current === open) return;
+    previousOpen.current = open;
+    afterConversationLayoutChange();
+  }, [open]);
+  const noteLabel = (note: (typeof row.notes)[number]) => [
+    t("conversation.advisor"), note.advisor,
+    note.severity && t(`conversation.advisorSeverity.${note.severity}`),
+  ].filter(Boolean).join(" · ");
+
+  if (row.notes.length <= 1) return <div className="ev ev-advisor-group" data-item-id={row.itemId}>
+    {row.notes.map((note, index) => <aside className="ev-advisor" key={index} aria-label={noteLabel(note)}>
         <div className="ev-head">
-          <span className="who"><Icon name="alert" extra="sm" />{label}</span>
+          <span className="who"><Icon name="alert" extra="sm" />{noteLabel(note)}</span>
           <span>{formatTime(row.createdAt)}</span>
-          <MessageCopyButton text={`${label}\n${note.text}`} />
+          <MessageCopyButton text={`${noteLabel(note)}\n${note.text}`} />
         </div>
         <div className="ev-advisor-text">{note.text}{note.truncated && <TruncationMark />}</div>
-      </aside>;
-    })}
+      </aside>)}
   </div>;
+
+  const source = row.notes[0]?.advisor;
+  const label = [t("conversation.advisor"), source && row.notes.every(note => note.advisor === source) ? source : undefined].filter(Boolean).join(" · ");
+  const counts = (["blocker", "concern", "nit", "note"] as const).flatMap(severity => {
+    const count = row.notes.filter(note => (note.severity ?? "note") === severity).length;
+    return count ? [{ severity, text: t(`conversation.advisorCount.${severity}${count === 1 ? "One" : "Other"}`, { count }) }] : [];
+  });
+  const summary = [label, ...counts.map(count => count.text)].join(" · ");
+  return <aside className="ev ev-advisor ev-advisor-batch" data-item-id={row.itemId} data-severity={counts[0]?.severity} aria-label={summary}>
+    <div className="ev-advisor-batch-head">
+      <button type="button" className="ev-advisor-toggle" aria-expanded={open} aria-controls={bodyId}
+        aria-label={t(open ? "conversation.advisorBatch.collapse" : "conversation.advisorBatch.expand", { summary })}
+        onClick={() => {
+          beforeConversationLayoutChange();
+          if (onToggle) onToggle(row.itemId, defaultOpen);
+          else setLocalOpen(!open);
+        }}>
+        <Icon name="chevron-r" extra="sm ev-advisor-chevron" />
+        <span className="ev-advisor-summary">
+          <span className="ev-advisor-title"><Icon name="alert" extra="sm" />{label}</span>
+          <span className="ev-advisor-counts">{counts.map(count => <span key={count.severity} data-severity={count.severity}>{count.text}</span>)}</span>
+        </span>
+      </button>
+      <span className="ev-advisor-batch-time">{formatTime(row.createdAt)}</span>
+      <MessageCopyButton label={t("conversation.advisorBatch.copy")} text={row.notes.map(note => `${noteLabel(note)}\n${note.text}`).join("\n\n")} />
+    </div>
+    <div id={bodyId} hidden={!open}>
+      {open ? <ol className="ev-advisor-notes">{row.notes.map((note, index) => <li className="ev-advisor-note" key={index} aria-label={noteLabel(note)}>
+        <div className="ev-head">
+          <span className="ev-advisor-note-label">{[note.advisor, note.severity && t(`conversation.advisorSeverity.${note.severity}`)].filter(Boolean).join(" · ")}</span>
+          <MessageCopyButton text={`${noteLabel(note)}\n${note.text}`} />
+        </div>
+        <div className="ev-advisor-text">{note.text}{note.truncated && <TruncationMark />}</div>
+      </li>)}</ol> : null}
+    </div>
+  </aside>;
 }
 
 function AssistantStatus({ status }: { status: Extract<TimelineRow, { type: "assistant" }>["status"] }) {
@@ -130,7 +182,7 @@ function concludingReplyText(segments: readonly AssistantSegment[]): Extract<Ass
   return last;
 }
 
-export function MessageCopyButton({ text }: { text: string }) {
+export function MessageCopyButton({ text, label }: { text: string; label?: string }) {
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [copied, setCopied] = useState(false);
@@ -146,8 +198,8 @@ export function MessageCopyButton({ text }: { text: string }) {
     <button
       type="button"
       className="ev-msg-copy"
-      aria-label={copied ? (zh ? "已复制" : "Copied") : (zh ? "复制消息" : "Copy message")}
-      data-tip={copied ? (zh ? "已复制" : "Copied") : (zh ? "复制" : "Copy")}
+      aria-label={copied ? (zh ? "已复制" : "Copied") : label ?? (zh ? "复制消息" : "Copy message")}
+      data-tip={copied ? (zh ? "已复制" : "Copied") : label ?? (zh ? "复制" : "Copy")}
       onClick={() => {
         const clipboard = typeof navigator === "object" ? navigator.clipboard : undefined;
         if (!clipboard) return;
@@ -597,6 +649,8 @@ export const ConversationItemView = memo(function ConversationItemView({
   liveAgents,
   planBind,
   planLink,
+  advisorOpen,
+  onToggleAdvisor,
 }: {
   row: TimelineRow;
   onRestore?: (requestId: string) => void;
@@ -615,10 +669,12 @@ export const ConversationItemView = memo(function ConversationItemView({
   liveAgents?: readonly StudioAgentSnapshot[];
   planBind?: RowPlanBind;
   planLink?: PlanCreatedLink;
+  advisorOpen?: boolean;
+  onToggleAdvisor?: (itemId: string, defaultOpen: boolean) => void;
 }) {
   const { settings: appSettings } = useAppSettings();
   const { resolvedLanguage } = useI18n();
-  if (row.type === "advisor") return <AdvisorMessage row={row} />;
+  if (row.type === "advisor") return <AdvisorMessage row={row} {...(advisorOpen === undefined ? {} : { open: advisorOpen })} {...(onToggleAdvisor === undefined ? {} : { onToggle: onToggleAdvisor })} />;
   if (row.type === "extension") return <div className="ev ev-extension" data-item-id={row.itemId}>
     <div className="ev-head"><span className="who">{row.asyncNotify ? resolvedLanguage === "zh" ? "后台输出通知" : "Background output" : resolvedLanguage === "zh" ? "扩展通知" : "Extension notice"}</span>{row.excludeFromContext && <span className="chip gray xs ev-context-excluded" data-tip={resolvedLanguage === "zh" ? "这条消息只显示在界面里，模型看不到" : "Shown here only. The model does not see this message."}><Icon name="eye-off" extra="xs" />{resolvedLanguage === "zh" ? "仅界面可见" : "UI only"}</span>}<span>{formatTime(row.createdAt)}</span></div>
     <MessageBody text={row.text} copyText={row.text} />
