@@ -12,10 +12,11 @@ export function SshField({ label, optional, htmlFor, children }: { label: string
 export interface SegmentOption<T extends string> { value: T; label: string; icon?: IconName }
 
 /** Two or three exclusive choices as a radio group with a sliding thumb. */
-export function SshSegmented<T extends string>({ label, value, options, disabled, onChange }: { label: string; value: T; options: readonly SegmentOption<T>[]; disabled?: boolean; onChange(value: T): void }) {
+export function SshSegmented<T extends string>({ label, value, options, hint, disabled, onChange }: { label: string; value: T; options: readonly SegmentOption<T>[]; hint?: ReactNode; disabled?: boolean; onChange(value: T): void }) {
   const id = useId();
   const index = Math.max(0, options.findIndex(option => option.value === value));
   const move = (step: number) => {
+    if (disabled) return;
     const next = options[(index + step + options.length) % options.length]!;
     onChange(next.value);
     requestAnimationFrame(() => document.getElementById(`${id}-${next.value}`)?.focus());
@@ -31,6 +32,7 @@ export function SshSegmented<T extends string>({ label, value, options, disabled
         {option.icon ? <Icon name={option.icon} extra="sm" /> : null}<span>{option.label}</span>
       </button>)}
     </div>
+    {hint ? <p className="ssh-hint" key={value}><Icon name="info" extra="sm" />{hint}</p> : null}
   </div>;
 }
 
