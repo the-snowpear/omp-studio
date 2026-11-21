@@ -103,8 +103,9 @@ export type ShellChrome = {
   onArchiveProvisionalThread: (thread: ProvisionalProjectThread) => void;
   /** 历史页「取消归档」：session.unarchive，恢复到进行中列表。 */
   onUnarchiveThread: (entry: SessionHistoryEntry) => void;
-  /** 历史页「删除会话」：session.delete，永久删除本地文件与相关残留。 */
-  onDeleteSessionThread: (entry: SessionHistoryEntry, deleteManagedArtifacts?: boolean) => Promise<boolean>;
+  onDeleteThread: (entry: SessionHistoryEntry, workspaceId: WorkspaceId) => void;
+  onDeleteProvisionalThread: (thread: ProvisionalProjectThread) => void;
+  onDeletePreviewThread: (threadId: string) => void;
   /** 顶栏「对话选项」：打开重命名对话框（builtin.rename，标题持久化到会话槽）。 */
   onRenameThread: () => void;
   /** 顶栏「对话选项」：Fork 当前会话（session.fork，Runtime 身份切换）。 */

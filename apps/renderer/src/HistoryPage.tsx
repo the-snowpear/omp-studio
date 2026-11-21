@@ -11,7 +11,7 @@ import { SessionImportPanel } from "./SessionImportPanel";
 import type { StudioClient, SessionId, WorkspaceId } from "@omp-studio/client-contract";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { SessionHistoryEntry, SessionHistoryReadModel, SessionHistoryStatus } from "@omp-studio/client-contract";
+import type { SessionHistoryEntry, SessionHistoryReadModel, SessionHistoryStatus, ThreadId } from "@omp-studio/client-contract";
 import { Icon, type IconName } from "./icons";
 import { ToastHost } from "./ToastHost";
 import type { PageRoute } from "./HomePage";
@@ -22,12 +22,25 @@ import {
   type PreviewHistoryStatus,
 } from "./preview/fixtures";
 import { useI18n } from "./i18n";
+import { useSurfaceDocument, surfaceWindow } from "./dock/SurfaceContext";
+import { hostErrorMessage } from "./hostError";
+import { DeleteSessionDialog } from "./history/DeleteSessionDialog";
+import { type ArchivedDeleteOutcome, type DeleteArchivedSessions } from "./history/sessionDeletion";
+import { useArchivedHistory } from "./history/useArchivedHistory";
+import { withoutDeletedSessions } from "./sidebar/useProjectHistories";
 import { useTimeTravelSettings } from "./history/useTimeTravelSettings";
 import { TimeTravelPane } from "./history/TimeTravelPane";
 import { TimeTravelEntry } from "./history/TimeTravelActivation";
 
 /** 工具栏状态筛选：纯客户端过滤已加载的会话模型，不涉及 Host 契约。 */
 type StatusTab = "all" | "active" | "archived";
+type BatchRow = { readonly id: string; readonly title: string; readonly entry?: SessionHistoryEntry };
+type DeleteRequest =
+  | { readonly kind: "preview"; readonly row: PreviewHistoryRow }
+  | { readonly kind: "single"; readonly entry: SessionHistoryEntry }
+  | { readonly kind: "batch"; readonly rows: readonly BatchRow[] };
+type BatchResult = { readonly deleted: number; readonly failures: ReadonlyArray<{ title: string; reason: string }>; readonly warnings: ReadonlyArray<{ title: string; details: string }> };
+type RowSelection = { readonly checked: boolean; readonly onChange: () => void };
 
 const STATUS_TABS: ReadonlyArray<{ readonly id: StatusTab; readonly key: string }> = [
   { id: "all", key: "history.all" },
@@ -93,8 +106,7 @@ function HistEmpty({ text }: { text: string }) {
 }
 
 /**
- * Per-row "⋮" popup. Only one item today (删除会话); the anchor is the row's
- * trigger button rect so the menu floats next to the row that owns it.
+ * The anchor is the trigger rect so the menu floats next to its row.
  */
 function HistMoreMenu({
   open,
@@ -106,12 +118,14 @@ function HistMoreMenu({
   open: boolean;
   rect: { top: number; left: number; width: number; bottom: number } | null;
   onClose: () => void;
-  onDelete: () => void;
+  onDelete?: (() => void) | undefined;
   onRename?: (() => void) | undefined;
   onPin?: (() => void) | undefined;
   pinned?: boolean | undefined;
 }) {
   const { t, resolvedLanguage } = useI18n();
+  const doc = useSurfaceDocument();
+  const win = surfaceWindow(doc);
   const zh = resolvedLanguage === "zh";
   const popRef = useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: 200 });
@@ -120,13 +134,13 @@ function HistMoreMenu({
     if (!open || rect === null) return;
     const width = Math.max(rect.width, 200);
     const height = popRef.current?.offsetHeight ?? 0;
-    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    const left = Math.max(8, Math.min(rect.left, win.innerWidth - width - 8));
     let top = rect.bottom + 6;
-    if (height > 0 && top + height > window.innerHeight - 8) {
+    if (height > 0 && top + height > win.innerHeight - 8) {
       top = Math.max(8, rect.top - height - 6);
     }
     setAnchor({ top, left, width });
-  }, [open, rect]);
+  }, [open, rect, win]);
 
   useEffect(() => {
     if (!open) return;
@@ -141,13 +155,13 @@ function HistMoreMenu({
       if (popRef.current?.contains(target)) return;
       onClose();
     };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("mousedown", onDoc);
+    win.addEventListener("keydown", onKey);
+    win.addEventListener("mousedown", onDoc);
     return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("mousedown", onDoc);
+      win.removeEventListener("keydown", onKey);
+      win.removeEventListener("mousedown", onDoc);
     };
-  }, [open, onClose]);
+  }, [open, onClose, win]);
 
   if (!open) return null;
   return createPortal(
@@ -160,81 +174,21 @@ function HistMoreMenu({
     >
       {onRename ? <button type="button" role="menuitem" className="menu-item" onClick={onRename}><Icon name="pencil" extra="sm" /><span>{t("conversation.renameThread")}</span></button> : null}
       {onPin ? <button type="button" role="menuitem" className="menu-item" onClick={onPin}><Icon name="pin" extra="sm" /><span>{pinned ? (zh ? "取消置顶" : "Unpin") : (zh ? "置顶" : "Pin")}</span></button> : null}
-      <button type="button" role="menuitem" className="menu-item danger" onClick={onDelete}>
+      {onDelete ? <button type="button" role="menuitem" className="menu-item danger" onClick={onDelete}>
         <Icon name="trash" extra="sm" />
         <span>{t("history.deleteSession")}</span>
-      </button>
+      </button> : null}
     </div>,
-    document.body,
+    doc.body,
   );
 }
 
-/** Application-internal delete confirmation (same style family as archive confirm). */
-function DeleteSessionDialog({
-  title,
-  preview,
-  busy,
-  error,
-  onConfirm,
-  onCancel,
-}: {
-  title: string;
-  preview: boolean;
-  busy: boolean;
-  error?: string;
-  onConfirm: (deleteManagedArtifacts: boolean) => void;
-  onCancel: () => void;
-}) {
-  const { t, resolvedLanguage } = useI18n();
-  const zh = resolvedLanguage === "zh";
-  const { marks } = usePreviewMode();
-  const [deleteManagedArtifacts, setDeleteManagedArtifacts] = useState(false);
-  useEffect(() => {
-    if (busy) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      onCancel();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [busy, onCancel]);
-  return createPortal(
-    <div className="modal-backdrop create-project-backdrop" role="presentation" onMouseDown={busy ? undefined : onCancel}>
-      <section
-        className="modal create-project-modal create-branch-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="histDeleteTitle"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="create-project-head">
-          <div>
-            <span className="create-project-kicker">SESSION</span>
-            <h2 id="histDeleteTitle">{t("history.deleteConfirmTitle")}</h2>
-            <p className="create-branch-sub">{t("history.deleteConfirmDesc", { title })}</p>
-          </div>
-          <button type="button" className="icon-btn" aria-label={t("common.close")} disabled={busy} onClick={onCancel}><Icon name="x" /></button>
-        </div>
-        <div className="create-project-body">
-          <p className="create-branch-hint">
-            {preview && marks ? t("history.deleteConfirmDemo") : t("history.deleteConfirmReal")}
-          </p>
-          <label className="small"><input type="checkbox" disabled={busy} checked={deleteManagedArtifacts} onChange={event => setDeleteManagedArtifacts(event.target.checked)} /> {t("history.deleteManagedArtifacts")}</label>
-          <p className="small muted">{t("history.retainManagedArtifacts")}</p>
-          {error !== undefined ? <div className="create-project-error" role="alert"><Icon name="alert" extra="sm" />{error}</div> : null}
-        </div>
-        <div className="create-project-foot">
-          <button type="button" className="btn outline" autoFocus disabled={busy} onClick={onCancel}>{t("common.cancel")}</button>
-          <button type="button" className="btn danger" disabled={busy} onClick={() => onConfirm(deleteManagedArtifacts)}>
-            {busy
-              ? <><span className="spinner" aria-hidden="true" />{t("history.deleting")}</>
-              : <><Icon name="trash" extra="sm" /><span>{t("history.deleteSession")}</span></>}
-          </button>
-        </div>
-      </section>
-    </div>,
-    document.body,
+function HistoryRowCheckbox({ selection, title }: { selection: RowSelection; title: string }) {
+  const { t } = useI18n();
+  return (
+    <label className="history-checkbox-label">
+      <input className="history-checkbox" type="checkbox" aria-label={t("history.selectSession", { title })} checked={selection.checked} onChange={selection.onChange} />
+    </label>
   );
 }
 
@@ -243,17 +197,20 @@ function PreviewHistRow({
   onOpen,
   onAct,
   onMore,
+  selection,
 }: {
   row: PreviewHistoryRow;
   onOpen: () => void;
   onAct: (kind: "resume" | "fork" | "more" | "unarchive") => void;
   onMore: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  selection?: RowSelection | undefined;
 }) {
   const status = PREVIEW_STATUS[row.status];
   const { t, resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   return (
-    <div className="hist-row">
+    <div className="hist-row" data-selected={selection?.checked || undefined}>
+      {selection ? <HistoryRowCheckbox selection={selection} title={row.title} /> : null}
       <span className="a-ic purple" aria-hidden="true"><Icon name="message" extra="sm" /></span>
       <a className="h-main" href="#!workbench" onClick={(event) => { event.preventDefault(); onOpen(); }}>
         <span className="h-title ellipsis">
@@ -298,6 +255,7 @@ function HostHistRow({
   onUnarchive,
   onMore,
   onTimeTravel,
+  selection,
 }: {
   entry: SessionHistoryEntry;
   lease?: boolean | null | undefined;
@@ -306,6 +264,7 @@ function HostHistRow({
   onUnarchive: (() => void) | undefined;
   onMore: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onTimeTravel: (() => void) | undefined;
+  selection?: RowSelection | undefined;
 }) {
   const status = HOST_STATUS[entry.status];
   const archived = entry.status === "archived";
@@ -313,7 +272,8 @@ function HostHistRow({
   const zh = resolvedLanguage === "zh";
   const title = hostHistoryTitle(entry, t("conversation.untitledSession"));
   return (
-    <div className="hist-row">
+    <div className="hist-row" data-selected={selection?.checked || undefined}>
+      {selection ? <HistoryRowCheckbox selection={selection} title={title} /> : null}
       <span className="a-ic purple" aria-hidden="true"><Icon name="message" extra="sm" /></span>
       <a className="h-main" href="#!workbench" onClick={(event) => { event.preventDefault(); onOpen(); }}>
         <span className="h-title ellipsis">
@@ -349,19 +309,28 @@ function HostHistRow({
 }
 
 export function HistoryPage({
- nativeContext,
+  nativeContext,
   client, onImportedOpen, onNativeResume, onImported,
   workspaceId,
   history,
+  active = true,
+  archiveRevision = 0,
   onRoute,
   onSelectThread,
   onUnarchive,
   onDeleteSession,
+  onDeleteArchivedSessions,
+  onDeletePreviewSessions,
+  deletedPreviewSessionIds,
+  deletedSessions,
+  sessionWillStop,
   onRenameSession, onPinSession,
 }: {
   nativeContext?: NativeHistoryContext;
   client?: StudioClient;
-  workspaceId?: string | undefined;
+  workspaceId?: WorkspaceId | undefined;
+  active?: boolean;
+  archiveRevision?: number;
   onRenameSession?: (entry: SessionHistoryEntry) => void;
   onPinSession?: (entry: SessionHistoryEntry) => void;
   onImportedOpen?: (sessionId: string, workspaceId: WorkspaceId) => void;
@@ -372,8 +341,12 @@ export function HistoryPage({
   onSelectThread: (entry: SessionHistoryEntry) => void;
   /** 真实模式「取消归档」（session.unarchive）；预览模式下为 undefined（走演示 toast）。 */
   onUnarchive?: (entry: SessionHistoryEntry) => void;
-  /** 真实模式「删除会话」；预览模式下为 undefined（走演示确认 + toast）。 */
   onDeleteSession?: (entry: SessionHistoryEntry, deleteManagedArtifacts?: boolean) => Promise<boolean> | boolean;
+  onDeleteArchivedSessions?: DeleteArchivedSessions;
+  onDeletePreviewSessions?: (ids: readonly string[]) => void;
+  deletedPreviewSessionIds?: ReadonlySet<string>;
+  deletedSessions?: ReadonlySet<string>;
+  sessionWillStop?: (entry: SessionHistoryEntry) => boolean;
 }) {
   const { preview, marks } = usePreviewMode();
   const timeTravelSettings = useTimeTravelSettings(client);
@@ -385,14 +358,22 @@ export function HistoryPage({
   const [notice, show, dismissNotice] = useNotice();
   const q = query.trim().toLowerCase();
   const [previewMetadata, setPreviewMetadata] = useState<Record<string, { title?: string; pinned?: boolean }>>({});
+  const [localPreviewDeletes, setLocalPreviewDeletes] = useState<ReadonlySet<string>>(() => new Set());
   const [previewRename, setPreviewRename] = useState<{ id: string; title: string }>();
   const [leases, setLeases] = useState<Record<string, boolean | null>>({});
   const canMetadata = preview || !!(nativeContext?.available && nativeContext.sessionId && nativeContext.capabilities?.capabilities.some(row => row.id === "session.history.rename" && row.grade !== "unavailable"));
   /** 哪个行的「⋮」菜单打开：id + 触发按钮 rect（菜单用 portal 定位到 body）。 */
   const [menu, setMenu] = useState<{ id: string; rect: { top: number; left: number; width: number; bottom: number } | null } | null>(null);
-  const [deleteFor, setDeleteFor] = useState<{ title: string; entry?: SessionHistoryEntry } | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | undefined>(undefined);
+  const [deleteFor, setDeleteFor] = useState<DeleteRequest | null>(null);
+  const [processed, setProcessed] = useState<number>();
+  const [deleteError, setDeleteError] = useState<unknown>();
+  const deleting = processed !== undefined;
+  const deleteInFlight = useRef(false);
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [batchResult, setBatchResult] = useState<BatchResult>();
+  const selectAll = useRef<HTMLInputElement>(null);
+  const archiveVisible = active && workspaceTab === "catalog" && statusTab === "archived";
+  const archivedHistory = useArchivedHistory(client, workspaceId, archiveVisible && !preview, archiveRevision);
   const [timeTravelSession, setTimeTravelSession] = useState<SessionId>();
 
   const closeMenu = useCallback(() => setMenu(null), []);
@@ -401,53 +382,121 @@ export function HistoryPage({
     setMenu({ id, rect: { top: rect.top, left: rect.left, width: rect.width, bottom: rect.bottom } });
   }, []);
 
-  const requestDelete = useCallback((title: string, entry?: SessionHistoryEntry) => {
+  const requestDelete = (request: DeleteRequest) => {
     setMenu(null);
     setDeleteError(undefined);
-    setDeleteFor(entry === undefined ? { title } : { title, entry });
-  }, []);
+    setDeleteFor(request);
+  };
 
-  const cancelDelete = useCallback(() => {
-    if (deleting) return;
+  const cancelDelete = () => {
+    if (deleteInFlight.current) return;
     setDeleteFor(null);
     setDeleteError(undefined);
-  }, [deleting]);
+  };
 
-  const confirmDelete = useCallback((deleteManagedArtifacts: boolean) => {
-    if (deleteFor === null || deleting) return;
-    if (preview || deleteFor.entry === undefined || onDeleteSession === undefined) {
-      if (marks || !preview) show(t("history.demoDeleteToast", { title: deleteFor.title }), "trash");
+  const removePreviewRows = (ids: readonly string[]) => {
+    setLocalPreviewDeletes(current => new Set([...current, ...ids]));
+    onDeletePreviewSessions?.(ids);
+  };
+
+  const confirmDelete = async (deleteManagedArtifacts: boolean) => {
+    if (deleteFor === null || deleteInFlight.current) return;
+    if (deleteFor.kind === "preview") {
+      removePreviewRows([deleteFor.row.id]);
+      if (marks) show(t("history.demoDeleteToast", { title: deleteFor.row.title }), "trash");
       setDeleteFor(null);
       return;
     }
-    setDeleting(true);
+    deleteInFlight.current = true;
+    setProcessed(0);
     setDeleteError(undefined);
-    void Promise.resolve(onDeleteSession(deleteFor.entry, deleteManagedArtifacts))
-      .then((ok) => {
-        if (ok) {
-          setDeleteFor(null);
-          setDeleteError(undefined);
+    try {
+      if (deleteFor.kind === "single") {
+        if (!await onDeleteSession?.(deleteFor.entry, deleteManagedArtifacts)) throw new Error();
+      } else {
+        const confirmed = deleteFor.rows;
+        if (preview) {
+          removePreviewRows(confirmed.map(row => row.id));
+          setSelectedIds(new Set());
+          if (marks) setBatchResult({ deleted: confirmed.length, failures: [], warnings: [] });
+        } else if (onDeleteArchivedSessions) {
+          const outcomes = await onDeleteArchivedSessions(confirmed.flatMap(row => row.entry ? [row.entry] : []), setProcessed);
+          const byThread = new Map<ThreadId, ArchivedDeleteOutcome>(outcomes.map(outcome => [outcome.threadId, outcome]));
+          const failures: Array<{ title: string; reason: string }> = [];
+          const warnings: Array<{ title: string; details: string }> = [];
+          const failedIds = new Set<string>();
+          let deleted = 0;
+          for (const row of confirmed) {
+            const result = row.entry && byThread.get(row.entry.threadId);
+            if (result?.status === "deleted") {
+              deleted += 1;
+              if (result.cleanupWarning !== undefined) warnings.push({ title: row.title, details: result.cleanupWarning });
+            } else {
+              failedIds.add(row.id);
+              failures.push({ title: row.title, reason: result?.reason ?? "" });
+            }
+          }
+          setSelectedIds(failedIds);
+          setBatchResult({ deleted, failures, warnings });
         }
-        setDeleting(false);
-      })
-      .catch((error) => {
-        setDeleteError(error instanceof Error && error.message.length > 0 ? error.message : String(error));
-        setDeleting(false);
-      });
-  }, [deleteFor, deleting, marks, preview, onDeleteSession, show, t]);
+      }
+      setDeleteFor(null);
+    } catch (error) {
+      setDeleteError(error);
+    } finally {
+      deleteInFlight.current = false;
+      setProcessed(undefined);
+    }
+  };
 
   const previewRows = useMemo(
     () => getPreviewHistory(zh).map(row => ({ ...row, ...previewMetadata[row.id] })).sort((a,b) => Number(!!b.pinned)-Number(!!a.pinned))
+      .filter((row) => !localPreviewDeletes.has(row.id) && !deletedPreviewSessionIds?.has(row.id))
       .filter((row) => `${row.title} ${row.project} ${row.branch}`.toLowerCase().includes(q))
       .filter((row) => matchesStatusTab(row.status, statusTab)),
-    [q, statusTab, previewMetadata, zh],
+    [q, statusTab, previewMetadata, localPreviewDeletes, deletedPreviewSessionIds, zh],
   );
+  const hostHistory = statusTab === "archived" && client ? archivedHistory.model : history;
   const hostRows = useMemo(
-    () => (history?.entries ?? [])
+    () => (hostHistory && deletedSessions ? withoutDeletedSessions(hostHistory, deletedSessions).entries : hostHistory?.entries ?? [])
       .filter((entry) => `${hostHistoryTitle(entry, t("conversation.untitledSession"))} ${entry.summary ?? ""}`.toLowerCase().includes(q))
       .filter((entry) => matchesStatusTab(entry.status, statusTab)),
-    [history, q, statusTab, t],
+    [hostHistory, deletedSessions, q, statusTab, t],
   );
+  const selectableRows: readonly BatchRow[] = useMemo(() => {
+    if (!archiveVisible) return [];
+    return preview
+      ? previewRows.map(row => ({ id: row.id, title: row.title }))
+      : onDeleteArchivedSessions
+        ? hostRows.map(entry => ({ id: entry.historyId, title: hostHistoryTitle(entry, t("conversation.untitledSession")), entry }))
+        : [];
+  }, [archiveVisible, preview, previewRows, hostRows, onDeleteArchivedSessions, t]);
+  const visibleIds = useMemo(() => new Set(selectableRows.map(row => row.id)), [selectableRows]);
+  const selectedRows = selectableRows.filter(row => selectedIds.has(row.id));
+  const selectedCount = selectedRows.length;
+  const allSelected = selectedCount > 0 && selectedCount === selectableRows.length;
+  useEffect(() => {
+    setSelectedIds(current => {
+      const remaining = new Set([...current].filter(id => visibleIds.has(id)));
+      return remaining.size === current.size ? current : remaining;
+    });
+  }, [visibleIds]);
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setBatchResult(undefined);
+  }, [preview, workspaceId, archiveVisible]);
+  useEffect(() => {
+    if (selectAll.current) selectAll.current.indeterminate = selectedCount > 0 && !allSelected;
+  }, [allSelected, selectedCount, selectableRows.length]);
+  const selectionFor = (id: string): RowSelection | undefined => visibleIds.has(id) ? {
+    checked: selectedIds.has(id),
+    onChange: () => setSelectedIds(current => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    }),
+  } : undefined;
   const historySessionIds = useMemo(() => (history?.entries ?? []).flatMap(row => row.sessionId ? [row.sessionId] : []), [history?.entries]);
   useEffect(() => {
     setTimeTravelSession(undefined);
@@ -473,6 +522,18 @@ export function HistoryPage({
   const titleMetadata = useSessionTitles(client,nativeContext,hostRows.flatMap(entry=>entry.sessionId?[{id:entry.sessionId,title:entry.title}]:[]),workspaceTab==="catalog");
   const rows = preview ? previewRows : hostRows;
   const live = rows.length ? t("history.conversationsCount", { count: rows.length }) : t("history.noMatches");
+  const canBatchDelete = preview || onDeleteArchivedSessions !== undefined;
+  const archiveReadError = archiveVisible && !preview ? archivedHistory.error : undefined;
+  const emptyLabel = archiveVisible && rows.length === 0 && !q
+    ? t(!preview && client && archivedHistory.loading ? "history.archiveLoading" : "history.noArchivedSessions")
+    : t("history.noMatches");
+  const deleteTarget = deleteFor?.kind === "batch"
+    ? { count: deleteFor.rows.length, processed: processed ?? 0 }
+    : deleteFor?.kind === "preview"
+      ? { title: previewRows.find(row => row.id === deleteFor.row.id)?.title ?? deleteFor.row.title, stopping: deleteFor.row.status === "running" }
+      : deleteFor?.kind === "single"
+        ? { title: hostHistoryTitle(deleteFor.entry, t("conversation.untitledSession")), stopping: sessionWillStop?.(deleteFor.entry) }
+        : undefined;
 
   return (
     <div className="page-wide">
@@ -514,12 +575,52 @@ export function HistoryPage({
           </button>
           {preview && marks ? <span className="chip gray xs">{t("common.demo")}</span> : null}
         </div>
+        {archiveVisible && canBatchDelete && selectableRows.length > 0 ? (
+          <div className="history-batch-toolbar">
+            <label className="history-checkbox-label">
+              <input ref={selectAll} className="history-checkbox" type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? new Set() : new Set(visibleIds))} />
+              {t("history.selectAllArchived")}
+            </label>
+            <output className="history-batch-count" aria-live="polite">{t("history.selectedCount", { count: selectedCount })}</output>
+            {selectedCount > 0 ? <>
+              <button type="button" className="btn small outline" onClick={() => setSelectedIds(new Set())}>{t("history.clearSelection")}</button>
+              <button type="button" className="btn danger solid small" onClick={() => requestDelete({ kind: "batch", rows: selectedRows })} disabled={deleting}>
+                <Icon name="trash" extra="sm" />{t("history.deleteSelected")}
+              </button>
+            </> : null}
+          </div>
+        ) : null}
+        {archiveVisible && batchResult ? (
+          <div className="history-batch-result">
+            <div className="history-batch-result-head">
+              <div role="status">
+                <strong>{t("history.batchDeleted", { count: batchResult.deleted })}</strong>
+                {batchResult.failures.length > 0 ? <> · {t("history.batchDeleteFailed", { count: batchResult.failures.length })}</> : null}
+                {batchResult.warnings.length > 0 ? <> · {t("history.batchCleanupPartial", { count: batchResult.warnings.length })}</> : null}
+              </div>
+              <button type="button" className="icon-btn small" aria-label={t("common.close")} onClick={() => setBatchResult(undefined)}><Icon name="x" extra="sm" /></button>
+            </div>
+            {batchResult.failures.length > 0 || batchResult.warnings.length > 0 ? (
+              <ul>
+                {batchResult.failures.map(({ title, reason }, index) => <li key={index}>{t("history.batchFailureDetail", { title, reason })}</li>)}
+                {batchResult.warnings.map(({ title, details }, index) => <li key={index}>{t("history.batchCleanupDetail", { title })} {details}</li>)}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+        {archiveReadError !== undefined ? (
+          <div className="create-project-error" role="alert">
+            <span>{hostErrorMessage(archiveReadError, t("history.archiveLoadError"))}</span>
+            <button type="button" className="btn small outline" onClick={archivedHistory.refresh}>{t("common.retry")}</button>
+          </div>
+        ) : null}
         {preview
           ? (previewRows.length
             ? previewRows.map((row) => (
               <PreviewHistRow
                 key={row.id}
                 row={row}
+                selection={selectionFor(row.id)}
                 onOpen={() => onRoute("workbench")}
                 onAct={(kind) => {
                   if (kind === "resume") {
@@ -539,12 +640,13 @@ export function HistoryPage({
                 onMore={(event) => openMenu(row.id, event)}
               />
             ))
-            : <HistEmpty text={t("history.noMatches")} />)
+            : <HistEmpty text={emptyLabel} />)
           : (hostRows.length
             ? hostRows.map((entry) => (
               <HostHistRow
                 key={entry.historyId}
                 entry={entry}
+                selection={selectionFor(entry.historyId)}
                 lease={leases[entry.sessionId ?? ""]}
                 titleRow={titleMetadata.rows.get(entry.sessionId ?? "")}
                 onOpen={() => onSelectThread(entry)}
@@ -553,7 +655,15 @@ export function HistoryPage({
                 onTimeTravel={timeTravelSettings.settings?.enabled && entry.sessionId ? () => setTimeTravelSession(entry.sessionId) : undefined}
               />
             ))
-            : <HistEmpty text={history ? t("history.noMatches") : t("history.catalogUnavailable")} />)}
+            : archiveReadError === undefined ? <HistEmpty text={archiveVisible || history ? emptyLabel : t("history.catalogUnavailable")} /> : null)}
+        {archiveVisible && !preview && archivedHistory.model && archivedHistory.model.entries.length < archivedHistory.model.total ? (
+          <div className="history-archived-more">
+            <button type="button" className="btn outline small" disabled={archivedHistory.loading} onClick={archivedHistory.loadMore}>
+              {archivedHistory.loading ? <span className="spinner" aria-hidden="true" /> : <Icon name="chevron-d" extra="sm" />}
+              {t("history.loadMoreArchived")}
+            </button>
+          </div>
+        ) : null}
         <div className="sr-only" role="status" aria-live="polite">{live}</div>
       </section>
       {!timeTravelSettings.settings?.enabled ? <TimeTravelEntry client={client} expanded /> : <TimeTravelPane key={`${workspaceId}:${timeTravelEntry?.sessionId}:${preview}`} client={client} entry={preview ? timeTravelPreview.entry : timeTravelEntry} onOpen={() => { if (timeTravelEntry) onSelectThread(timeTravelEntry); }} />}
@@ -572,29 +682,25 @@ export function HistoryPage({
           else { const row = hostRows.find(row => row.historyId === menu?.id); if (row) onPinSession?.(row); }
           closeMenu();
         } : undefined}
-        onDelete={() => {
+        onDelete={preview || onDeleteSession ? () => {
           if (menu === null) return;
-          const hostEntry = hostRows.find((entry) => entry.historyId === menu.id);
-          if (hostEntry !== undefined) {
-            requestDelete(hostHistoryTitle(hostEntry, t("conversation.untitledSession")), hostEntry);
-            return;
-          }
-          const previewRow = previewRows.find((row) => row.id === menu.id);
-          if (previewRow !== undefined) {
-            requestDelete(previewRow.title);
-            return;
+          if (preview) {
+            const row = previewRows.find(candidate => candidate.id === menu.id);
+            if (row) return requestDelete({ kind: "preview", row });
+          } else {
+            const entry = hostRows.find(candidate => candidate.historyId === menu.id);
+            if (entry) return requestDelete({ kind: "single", entry });
           }
           closeMenu();
-        }}
+        } : undefined}
       />
       {previewRename ? <div className="modal-backdrop create-project-backdrop"><form className="modal create-project-modal" role="dialog" aria-label={t("conversation.renameThread")} onSubmit={event => { event.preventDefault(); if (!previewRename.title.trim()) return; setPreviewMetadata(current => ({ ...current, [previewRename.id]: { ...current[previewRename.id], title: previewRename.title.trim() } })); setPreviewRename(undefined); }}><h3>{t("conversation.renameThread")}</h3><input className="input" autoFocus value={previewRename.title} onChange={event => setPreviewRename({ ...previewRename, title: event.target.value })} /><div className="create-project-foot"><button type="button" className="btn outline" onClick={() => setPreviewRename(undefined)}>{t("common.cancel")}</button><button type="submit" className="btn primary" disabled={!previewRename.title.trim()}>{t("common.save")}</button></div></form></div> : null}
-      {deleteFor !== null ? (
+      {deleteTarget ? (
         <DeleteSessionDialog
-          title={deleteFor.title}
-          preview={preview}
+          target={deleteTarget}
           busy={deleting}
-          {...(deleteError === undefined ? {} : { error: deleteError })}
-          onConfirm={confirmDelete}
+          error={deleteError === undefined ? undefined : hostErrorMessage(deleteError, t("history.deleteSessionFailed"))}
+          onConfirm={deleteManagedArtifacts => { void confirmDelete(deleteManagedArtifacts); }}
           onCancel={cancelDelete}
         />
       ) : null}

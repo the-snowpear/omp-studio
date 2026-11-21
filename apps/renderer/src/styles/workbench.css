@@ -2395,11 +2395,11 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   color: var(--text-3);
 }
 .al-glyph {
-  display: inline-flex;
+  display: block;
   flex: none;
+  width: 14px;
+  height: 14px;
   color: var(--accent);
-  /* 不是加载指示：一圈比 spinner 慢得多，停在余光里。 */
-  animation: omp-spin calc(var(--loop-drift) * 1.5) linear infinite;
 }
 .al-text {
   display: inline-flex;

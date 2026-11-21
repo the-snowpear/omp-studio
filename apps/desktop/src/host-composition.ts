@@ -6,6 +6,7 @@ import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
 import { timeTravelService } from "./time-travel-service.js";
 import { randomUUID } from "node:crypto";
 import type { WorkspaceId, SessionId } from "@omp-studio/client-contract";
+import type { ThreadId } from "@omp-studio/studio-protocol";
 import { desktopText } from "./desktop-language-shared.js";
 
 /**
@@ -480,6 +481,7 @@ interface FacadeContext {
   readonly evaluationOwner: object;
   /** Private, profile-bound maintenance shared by every conversation facade. */
   readonly sessionPurge: SessionPurgeMaintenancePort;
+  readonly sessionFileOperations: Map<ThreadId, Promise<unknown>>;
   /** One usage adapter per Host: it caches the resolved dashboard endpoint. */
   usage?: HostUsageService;
   readonly authority: PublicAuthorityIdentity;
@@ -864,6 +866,7 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
       },
       archive: currentArchiveService,
       deleteService: currentDeleteService,
+      sessionFileOperations: context.sessionFileOperations,
       finishManagedArtifacts: async (sessionId, cascade) => {
         const library = artifactLibraryForProfile(context.profileDirectory);
         try { await runtimeMediaFilesForLibrary(library).finishSession(join(context.profileDirectory, "bridge", "media-v1"), sessionId, cascade); }
@@ -1686,6 +1689,7 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
       const facadeContext: FacadeContext = {
         projectReads: new ProjectReadServices(),
         evaluationOwner: {},
+        sessionFileOperations: new Map(),
         sessionPurge: createNodeSessionPurgeMaintenance({
           workingDirectory: profileDirectory,
           executablePath: async () => {

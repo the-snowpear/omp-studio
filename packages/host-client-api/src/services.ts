@@ -731,6 +731,7 @@ export interface HostSemanticCommandService {
    * record (telemetry, thread binding, session lease, pin entry).
    */
   delete?(input: { readonly threadId: ThreadId; readonly deleteManagedArtifacts?: boolean }): ConfigWriteResult | Promise<ConfigWriteResult>;
+  deleteArchived?(input: { readonly threadId: ThreadId }): ConfigWriteResult | Promise<ConfigWriteResult>;
 }
 
 /** Default diagnostics factory: real timestamps and random opaque entry ids. */

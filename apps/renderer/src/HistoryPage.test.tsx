@@ -1,13 +1,14 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SessionHistoryEntry, SessionHistoryReadModel, StudioClient } from "@omp-studio/client-contract";
+import type { QueryInput, SessionHistoryEntry, SessionHistoryReadModel, StudioClient } from "@omp-studio/client-contract";
 import type { NativeHistoryContext } from "./history/NativeArchivePane";
 import { HistoryPage } from "./HistoryPage";
 import { I18nProvider } from "./i18n";
 import { PreviewModeProvider } from "./preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "./preview/mode";
+import type { DeleteArchivedSessions } from "./history/sessionDeletion";
 
 afterEach(() => {
   cleanup();
@@ -176,9 +177,90 @@ describe("HistoryPage delete session (preview mode)", () => {
     fireEvent.click((await screen.findAllByRole("button", { name: "更多操作" }))[0]!);
     fireEvent.click(await screen.findByRole("menuitem", { name: "删除会话" }));
     await screen.findByRole("dialog", { name: "删除会话确认" });
-    fireEvent.click(screen.getByRole("button", { name: "删除会话" }));
+    fireEvent.click(screen.getByRole("button", { name: "停止并删除" }));
 
     expect(onDeleteSession).not.toHaveBeenCalled();
-    expect(await screen.findByText(/演示：已删除/)).toBeTruthy();
+    expect(await screen.findByText(/演示 · 已删除/)).toBeTruthy();
   });
+});
+
+it("keeps only visible archive selections and preserves confirmation through zh → en → zh", async () => {
+  window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "1");
+  const onDeleteArchivedSessions = vi.fn<DeleteArchivedSessions>();
+  const view = (lang: "zh" | "en") => (
+    <I18nProvider forcedLanguage={lang}>
+      <PreviewModeProvider switchEnabled>
+        <HistoryPage onRoute={() => undefined} onSelectThread={() => undefined} onDeleteArchivedSessions={onDeleteArchivedSessions} />
+      </PreviewModeProvider>
+    </I18nProvider>
+  );
+  const { rerender } = render(view("zh"));
+  fireEvent.click(screen.getByRole("button", { name: "已归档" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "全选当前结果" }));
+  expect(screen.getByText("已选 2 条")).toBeTruthy();
+  const search = screen.getByRole("searchbox");
+  fireEvent.change(search, { target: { value: "session" } });
+  expect(screen.getByText("已选 1 条")).toBeTruthy();
+  fireEvent.change(search, { target: { value: "" } });
+  expect((screen.getByRole("checkbox", { name: "全选当前结果" }) as HTMLInputElement).indeterminate).toBe(true);
+
+  fireEvent.click(screen.getByRole("button", { name: "删除所选" }));
+  expect(screen.getByRole("dialog").textContent).toContain("所选 1 条");
+  expect(document.activeElement).toBe(within(screen.getByRole("dialog")).getByRole("button", { name: "取消" }));
+  rerender(view("en"));
+  expect(screen.getByRole("dialog", { name: "Delete archived sessions" }).textContent).toContain("1 selected");
+  rerender(view("zh"));
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "删除所选" }));
+  await screen.findByText("已删除 1 条");
+  expect(screen.getByRole("checkbox", { name: /对比 v0.8.0/ })).toBeTruthy();
+  expect(screen.queryByRole("checkbox", { name: /重构 session/ })).toBeNull();
+  expect(onDeleteArchivedSessions).not.toHaveBeenCalled();
+});
+
+it("loads archive pages independently and keeps only failures selected after a partial batch", async () => {
+  const archived = (id: string, title: string): SessionHistoryEntry => ({
+    ...ACTIVE_ENTRY,
+    historyId: id as never,
+    threadId: id as never,
+    sessionId: id as never,
+    title,
+    status: "archived",
+  });
+  const deleted = archived("archived-a", "Old build");
+  const failed = archived("archived-b", "Old review");
+  const firstPage = [deleted, ...Array.from({ length: 49 }, (_, index) => archived(`archive-${index}`, `Record ${index}`))];
+  const query = vi.fn(async (name: string, input: QueryInput<"history.list">) => {
+    if (name !== "history.list") return {};
+    return { entries: input.offset ? [failed] : firstPage, total: 51 };
+  });
+  const onDeleteArchivedSessions = vi.fn<DeleteArchivedSessions>(async (_entries, onProgress) => {
+    onProgress(1);
+    return [
+      { threadId: deleted.threadId, status: "deleted", cleanupWarning: "Native history is still present." },
+      { threadId: failed.threadId, status: "failed", reason: "File was locked." },
+    ];
+  });
+  const client = { query, subscribe: () => () => {} } as unknown as StudioClient;
+  const view = (deletedSessions?: ReadonlySet<string>) => (
+    <I18nProvider forcedLanguage="en">
+      <HistoryPage client={client} history={{ entries: [ACTIVE_ENTRY], total: 1 }} onRoute={() => undefined}
+        onSelectThread={() => undefined} onDeleteArchivedSessions={onDeleteArchivedSessions}
+        {...(deletedSessions ? { deletedSessions } : {})} />
+    </I18nProvider>
+  );
+  const { rerender } = render(view());
+  fireEvent.click(screen.getByRole("button", { name: "Archived" }));
+  fireEvent.click(await screen.findByRole("checkbox", { name: /Old build/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  fireEvent.click(await screen.findByRole("checkbox", { name: /Old review/ }));
+  expect(query).toHaveBeenCalledWith("history.list", { status: "archived", limit: 50, offset: 50 });
+  fireEvent.click(screen.getByRole("button", { name: "Delete selected" }));
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete selected" }));
+  await screen.findByText(/File was locked/);
+  rerender(view(new Set([deleted.historyId])));
+  expect(onDeleteArchivedSessions.mock.calls[0]?.[0]).toEqual([deleted, failed]);
+  expect(screen.getByText("1 deleted")).toBeTruthy();
+  expect(screen.getByText(/Native history is still present/)).toBeTruthy();
+  expect(screen.queryByRole("checkbox", { name: /Old build/ })).toBeNull();
+  expect((screen.getByRole("checkbox", { name: /Old review/ }) as HTMLInputElement).checked).toBe(true);
 });

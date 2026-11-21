@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fileKind, parseFileReference, relativeFileReference } from "./fileTypes";
+import { fileKind, parseFileReference, relativeFileReference, textEditable } from "./fileTypes";
 describe("file links", () => {
   it("recognizes Windows and workspace links with Chinese names and line locations", () => {
     expect(parseFileReference("D:\\项目\\main.ts:42:8")).toEqual({ path: "D:\\项目\\main.ts", line: 42, column: 8 });
@@ -14,6 +14,9 @@ describe("file links", () => {
   });
   it("routes Office, spreadsheets, SVG and source HTML to their intended viewers", () => {
     expect(fileKind("REPORT.DOCX")).toBe("office"); expect(fileKind("report.XLSX")).toBe("spreadsheet");
+    expect(fileKind("report.DOCM")).toBe("office"); expect(fileKind("deck.PPTM")).toBe("office");
+    expect(fileKind("report.XLSM")).toBe("spreadsheet"); expect(fileKind("report.XLSB")).toBe("spreadsheet"); expect(fileKind("report.ODS")).toBe("spreadsheet");
+    expect(textEditable("report.XLSM")).toBe(false); expect(textEditable("report.XLSB")).toBe(false); expect(textEditable("report.ODS")).toBe(false);
     expect(fileKind("image.svg")).toBe("image"); expect(fileKind("index.html")).toBe("text");
     expect(relativeFileReference("docs/guide.md", "images/chart.png")).toBe("docs/images/chart.png");
     expect(relativeFileReference("docs/guide.md", "../AGENTS.md")).toBe("AGENTS.md");

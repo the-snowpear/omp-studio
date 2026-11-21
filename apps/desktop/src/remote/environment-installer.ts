@@ -9,6 +9,7 @@ import { withUpdateRequest } from "../update-request.js";
 import { REMOTE_PROTOCOL_VERSION } from "./wire.js";
 import { powershellCommand, quotePs, quoteSh } from "./probe.js";
 import { remoteNodeCommand } from "./remote-command.js";
+import { uploadRemoteFile } from "./file-transfer.js";
 import { runSsh, type RemoteEnvironment, type RemoteInstallation } from "./deploy.js";
 import type { SshAuthentication } from "./authentication.js";
 import type { RemoteConnectionProfile, RemotePreparationStage } from "./shared.js";
@@ -80,37 +81,44 @@ export class RemoteEnvironmentInstaller {
       } finally { await rm(temporary, { force: true }); }
     }
     const stage = paths.join(environment.root, `.prepare-${randomUUID()}`), remoteArchive = paths.join(stage, environment.platform === "win32" ? "environment.zip" : "environment.tar.gz");
-    progress("upload", desktopText("正在上传私有运行环境", "Uploading private runtime environment"), 0, manifest.archive.size);
-    const upload = environment.platform === "win32"
-      ? powershellCommand(`$ErrorActionPreference='Stop';New-Item -ItemType Directory -Path ${quotePs(stage)} -Force | Out-Null;$o=[IO.File]::OpenWrite(${quotePs(remoteArchive)});try{[Console]::OpenStandardInput().CopyTo($o)}finally{$o.Dispose()}`)
-      : `umask 077; mkdir -p ${quoteSh(stage)} && cat > ${quoteSh(remoteArchive)}`;
-    let uploaded = 0;
-    const input = createReadStream(archive); input.on("data", bytes => { uploaded += bytes.length; progress("upload", desktopText("正在上传私有运行环境", "Uploading private runtime environment"), uploaded, manifest.archive.size); });
-    await runSsh(profile, upload, input, 600_000, signal, authentication);
-    const unpacked = paths.join(stage, "environment"), destination = paths.join(environment.root, "environments", manifest.archive.sha256);
-    progress("install", desktopText("正在校验并安装 Node、Host 和 Runtime", "Verifying and installing Node, Host, and Runtime"));
-    const extract = environment.platform === "win32"
-      ? powershellCommand(`$ErrorActionPreference='Stop';if((Get-FileHash -LiteralPath ${quotePs(remoteArchive)} -Algorithm SHA256).Hash.ToLower() -ne '${manifest.archive.sha256}'){throw 'Upload checksum mismatch'};Expand-Archive -LiteralPath ${quotePs(remoteArchive)} -DestinationPath ${quotePs(unpacked)};New-Item -ItemType Directory -Path ${quotePs(paths.dirname(destination))} -Force | Out-Null;if(Test-Path -LiteralPath ${quotePs(destination)}){Remove-Item -LiteralPath ${quotePs(unpacked)} -Recurse -Force}else{Move-Item -LiteralPath ${quotePs(unpacked)} -Destination ${quotePs(destination)}}`)
-      : `set -e; digest=$( ${environment.platform === "darwin" ? "shasum -a 256" : "sha256sum"} ${quoteSh(remoteArchive)} | cut -d ' ' -f1 ); [ "$digest" = '${manifest.archive.sha256}' ] || { echo 'Upload checksum mismatch' >&2; exit 1; }; mkdir -p ${quoteSh(unpacked)} ${quoteSh(paths.dirname(destination))}; tar -xzf ${quoteSh(remoteArchive)} -C ${quoteSh(unpacked)}; if [ -d ${quoteSh(destination)} ]; then rm -rf ${quoteSh(unpacked)}; else mv ${quoteSh(unpacked)} ${quoteSh(destination)}; fi`;
-    await runSsh(profile, extract, undefined, 180_000, signal, authentication);
-    const installed: RemoteInstallation = { entry: paths.join(destination, "host.mjs"), node: paths.join(destination, "node", environment.platform === "win32" ? "node.exe" : "bin/node"), state: paths.join(environment.root, "state"), bundleVersion: manifest.hostSha256, environmentVersion: manifest.archive.sha256 };
-    environment.node = installed.node!; environment.version = manifest.nodeVersion;
-    const keys = Object.fromEntries(Object.entries(this.options.keys).map(([id, key]) => [id, key.toString()]));
-    await runSsh(profile, remoteNodeCommand(environment, `const fs=require('node:fs'),p=require('node:path');if(process.platform!==${JSON.stringify(environment.platform)}||process.arch!==${JSON.stringify(environment.arch)})throw Error('Private Node target mismatch');const root=${JSON.stringify(destination)},keys=p.join(root,'trusted-keys');fs.mkdirSync(keys,{recursive:true,mode:448});const map={};for(const [id,key]of Object.entries(${JSON.stringify(keys)})){const name='key-'+Object.keys(map).length+'.pem';fs.writeFileSync(p.join(keys,name),key,{mode:384});map[id]=name;}fs.writeFileSync(p.join(keys,'trusted-keys.json'),JSON.stringify({keys:map}),{mode:384});`), undefined, 30_000, signal, authentication);
-    // start checks the existing Host's busy guard before replacing it.
-    await this.start(profile, environment, installed, authentication, signal);
-    const { attachRemote } = await import("./deploy.js");
-    const transport = await attachRemote(profile, environment, installed, signal, authentication);
+    let activated = false;
     try {
-      await transport.bootstrap();
-      await transport.peer.request("shutdown");
-    } finally { await transport.close(); }
-    progress("verify", desktopText("正在验证并激活签名 Runtime", "Verifying and activating signed Runtime"));
-    const install = `const cp=require('node:child_process');try{cp.execFileSync(process.execPath,${JSON.stringify([installed.entry, "install", "--state", installed.state, "--keys", paths.join(destination, "trusted-keys"), "--artifact", paths.join(destination, "runtime")])},{stdio:['ignore','pipe','pipe'],timeout:180000,windowsHide:true});}catch(e){process.stderr.write(String(e.stderr||e.message));process.exitCode=1;}`;
-    await runSsh(profile, remoteNodeCommand(environment, install), undefined, 200_000, signal, authentication);
-    await this.start(profile, environment, installed, authentication, signal);
-    await runSsh(profile, remoteNodeCommand(environment, `const fs=require('node:fs');const file=${JSON.stringify(marker)},tmp=file+'.tmp';fs.writeFileSync(tmp,JSON.stringify(${JSON.stringify({ ...installed, appVersion: this.options.appVersion, protocolVersion: REMOTE_PROTOCOL_VERSION, envelope })}),{mode:384});fs.renameSync(tmp,file);fs.rmSync(${JSON.stringify(stage)},{recursive:true,force:true});`), undefined, 30_000, signal, authentication);
-    return installed;
+      progress("upload", desktopText("正在上传私有运行环境", "Uploading private runtime environment"), 0, manifest.archive.size);
+      await uploadRemoteFile({ connection: profile, platform: environment.platform, localPath: archive, remoteDirectory: stage, remotePath: remoteArchive, signal, ...(authentication ? { authentication } : {}),
+        progress: (receivedBytes, totalBytes) => progress("upload", desktopText("正在上传私有运行环境", "Uploading private runtime environment"), receivedBytes, totalBytes) });
+      const unpacked = paths.join(stage, "environment"), destination = paths.join(environment.root, "environments", manifest.archive.sha256);
+      progress("install", desktopText("正在校验并安装 Node、Host 和 Runtime", "Verifying and installing Node, Host, and Runtime"));
+      const extract = environment.platform === "win32"
+        ? powershellCommand(`$ErrorActionPreference='Stop';if((Get-FileHash -LiteralPath ${quotePs(remoteArchive)} -Algorithm SHA256).Hash.ToLower() -ne '${manifest.archive.sha256}'){throw 'Upload checksum mismatch'};Expand-Archive -LiteralPath ${quotePs(remoteArchive)} -DestinationPath ${quotePs(unpacked)};New-Item -ItemType Directory -Path ${quotePs(paths.dirname(destination))} -Force | Out-Null;if(Test-Path -LiteralPath ${quotePs(destination)}){Remove-Item -LiteralPath ${quotePs(unpacked)} -Recurse -Force}else{Move-Item -LiteralPath ${quotePs(unpacked)} -Destination ${quotePs(destination)}}`)
+        : `set -e; digest=$( ${environment.platform === "darwin" ? "shasum -a 256" : "sha256sum"} ${quoteSh(remoteArchive)} | cut -d ' ' -f1 ); [ "$digest" = '${manifest.archive.sha256}' ] || { echo 'Upload checksum mismatch' >&2; exit 1; }; mkdir -p ${quoteSh(unpacked)} ${quoteSh(paths.dirname(destination))}; tar -xzf ${quoteSh(remoteArchive)} -C ${quoteSh(unpacked)}; if [ -d ${quoteSh(destination)} ]; then rm -rf ${quoteSh(unpacked)}; else mv ${quoteSh(unpacked)} ${quoteSh(destination)}; fi`;
+      await runSsh(profile, extract, undefined, 180_000, signal, authentication);
+      const installed: RemoteInstallation = { entry: paths.join(destination, "host.mjs"), node: paths.join(destination, "node", environment.platform === "win32" ? "node.exe" : "bin/node"), state: paths.join(environment.root, "state"), bundleVersion: manifest.hostSha256, environmentVersion: manifest.archive.sha256 };
+      environment.node = installed.node!; environment.version = manifest.nodeVersion;
+      const keys = Object.fromEntries(Object.entries(this.options.keys).map(([id, key]) => [id, key.toString()]));
+      await runSsh(profile, remoteNodeCommand(environment, `const fs=require('node:fs'),p=require('node:path');if(process.platform!==${JSON.stringify(environment.platform)}||process.arch!==${JSON.stringify(environment.arch)})throw Error('Private Node target mismatch');const root=${JSON.stringify(destination)},keys=p.join(root,'trusted-keys');fs.mkdirSync(keys,{recursive:true,mode:448});const map={};for(const [id,key]of Object.entries(${JSON.stringify(keys)})){const name='key-'+Object.keys(map).length+'.pem';fs.writeFileSync(p.join(keys,name),key,{mode:384});map[id]=name;}fs.writeFileSync(p.join(keys,'trusted-keys.json'),JSON.stringify({keys:map}),{mode:384});`), undefined, 30_000, signal, authentication);
+      // start checks the existing Host's busy guard before replacing it.
+      await this.start(profile, environment, installed, authentication, signal);
+      const { attachRemote } = await import("./deploy.js");
+      const transport = await attachRemote(profile, environment, installed, signal, authentication);
+      try {
+        await transport.bootstrap();
+        await transport.peer.request("shutdown");
+      } finally { await transport.close(); }
+      progress("verify", desktopText("正在验证并激活签名 Runtime", "Verifying and activating signed Runtime"));
+      const install = `const cp=require('node:child_process');try{cp.execFileSync(process.execPath,${JSON.stringify([installed.entry, "install", "--state", installed.state, "--keys", paths.join(destination, "trusted-keys"), "--artifact", paths.join(destination, "runtime")])},{stdio:['ignore','pipe','pipe'],timeout:180000,windowsHide:true});}catch(e){process.stderr.write(String(e.stderr||e.message));process.exitCode=1;}`;
+      await runSsh(profile, remoteNodeCommand(environment, install), undefined, 200_000, signal, authentication);
+      await this.start(profile, environment, installed, authentication, signal);
+      await runSsh(profile, remoteNodeCommand(environment, `const fs=require('node:fs');const file=${JSON.stringify(marker)},tmp=file+'.tmp';fs.writeFileSync(tmp,JSON.stringify(${JSON.stringify({ ...installed, appVersion: this.options.appVersion, protocolVersion: REMOTE_PROTOCOL_VERSION, envelope })}),{mode:384});fs.renameSync(tmp,file);fs.rmSync(${JSON.stringify(stage)},{recursive:true,force:true});`), undefined, 30_000, signal, authentication);
+      activated = true;
+      return installed;
+    } finally {
+      if (!activated) {
+        const cleanup = environment.platform === "win32"
+          ? powershellCommand(`if(Test-Path -LiteralPath ${quotePs(stage)}){Remove-Item -LiteralPath ${quotePs(stage)} -Recurse -Force -ErrorAction SilentlyContinue}`)
+          : `rm -rf -- ${quoteSh(stage)}`;
+        await runSsh(profile, cleanup, undefined, 15_000, undefined, authentication).catch(() => {});
+      }
+    }
   }
   private async start(profile: RemoteConnectionProfile, environment: RemoteEnvironment, installed: RemoteInstallation, authentication: SshAuthentication | undefined, signal: AbortSignal): Promise<void> {
     let input: Buffer | undefined;

@@ -11,9 +11,9 @@ const MIME: Record<string, string> = {
   pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp", avif: "image/avif", svg: "image/svg+xml",
   mp4: "video/mp4", m4v: "video/mp4", webm: "video/webm", mov: "video/quicktime", ogv: "video/ogg", mkv: "video/x-matroska", avi: "video/x-msvideo",
   mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg", opus: "audio/ogg", flac: "audio/flac", m4a: "audio/mp4", aac: "audio/aac",
-  doc: "application/msword", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", rtf: "application/rtf", odt: "application/vnd.oasis.opendocument.text",
-  ppt: "application/vnd.ms-powerpoint", pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation", odp: "application/vnd.oasis.opendocument.presentation",
-  xls: "application/vnd.ms-excel", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", csv: "text/csv", md: "text/markdown", html: "text/html", htm: "text/html",
+  doc: "application/msword", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", docm: "application/vnd.ms-word.document.macroEnabled.12", rtf: "application/rtf", odt: "application/vnd.oasis.opendocument.text",
+  ppt: "application/vnd.ms-powerpoint", pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation", pptm: "application/vnd.ms-powerpoint.presentation.macroEnabled.12", odp: "application/vnd.oasis.opendocument.presentation",
+  xls: "application/vnd.ms-excel", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsm: "application/vnd.ms-excel.sheet.macroEnabled.12", xlsb: "application/vnd.ms-excel.sheet.binary.macroEnabled.12", ods: "application/vnd.oasis.opendocument.spreadsheet", csv: "text/csv", md: "text/markdown", html: "text/html", htm: "text/html",
 };
 export const fileMime = (path: string) => MIME[extname(path).slice(1).toLowerCase()] ?? "text/plain";
 const versionOf = (info: { size: number; mtimeMs: number; ctimeMs: number; ino: number }) => `${info.size}:${info.mtimeMs}:${info.ctimeMs}:${info.ino}`;

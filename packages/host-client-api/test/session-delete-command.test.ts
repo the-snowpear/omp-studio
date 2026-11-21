@@ -32,7 +32,7 @@ const snapshot: OperatorStateSnapshot = {
 };
 
 /** Full HostSemanticCommandService with a customizable `delete`. */
-function service(overrides?: Pick<HostSemanticCommandService, "delete">): HostSemanticCommandService {
+function service(overrides?: Pick<HostSemanticCommandService, "delete" | "deleteArchived">): HostSemanticCommandService {
   return {
     resume: async () => snapshot,
     drop: async () => snapshot,
@@ -71,19 +71,21 @@ function makeFacade(commands: HostSemanticCommandService): StudioHostClientFacad
   });
 }
 
-test("session.delete is accepted and completes with the ConfigWriteResult", async () => {
+for (const name of ["session.delete", "session.deleteArchived"] as const) {
+test(`${name} is accepted and completes with the ConfigWriteResult`, async () => {
   const deletedThreads: ThreadId[] = [];
+  const remove = async ({ threadId }: { threadId: ThreadId }) => {
+    deletedThreads.push(threadId);
+    return { applied: true, runtimeEffect: "immediate" as const, message: "Session deleted" };
+  };
   const facade = makeFacade(service({
-    delete: async ({ threadId }) => {
-      deletedThreads.push(threadId);
-      return { applied: true, runtimeEffect: "immediate", message: "Session deleted" };
-    },
+    ...(name === "session.delete" ? { delete: remove } : { deleteArchived: remove }),
   }));
   const events: ClientEvent[] = [];
   const unsubscribe = facade.subscribe({ scope: "all" }, (event) => events.push(event));
   try {
     const accepted = await facade.command({
-      commandName: "session.delete",
+      commandName: name,
       input: { threadId: "thread-a" as ThreadId },
       requestId: "req-delete" as CommandRequestId,
       idempotencyKey: "idem-delete" as IdempotencyKey,
@@ -98,6 +100,7 @@ test("session.delete is accepted and completes with the ConfigWriteResult", asyn
     await facade.close();
   }
 });
+}
 
 test("session.delete without a delete capability fails closed", async () => {
   const facade = makeFacade(service());

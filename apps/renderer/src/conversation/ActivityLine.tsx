@@ -3,6 +3,7 @@ import { useI18n } from "../i18n";
 import { Icon } from "../icons";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { resolveFileIconMeta } from "./toolMeta";
+import { ActivityGlyph } from "./ActivityGlyph";
 import {
   formatElapsed,
   formatRetry,
@@ -170,9 +171,7 @@ export function ActivityLine({
 
   return (
     <div className="activity-line" data-phase={status.retry?.nextRetryAt === undefined ? status.phase : "waiting"}>
-      <span className="al-glyph" aria-hidden="true">
-        <Icon name="asterisk" extra="sm" />
-      </span>
+      <ActivityGlyph glyph={status.glyph} />
       <span className="al-text" role="status" aria-live="polite">
         <span className="al-label">{WORKING_LABEL}</span>
         {status.retry === undefined || live ? null : (

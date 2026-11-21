@@ -10,8 +10,8 @@ export function fileKind(name: string): FileKind {
   if (["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"].includes(ext)) return "image";
   if (["mp4", "m4v", "webm", "mov", "mkv", "avi", "ogv"].includes(ext)) return "video";
   if (["mp3", "wav", "ogg", "opus", "flac", "m4a", "aac"].includes(ext)) return "audio";
-  if (["xls", "xlsx", "csv", "tsv"].includes(ext)) return "spreadsheet";
-  if (["doc", "docx", "odt", "rtf", "ppt", "pptx", "odp"].includes(ext)) return "office";
+  if (["xls", "xlsx", "xlsm", "xlsb", "ods", "csv", "tsv"].includes(ext)) return "spreadsheet";
+  if (["doc", "docx", "docm", "odt", "rtf", "ppt", "pptx", "pptm", "odp"].includes(ext)) return "office";
   return "text";
 }
 export const textEditable = (name: string) => ["text", "markdown"].includes(fileKind(name)) || ["csv", "tsv"].includes(extension(name));
@@ -24,8 +24,8 @@ const LANGUAGES: Record<string, [label: string, badge: string, tone: string]> = 
   c: ["C", "C", "blue"], h: ["C Header", "H", "blue"], cpp: ["C++", "C++", "blue"], hpp: ["C++ Header", "H++", "blue"], cs: ["C#", "C#", "accent"], rb: ["Ruby", "RB", "red"], php: ["PHP", "PHP", "accent"],
   sh: ["Shell", "SH", "green"], bash: ["Shell", "SH", "green"], zsh: ["Shell", "SH", "green"], ps1: ["PowerShell", "PS", "blue"], bat: ["Batch", "BAT", "gray"], cmd: ["Batch", "CMD", "gray"],
   sql: ["SQL", "SQL", "amber"], html: ["HTML", "HTML", "red"], htm: ["HTML", "HTML", "red"], css: ["CSS", "CSS", "blue"], scss: ["SCSS", "SCSS", "accent"], less: ["Less", "LESS", "blue"], xml: ["XML", "XML", "amber"], svg: ["SVG", "SVG", "amber"], vue: ["Vue", "VUE", "green"], svelte: ["Svelte", "SV", "red"],
-  csv: ["CSV", "CSV", "green"], tsv: ["TSV", "TSV", "green"], xls: ["Excel", "XLS", "green"], xlsx: ["Excel", "XLSX", "green"], pdf: ["PDF", "PDF", "red"],
-  doc: ["Word", "DOC", "blue"], docx: ["Word", "DOCX", "blue"], odt: ["Document", "ODT", "blue"], rtf: ["RTF", "RTF", "blue"], ppt: ["PowerPoint", "PPT", "amber"], pptx: ["PowerPoint", "PPTX", "amber"], odp: ["Presentation", "ODP", "amber"],
+  csv: ["CSV", "CSV", "green"], tsv: ["TSV", "TSV", "green"], xls: ["Excel", "XLS", "green"], xlsx: ["Excel", "XLSX", "green"], xlsm: ["Excel", "XLSM", "green"], xlsb: ["Excel", "XLSB", "green"], ods: ["Spreadsheet", "ODS", "green"], pdf: ["PDF", "PDF", "red"],
+  doc: ["Word", "DOC", "blue"], docx: ["Word", "DOCX", "blue"], docm: ["Word", "DOCM", "blue"], odt: ["Document", "ODT", "blue"], rtf: ["RTF", "RTF", "blue"], ppt: ["PowerPoint", "PPT", "amber"], pptx: ["PowerPoint", "PPTX", "amber"], pptm: ["PowerPoint", "PPTM", "amber"], odp: ["Presentation", "ODP", "amber"],
   txt: ["Plain text", "TXT", "gray"], log: ["Log", "LOG", "gray"], lock: ["Lock", "LOCK", "gray"], env: ["Env", "ENV", "gray"],
 };
 const KIND_BADGE: Record<FileKind, [string, string, string]> = { text: ["Plain text", "TXT", "gray"], markdown: ["Markdown", "MD", "blue"], pdf: ["PDF", "PDF", "red"], image: ["Image", "IMG", "green"], audio: ["Audio", "AUD", "accent"], video: ["Video", "VID", "accent"], spreadsheet: ["Spreadsheet", "XLS", "green"], office: ["Document", "DOC", "blue"] };
@@ -55,7 +55,7 @@ export function formatBytes(size: number | undefined): string {
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }
 /** The kinds the transcript links on sight; other slash-separated text waits for the Host verdict. */
-const KNOWN_FILE_EXTENSION = /\.(?:[cm]?js|jsx|tsx?|py|rs|go|java|c|h|cpp|hpp|cs|rb|php|sh|ps1|sql|json|ya?ml|toml|ini|conf|txt|log|md|mdx|markdown|html?|css|scss|xml|csv|tsv|xlsx?|pdf|png|jpe?g|gif|webp|bmp|avif|svg|mp4|webm|mov|mkv|mp3|wav|ogg|flac|m4a|docx?|pptx?|odt|odp|rtf)$/i;
+const KNOWN_FILE_EXTENSION = /\.(?:[cm]?js|jsx|tsx?|py|rs|go|java|c|h|cpp|hpp|cs|rb|php|sh|ps1|sql|json|ya?ml|toml|ini|conf|txt|log|md|mdx|markdown|html?|css|scss|xml|csv|tsv|xlsx?|xlsm|xlsb|ods|pdf|png|jpe?g|gif|webp|bmp|avif|svg|mp4|webm|mov|mkv|mp3|wav|ogg|flac|m4a|docx?|docm|pptx?|pptm|odt|odp|rtf)$/i;
 export function hasKnownFileExtension(path: string): boolean {
   return KNOWN_FILE_EXTENSION.test(path);
 }

@@ -46,6 +46,8 @@ export class ConversationWorkspaceStore {
   private catalogs = new Map<string | null, WorkspaceListReadModel>();
   private histories = new Map<string | null, ProjectHistoryStore>();
   private provisionals = new Map<string | null, ProvisionalThreadStore>();
+  deletedPreviewSessions: ReadonlySet<string> = new Set();
+  deletionNotice: { readonly title: string; readonly cleanupWarning?: string | undefined; readonly preview?: boolean } | null = null;
   catalog(target: string | null) { return this.catalogs.get(target); }
   rememberCatalog(target: string | null, value: WorkspaceListReadModel) { this.catalogs.set(target, value); }
   history(target: string | null) { let value = this.histories.get(target); if (!value) { value = new ProjectHistoryStore(); this.histories.set(target, value); } return value; }
@@ -212,6 +214,45 @@ export class ConversationWorkspaceStore {
   }
   actionFor(id: string) { return this.actions.get(id); }
   takeAction(id: string) { const value = this.actions.get(id); this.actions.delete(id); return value; }
+  setDeletionNotice = (notice: ConversationWorkspaceStore["deletionNotice"]) => {
+    this.deletionNotice = notice;
+    this.publish(false);
+  };
+  removeDeletedSessions(
+    targetId: string | null,
+    workspaceId: string | undefined,
+    identities: ReadonlySet<string>,
+    draftTitle: string,
+    keepPageDocument?: string,
+  ) {
+    const documents = this.metadata.documents.filter(({ ref }) => ref.targetId === targetId && (
+      this.demo ? identities.has(ref.previewThreadId ?? "") : identities.has(ref.sessionId ?? "") || identities.has(ref.historyId ?? "")
+    ));
+    if (documents.length === 0) return;
+    this.batch(() => {
+      const ids = new Set(documents.map(document => document.id));
+      const active = documents.find(document => document.id === this.metadata.activeDocumentId);
+      if (active && active.id === keepPageDocument) {
+        this.updateDocument(active.id, {
+          ref: { targetId, workspaceId: active.ref.workspaceId ?? workspaceId, draftId: crypto.randomUUID(), ...(this.demo ? { previewProjectId: active.ref.previewProjectId, previewThreadId: "t0" } : {}) },
+          title: draftTitle,
+        });
+        ids.delete(active.id);
+      } else if (active) {
+        this.open({ targetId, workspaceId: active.ref.workspaceId ?? workspaceId, draftId: crypto.randomUUID() }, "current", undefined, draftTitle);
+      }
+      for (const view of this.state.views) {
+        if (ids.has(view.documentId)) this.close(view.id);
+      }
+      for (const id of ids) this.closedDocuments.add(id);
+      this.pruneClosedDocuments();
+      this.publish();
+    });
+  }
+  recordPreviewDeletion(ids: readonly string[]) {
+    this.deletedPreviewSessions = new Set([...this.deletedPreviewSessions, ...ids]);
+    this.publish(false);
+  }
   requestAction(ref: ConversationRef, entry: SessionHistoryEntry, kind: ConversationAction["kind"]) {
     const viewId = this.open(ref), document = this.documentFor(viewId)!;
     this.actions.set(document.id, { id: crypto.randomUUID(), kind, entry, workspaceId: ref.workspaceId! });

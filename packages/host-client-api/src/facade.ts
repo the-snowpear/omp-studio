@@ -1275,6 +1275,12 @@ export class StudioHostClientFacade implements ClientTransport {
       case "session.delete": {
         return this.#commandDelete(request as ClientCommandRequest<"session.delete">);
       }
+      case "session.deleteArchived": {
+        const run = this.#options.commands?.deleteArchived;
+        const { input } = request as ClientCommandRequest<"session.deleteArchived">;
+        if (run === undefined) throw clientError("CAPABILITY_UNAVAILABLE", "Archived session deletion is not available on this Host");
+        return this.#commandLocalTask(request, async () => run(input));
+      }
       case "interaction.respond": {
         const respondRequest = request as ClientCommandRequest<"interaction.respond">;
         return this.#commandRespond(respondRequest);

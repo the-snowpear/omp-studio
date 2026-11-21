@@ -1,7 +1,6 @@
 /** @vitest-environment jsdom */
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { selectOption } from "../test/selectOption";
 import { useState } from "react";
 import type { ClientBootstrap, StudioClient } from "@omp-studio/client-contract";
 import type { RemoteApi, RemoteInventory } from "../../../desktop/src/remote/shared";
@@ -118,10 +117,11 @@ it("keeps authentication inside the connection dialog and identifies the target 
   fireEvent.click(await screen.findByRole("button", { name: /此计算机/ }));
   fireEvent.click(screen.getByRole("menuitem", { name: "添加 SSH 连接" }));
   const dialog = screen.getByRole("dialog", { name: "添加 SSH 连接" });
-  const auth = screen.getByRole("combobox", { name: /认证方式/ });
-  fireEvent.click(auth);
-  expect(dialog.contains(screen.getByRole("listbox"))).toBe(true);
-  selectOption(auth, "用户名和密码");
+  const auth = screen.getByRole("radiogroup", { name: "认证方式" });
+  expect(dialog.contains(auth)).toBe(true);
+  expect(screen.getByLabelText("用户名").hasAttribute("required")).toBe(false);
+  fireEvent.click(screen.getByRole("radio", { name: "密码" }));
+  expect(screen.getByRole("radio", { name: "密码" }).getAttribute("aria-checked")).toBe("true");
   expect(screen.queryByRole("combobox", { name: /远端系统/ })).toBeNull();
   expect(screen.getByText(/连接后自动识别 Windows/)).toBeTruthy();
   expect(screen.getByLabelText("用户名").hasAttribute("required")).toBe(true);

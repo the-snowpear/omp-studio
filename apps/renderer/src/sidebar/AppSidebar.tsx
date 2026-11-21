@@ -627,6 +627,9 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                                 />
                                 <div className="menu-sep" />
                                 <MenuItem icon="archive" onClick={() => runRowAction(() => chrome.onArchivePreviewThread(thread.id))}>{t("history.archiveSession")}</MenuItem>
+                                {thread.msgs > 0 ? <button type="button" role="menuitem" className="menu-item danger" onClick={() => runRowAction(() => chrome.onDeletePreviewThread(thread.id))}>
+                                  <Icon name="trash" extra="sm" /><span>{t("history.deleteSession")}</span>
+                                </button> : null}
                               </>
                             }
                           />
@@ -747,6 +750,9 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                                     />
                                     <div className="menu-sep" />
                                     <MenuItem icon="archive" onClick={() => runRowAction(() => chrome.onArchiveProvisionalThread(thread))}>{t("history.archiveSession")}</MenuItem>
+                                    <button type="button" role="menuitem" className="menu-item danger" onClick={() => runRowAction(() => chrome.onDeleteProvisionalThread(thread))}>
+                                      <Icon name="trash" extra="sm" /><span>{t("history.deleteSession")}</span>
+                                    </button>
                                   </>
                                 }
                               />
@@ -833,6 +839,9 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                                   />
                                   <div className="menu-sep" />
                                   <MenuItem icon="archive" onClick={() => runRowAction(() => chrome.onArchiveThread(entry, workspace.workspaceId))}>{t("history.archiveSession")}</MenuItem>
+                                  <button type="button" role="menuitem" className="menu-item danger" onClick={() => runRowAction(() => chrome.onDeleteThread(entry, workspace.workspaceId))}>
+                                    <Icon name="trash" extra="sm" /><span>{t("history.deleteSession")}</span>
+                                  </button>
                                 </>
                               }
                             />

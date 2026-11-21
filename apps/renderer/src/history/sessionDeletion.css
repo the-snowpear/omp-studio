@@ -1,0 +1,109 @@
+.history-batch-toolbar,
+.history-batch-result {
+  padding: var(--sp-10) var(--sp-12);
+  margin-bottom: var(--sp-8);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--surface);
+}
+
+.history-batch-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-8) var(--sp-12);
+}
+
+.history-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-8);
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+
+.history-checkbox {
+  accent-color: var(--accent);
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.hist-row .history-checkbox-label {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  min-height: 32px;
+}
+
+.hist-row[data-selected] {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.history-batch-count {
+  flex: 1 0 auto;
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-theme="dark"] :is(.history-batch-toolbar, .session-delete-dialog) .btn.danger.solid {
+  background: color-mix(in srgb, var(--red) 72%, black);
+  border-color: transparent;
+}
+
+.history-batch-result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-8);
+}
+
+.history-batch-result ul {
+  max-height: 10rem;
+  overflow: auto;
+  margin: var(--sp-8) 0 0;
+  padding-inline-start: var(--sp-20);
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  overflow-wrap: anywhere;
+}
+
+.history-archived-more {
+  display: flex;
+  justify-content: center;
+  margin-block-start: var(--sp-12);
+}
+
+.create-project-modal.session-delete-dialog { width: min(480px, calc(100vw - 48px)); }
+.session-delete-dialog .create-branch-sub { overflow-wrap: anywhere; }
+.session-delete-dialog:focus { outline: none; }
+.session-delete-dialog .small.muted { margin: var(--sp-8) 0 0; }
+
+.session-delete-warning,
+.session-delete-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.session-delete-warning {
+  margin: 0 0 var(--sp-12);
+  color: var(--red);
+  font-size: var(--fs-12);
+}
+
+.session-delete-progress {
+  margin-top: var(--sp-12);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
+
+.session-delete-progress progress {
+  accent-color: var(--accent);
+  flex: 1;
+  min-width: 0;
+}

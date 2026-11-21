@@ -66,6 +66,25 @@ describe("conversation workspace", () => {
     expect(store.getSnapshot().views).toHaveLength(1);
     expect(store.documentFor(first)?.ref).toEqual(b);
   });
+  it("keeps the selected conversation when removing another view, and returns to a draft when it is deleted", () => {
+    const store = new ConversationWorkspaceStore(null);
+    const current = store.open(a);
+    const sibling = { ...a, workspaceId: "other-project", sessionId: "sibling-chat" };
+    const siblingView = store.open(sibling, "float");
+    const remoteView = store.open({ ...b, sessionId: sibling.sessionId }, "float");
+    store.activate(current);
+
+    store.removeDeletedSessions(null, sibling.workspaceId, new Set([sibling.sessionId]), "New conversation");
+    expect(store.getSnapshot().activeViewId).toBe(current);
+    expect(store.documentFor(current)?.ref).toEqual(a);
+    expect(store.documentFor(siblingView)).toBeUndefined();
+    expect(store.documentFor(remoteView)?.ref.targetId).toBe(b.targetId);
+
+    store.removeDeletedSessions(null, a.workspaceId, new Set([a.sessionId]), "New conversation");
+    expect(store.documentFor(current)?.ref).toMatchObject({ targetId: null, workspaceId: a.workspaceId, draftId: expect.any(String) });
+    expect(store.documentFor(current)?.ref.sessionId).toBeUndefined();
+    expect(store.getSnapshot().documents.some(doc => doc.ref.sessionId === a.sessionId)).toBe(false);
+  });
   it("keeps separate preview drafts when creating new conversation windows", () => {
     const store = new ConversationWorkspaceStore(null, true);
     const first = store.open({ targetId: null, workspaceId: "p0", draftId: "draft-a" }, "float");

@@ -1,6 +1,7 @@
 import { fileBase, isPathKind, toolHeaderFileMeta, toolKind, toolLabel, toolTarget } from "./toolMeta";
 import type { ConversationState, LiveTool } from "./conversationViewModel";
 import { isZh } from "../i18n";
+import { activityGlyphFor, type ActivityGlyphKind } from "./activityGlyphDrawing";
 
 export type ActivityPhase = "waiting" | "thinking" | "responding" | "tool" | "queued";
 
@@ -16,6 +17,7 @@ export interface ActivityRetry {
 
 export interface ActivityStatus {
   readonly phase: ActivityPhase;
+  readonly glyph: ActivityGlyphKind;
   /** Verb phrase shown after elapsed time once the model has started responding. */
   readonly label: string;
   /** Concrete target of the operation (file, command, query); already shortened. */
@@ -417,9 +419,6 @@ export function deriveActivityStatus(input: {
   readonly zh?: boolean;
 }): ActivityStatus | null {
   const { state, streaming, pendingMessages, awaiting = false, retry, zh = isZh() } = input;
-  const withRetry = (status: ActivityStatus): ActivityStatus => (
-    retry === undefined ? status : { ...status, retry }
-  );
   if (streaming && hasLiveActivityProgress(state)) {
     const tool = activeTool(state);
     if (tool !== undefined) {
@@ -430,17 +429,21 @@ export function deriveActivityStatus(input: {
       const fileMeta = detail === "" ? undefined : toolHeaderFileMeta(tool);
       return {
         phase: "tool",
+        glyph: activityGlyphFor("tool", kind),
         label,
         ...(detail === "" ? {} : { detail }),
         ...(fileMeta === undefined ? {} : { filePath: fileMeta.path }),
       };
     }
     const blockType = lastLiveBlockType(state);
-    if (blockType === "thinking") return { phase: "thinking", label: zh ? "正在思考" : "Thinking" };
-    if (blockType === "text") return { phase: "responding", label: zh ? "正在回复" : "Responding" };
+    if (blockType === "thinking") return { phase: "thinking", glyph: activityGlyphFor("thinking"), label: zh ? "正在思考" : "Thinking" };
+    if (blockType === "text") return { phase: "responding", glyph: activityGlyphFor("responding"), label: zh ? "正在回复" : "Responding" };
   }
-  if (streaming || awaiting || retry !== undefined) return withRetry({ phase: "waiting", label: WORKING_LABEL });
-  if (pendingMessages > 0) return { phase: "queued", label: zh ? `已排队 ${pendingMessages} 条消息` : `${pendingMessages} queued ${pendingMessages === 1 ? "message" : "messages"}` };
+  if (streaming || awaiting || retry !== undefined) return {
+    phase: "waiting", glyph: activityGlyphFor("waiting", undefined, retry), label: WORKING_LABEL,
+    ...(retry === undefined ? {} : { retry }),
+  };
+  if (pendingMessages > 0) return { phase: "queued", glyph: activityGlyphFor("queued"), label: zh ? `已排队 ${pendingMessages} 条消息` : `${pendingMessages} queued ${pendingMessages === 1 ? "message" : "messages"}` };
   return null;
 }
 

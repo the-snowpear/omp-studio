@@ -382,6 +382,7 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "session.archive": true,
   "session.unarchive": true,
   "session.delete": true,
+  "session.deleteArchived": true,
   "interaction.respond": true,
   "permissions.mode.set": true,
   "models.provider.upsert": true,
@@ -662,7 +663,8 @@ function preserveHostOwnedCommand(command: CommandState): boolean {
     || command.commandName === "workspace.forgetUnavailable"
     || command.commandName === "session.archive"
     || command.commandName === "session.unarchive"
-    || command.commandName === "session.delete";
+    || command.commandName === "session.delete"
+    || command.commandName === "session.deleteArchived";
 }
 
 export function reduceClientState(state: ClientState, action: ClientAction): ClientState {

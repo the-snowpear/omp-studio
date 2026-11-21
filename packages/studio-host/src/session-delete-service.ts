@@ -23,6 +23,7 @@ const DEFAULT_MAX_SCAN_FILES = 20_000;
 
 export type SessionDeleteServiceErrorCode =
   | "SESSION_NOT_FOUND"
+  | "SESSION_NOT_ARCHIVED"
   | "SESSION_DUPLICATE"
   | "SESSION_RESIDENT"
   | "WORKSPACE_MISMATCH"
@@ -56,6 +57,7 @@ export interface SessionDeleteResult {
   readonly deleted: true;
   /** Independent native-store outcomes; transcript removal is not a cross-store transaction. */
   readonly nativeCleanup: SessionPurgeResult;
+  readonly artifactsCleanupFailed?: true;
 }
 
 interface LocatedSession {
@@ -98,7 +100,7 @@ export class StudioSessionDeleteService {
     }
   }
 
-  async delete(sessionId: string): Promise<SessionDeleteResult> {
+  async delete(sessionId: string, options?: { readonly archivedOnly?: boolean }): Promise<SessionDeleteResult> {
     if (sessionId.length === 0) {
       throw new SessionDeleteServiceError("SESSION_NOT_FOUND", "Session id is required");
     }
@@ -111,6 +113,9 @@ export class StudioSessionDeleteService {
         "Session identity is duplicated between active and archive trees; refusing an ambiguous delete",
       );
     }
+    if (options?.archivedOnly && active !== undefined) {
+      throw new SessionDeleteServiceError("SESSION_NOT_ARCHIVED", "Session is no longer archived");
+    }
     const located = active ?? archived;
     if (located === undefined) {
       throw new SessionDeleteServiceError(
@@ -120,9 +125,9 @@ export class StudioSessionDeleteService {
     }
     this.#assertWorkspace(located);
 
-    const nativeCleanup = await this.#removeSessionWithArtifacts(located.path, sessionId);
+    const cleanup = await this.#removeSessionWithArtifacts(located.path, sessionId, options?.archivedOnly === true);
     await this.#timeTravel?.removeSession(sessionId).catch(() => undefined);
-    return { sessionId, deleted: true, nativeCleanup };
+    return { sessionId, deleted: true, ...cleanup };
   }
 
   #assertWorkspace(source: LocatedSession): void {
@@ -161,10 +166,13 @@ export class StudioSessionDeleteService {
 
   /**
    * Delete the transcript then its artifacts directory. The session file is
-   * the primary object; a failing artifacts cleanup is surfaced so the
-   * operator knows residue remains (same policy as OMP's own delete).
+   * the primary object; report residue as partial cleanup after it is gone.
    */
-  async #removeSessionWithArtifacts(sessionPath: string, sessionId: string): Promise<SessionPurgeResult> {
+  async #removeSessionWithArtifacts(
+    sessionPath: string,
+    sessionId: string,
+    archivedOnly: boolean,
+  ): Promise<Pick<SessionDeleteResult, "nativeCleanup" | "artifactsCleanupFailed">> {
     let metadata;
     try {
       metadata = await lstat(sessionPath);
@@ -192,17 +200,15 @@ export class StudioSessionDeleteService {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         throw new SessionDeleteServiceError("IO_ERROR", `Failed to delete session file: ${errorMessage(error)}`);
       }
+      if (archivedOnly) throw new SessionDeleteServiceError("SESSION_NOT_ARCHIVED", "The archived session file is no longer present");
     }
     const artifactsDir = artifactsPathFor(sessionPath);
     try {
       await rm(artifactsDir, { recursive: true, force: true });
-    } catch (error) {
-      throw new SessionDeleteServiceError(
-        "IO_ERROR",
-        `Session file deleted but failed to remove artifacts directory ${artifactsDir}: ${errorMessage(error)}`,
-      );
+    } catch {
+      return { nativeCleanup, artifactsCleanupFailed: true };
     }
-    return nativeCleanup;
+    return { nativeCleanup };
   }
 }
 
