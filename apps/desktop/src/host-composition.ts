@@ -1165,6 +1165,15 @@ async function openSessionContext(root: FacadeContext, scope: import("@omp-studi
       ...(root.seams.workspaces ? { workspaces: {
         list,
         ...(root.seams.workspaces.forgetUnavailable ? { forgetUnavailable: () => root.seams.workspaces!.forgetUnavailable!() } : {}),
+        ...(root.seams.workspaces.remove ? { remove: async (input: { readonly workspaceId: WorkspaceId }) => {
+          const model = await root.seams.workspaces!.remove!(input);
+          if (model.activeWorkspaceId) {
+            workspace.current = await resolveWorkspace(model.activeWorkspaceId);
+            context.workspaceCwd.current = workspace.current.cwd;
+            wanted = undefined; bind(undefined);
+          }
+          return list();
+        } } : {}),
         open: async ({ workspaceId }) => {
           if (workspaceId !== workspace.current.workspaceId) {
             workspace.current = await resolveWorkspace(workspaceId);

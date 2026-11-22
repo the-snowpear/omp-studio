@@ -6,12 +6,14 @@
  */
 
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
 
 import { WorkspaceRegistry, canonicalWorkspacePath } from "@omp-studio/studio-host";
+import type { WorkspaceId } from "@omp-studio/client-contract";
 
 import { createOmpWorkspaceService, WorkspacePickCancelledError } from "@omp-studio/host-client-api/workspaces";
 import type { StoredWorkspace } from "@omp-studio/studio-host";
@@ -130,6 +132,38 @@ test("onActivated fires with the stored workspace; the runtime port rebind recei
   } finally {
     await rm(profile, { recursive: true, force: true });
     await rm(picked, { recursive: true, force: true });
+  }
+});
+
+test("remove drops one record and re-activates the surviving workspace", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "omp-ws-service-"));
+  const dirA = join(profile, "aaa"), dirB = join(profile, "bbb");
+  try {
+    await Promise.all([dirA, dirB].map(dir => mkdir(dir)));
+    const registry = new WorkspaceRegistry(join(profile, "workspaces.json"));
+    await registry.load();
+    const a = await registry.upsertByPath(dirA, "2026-08-14T00:00:00.000Z");
+    const b = await registry.upsertByPath(dirB, "2026-08-14T01:00:00.000Z");
+    const activated: StoredWorkspace[] = [];
+    const service = createOmpWorkspaceService({
+      registry,
+      pickDirectory: async () => undefined,
+      onActivated: async (stored) => { activated.push(stored); },
+    });
+
+    const model = await service.remove!({ workspaceId: b.workspaceId as WorkspaceId });
+    assert.equal(model.workspaces.length, 1);
+    assert.equal(model.workspaces[0]!.workspaceId, a.workspaceId);
+    assert.equal(model.workspaces[0]!.active, true);
+    assert.equal(model.activeWorkspaceId, a.workspaceId);
+    // The runtime rebinds to the surviving workspace's canonical cwd.
+    assert.equal(activated.length, 1);
+    assert.equal(activated[0]!.canonicalPath, await canonicalWorkspacePath(dirA));
+    // The directory itself is untouched.
+    assert.ok(existsSync(dirB));
+    await assert.rejects(() => service.remove!({ workspaceId: "nope" as WorkspaceId }), /unknown workspace id/u);
+  } finally {
+    await rm(profile, { recursive: true, force: true });
   }
 });
 

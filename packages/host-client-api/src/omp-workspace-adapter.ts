@@ -89,6 +89,14 @@ export function createOmpWorkspaceService(options: OmpWorkspaceAdapterOptions): 
       return toModel(options.registry);
     },
 
+    async remove(input: { readonly workspaceId: WorkspaceId }): Promise<WorkspaceListReadModel> {
+      const previous = options.registry.activeWorkspaceId;
+      await options.registry.remove(input.workspaceId);
+      const active = options.registry.activeWorkspaceId;
+      if (active !== undefined && active !== previous) await activate(options.registry.get(active)!);
+      return toModel(options.registry);
+    },
+
     async open(input: { readonly workspaceId: WorkspaceId }): Promise<WorkspaceListReadModel> {
       // Re-opening the already-active workspace just refreshes the
       // timestamp; it must not restart the Runtime (the desktop wires

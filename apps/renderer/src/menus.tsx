@@ -15,7 +15,7 @@ import { useI18n } from "./i18n";
 import { PLATFORM } from "./platform";
 import { fileManagerName } from "./platformCopy";
 
-export function MenuItem({ icon, leading, children, hint, kbd, disabled, title, current, onClick }: {
+export function MenuItem({ icon, leading, children, hint, kbd, disabled, title, current, danger, onClick }: {
   icon?: IconName;
   /** A custom mark in the icon's place (an agent's avatar). */
   leading?: ReactNode;
@@ -26,12 +26,14 @@ export function MenuItem({ icon, leading, children, hint, kbd, disabled, title, 
   disabled?: boolean;
   title?: string | undefined;
   current?: boolean;
+  /** 破坏性动作（删除 / 移除）：danger 样式，与 HistoryPage 会话删除同款。 */
+  danger?: boolean;
   onClick?: () => void;
 }) {
   return (
     <button
       type="button"
-      className="menu-item"
+      className={danger ? "menu-item danger" : "menu-item"}
       role="menuitem"
       disabled={disabled}
       data-tip={title}

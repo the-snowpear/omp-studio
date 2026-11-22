@@ -629,6 +629,7 @@ export function createProductionHostFactory(options?: {
     pick: (input?: { readonly name?: string }) => innerWorkspaces.pick(input),
     openPath: (input: { readonly path: string }) => innerWorkspaces.openPath!(input),
     forgetUnavailable: () => innerWorkspaces.forgetUnavailable!(),
+    remove: (input: { readonly workspaceId: WorkspaceId }) => innerWorkspaces.remove!(input),
     async open(input: { readonly workspaceId: WorkspaceId }) {
       const alreadyActive = registry.activeWorkspaceId === input.workspaceId;
       const runtimeBound = activeComposition?.status === "ready";

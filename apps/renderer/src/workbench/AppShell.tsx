@@ -18,6 +18,7 @@ import { setCapIntent, setModelConfigIntent, setSettingsIntent, setDiagnosticsIn
 import { modelConfigHasUnsavedChanges } from "../models/modelConfigState";
 import { WorkbenchHealth } from "../WorkbenchHealth";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { applyTypography } from "../settings/typography";
 import { useWorkbenchLayout } from "../layout/useWorkbenchLayout";
 import { beforeConversationLayoutChange } from "../conversation/conversationReflow";
@@ -136,6 +137,64 @@ type SidebarDelete =
 const EMPTY_IDS: ReadonlySet<string> = new Set();
 const emptyIds = () => EMPTY_IDS;
 const noSubscription = () => () => {};
+
+/** 侧栏项目行「移除项目」确认框（与 HistoryPage 会话删除确认同一样式家族）。
+    移除只删注册表记录：项目文件与会话历史保留在磁盘。 */
+function RemoveProjectDialog({
+  name,
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  name: string;
+  busy: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useI18n();
+  useEffect(() => {
+    if (busy) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onCancel]);
+  return createPortal(
+    <div className="modal-backdrop create-project-backdrop" role="presentation" onMouseDown={busy ? undefined : onCancel}>
+      <section
+        className="modal create-project-modal create-branch-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="projectRemoveTitle"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="create-project-head">
+          <div>
+            <span className="create-project-kicker">PROJECT</span>
+            <h2 id="projectRemoveTitle">{t("shell.removeProjectConfirmTitle")}</h2>
+            <p className="create-branch-sub">{t("shell.removeProjectConfirmDesc", { name })}</p>
+          </div>
+          <button type="button" className="icon-btn" aria-label={t("common.close")} disabled={busy} onClick={onCancel}><Icon name="x" /></button>
+        </div>
+        <div className="create-project-body">
+          <p className="create-branch-hint">{t("shell.removeProjectKeep")}</p>
+        </div>
+        <div className="create-project-foot">
+          <button type="button" className="btn outline" autoFocus disabled={busy} onClick={onCancel}>{t("common.cancel")}</button>
+          <button type="button" className="btn danger" disabled={busy} onClick={onConfirm}>
+            {busy
+              ? <><span className="spinner" aria-hidden="true" />{t("shell.removingProject")}</>
+              : <><Icon name="trash" extra="sm" /><span>{t("shell.removeProject")}</span></>}
+          </button>
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
+}
 
 export function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSelectThread, onNewThread, projectsLoading, onWorkspacesChange, onHistoryChange }: {
   state: ViewState;
@@ -2340,16 +2399,22 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   // 项目 shell 动作（外部编辑器 / 文件管理器）：AppShell 统一持有，
   // 顶栏面包屑菜单与侧栏应用菜单共用同一套状态与 Toast 提示。
   const [shellAction, setShellAction] = useState<"editor" | "directory" | null>(null);
+  /** 侧栏项目行 ⋯「移除项目」确认对话框目标；null = 未打开。 */
+  const [removeProjectFor, setRemoveProjectFor] = useState<{ id: WorkspaceId; name: string } | null>(null);
+  const [removeProjectBusy, setRemoveProjectBusy] = useState(false);
   const { openRenameDialog, renameOpen, renameBusy, setRenameOpen, renameValue, setRenameValue, submitRename, renameError } = useSessionRename({ renameTargetSessionId, selected, renameTargetWorkspaceId, threadTitle, workspaceActionQueue, snapshot, can, client, refreshHistoryAfterTitle, setProvisionalThreadsBySession, setShellNotice, ensureWorkspaceActive });
   const realActiveWorkspace = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
+  // 桌面 shell 函数是否存在与是否有活动项目无关（侧栏项目行 ⋯ 菜单按行禁用只看它）；
+  // 顶栏 / 应用菜单额外要求有活动项目，见 projectShellUnavailable。
+  const projectShellFunctionsUnavailable = globalThis.ompStudioChrome?.openProjectInEditor === undefined || globalThis.ompStudioChrome?.openProjectDirectory === undefined
+    ? (zh ? "仅桌面端可用" : "Desktop only")
+    : undefined;
   // 预览模式只是显示层：桌面 shell 操作仍走真实 API。若已注册过真实
   // workspace，就允许在预览态下对当前真实项目执行；没有真实 workspace
   // 时保持禁用并给出原因，绝不使用 preview fixture 里的演示路径。
   const projectShellUnavailable = executionTarget.kind === "ssh" ? (zh ? "SSH 工作区不支持在本机打开" : "Not available for SSH workspaces") : realActiveWorkspace === undefined
     ? (zh ? "请先打开本地项目" : "Open a local project first")
-    : (globalThis.ompStudioChrome?.openProjectInEditor === undefined || globalThis.ompStudioChrome?.openProjectDirectory === undefined)
-      ? (zh ? "仅桌面端可用" : "Desktop only")
-      : undefined;
+    : projectShellFunctionsUnavailable;
 
   const runProjectShellAction = async (kind: "editor" | "directory", action: () => Promise<ProjectShellActionResult>) => {
     if (shellAction !== null) return;
@@ -2371,24 +2436,66 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     }
   };
 
+  /** Shell 动作的目标项目：显式 project（侧栏项目行 ⋯ 菜单）指向所在行的项目，
+      缺省回落到当前活动项目。activate = 目标还不是活动项目：先 workspace.open
+      并等待回执（与项目行「＋」同序），桌面端按 id 解析 cwd，UI 跟随回执切换。
+      激活别的行时不带 executionTarget.id（那是当前对话的远端连接，与目标行无关）。 */
+  const projectShellTarget = (project?: SelectedProject) => {
+    if (project !== undefined) {
+      const row = state.model.workspaces?.workspaces.find((candidate) => candidate.workspaceId === project.id);
+      return row === undefined ? undefined : { workspace: row, activate: project.id !== currentActiveWorkspaceId };
+    }
+    return realActiveWorkspace === undefined ? undefined : { workspace: realActiveWorkspace, activate: false };
+  };
+
   const openProjectInEditor = (project?: SelectedProject) => {
-    const workspace = project === undefined
-      ? realActiveWorkspace
-      : state.model.workspaces?.workspaces.find(row => row.workspaceId === project.id);
+    const target = projectShellTarget(project);
     const openInEditor = globalThis.ompStudioChrome?.openProjectInEditor;
-    if (workspace === undefined || openInEditor === undefined) return;
-    void runProjectShellAction("editor", () => openInEditor(workspace.workspaceId, executionTarget.id ?? undefined));
+    if (target === undefined || openInEditor === undefined) return;
+    void runProjectShellAction("editor", async () => {
+      if (target.activate) await ensureWorkspaceActive(target.workspace.workspaceId);
+      return openInEditor(target.workspace.workspaceId, target.activate ? undefined : executionTarget.id ?? undefined);
+    });
   };
 
   const openProjectDirectory = (project?: SelectedProject) => {
-    const workspace = project === undefined
-      ? realActiveWorkspace
-      : state.model.workspaces?.workspaces.find(row => row.workspaceId === project.id);
+    const target = projectShellTarget(project);
     const openDirectory = globalThis.ompStudioChrome?.openProjectDirectory;
-    if (workspace === undefined || openDirectory === undefined) return;
+    if (target === undefined || openDirectory === undefined) return;
     void runProjectShellAction("directory", async () => {
-      await openDirectory(workspace.workspaceId, executionTarget.id ?? undefined);
+      if (target.activate) await ensureWorkspaceActive(target.workspace.workspaceId);
+      await openDirectory(target.workspace.workspaceId, target.activate ? undefined : executionTarget.id ?? undefined);
       return { status: "opened" };
+    });
+  };
+
+  /** 侧栏项目行 ⋯「移除项目」：workspace.remove 只删注册表记录，
+      项目文件与会话历史保留（与 workspace.forgetUnavailable 同一语义的单项目版）。
+      活动项目被移除时注册表把活动权移到最近的可用记录，AppShell 的
+      workspaces 同步 effect 随后把 selectedProject / 顶栏 crumb 带过去。 */
+  const requestRemoveProject = (workspaceId: WorkspaceId) => {
+    if (previewMode.preview) return;
+    const row = state.model.workspaces?.workspaces.find((candidate) => candidate.workspaceId === workspaceId);
+    if (row === undefined) return;
+    setRemoveProjectFor({ id: workspaceId, name: row.name });
+  };
+
+  const confirmRemoveProject = () => {
+    const target = removeProjectFor;
+    if (target === null || removeProjectBusy) return;
+    setRemoveProjectBusy(true);
+    void workspaceActionQueue.enqueue(async () => {
+      try {
+        const handle = await client.command("workspace.remove", { workspaceId: target.id });
+        const workspaces = await waitReceipt<WorkspaceListReadModel>(client, handle.requestId);
+        onWorkspacesChange(workspaces);
+        setRemoveProjectFor(null);
+        setShellNotice({ text: t("shell.removedProject", { name: target.name }), icon: "trash" });
+      } catch (error) {
+        setShellNotice({ text: hostErrorMessage(error, t("shell.removeProjectFailed")), icon: "alert" });
+      } finally {
+        setRemoveProjectBusy(false);
+      }
     });
   };
 
@@ -2599,7 +2706,9 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     onOpenTerminalPanel: () => setBottomTab("terminal"),
     onOpenProjectInEditor: openProjectInEditor,
     onOpenProjectDirectory: openProjectDirectory,
+    onRemoveProject: requestRemoveProject,
     projectShellUnavailable,
+    projectShellFunctionsUnavailable,
     projectShellAction: shellAction,
     fileOpeners,
     fileShellUnavailable,
@@ -3200,6 +3309,14 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
             </div>
           </div>
         </div>
+      ) : null}
+      {removeProjectFor !== null ? (
+        <RemoveProjectDialog
+          name={removeProjectFor.name}
+          busy={removeProjectBusy}
+          onConfirm={confirmRemoveProject}
+          onCancel={() => { if (!removeProjectBusy) setRemoveProjectFor(null); }}
+        />
       ) : null}
       <ToastHost message={shellNotice?.partialDeletion ? partialSessionDeletionNotice(shellNotice.partialDeletion.title, shellNotice.partialDeletion.details, resolvedLanguage === "zh") : shellNotice?.text ?? null} icon={shellNotice?.icon ?? "info"} sticky={shellNotice?.sticky === true} onDismiss={() => setShellNotice(null)} />
       <CommandPalette
