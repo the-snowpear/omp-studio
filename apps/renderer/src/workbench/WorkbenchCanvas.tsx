@@ -55,6 +55,8 @@ import { ServiceTierPicker } from "../composer/ServiceTierPicker";
 import { RuntimeQueue } from "../composer/RuntimeQueue";
 import { ComposerModePicker } from "../ComposerModePicker";
 import { ChipComposer, type ChipComposerHandle } from "../composer/ChipComposer";
+import { dragComposerCapsule } from "../composer/capsuleDrag";
+import { useOpenFile } from "../files/fileLinks";
 import { bindSlashTypedCommand, composerSlashCatalog, composerSlashExecute, isDestructiveMemoryClear, planComposerSend, resolveSlashExecute, type SlashNativeUi, type StudioSlashCommand } from "../composer/commands";
 import { LuxOrbit } from "../lux/LuxOrbit";
 import { composerFollowUpEnabled, composerOwnerSessionId, composerOwnsLiveSnapshot, composerPromptEnabled, composerQueueEnabled, composerRunningForTarget, createComposerDispatchGate, promptTargetChanged, visibleQueuedMessages } from "../composer/dispatch";
@@ -296,6 +298,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
 }) {
   const { document, window } = useConversationDom();
   const mdi = useConversationView();
+  const openFileInViewer = useOpenFile();
   const { t, resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const zhRef = useRef(zh);
@@ -2844,6 +2847,8 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
                 prediction={{client,sessionId:snapshot?.sessionId,available:runtimeConnected&&executionMatches&&can("prediction.prepare"),nextMessageAvailable:can("composer.predictions")}}
                 ref={composerInputRef}
                 id="composerInput"
+                dropTarget={{ documentId: mdi?.document.id, sessionId: mdi?.document.ref.sessionId ?? selectedSessionId }}
+                onCapsuleDrag={(event, chip, target) => dragComposerCapsule(event, chip, target, { store: mdi?.store, openFile: (path, rect) => { openFileInViewer({ path, rect, ...(workspaceId === undefined ? {} : { workspaceId }) }); } })}
                 submitDisabled={worktreeGated}
                 compact={composerRunning && !composerExpanded}
                 sessionReferences

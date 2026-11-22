@@ -1,9 +1,11 @@
 import { flattenTree, treeNavigationIndex, treeTypeahead } from "./treeKeyboard";
 import { useOpenFile } from "../files/fileLinks";
+import { dragFile, explorerChip } from "../files/fileDrag";
+import { useConversationView, useConversationWorkspace } from "../conversationWorkspace/Context";
 import { useOpenFileBrowser, useExplorerReveal } from "../fileBrowser/fileBrowserLinks";
 import { useExecutionTarget } from "../workspaces/ExecutionTargets";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, FormEvent as ReactFormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
+import type { CSSProperties, FormEvent as ReactFormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { StudioClient, WorkspaceId, WorkspaceFileNode, WorkspaceFileTreeReadModel } from "@omp-studio/client-contract";
 import { Icon } from "../icons";
 import { fileTypeOf, iconNameFor, isNoiseDir, isSensitive } from "../explorer-types";
@@ -121,6 +123,7 @@ function WorkspaceTreeNodes({
   onToggle,
   onFile,
   onContext,
+  onDrag,
   fileMenu,
   gitStatus,
   fileActivity = EMPTY_EXPLORER_FILE_ACTIVITY,
@@ -146,6 +149,8 @@ function WorkspaceTreeNodes({
   onToggle: (path: string) => void;
   onFile: (path: string) => void;
   onContext: (path: string, kind: "file" | "dir") => void;
+  /** Pointer down on a row: it may become a drag towards an input box or the workbench. */
+  onDrag?: ((event: ReactPointerEvent<HTMLDivElement>, path: string, kind: "file" | "dir") => void) | undefined;
   fileMenu: TreeFileMenu;
   gitStatus?: ReadonlyMap<string, TreeGitStatus> | undefined;
   fileActivity?: ExplorerFileActivity;
@@ -186,6 +191,7 @@ function WorkspaceTreeNodes({
             style={pad}
             onFocus={() => onSelect(node.path)}
             onClick={() => { onSelect(node.path); onToggle(node.path); }}
+            onPointerDown={(event) => onDrag?.(event, node.path, "dir")}
             onContextMenu={(event) => fileMenu.onContext(event, node.path)}
             onKeyDown={(event) => onKeyDown(event, node, parentPath)}
           >
@@ -215,7 +221,7 @@ function WorkspaceTreeNodes({
                 <span className="fi"><span className="spinner" aria-hidden="true" /></span>
                 <span className="fname ellipsis">{t("common.reading")}</span>
               </div>
-            ) : node.children ? <WorkspaceTreeNodes nodes={node.children} depth={depth + 1} parentPath={node.path} expanded={expanded} loadingPaths={loadingPaths} activePath={activePath} registerNode={registerNode} createKind={createKind} createParentPath={createParentPath} createName={createName} createBusy={createBusy} createError={createError} createInputRef={createInputRef} onCreateNameChange={onCreateNameChange} onCreateSubmit={onCreateSubmit} onCreateCancel={onCreateCancel} onSelect={onSelect} onKeyDown={onKeyDown} onToggle={onToggle} onFile={onFile} onContext={onContext} fileMenu={fileMenu} fileActivity={fileActivity} {...(gitStatus !== undefined ? { gitStatus } : {})} /> : null}
+            ) : node.children ? <WorkspaceTreeNodes nodes={node.children} depth={depth + 1} parentPath={node.path} expanded={expanded} loadingPaths={loadingPaths} activePath={activePath} registerNode={registerNode} createKind={createKind} createParentPath={createParentPath} createName={createName} createBusy={createBusy} createError={createError} createInputRef={createInputRef} onCreateNameChange={onCreateNameChange} onCreateSubmit={onCreateSubmit} onCreateCancel={onCreateCancel} onSelect={onSelect} onKeyDown={onKeyDown} onToggle={onToggle} onFile={onFile} onContext={onContext} onDrag={onDrag} fileMenu={fileMenu} fileActivity={fileActivity} {...(gitStatus !== undefined ? { gitStatus } : {})} /> : null}
           </div>
         </div>;
       }
@@ -241,6 +247,7 @@ function WorkspaceTreeNodes({
         style={pad}
         onFocus={() => onSelect(node.path)}
         onClick={() => { onSelect(node.path); onFile(node.path); }}
+        onPointerDown={(event) => onDrag?.(event, node.path, "file")}
         onContextMenu={(event) => fileMenu.onContext(event, node.path)}
         onKeyDown={(event) => onKeyDown(event, node, parentPath)}
       >
@@ -476,6 +483,12 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
     setActivePath(path);
     openInViewer({ workspaceId: String(workspaceId), path });
   }, [workspaceId, openInViewer]);
+  const conversationView = useConversationView(), conversationWorkspace = useConversationWorkspace();
+  /* Rows drag towards an input box (capsule) or the workbench (a floating file window there). */
+  const dragNode = useCallback((event: ReactPointerEvent<HTMLDivElement>, path: string, kind: "file" | "dir") => {
+    if (event.button !== 0 || (event.target as Element).closest("button, input, a")) return;
+    dragFile(event, conversationView?.store ?? conversationWorkspace?.store, { chip: explorerChip(path, kind), open: rect => openInViewer({ workspaceId: String(workspaceId), path, rect }) });
+  }, [conversationView?.store, conversationWorkspace?.store, openInViewer, workspaceId]);
   const selectPath = useCallback((path: string) => {
     setActivePath(path);
     const node = model === null ? undefined : findWorkspaceNode(model.nodes, path);
@@ -607,6 +620,7 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
         onKeyDown={handleTreeKeyDown}
         onToggle={toggle}
         onFile={openFile}
+        onDrag={dragNode}
         onContext={(path, kind) => {
           onAddContext?.(path, kind);
         }}

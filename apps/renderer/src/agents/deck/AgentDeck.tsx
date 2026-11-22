@@ -37,6 +37,8 @@ export type DeckLinks = Omit<InspectorActions, "caps" | "run" | "busy" | "notice
 export type DeckEmbedding = {
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** Clears a host-owned detail card when the user navigates to another view. */
+  onClear?: () => void;
 };
 
 export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, width, height, region, openedIds, links, commandContext, embedded, comms: hostComms }: {
@@ -180,7 +182,14 @@ export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, 
     direction.current = order.indexOf(current) >= order.indexOf(previous.current) ? "fwd" : "back";
     previous.current = current;
   }
-  const setView = (view: DeckView) => bridge ? update({ stage: view as DeckStageView }) : update({ view });
+  const setView = (view: DeckView) => {
+    // View changes are navigation. Close an open detail sheet and clear its
+    // selection so the newly selected view is immediately available.
+    if (embedded) embedded.onClear?.();
+    update(bridge
+      ? { stage: view as DeckStageView, selected: null, sheet: false }
+      : { view, selected: null, sheet: false });
+  };
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     // A host page owns the selection, so Esc is left to it (closing its drawer, say).
@@ -292,8 +301,8 @@ export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, 
           <div className="ad-crew-list">{formation}</div>
         </aside>
         <div className="ad-stage">
+          <div className="ad-bar">{tabs}</div>
           <div className="ad-pane-fill" inert={sheetOpen} aria-hidden={sheetOpen || undefined}>
-            <div className="ad-bar">{tabs}</div>
             <div className={paneClass} key={current} id={`${instanceKey}-pane`} role="tabpanel">{stageView(current)}</div>
             {current !== "comms" ? scrubber(short) : null}
           </div>

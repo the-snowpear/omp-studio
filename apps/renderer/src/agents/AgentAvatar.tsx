@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { Icon } from "../icons";
 import { AgentSigil } from "./deck/AgentSigil";
 import type { DeckTone } from "./deck/deckModel";
@@ -40,6 +40,7 @@ export function avatarTone(status: string | undefined): DeckTone {
  * conversation. Decorative (`aria-hidden`); the caller names the agent in text.
  */
 export const AgentAvatar = memo(function AgentAvatar({ agentId, name, tone, main = false, size, progress, ring = false, className }: AgentAvatarProps) {
+  const identity = useMemo(() => agentId === undefined ? undefined : ({ id: agentId, name: name ?? agentId, hue: main ? -1 : sigilHue(agentId), main }), [agentId, main, name]);
   if (!agentId) {
     return <span className={`sg is-unknown${className ? ` ${className}` : ""}`} data-tone={tone}
       style={{ width: size, height: size, borderRadius: Math.round(size * 0.3) }} aria-hidden="true">
@@ -47,7 +48,7 @@ export const AgentAvatar = memo(function AgentAvatar({ agentId, name, tone, main
     </span>;
   }
   return <AgentSigil
-    identity={{ id: agentId, name: name ?? agentId, hue: main ? -1 : sigilHue(agentId), main }}
+    identity={identity!}
     tone={tone}
     size={size}
     progress={progress}

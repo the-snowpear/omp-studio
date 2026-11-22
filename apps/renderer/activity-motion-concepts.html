@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark light" />
+  <title>OMP Studio · Operation Icons</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #121519;
+      --surface: #1a1b1f;
+      --surface-2: #222329;
+      --border: rgba(255, 255, 255, .075);
+      --text: #e7e8eb;
+      --text-2: #a7abb4;
+      --text-3: #8b909a;
+      --accent: #9e8cfc;
+      --accent-soft: rgba(158, 140, 252, .12);
+      --amber: #e0a23c;
+      --mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+      --ui: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-family: var(--ui);
+      color: var(--text);
+      background: var(--bg);
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+    }
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg: #fbfbfc;
+      --surface: #fff;
+      --surface-2: #f2f2f5;
+      --border: rgba(15, 18, 25, .1);
+      --text: #1d2129;
+      --text-2: #4e5560;
+      --text-3: #5c636e;
+      --accent: #6e56cf;
+      --accent-soft: rgba(110, 86, 207, .09);
+      --amber: #8f5a05;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; background: var(--bg); }
+    button { font: inherit; color: inherit; }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    .shell { width: min(1120px, calc(100% - 64px)); margin: 0 auto; padding: 30px 0 40px; }
+    .topline { display: flex; justify-content: space-between; align-items: center; padding-bottom: 25px; border-bottom: 1px solid var(--border); }
+    .brand { display: flex; gap: 11px; align-items: center; font-weight: 650; letter-spacing: -.02em; }
+    .brand-mark { display: grid; place-items: center; width: 25px; height: 25px; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 44%, transparent); border-radius: 8px; font-size: 13px; }
+    .top-actions { display: flex; align-items: center; gap: 12px; }
+    .eyebrow { color: var(--text-3); font: 10px/1.3 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+    .quiet-button { border: 1px solid var(--border); border-radius: 7px; background: transparent; padding: 7px 10px; color: var(--text-2); font-size: 12px; cursor: pointer; }
+    .quiet-button:hover { color: var(--text); background: var(--surface); }
+    .intro { display: flex; align-items: end; justify-content: space-between; gap: 32px; padding: 38px 0 27px; }
+    .intro-copy { max-width: 690px; }
+    .intro h1 { margin: 8px 0 10px; font-size: clamp(25px, 3vw, 36px); line-height: 1.12; font-weight: 590; letter-spacing: -.045em; }
+    .intro p { margin: 0; color: var(--text-2); font-size: 14px; line-height: 1.65; }
+    .current-action { flex: 0 0 auto; color: var(--text-3); font: 11px/1.55 var(--mono); text-align: right; }
+    .current-action strong { color: var(--accent); font-weight: 500; }
+    .operation-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 0 16px; border-bottom: 1px solid var(--border); }
+    .operation-label { margin-right: 8px; color: var(--text-3); font-size: 11px; }
+    .operation-button { border: 1px solid transparent; border-radius: 7px; padding: 7px 11px; background: transparent; color: var(--text-2); font-size: 12px; cursor: pointer; transition: background-color .16s ease, color .16s ease, border-color .16s ease; }
+    .operation-button:hover { background: var(--surface); color: var(--text); }
+    .operation-button[aria-pressed="true"] { border-color: color-mix(in srgb, var(--accent) 34%, transparent); background: var(--accent-soft); color: var(--accent); }
+    .compare-note { display: flex; justify-content: space-between; gap: 20px; padding: 12px 0 3px; color: var(--text-3); font-size: 10px; }
+    .concept-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding-top: 11px; }
+    .concept { min-width: 0; padding: 17px 15px 13px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); transition: border-color .2s ease, background-color .2s ease; }
+    .concept.is-selected { border-color: color-mix(in srgb, var(--accent) 65%, var(--border)); background: color-mix(in srgb, var(--accent-soft) 42%, var(--surface)); }
+    .concept-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; min-height: 69px; }
+    .concept-index { color: var(--text-3); font: 10px/1.4 var(--mono); letter-spacing: .08em; }
+    .concept h2 { margin: 5px 0 3px; font-size: 15px; line-height: 1.25; font-weight: 560; letter-spacing: -.025em; }
+    .concept-subtitle { margin: 0; color: var(--text-3); font-size: 10px; }
+    .pick-button { flex: none; border: 1px solid var(--border); border-radius: 6px; background: transparent; padding: 5px 8px; color: var(--text-2); font-size: 10px; cursor: pointer; }
+    .pick-button:hover, .is-selected .pick-button { border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); }
+    .preview-window { display: flex; align-items: center; min-height: 82px; margin: 11px 0 10px; padding: 14px 10px; border-radius: 8px; background: var(--bg); }
+    .activity-line { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-3); font-size: 11px; white-space: nowrap; }
+    .working { color: var(--text-2); font-weight: 530; }
+    .sep { flex: none; opacity: .55; }
+    .op-label { flex: none; color: var(--text-3); }
+    .detail { overflow: hidden; max-width: 94px; color: var(--text-3); font: 10px/1.4 var(--mono); text-overflow: ellipsis; }
+    .state-icon-wrap { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 20px; color: var(--accent); }
+    .tool-glyph { position: relative; z-index: 1; display: block; width: 20px; height: 20px; overflow: visible; fill: none; stroke: currentColor; stroke-width: 1.45; stroke-linecap: round; stroke-linejoin: round; }
+    .tool-glyph .motion { transform-box: fill-box; transform-origin: center; }
+    .motion-caption { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 31px; color: var(--text-3); font-size: 10px; }
+    .motion-caption strong { color: var(--text-2); font-weight: 500; }
+
+    /* A · direct tool symbols, with their active part doing the work. */
+    .concept[data-kind="clean"] .tool-glyph { stroke-width: 1.55; }
+    .concept[data-kind="clean"] .tool-glyph .accent-mark { stroke: var(--accent); }
+    .concept[data-kind="clean"] [data-op="read"] .motion { animation: clean-scan 1.1s ease-in-out infinite; }
+    .concept[data-kind="clean"] [data-op="edit"] .motion { animation: clean-write .72s ease-in-out infinite; }
+    .concept[data-kind="clean"] [data-op="bash"] .motion,
+    .concept[data-kind="clean"] [data-op="bash"] .cursor { animation: clean-caret .68s steps(2, end) infinite; }
+    .concept[data-kind="clean"] [data-op="grep"] .motion { animation: clean-search .95s ease-in-out infinite; }
+    .concept[data-kind="clean"] [data-op="browser"] .motion { transform-box: view-box; animation: clean-globe 1.3s ease-in-out infinite; }
+    .concept[data-kind="clean"] [data-op="agent"] .branch { animation: clean-branch 1.1s linear infinite; }
+    .concept[data-kind="clean"] [data-op="agent"] .node-a { animation: clean-node .9s ease-in-out infinite; }
+    .concept[data-kind="clean"] [data-op="agent"] .node-b { animation: clean-node .9s .2s ease-in-out infinite; }
+    .concept[data-kind="clean"] [data-op="agent"] .node-c { animation: clean-node .9s .4s ease-in-out infinite; }
+    .concept[data-kind="clean"] [data-op="edit"] .motion { transform-box: view-box; transform-origin: 5px 15px; }
+    @keyframes clean-scan { 0%, 100% { translate: 0 -3.5px; opacity: .35; } 50% { translate: 0 3.5px; opacity: 1; filter: drop-shadow(0 0 2px currentColor); } }
+    @keyframes clean-write { 0%, 100% { rotate: -16deg; translate: -1px 0; } 50% { rotate: 10deg; translate: 1px -1px; } }
+    @keyframes clean-caret { 0%, 36% { opacity: 1; translate: 0 0; } 68%, 100% { opacity: .05; translate: 1px 0; } }
+    @keyframes clean-search { 0%, 100% { rotate: -18deg; translate: -1px 1px; scale: .88; } 55% { rotate: 24deg; translate: 2px -1px; scale: 1.2; } }
+    @keyframes clean-globe { 0%, 100% { scale: 1 1; } 50% { scale: .32 1; } }
+    @keyframes clean-branch { 50% { stroke-dasharray: 2 2; stroke-dashoffset: 4; opacity: .48; } }
+    @keyframes clean-node { 50% { scale: 1.55; fill: var(--accent); opacity: .55; } }
+
+    /* B · a quiet context tile makes each action read as one compact tool. */
+    .concept[data-kind="tile"] .state-icon-wrap { width: 24px; height: 24px; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border)); border-radius: 7px; background: var(--accent-soft); }
+    .concept[data-kind="tile"] .state-icon-wrap::after { position: absolute; z-index: 0; content: ""; }
+    .concept[data-kind="tile"] .tool-glyph { width: 16px; height: 16px; stroke-width: 1.6; }
+    .concept[data-kind="tile"] .tool-glyph .accent-mark { fill: color-mix(in srgb, var(--accent) 17%, transparent); }
+    .concept[data-kind="tile"] [data-op="read"] .motion { animation: tile-read 1.05s steps(3, end) infinite; }
+    .concept[data-kind="tile"] [data-op="read"]::after { left: 5px; top: 4px; width: 12px; height: 1.5px; background: var(--accent); box-shadow: 0 0 5px var(--accent); animation: tile-beam .9s ease-in-out infinite; }
+    .concept[data-kind="tile"] [data-op="edit"] .motion { transform-box: view-box; transform-origin: 5px 15px; animation: tile-edit .7s cubic-bezier(.3, .7, .3, 1) infinite; }
+    .concept[data-kind="tile"] [data-op="bash"] .motion,
+    .concept[data-kind="tile"] [data-op="bash"] .cursor { animation: tile-run .62s steps(2, end) infinite; }
+    .concept[data-kind="tile"] [data-op="grep"] .motion { animation: tile-grep .8s ease-in-out infinite; }
+    .concept[data-kind="tile"] [data-op="browser"] .motion { transform-box: view-box; animation: tile-browser 1s linear infinite; }
+    .concept[data-kind="tile"] [data-op="agent"] .node-a { animation: tile-node 1s ease-in-out infinite; }
+    .concept[data-kind="tile"] [data-op="agent"] .node-b { animation: tile-node 1s .15s ease-in-out infinite; }
+    .concept[data-kind="tile"] [data-op="agent"] .node-c { animation: tile-node 1s .3s ease-in-out infinite; }
+    .concept[data-kind="tile"] [data-op="agent"] .node-d { animation: tile-node 1s .45s ease-in-out infinite; }
+    @keyframes tile-beam { 0%, 100% { translate: 0 0; opacity: .45; } 50% { translate: 0 15px; opacity: 1; } }
+    @keyframes tile-read { 50% { translate: 0 2px; opacity: .35; } }
+    @keyframes tile-edit { 50% { translate: 1.5px -1.5px; rotate: 14deg; } }
+    @keyframes tile-run { 0%, 32% { opacity: 1; } 60%, 100% { opacity: .08; } }
+    @keyframes tile-grep { 0%, 100% { translate: -2px 1px; rotate: -16deg; } 50% { translate: 2px -2px; rotate: 20deg; scale: 1.18; } }
+    @keyframes tile-browser { 50% { scale: .28 1; } to { rotate: 360deg; } }
+    @keyframes tile-node { 50% { scale: 1.8; opacity: .3; } }
+
+    /* C · a traveling signal draws attention to the part currently in motion. */
+    .concept[data-kind="trail"] .tool-glyph { stroke-width: 1.35; }
+    .concept[data-kind="trail"] .tool-glyph .motion { stroke: var(--accent); stroke-dasharray: 12; stroke-dashoffset: 12; animation-timing-function: linear; animation-iteration-count: infinite; }
+    .concept[data-kind="trail"] [data-op="read"] .motion { animation: trail-scan .85s ease-in-out infinite; }
+    .concept[data-kind="trail"] [data-op="edit"] .motion { transform-origin: 4px 14px; animation: trail-ink .9s linear infinite; }
+    .concept[data-kind="trail"] [data-op="bash"] .motion { animation: trail-type .75s steps(3, end) infinite; }
+    .concept[data-kind="trail"] [data-op="bash"] .cursor { animation: clean-caret .6s steps(2, end) infinite; }
+    .concept[data-kind="trail"] [data-op="grep"] .motion { transform-origin: 9px 8px; animation: trail-ping .85s ease-in-out infinite; }
+    .concept[data-kind="trail"] [data-op="browser"] .motion { animation: trail-meridian 1.25s linear infinite; }
+    .concept[data-kind="trail"] [data-op="agent"] .branch { animation: trail-branch .75s linear infinite; }
+    .concept[data-kind="trail"] [data-op="agent"] .node-a { animation: clean-node .8s ease-in-out infinite; }
+    .concept[data-kind="trail"] [data-op="agent"] .node-b { animation: clean-node .8s .15s ease-in-out infinite; }
+    .concept[data-kind="trail"] [data-op="agent"] .node-c { animation: clean-node .8s .3s ease-in-out infinite; }
+    .concept[data-kind="trail"] [data-op="agent"] .node-d { animation: clean-node .8s .45s ease-in-out infinite; }
+    @keyframes trail-scan { 0%, 100% { stroke-dashoffset: 12; translate: 0 -3px; opacity: .3; } 50% { stroke-dashoffset: 0; translate: 0 3px; opacity: 1; } }
+    @keyframes trail-ink { 0% { stroke-dashoffset: 12; } 65%, 100% { stroke-dashoffset: -8; } }
+    @keyframes trail-type { 0%, 100% { stroke-dashoffset: 12; } 50% { stroke-dashoffset: -2; } }
+    @keyframes trail-ping { 50% { scale: 1.32; opacity: .28; } }
+    @keyframes trail-meridian { 0%, 100% { stroke-dashoffset: 14; } 50% { stroke-dashoffset: -15; } }
+    @keyframes trail-branch { 50% { stroke-dashoffset: -14; opacity: .28; } }
+
+    .concept.paused *, .concept.paused *::before, .concept.paused *::after { animation-play-state: paused !important; }
+    .motion-toggle { display: inline-flex; align-items: center; gap: 5px; color: var(--text-3); cursor: pointer; user-select: none; }
+    .motion-toggle input { width: 12px; height: 12px; margin: 0; accent-color: var(--accent); }
+    .footer { display: flex; justify-content: space-between; gap: 24px; margin-top: 23px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--text-3); font-size: 11px; }
+    .footer strong { color: var(--text-2); font-weight: 500; }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; } }
+    @media (max-width: 930px) {
+      .shell { width: min(700px, calc(100% - 36px)); }
+      .concept-grid { grid-template-columns: 1fr; gap: 11px; }
+      .concept { padding: 14px 15px 11px; }
+      .concept-head { min-height: 55px; }
+      .preview-window { min-height: 69px; margin: 8px 0; }
+      .intro { align-items: flex-start; flex-direction: column; gap: 15px; }
+      .current-action { text-align: left; }
+    }
+    @media (max-width: 520px) {
+      .shell { width: calc(100% - 28px); padding-top: 18px; }
+      .topline { padding-bottom: 17px; }
+      .eyebrow { display: none; }
+      .intro { padding: 28px 0 21px; }
+      .operation-nav { gap: 3px; }
+      .operation-label { width: 100%; margin: 0 0 3px; }
+      .operation-button { padding: 7px 9px; }
+      .preview-window { padding-inline: 8px; }
+      .activity-line { gap: 5px; font-size: 10px; }
+      .detail { max-width: 69px; }
+      .footer { flex-direction: column; gap: 6px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topline">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">✳</span><span>OMP Studio</span></div>
+      <div class="top-actions"><span class="eyebrow">Conversation / Tool activity</span><button class="quiet-button" id="theme-toggle" type="button" aria-label="切换明暗主题">切换主题</button></div>
+    </header>
+
+    <section class="intro" aria-labelledby="page-title">
+      <div class="intro-copy">
+        <div class="eyebrow">Operation icon studies &nbsp;·&nbsp; 01</div>
+        <h1 id="page-title">让图标跟着正在做的事变化。</h1>
+        <p>读文件时看见文档，修改时看见笔，执行命令时看见终端。切换操作，比较三种动效风格。</p>
+      </div>
+      <div class="current-action" aria-live="polite">当前操作<br /><strong id="active-operation">读取文件 · Reading</strong></div>
+    </section>
+
+    <nav class="operation-nav" aria-label="切换运行操作">
+      <span class="operation-label">操作类型</span>
+      <button class="operation-button" type="button" data-operation-choice="read" aria-pressed="true">读文件</button>
+      <button class="operation-button" type="button" data-operation-choice="edit" aria-pressed="false">改文件</button>
+      <button class="operation-button" type="button" data-operation-choice="bash" aria-pressed="false">跑命令</button>
+      <button class="operation-button" type="button" data-operation-choice="grep" aria-pressed="false">搜索</button>
+      <button class="operation-button" type="button" data-operation-choice="browser" aria-pressed="false">浏览网页</button>
+      <button class="operation-button" type="button" data-operation-choice="agent" aria-pressed="false">委派 Agent</button>
+    </nav>
+
+    <div class="compare-note"><span>同一操作同步预览 · 图标动作只占用左侧 16–22px</span><span>每版可单独暂停</span></div>
+
+    <section class="concept-grid" aria-label="操作图标设计方向">
+      <article class="concept" data-kind="clean">
+        <header class="concept-head">
+          <div><div class="concept-index">A &nbsp;/&nbsp; TOOL SYMBOLS</div><h2>一眼认出操作</h2><p class="concept-subtitle">文档、笔、终端、放大镜等直观符号</p></div>
+          <button class="pick-button" type="button" data-pick="clean" aria-pressed="false">选这版</button>
+        </header>
+        <div class="preview-window"><div class="activity-line"><span class="state-icon-wrap" aria-hidden="true"></span><span class="working">working</span><span class="sep sample-time-sep">·</span><span class="sample-time">2s</span><span class="sep">·</span><span class="op-label">Reading</span><span class="sep sample-detail-sep">·</span><span class="detail">ActivityLine.tsx</span></div></div>
+        <div class="motion-caption"><span>动效 <strong class="motion-name">扫读</strong></span><label class="motion-toggle"><input class="local-motion" type="checkbox" checked />动画</label></div>
+      </article>
+
+      <article class="concept" data-kind="tile">
+        <header class="concept-head">
+          <div><div class="concept-index">B &nbsp;/&nbsp; TOOL TILE</div><h2>轻量工具底座</h2><p class="concept-subtitle">一抹浅色托住图形，动作更聚焦</p></div>
+          <button class="pick-button" type="button" data-pick="tile" aria-pressed="false">选这版</button>
+        </header>
+        <div class="preview-window"><div class="activity-line"><span class="state-icon-wrap" aria-hidden="true"></span><span class="working">working</span><span class="sep sample-time-sep">·</span><span class="sample-time">2s</span><span class="sep">·</span><span class="op-label">Reading</span><span class="sep sample-detail-sep">·</span><span class="detail">ActivityLine.tsx</span></div></div>
+        <div class="motion-caption"><span>动效 <strong class="motion-name">逐行扫描</strong></span><label class="motion-toggle"><input class="local-motion" type="checkbox" checked />动画</label></div>
+      </article>
+
+      <article class="concept" data-kind="trail">
+        <header class="concept-head">
+          <div><div class="concept-index">C &nbsp;/&nbsp; ACTIVE TRACE</div><h2>让动作沿图形经过</h2><p class="concept-subtitle">细线轨迹强调文件或工具正被处理</p></div>
+          <button class="pick-button" type="button" data-pick="trail" aria-pressed="false">选这版</button>
+        </header>
+        <div class="preview-window"><div class="activity-line"><span class="state-icon-wrap" aria-hidden="true"></span><span class="working">working</span><span class="sep sample-time-sep">·</span><span class="sample-time">2s</span><span class="sep">·</span><span class="op-label">Reading</span><span class="sep sample-detail-sep">·</span><span class="detail">ActivityLine.tsx</span></div></div>
+        <div class="motion-caption"><span>动效 <strong class="motion-name">扫过文件线条</strong></span><label class="motion-toggle"><input class="local-motion" type="checkbox" checked />动画</label></div>
+      </article>
+    </section>
+
+    <footer class="footer"><span>图标对应当前工具操作；文件路径和现有状态行文案保持在右侧。</span><span id="selection-note">可以回复 <strong>A / B / C</strong>，也可混搭你喜欢的图标或动效</span></footer>
+  </main>
+
+  <script>
+    const operations = {
+      read: { title: "读取文件 · Reading", label: "Reading", detail: "ActivityLine.tsx", time: "2s", motion: ["扫读", "逐行扫描", "扫过文件线条"] },
+      edit: { title: "修改文件 · Editing", label: "Editing", detail: "ActivityLine.tsx", time: "4s", motion: ["笔尖落下", "落笔改写", "笔迹沿线前进"] },
+      bash: { title: "运行命令 · Running", label: "Running", detail: "npm run check", time: "7s", motion: ["命令执行", "输入光标", "指令逐段显现"] },
+      grep: { title: "搜索内容 · Searching", label: "Searching", detail: "activityStatus", time: "2s", motion: ["探测目标", "定位扫描", "搜寻脉冲"] },
+      browser: { title: "浏览网页 · Browser", label: "Using browser", detail: "docs.omp.dev", time: "5s", motion: ["页面浏览", "轨道旋转", "沿经线巡行"] },
+      agent: { title: "委派 Agent · Delegating", label: "Delegating agent", detail: "Review", time: "3s", motion: ["分支脉冲", "节点传递", "分支信号"] },
+    };
+    const iconMarkup = {
+      read: '<svg class="tool-glyph" viewBox="0 0 20 20"><path d="M5 2.5h6l4 4v11H5z"/><path d="M11 2.5v4h4"/><path class="motion accent-mark" d="M7.5 9.5h5M7.5 12h5M7.5 14.5h3"/></svg>',
+      edit: '<svg class="tool-glyph" viewBox="0 0 20 20"><path d="M4 15.8 5.1 12 13 4.1l3 3L8.1 15z"/><path class="motion accent-mark" d="m11.8 5.3 3 3M4 15.8h4.1"/></svg>',
+      bash: '<svg class="tool-glyph" viewBox="0 0 20 20"><rect x="2.5" y="3.5" width="15" height="13" rx="2"/><path d="M2.7 7h14.6"/><path class="motion" d="m6 10 2 1.8-2 1.8"/><path class="accent-mark cursor" d="M10 13.6h3"/></svg>',
+      grep: '<svg class="tool-glyph" viewBox="0 0 20 20"><g class="motion"><circle cx="8.2" cy="8.2" r="4.8"/><path d="m11.8 11.8 4.1 4.1"/><circle class="accent-mark" cx="8.2" cy="8.2" r="1.2"/></g></svg>',
+      browser: '<svg class="tool-glyph" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.1"/><path class="motion" d="M3.2 10h13.6M10 2.9c2 2 3 4.3 3 7.1s-1 5.1-3 7.1c-2-2-3-4.3-3-7.1s1-5.1 3-7.1z"/></svg>',
+      agent: '<svg class="tool-glyph" viewBox="0 0 20 20"><path class="motion accent-mark branch" d="M5.2 10.1 10 6.1m0 0 4.8 4m-4.8-4v8.1"/><circle class="node-a" cx="5.2" cy="10.1" r="2"/><circle class="node-b" cx="10" cy="5" r="2"/><circle class="node-c" cx="14.8" cy="10.1" r="2"/><circle class="accent-mark node-d" cx="10" cy="14.5" r="2"/></svg>',
+    };
+    const glyph = (op) => iconMarkup[op];
+    const concepts = [...document.querySelectorAll(".concept")];
+    function updateOperation(op) {
+      const info = operations[op];
+      document.querySelector("#active-operation").textContent = info.title;
+      document.querySelectorAll("[data-operation-choice]").forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.operationChoice === op));
+      });
+      concepts.forEach((concept, index) => {
+        const line = concept.querySelector(".activity-line");
+        const icon = line.querySelector(".state-icon-wrap");
+        icon.dataset.op = op;
+        icon.innerHTML = glyph(op);
+        line.querySelector(".op-label").textContent = info.label;
+        line.querySelector(".detail").textContent = info.detail;
+        line.querySelector(".sample-time").textContent = info.time;
+        concept.querySelector(".motion-name").textContent = info.motion[index];
+      });
+    }
+    document.querySelectorAll("[data-operation-choice]").forEach((button) => {
+      button.addEventListener("click", () => updateOperation(button.dataset.operationChoice));
+    });
+    document.querySelectorAll("[data-pick]").forEach((button) => {
+      button.addEventListener("click", () => {
+        concepts.forEach((concept) => {
+          const selected = concept.dataset.kind === button.dataset.pick;
+          concept.classList.toggle("is-selected", selected);
+          concept.querySelector("[data-pick]").setAttribute("aria-pressed", String(selected));
+        });
+        const label = { clean: "A", tile: "B", trail: "C" }[button.dataset.pick];
+        document.querySelector("#selection-note").innerHTML = `已标记方向 <strong>${label}</strong> · 回复 ${label} 即可，也可说想混搭的操作图标`;
+      });
+    });
+    document.querySelectorAll(".local-motion").forEach((toggle) => {
+      toggle.addEventListener("change", () => toggle.closest(".concept").classList.toggle("paused", !toggle.checked));
+    });
+    document.querySelector("#theme-toggle").addEventListener("click", () => {
+      document.documentElement.dataset.theme = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    });
+    updateOperation("read");
+  </script>
+</body>
+</html>

@@ -15,7 +15,6 @@ import { parsePlanSections } from "./planSections";
 import { PromptHead } from "./PromptHead";
 import { PLAN_ACTIONS, type PlanActionDetail, type PlanActionId } from "./types";
 import { MOTION_MS, MOTION_SLACK_MS, motionReduced } from "../motion";
-import { PLATFORM } from "../platform";
 import "./planEditor.css";
 
 export type PlanOperationResult = boolean | void | { ok: boolean; error?: string; cancelled?: boolean };
@@ -470,9 +469,16 @@ export function PlanCard({
       <span className={`plan-save-status${dirty ? " is-dirty" : ""}`} role="status">
         {saving ? (zh ? "正在处理…" : "Working…") : dirty ? (zh ? "未保存" : "Unsaved") : hasSaved ? (zh ? "已保存" : "Saved") : (zh ? "计划正文" : "Plan document")}
       </span>
-      <span className="plan-save-shortcut">{PLATFORM === "darwin" ? "⌘ ↵" : "Ctrl ↵"}</span>
-      <button type="button" className="btn small primary" disabled={locked || !dirty} onClick={savePlan}>
-        <Icon name="save" extra="sm" />{zh ? "保存计划" : "Save plan"}
+      {/* 文字标签收进 data-tip（通用悬停提示），快捷键提示撤掉——工具栏只留一个方形主操作按钮。 */}
+      <button
+        type="button"
+        className="icon-btn plan-save-button"
+        aria-label={zh ? "保存计划" : "Save plan"}
+        data-tip={zh ? "保存计划" : "Save plan"}
+        disabled={locked || !dirty}
+        onClick={savePlan}
+      >
+        <Icon name="save" />
       </button>
     </div> : null}
     {operationError ? <div className="plan-operation-error" role="alert"><Icon name="alert" extra="sm" />{errorMessage}</div> : null}

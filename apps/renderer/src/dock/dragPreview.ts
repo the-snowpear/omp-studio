@@ -28,6 +28,10 @@ export type DragPreview = {
     attach?: ((slots: Partial<ConversationHostSlots>) => () => void) | undefined;
     loadingLabel: string;
   };
+  /** A file that opens as a floating window where it is dropped. */
+  file?: { title: string; path: string; loadingLabel: string };
+  /** The pointer is over an input box: the window folds into the capsule at this viewport box. */
+  capsule?: { rect: DockRect };
 };
 
 // Only the preview subscribes to pointer geometry; the workbench and transcript do not.

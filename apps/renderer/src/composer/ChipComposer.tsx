@@ -65,6 +65,7 @@ import {
   type StudioSlashCommand,
 } from "./commands";
 
+import { caretBox, dropRangeAt, insertNodesAtRange, registerComposerDrop, type ComposerDropTarget } from "./composerDrop";
 import { DictationEditor, insertDictationText } from "./dictationEditor";
 import { DictationKeyboard } from "./dictationKeyboard";
 import type { ComposerDictationBinding, ComposerDictationHandle } from "./dictationTypes";
@@ -118,6 +119,10 @@ type Props = {
   onBlur?: (event: FocusEvent<HTMLDivElement>) => void;
   onPointerDown?: (event: PointerEvent<HTMLDivElement>) => void;
   onError?: (message: string) => void;
+  /** Accept dragged capsules (rows, windows, files) for this conversation's main input. */
+  dropTarget?: { documentId: string | undefined; sessionId: string | undefined } | undefined;
+  /** A capsule was grabbed; the owner runs the drag (reorder, move, open). */
+  onCapsuleDrag?: ((event: PointerEvent<HTMLElement>, chip: HTMLElement, target: ComposerDropTarget) => void) | undefined;
 };
 
 function snapshotOf(editor: HTMLElement, images: Map<string, PromptImage>): ComposerSnapshot {
@@ -215,6 +220,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     onPointerDown,
     onError,
     predict,
+    dropTarget,
+    onCapsuleDrag,
   },
   ref,
 ) {
@@ -434,6 +441,109 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     const editor = editorRef.current;
     if (!editor || !removeChipById(editor, chipId)) return;
     emit();
+  };
+
+  /* Dragged capsules land where the pointer is, not at the last caret. */
+  const moveChipTo = (element: HTMLElement, point: { x: number; y: number }): HTMLElement | null => {
+    const editor = editorRef.current;
+    if (!editor || !editor.contains(element)) return null;
+    const marker = document.createComment("move");
+    dropRangeAt(editor, point).insertNode(marker);
+    const spacer = element.nextSibling;
+    const beside = marker.nextSibling === element || marker.previousSibling === element
+      || (marker.previousSibling === spacer && spacer?.nodeType === Node.TEXT_NODE && spacer.textContent === " ");
+    if (beside) { marker.remove(); return element; }
+    dictationEditorRef.current?.beforeEdit();
+    // Close the gap the capsule leaves: its own spacer, then one of two spaces meeting there.
+    const previous = element.previousSibling;
+    let next = element.nextSibling;
+    if (next?.nodeType === Node.TEXT_NODE && next.textContent === " ") { const after = next.nextSibling; next.remove(); next = after; }
+    element.remove();
+    const openBefore = !previous || previous.nodeName === "BR" || (previous.nodeType === Node.TEXT_NODE && /\s$/u.test((previous as Text).data));
+    if (openBefore && next?.nodeType === Node.TEXT_NODE && /^\s/u.test((next as Text).data)) {
+      const text = next as Text;
+      if (text.data.length === 1) text.remove(); else text.data = text.data.slice(1);
+    }
+    const at = document.createRange();
+    at.setStartBefore(marker); at.collapse(true);
+    marker.remove();
+    insertNodesAtRange(editor, at, [element]);
+    typeAfter(editor, element);
+    emit();
+    return element;
+  };
+  /** After a drop the user keeps typing right behind the capsule. */
+  const typeAfter = (editor: HTMLElement, element: HTMLElement) => {
+    editor.focus({ preventScroll: true });
+    const next = element.nextSibling, selection = window.getSelection();
+    if (next?.nodeType !== Node.TEXT_NODE || !selection) { placeCaretAfter(element); return; }
+    const range = document.createRange();
+    range.setStart(next, /^\s/u.test((next as Text).data) ? 1 : 0);
+    range.collapse(true);
+    selection.removeAllRanges(); selection.addRange(range);
+  };
+  const insertChipAt = (draft: Omit<ComposerChip, "id"> & { id?: string }, point: { x: number; y: number }): HTMLElement | null => {
+    const editor = editorRef.current;
+    if (!editor) return null;
+    if (draft.sessionReference) {
+      const existing = existingSessionChip(editor, draft.sessionReference);
+      if (existing) return moveChipTo(existing, point);
+    }
+    dictationEditorRef.current?.beforeEdit();
+    const chip: ComposerChip = { ...draft, id: draft.id ?? newChipId() };
+    if (chip.image) imagesRef.current.set(chip.id, chip.image);
+    const element = createChipElement(chip, document);
+    insertNodesAtRange(editor, dropRangeAt(editor, point), [element]);
+    typeAfter(editor, element);
+    emit();
+    return element;
+  };
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const dropActions = useRef({ insertChipAt, moveChipTo, removeChip, disabled: !!disabled, onCapsuleDrag });
+  dropActions.current = { insertChipAt, moveChipTo, removeChip, disabled: !!disabled, onCapsuleDrag };
+  const dropTargetRef = useRef<ComposerDropTarget | null>(null);
+  const dropDocumentId = dropTarget?.documentId, dropSessionId = dropTarget?.sessionId, dropEnabled = dropTarget !== undefined;
+  useEffect(() => {
+    const root = rootRef.current, editor = editorRef.current;
+    if (!dropEnabled || !root || !editor) return;
+    const element = root.closest<HTMLElement>(".composer") ?? root;
+    const caret = document.createElement("span");
+    caret.className = "cm-drop-caret";
+    caret.setAttribute("aria-hidden", "true");
+    root.append(caret);
+    const target: ComposerDropTarget = {
+      documentId: dropDocumentId, sessionId: dropSessionId, element, editor,
+      accepts: () => !dropActions.current.disabled && editor.isConnected,
+      showCaret: point => {
+        const box = caretBox(dropRangeAt(editor, point), editor), origin = root.getBoundingClientRect();
+        caret.style.height = `${box.height}px`;
+        caret.style.transform = `translate(${box.x - origin.left - 1}px, ${box.y - origin.top}px)`;
+        caret.classList.add("is-visible");
+        element.dataset.capsuleOver = "";
+      },
+      hideCaret: () => { caret.classList.remove("is-visible"); delete element.dataset.capsuleOver; },
+      insertAt: (chip, point) => dropActions.current.insertChipAt(chip, point),
+      moveTo: (chip, point) => dropActions.current.moveChipTo(chip, point),
+      remove: chipId => dropActions.current.removeChip(chipId),
+      chipOf: chip => {
+        const payload = editor.contains(chip) ? parseChipPayload(chip.dataset.chip ?? "") : null;
+        if (!payload) return null;
+        const image = imagesRef.current.get(payload.id);
+        return image ? { ...payload, image } : payload;
+      },
+    };
+    dropTargetRef.current = target;
+    const release = registerComposerDrop(target);
+    return () => { release(); caret.remove(); if (dropTargetRef.current === target) dropTargetRef.current = null; };
+  }, [document, dropEnabled, dropDocumentId, dropSessionId]);
+  const onCapsulePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    const target = dropTargetRef.current, drag = dropActions.current.onCapsuleDrag;
+    if (!target || !drag || disabled || event.button !== 0 || chipRemoveTarget(event.target) !== null) return;
+    const chip = (event.target as Element).closest<HTMLElement>(".cm-chip");
+    if (!chip || !event.currentTarget.contains(chip) || chip.classList.contains("cm-chip-mode")) return;
+    // No text selection or native drag from a capsule; a click still opens it.
+    event.preventDefault();
+    drag(event as PointerEvent<HTMLElement>, chip, target);
   };
 
   const enqueueAttachment = (work: (current: () => boolean) => Promise<boolean>): Promise<boolean> => {
@@ -1234,7 +1344,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   };
 
   return (
-    <div className={`chip-composer${compact ? " is-compact" : ""}`} style={{position:"relative"}}>
+    <div ref={rootRef} className={`chip-composer${compact ? " is-compact" : ""}`} style={{position:"relative"}}>
       {thumbs.length > 0 ? (
         <div className="cm-thumbs" aria-label={zh ? "已附加的图片" : "Attached images"}>
           {thumbs.map((thumb) => (
@@ -1320,7 +1430,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
           closeCommandMenu();
           onBlur?.(event);
         }}
-        onPointerDown={onPointerDown}
+        onPointerDown={(event) => { onPointerDown?.(event); onCapsulePointerDown(event); }}
+        onDragStart={(event) => { if ((event.target as Element).closest?.(".cm-chip")) event.preventDefault(); }}
         onCompositionStart={() => {
           dictationKeyboardRef.current?.compositionStart();
           composingRef.current = true;

@@ -11,6 +11,9 @@ import type { GitCommitReferenceSnapshot } from "./gitCommitReference";
 import { splitChipLabel, type PromptImage } from "./types";
 import { I18nProvider } from "../i18n";
 import * as ingest from "./ingest";
+import { dragComposerCapsule } from "./capsuleDrag";
+import { composerDropAt } from "./composerDrop";
+import { PreviewFileTree } from "../preview/surfaces";
 
 afterEach(() => {
   cleanup();
@@ -1070,5 +1073,71 @@ describe("ChipComposer", () => {
     } finally {
       for (const [name, original] of descriptors) Object.defineProperty(Element.prototype, name, original);
     }
+  });
+});
+
+describe("dragging capsules", () => {
+  const under = (elements: () => Element[]) => Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: vi.fn(elements) });
+  const caretAt = (pick: () => Range) => Object.defineProperty(document, "caretRangeFromPoint", { configurable: true, value: vi.fn(pick) });
+  afterEach(() => { Reflect.deleteProperty(document, "elementsFromPoint"); Reflect.deleteProperty(document, "caretRangeFromPoint"); vi.unstubAllGlobals(); });
+  const mountComposer = () => {
+    vi.stubGlobal("PointerEvent", MouseEvent);
+    const ref = createRef<ChipComposerHandle>();
+    const change = vi.fn();
+    render(<div className="composer"><ChipComposer ref={ref} onChange={change} dropTarget={{ documentId: "doc-a", sessionId: "session-a" }} onCapsuleDrag={(event, chip, target) => dragComposerCapsule(event, chip, target, { store: null })} /></div>);
+    return { ref, change, editor: screen.getByRole("textbox") };
+  };
+  const order = (ref: { current: ChipComposerHandle | null }) => ref.current!.getSnapshot().doc.nodes.map(node => node.type === "chip" ? `[${node.chip.label}]` : node.value).join("");
+
+  it("moves a capsule to where it is dropped in the text and keeps the draft in sync", () => {
+    const { ref, change, editor } = mountComposer();
+    act(() => ref.current!.setSnapshot({ text: "", images: [], doc: { nodes: [{ type: "chip", chip: { id: "skill-1", kind: "skill", label: "review", name: "review" } }, { type: "text", value: " check this file" }] } }));
+    const text = [...editor.childNodes].find(node => node.nodeType === Node.TEXT_NODE && node.textContent?.includes("check")) as Text;
+    caretAt(() => { const range = document.createRange(); range.setStart(text, text.data.indexOf(" file")); range.collapse(true); return range; });
+    under(() => [editor]);
+    const chip = editor.querySelector<HTMLElement>(".cm-chip")!;
+    change.mockClear();
+    fireEvent.pointerDown(chip, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(window, { clientX: 80, clientY: 12 });
+    expect(chip.classList.contains("is-drag-origin")).toBe(true);
+    fireEvent.pointerUp(window, { clientX: 80, clientY: 12 });
+    expect(order(ref)).toBe("check this [review] file");
+    expect(chip.classList.contains("is-drag-origin")).toBe(false);
+    expect(change).toHaveBeenCalled();
+  });
+
+  it("puts the capsule back when the drag is cancelled", () => {
+    const { ref, editor } = mountComposer();
+    act(() => ref.current!.setSnapshot({ text: "", images: [], doc: { nodes: [{ type: "chip", chip: { id: "skill-1", kind: "skill", label: "review", name: "review" } }, { type: "text", value: " check" }] } }));
+    under(() => [editor]);
+    const before = order(ref);
+    fireEvent.pointerDown(editor.querySelector(".cm-chip")!, { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(window, { clientX: 80, clientY: 12 });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(order(ref)).toBe(before);
+    expect(document.querySelector(".capsule-ghost")).toBeNull();
+  });
+
+  it("does not add the same conversation twice and never targets the box's own conversation", () => {
+    const { ref, editor } = mountComposer();
+    under(() => [editor]);
+    expect(composerDropAt(document, { x: 1, y: 1 }, { sessionId: "session-a" })).toBeNull();
+    const target = composerDropAt(document, { x: 1, y: 1 }, { documentId: "doc-b", sessionId: "session-b" })!;
+    const chip = { kind: "session" as const, label: "Other", sessionReference: { sessionId: "session-b", source: { targetId: null, workspaceId: "ws" as never, title: "Other" }, messages: [] } };
+    act(() => { target.insertAt(chip, { x: 1, y: 1 }); target.insertAt(chip, { x: 1, y: 1 }); });
+    expect(editor.querySelectorAll(".cm-chip-session")).toHaveLength(1);
+    expect(document.activeElement).toBe(editor);
+  });
+
+  it("turns an Explorer file into a capsule in the input box", async () => {
+    const { editor } = mountComposer();
+    render(<PreviewFileTree label="Project" />);
+    const row = document.querySelector<HTMLElement>(".tree-row[data-file]")!;
+    under(() => [editor]);
+    fireEvent.pointerDown(row, { button: 0, clientX: 10, clientY: 300 });
+    fireEvent.pointerMove(window, { clientX: 60, clientY: 20 });
+    await waitFor(() => expect(document.querySelector(".capsule-ghost")?.textContent).toContain(row.querySelector(".fname")!.textContent!));
+    fireEvent.pointerUp(window, { clientX: 60, clientY: 20 });
+    expect(editor.querySelector(".cm-chip")?.getAttribute("title")).toBe(row.dataset.file);
   });
 });

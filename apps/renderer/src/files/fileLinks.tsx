@@ -8,7 +8,8 @@ import { useI18n } from "../i18n";
 import { parseFileReference, relativeFileReference, type FileReference } from "./fileTypes";
 import { resolvePathOnOpen, useFilePathKind } from "./pathResolution";
 
-export interface FileOpenIntent extends FileReference { source?: "system"; workspaceId?: string; ownerId?: string; targetId?: string | null }
+/** `rect`: open a new file window floating there (workbench coordinates), e.g. where an Explorer row was dropped. */
+export interface FileOpenIntent extends FileReference { source?: "system"; workspaceId?: string; ownerId?: string; targetId?: string | null; rect?: { x: number; y: number; width: number; height: number } }
 type Opener = (intent: FileOpenIntent) => void;
 const openers = new Map<string, Opener>();
 export function registerFileOpener(owner: string, open: Opener) { openers.set(owner, open); return () => { if (openers.get(owner) === open) openers.delete(owner); }; }

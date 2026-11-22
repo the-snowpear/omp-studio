@@ -104,7 +104,7 @@ function MemberCard({ line, now, density, compact, query, selected, opened, dimm
   const minimal = compact || (density === "minimal" && !row.main);
   const hasChildren = row.childIds.length > 0;
   const label = `${row.main ? d("backToMain") : d("open")} · ${row.name} · ${row.statusText}`;
-  const identity = { id: row.id, name: row.name, hue: row.hue, main: row.main };
+  const identity = useMemo(() => ({ id: row.id, name: row.name, hue: row.hue, main: row.main }), [row.hue, row.id, row.main, row.name]);
   return <div className="ad-node" role="listitem" data-flip={row.id} style={{ ["--depth" as string]: depth, paddingLeft: depth * INDENT }}>
     {guides.map((on, level) => on ? <span key={level} className="ad-guide" style={{ left: level * INDENT + STEM }} aria-hidden="true" /> : null)}
     {depth > 0 ? <span className={`ad-elbow${last ? " is-last" : ""}`} style={{ left: (depth - 1) * INDENT + STEM }} aria-hidden="true" /> : null}

@@ -103,6 +103,35 @@ function renderSidebar({ preview, chrome, state }: {
 }
 
 describe("AppSidebar thread row more menu", () => {
+  it("opens project actions from the project row more button", () => {
+    const project = { id: workspaceId, name: "omp-studio" };
+    const onStartChatInProject = vi.fn();
+    const onOpenProjectInEditor = vi.fn();
+    const onOpenProjectDirectory = vi.fn();
+    const onToggleProject = vi.fn();
+    const chrome = {
+      ...baseChrome(),
+      projectShellUnavailable: undefined,
+      projectShellAction: null,
+      onStartChatInProject,
+      onOpenProjectInEditor,
+      onOpenProjectDirectory,
+      onToggleProject,
+    } as unknown as ComponentProps<typeof AppSidebar>["chrome"];
+    renderSidebar({ preview: false, chrome, state: baseState() });
+
+    const row = screen.getByRole("button", { name: project.name }).closest(".project-head-row");
+    expect(row).not.toBeNull();
+    fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "更多操作" }));
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: "在外部编辑器中打开项目" })).toBeTruthy();
+    expect(within(menu).getByRole("menuitem", { name: /中打开$/ })).toBeTruthy();
+
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "在外部编辑器中打开项目" }));
+    expect(onOpenProjectInEditor).toHaveBeenCalledWith(project);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
   it("opens the top-bar thread actions on a history row and routes the pick to onThreadRowAction", () => {
     const onThreadRowAction = vi.fn();
     const chrome = {

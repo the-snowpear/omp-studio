@@ -43,7 +43,11 @@
 .plan-save-status { display: inline-flex; align-items: center; gap: var(--sp-6); }
 .plan-save-status.is-dirty { color: var(--amber); }
 .plan-save-status.is-dirty::before { content: ""; width: 5px; height: 5px; border-radius: var(--r-full); background: currentColor; }
-.plan-save-shortcut { margin-inline-start: auto; color: var(--text-3); font: var(--fs-11) var(--font-mono); }
+/* 保存计划收成单图标：文字说明走 data-tip，自动外边距把它顶到工具栏最右。
+   外观跟工具栏里其他图标按钮一致（中性灰、悬停才出底色），不涂强调色。 */
+.plan-editor-toolbar .plan-save-button { margin-inline-start: auto; }
+/* 禁用时仍要能悬停出提示（图标按钮没有文字），所以不继承 .btn:disabled 的 pointer-events: none。 */
+.plan-editor-toolbar .plan-save-button:disabled { opacity: 0.45; cursor: not-allowed; }
 .plan-operation-error {
   display: flex; align-items: flex-start; gap: var(--sp-8); flex: none;
   padding: var(--sp-8) var(--sp-20); color: var(--red); font-size: var(--fs-12);
@@ -127,7 +131,6 @@
 .plan-overall-chevron.is-open { transform: rotate(180deg); }
 @media (max-width: 640px) {
   .plan-editor-toolbar { gap: var(--sp-6); padding-inline: var(--sp-12); }
-  .plan-save-shortcut { visibility: hidden; width: 0; }
   .plan-preview-scroll { padding: var(--sp-12) var(--sp-16); }
   .plan-review-dialog .dk-actions { flex-wrap: wrap; }
 }

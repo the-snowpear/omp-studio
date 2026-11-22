@@ -153,7 +153,7 @@ export function FileDockInstances({ workspaceId, targetId, client, onSettings, a
     const descriptor: FilePanelDescriptor = { ...(intent.source ? { source: intent.source } : {}), targetId: target, workspaceId: workspace, path: file.path, fileId: file.id, title: file.name, scope, ...(intent.line ? { line: intent.line } : {}), ...(intent.column ? { column: intent.column } : {}), ...(intent.fragment ? { fragment: intent.fragment, mode: "preview" } : {}) };
     const session = getFileDocument(target, file, () => latest.current.resolveClient(target), preview);
     catalog.documents.set(catalogBufferKey(descriptor), session);
-    const rect = current.view?.store.nextWindowRect({ width: 900, height: 680 });
+    const rect = intent.rect ?? current.view?.store.nextWindowRect({ width: 900, height: 680 });
     store.dispatch({ type: "file-open", panel, descriptor, ...(rect ? { rect } : {}) });
     if (scope === "workspace") { const location = locatePanel(store.getSnapshot().layout, panel); if (location?.groupId) store.setPin(location.groupId, "workspace"); }
     store.dispatch({ type: "open", panel });

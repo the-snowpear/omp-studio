@@ -144,8 +144,8 @@ export type ShellChrome = {
   /** 左上应用菜单「打开终端」：切到终端页签并展开底部面板（Ctrl J 同款语义）。 */
   onOpenTerminalPanel: () => void;
   /** 项目 shell 动作（AppShell 统一实现，顶栏面包屑菜单与侧栏应用菜单共用）。 */
-  onOpenProjectInEditor: () => void;
-  onOpenProjectDirectory: () => void;
+  onOpenProjectInEditor: (project?: SelectedProject) => void;
+  onOpenProjectDirectory: (project?: SelectedProject) => void;
   /** undefined = 可用；否则为禁用原因（无真实 workspace / 非桌面端）。 */
   projectShellUnavailable: string | undefined;
   /** 进行中的 shell 动作类型；null = 空闲。 */

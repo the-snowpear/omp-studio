@@ -33,17 +33,8 @@
 .dock-panel-content[data-dock-auto-height] > .ad > .ad-body { flex: none; height: clamp(280px, 52vh, 420px); }
 
 /* ---------- Sigils ---------------------------------------------------------- */
-/* Palette and tile live in sigil.css (imported by AgentSigil.tsx); the deck keeps the loops.
-   A working agent's beacon breathes and it blinks now and then, each on its own phase. */
-.ad[data-live] [data-tone="running"] .sg-beacon { animation: omp-pulse var(--loop-pulse) var(--ease-loop) infinite; }
-.ad[data-live] [data-tone="running"] .sg-eyes {
-  animation: ad-blink calc(var(--loop-orbit) * 1.6) var(--ease-loop) infinite;
-  animation-delay: calc(var(--loop-orbit) * -1.6 * var(--sg-phase, 0));
-}
-@keyframes ad-blink {
-  0%, 91%, 100% { scale: 1 1; }
-  95% { scale: 1 0.12; }
-}
+/* Palette and tile live in sigil.css (imported by AgentSigil.tsx). Status is
+   communicated by the tone and text so a busy roster stays readable. */
 
 /* ---------- Pulse header ---------------------------------------------------- */
 .ad-pulse {
@@ -310,7 +301,6 @@
 .ad-status[data-tone="waiting"] { color: var(--amber); }
 .ad-status[data-tone="failed"] { color: var(--red); }
 .ad-status:is([data-tone="parked"], [data-tone="stopped"]) { color: var(--text-faint); }
-.ad[data-live] .ad-status[data-tone="running"] > i { animation: agent-running-breathe var(--loop-drift) var(--ease-loop) infinite; }
 .ad-fold, .ad-quick {
   display: inline-flex;
   align-items: center;
@@ -346,20 +336,6 @@
 .ad-card.is-main :is(.ad-card-task, .ad-card-stage, .ad-card-meter, .ad-card-parent) { margin-left: 42px; }
 .ad-card-stage { display: flex; align-items: center; gap: 5px; min-width: 0; margin: var(--sp-4) 0 0 36px; color: var(--text-3); font-size: var(--fs-11); line-height: 16px; }
 .ad-card-stage > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-/* A light passes over the activity of an agent that is working right now. */
-.ad[data-live] :is(.ad-card-stage, .ad-ins-now)[data-running] > span {
-  background: linear-gradient(100deg, var(--text-3) 0%, var(--text-3) 38%, var(--text) 50%, var(--text-3) 62%, var(--text-3) 100%);
-  background-size: 300% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: ad-shimmer calc(var(--loop-drift) * 1.25) linear infinite;
-}
-@keyframes ad-shimmer {
-  from { background-position: 100% 0; }
-  to { background-position: 0% 0; }
-}
-:root[data-perf-tier~="L1"] .ad :is(.ad-card-stage, .ad-ins-now)[data-running] > span { background: none; color: var(--text-3); }
 .ad-card-meter { display: flex; align-items: center; gap: var(--sp-8); min-width: 0; margin: var(--sp-6) 0 0 36px; color: var(--text-faint); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
 .ad-card-facts { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ad-steps { display: inline-flex; gap: 2px; flex: none; }
@@ -759,7 +735,6 @@
 .ad-scrub[data-live] .ad-scrub-thumb { border-color: var(--green); }
 .ad-scrub-live { display: inline-flex; align-items: center; gap: 5px; flex: none; color: var(--green); font-size: var(--fs-11); font-weight: var(--fw-semibold); }
 .ad-scrub-live > i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.ad[data-live] .ad-scrub-live > i { animation: agent-running-breathe var(--loop-drift) var(--ease-loop) infinite; }
 .ad-scrub-time { flex: none; height: 22px; padding: 0 var(--sp-8); border: 0; border-radius: var(--r-full); background: var(--amber-soft); color: var(--amber); font-size: var(--fs-11); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; cursor: pointer; }
 .ad-scrub-opts { display: inline-flex; align-items: center; gap: var(--sp-6); flex: none; }
 .ad-toggle { height: 22px; padding: 0 var(--sp-8); border: 1px solid var(--border); border-radius: var(--r-4); background: transparent; color: var(--text-3); font-size: var(--fs-11); cursor: pointer; transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease); }

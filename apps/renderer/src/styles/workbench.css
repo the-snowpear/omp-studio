@@ -4010,6 +4010,60 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   transform: translateX(var(--cm-scroll-x));
   transition: transform var(--cm-scroll-duration) linear var(--tip-delay);
 }
+/* Capsule drag (composer/capsuleGhost.ts, composerDrop.ts): the pill that follows
+   the pointer, the caret where it will land, and the capsule left behind. */
+.capsule-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 58;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  pointer-events: none;
+}
+.capsule-ghost-pill {
+  display: inline-flex;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--border-strong), 0 6px 18px rgb(0 0 0 / 16%);
+  transition: box-shadow var(--dur-slow) var(--ease-ios), background-color var(--dur-slow) var(--ease-ios);
+}
+.capsule-ghost .cm-chip { max-width: 220px; margin: 0; }
+.capsule-ghost.is-landing .capsule-ghost-pill { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
+.capsule-ghost.is-muted .capsule-ghost-pill { opacity: 0.6; }
+.capsule-ghost-caption {
+  padding: 2px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-6);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: var(--fs-11);
+  white-space: nowrap;
+}
+.capsule-ghost.is-muted .capsule-ghost-caption { color: var(--text-3); }
+.cm-drop-caret {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  width: 2px;
+  height: 20px;
+  border-radius: 1px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-softer);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease-ios);
+}
+.cm-drop-caret.is-visible { opacity: 1; }
+.composer[data-capsule-over] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-softer), 0 0 18px 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.cm-chip.is-drag-origin { opacity: 0.35; transition: opacity var(--dur-fast) var(--ease); }
+.cm-chip.is-landing { visibility: hidden; }
 .cm-chip-file { color: var(--accent); background: var(--accent-soft); }
 .cm-chip-dir { color: var(--blue); background: var(--blue-soft); }
 .cm-chip-image { color: var(--purple); background: var(--purple-soft); }

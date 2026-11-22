@@ -1,0 +1,710 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Activity Glyphs</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #121519;
+    --surface: #1a1b1f;
+    --surface-2: #222329;
+    --border: rgba(255, 255, 255, .075);
+    --border-2: rgba(255, 255, 255, .12);
+    --text: #e7e8eb;
+    --text-2: #a7abb4;
+    --text-3: #8b909a;
+    --accent: #9e8cfc;
+    --accent-soft: rgba(158, 140, 252, .14);
+    --mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+    --ui: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --ease-nav: cubic-bezier(0.32, 0.72, 0, 1);
+    font-family: var(--ui);
+    color: var(--text);
+    background: var(--bg);
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #fbfbfc;
+    --surface: #ffffff;
+    --surface-2: #f2f2f5;
+    --border: rgba(15, 18, 25, .09);
+    --border-2: rgba(15, 18, 25, .14);
+    --text: #1d2129;
+    --text-2: #4e5560;
+    --text-3: #6b717c;
+    --accent: #6e56cf;
+    --accent-soft: rgba(110, 86, 207, .09);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); }
+  .page { max-width: 1120px; margin: 0 auto; padding: 48px 24px 96px; }
+
+  header.top { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-end; justify-content: space-between; margin-bottom: 36px; }
+  .eyebrow { font: 600 11px/1 var(--mono); letter-spacing: .14em; color: var(--accent); text-transform: uppercase; }
+  h1 { margin: 12px 0 10px; font-size: 30px; font-weight: 650; letter-spacing: -.02em; }
+  .lede { margin: 0; max-width: 620px; color: var(--text-2); font-size: 14px; line-height: 1.7; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; }
+  .toggle {
+    appearance: none; border: 1px solid var(--border-2); background: var(--surface); color: var(--text-2);
+    font: 500 12px/1 var(--ui); padding: 8px 12px; border-radius: 999px; cursor: pointer;
+    transition: color .2s var(--ease-nav), border-color .2s var(--ease-nav), background .2s var(--ease-nav);
+  }
+  .toggle:hover { color: var(--text); }
+  .toggle[aria-pressed="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: var(--accent-soft); }
+
+  /* ---------- Live stage ---------- */
+  .stage { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 22px 22px 18px; margin-bottom: 56px; }
+  .stage-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .stage-title { font-size: 13px; font-weight: 600; }
+  .stage-title small { color: var(--text-3); font-weight: 400; margin-left: 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
+  .chip {
+    appearance: none; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2);
+    font: 500 11.5px/1 var(--ui); padding: 6px 10px; border-radius: 7px; cursor: pointer;
+    transition: color .2s var(--ease-nav), border-color .2s var(--ease-nav), background .2s var(--ease-nav);
+  }
+  .chip:hover { color: var(--text); }
+  .chip.on { color: var(--text); border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: var(--accent-soft); }
+  .live-rows { display: grid; gap: 4px; }
+  .live-row {
+    display: grid; grid-template-columns: 74px 1fr 64px; align-items: center; gap: 16px;
+    padding: 10px 14px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border);
+  }
+  .live-tag { font: 600 10.5px/1.3 var(--mono); color: var(--text-3); letter-spacing: .06em; }
+  .live-tag b { display: block; color: var(--text); font: 600 12px/1.4 var(--ui); letter-spacing: 0; }
+  .zoom { width: 64px; height: 40px; display: grid; place-items: center; border-left: 1px solid var(--border); }
+
+  /* Mirrors .activity-line in workbench.css */
+  .activity-line { display: flex; align-items: center; gap: 8px; min-height: 28px; font-size: 12px; color: var(--text-3); min-width: 0; }
+  .al-glyph { display: inline-flex; flex: none; width: 14px; height: 14px; }
+  .al-text { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; }
+  .al-sep { color: var(--text-3); opacity: .7; }
+  .al-elapsed { font-variant-numeric: tabular-nums; }
+  .al-detail { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; }
+  .shimmer {
+    background: linear-gradient(90deg, var(--text-3) 30%, var(--text) 50%, var(--text-3) 70%);
+    background-size: 240% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+    animation: sweep 2400ms linear infinite;
+  }
+  @keyframes sweep { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+  .swap { animation: swap-in 320ms var(--ease-nav); }
+  @keyframes swap-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+  /* ---------- Schemes ---------- */
+  section.scheme { margin-bottom: 64px; }
+  .scheme-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: end; margin-bottom: 18px; }
+  .scheme-index { font: 600 11px/1 var(--mono); color: var(--accent); letter-spacing: .14em; }
+  h2 { margin: 10px 0 8px; font-size: 21px; font-weight: 650; letter-spacing: -.01em; }
+  h2 span { color: var(--text-3); font-weight: 450; font-size: 15px; margin-left: 8px; }
+  .scheme-desc { margin: 0; color: var(--text-2); font-size: 13.5px; line-height: 1.7; max-width: 680px; }
+  .traits { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .trait { font-size: 11px; color: var(--text-2); border: 1px solid var(--border); padding: 4px 8px; border-radius: 6px; white-space: nowrap; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(164px, 1fr)); gap: 10px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px 14px 14px;
+    display: grid; justify-items: center; gap: 12px; cursor: pointer;
+    transition: border-color .25s var(--ease-nav), transform .25s var(--ease-nav);
+  }
+  .card:hover { border-color: var(--border-2); transform: translateY(-1px); }
+  .tile { width: 72px; height: 72px; border-radius: 18px; display: grid; place-items: center; background: radial-gradient(circle at 50% 45%, var(--accent-soft), transparent 70%); }
+  .card-label { font-size: 12.5px; font-weight: 600; text-align: center; }
+  .card-label small { display: block; margin-top: 3px; color: var(--text-3); font: 500 10.5px/1.2 var(--mono); }
+  .card-mini { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-3); padding: 5px 9px; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); }
+  .card-mini .g { width: 14px; height: 14px; display: inline-flex; }
+  .note { margin-top: 14px; font-size: 12.5px; color: var(--text-3); line-height: 1.7; }
+  .note b { color: var(--text-2); font-weight: 600; }
+
+  footer.impl { border-top: 1px solid var(--border); padding-top: 28px; color: var(--text-2); font-size: 13px; line-height: 1.8; }
+  footer.impl h3 { font-size: 14px; color: var(--text); margin: 0 0 8px; }
+  footer.impl ul { margin: 0; padding-left: 18px; }
+  footer.impl code { font-family: var(--mono); font-size: 12px; color: var(--text); background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+
+  svg.glyph line { stroke-linecap: round; }
+  canvas.glyph { display: block; }
+
+  @media (max-width: 640px) {
+    .page { padding: 32px 16px 72px; }
+    .scheme-head { grid-template-columns: 1fr; }
+    .traits { justify-content: flex-start; }
+    .live-row { grid-template-columns: 1fr 52px; }
+    .live-tag { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <div>
+      <div class="eyebrow">OMP Studio · Activity Line</div>
+      <h1>状态行图标：一种操作，一种动作</h1>
+      <p class="lede">替换对话底部 <code style="font-family:var(--mono)">Working</code> 左侧的旋转星芒。三套方案各自是一门统一的“动作语言”，覆盖 12 种状态；切换操作时图标会连续变形或交融过去，而不是硬切。点任意卡片可以把它送到上面的实况区看真实尺寸。</p>
+    </div>
+    <div class="controls">
+      <button class="toggle" id="t-theme" aria-pressed="false">浅色</button>
+      <button class="toggle" id="t-tint" aria-pressed="false">按操作着色</button>
+      <button class="toggle" id="t-reduce" aria-pressed="false">减弱动效</button>
+    </div>
+  </header>
+
+  <div class="stage">
+    <div class="stage-head">
+      <div class="stage-title">实况模拟<small>真实尺寸 14px · 12px 文字，与对话底部一致；右侧为 2.8× 放大</small></div>
+      <button class="toggle" id="t-play" aria-pressed="true">自动演示中</button>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div class="live-rows" id="live"></div>
+  </div>
+
+  <div id="schemes"></div>
+
+  <footer class="impl">
+    <h3>落地方式（选定后）</h3>
+    <ul>
+      <li>状态来自现有 <code>KIND_VERB</code> 的 tool kind：read / edit / write / bash / grep·glob / web / task·hub / todo，加上 thinking、responding、waiting、retry；lsp、image、mcp 等就近归类，未知 kind 回落到“工作中”。</li>
+      <li>只换 <code>.al-glyph</code> 这一处，文字、计时、文件图标不动；周期、曲线从 <code>tokens.css</code> 的 Motion 段推导，不新增字面时长。</li>
+      <li>减弱动效（<code>motionReduced()</code> / L1 档）时每种状态停在一个能认出来的静态姿势，切换也不做过渡。</li>
+      <li>开销：A 每帧只改 6 条 SVG line 的属性；B 是 25 个点的小 canvas；C 约 30 段线。都只在可见时跑一个共享 rAF。</li>
+    </ul>
+  </footer>
+</div>
+
+<script>
+(() => {
+  const TAU = Math.PI * 2, PI = Math.PI;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const fract = (x) => x - Math.floor(x);
+  const ease = (x) => (x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+  const easeOut = (x) => 1 - Math.pow(1 - x, 3);
+  const smooth = (x) => x * x * (3 - 2 * x);
+  const backOut = (x) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+  const hash = (i, j, s) => fract(Math.sin(i * 127.1 + j * 311.7 + s * 74.7) * 43758.5453);
+  const K6 = [0, 1, 2, 3, 4, 5];
+
+  const STATES = [
+    { id: "working", zh: "工作中", en: "waiting" },
+    { id: "thinking", zh: "正在思考", en: "thinking" },
+    { id: "responding", zh: "正在回复", en: "responding" },
+    { id: "read", zh: "正在读取", en: "read", detail: "ActivityLine.tsx" },
+    { id: "edit", zh: "正在修改", en: "edit · ast_edit", detail: "workbench.css" },
+    { id: "write", zh: "正在写入", en: "write", detail: "activity-glyphs.ts" },
+    { id: "bash", zh: "正在运行", en: "bash · eval", detail: "npm run check -- --only renderer" },
+    { id: "search", zh: "正在搜索", en: "grep · glob · lsp", detail: "useRunWindow" },
+    { id: "web", zh: "正在联网检索", en: "web · web_search", detail: "electron 33 release notes" },
+    { id: "agents", zh: "正在派发子 Agent", en: "task · hub", detail: "explore-renderer" },
+    { id: "todo", zh: "正在整理任务", en: "todo" },
+    { id: "retry", zh: "等待重试", en: "retry", detail: "Retry 2/5 · retry in 0:08" },
+  ];
+  const BY_ID = Object.fromEntries(STATES.map((s) => [s.id, s]));
+
+  const TINT = {
+    dark: { thinking: "#b7a3ff", read: "#7db6ff", edit: "#f2b45c", write: "#ee9bd0", bash: "#65d39c", search: "#5ccfd6", web: "#80a8ff", agents: "#c99cff", todo: "#a3d46c", retry: "#e0a23c" },
+    light: { thinking: "#7a5ae0", read: "#2f6fd6", edit: "#b26a00", write: "#b4489a", bash: "#1d8a55", search: "#11818a", web: "#3b5fd6", agents: "#8a4fd6", todo: "#4f8a14", retry: "#8f5a05" },
+  };
+
+  const opts = { tint: false, reduce: window.matchMedia("(prefers-reduced-motion: reduce)").matches };
+  let accent = "#9e8cfc";
+  const colorFor = (state) => (opts.tint && TINT[document.documentElement.dataset.theme][state]) || accent;
+
+  /* =====================================================================
+     A · 星芒变形 — six strokes. Each state returns 6 segments
+     [x1, y1, x2, y2, opacity, width] in a 16×16 box.
+     ===================================================================== */
+  const seg = (x1, y1, x2, y2, o = 1, w = 1.5) => [x1, y1, x2, y2, o, w];
+  const dot = (x, y, o = 1, w = 2.2) => [x, y, x + .01, y, o, w];
+  const arm = (th, r0, r1, o = 1, w = 1.5) => seg(8 + r0 * Math.cos(th), 8 + r0 * Math.sin(th), 8 + r1 * Math.cos(th), 8 + r1 * Math.sin(th), o, w);
+
+  const A = {
+    working: (t) => { const a = -PI / 2 + t * TAU / 3.6; return K6.map((k) => arm(a + k * TAU / 6, 0, 6.2)); },
+    thinking: (t) => {
+      const a = -PI / 2 + t * TAU / 10;
+      return K6.map((k) => { const p = Math.pow(.5 + .5 * Math.sin(t * TAU / 1.7 - k * TAU / 6), 2); return arm(a + k * TAU / 6, 1.7, 3.3 + 2.9 * p, .4 + .6 * p); });
+    },
+    responding: (t) => {
+      const d = [0, 1, 2].map((i) => { const p = fract(t / 1.25 - i * .14); const h = p < .42 ? Math.sin(p / .42 * PI) : 0; return dot(3.6 + i * 4.4, 9.2 - 2.8 * h, .4 + .6 * h, 2.4); });
+      return [...d, ...d];
+    },
+    read: (t) => {
+      const ends = [13, 13, 9.6], ys = [4.2, 8, 11.8];
+      const p = fract(t / 2.8) * 3, r = Math.floor(p), u = p - r;
+      const fade = p > 2.82 ? (3 - p) / .18 : 1;
+      const hx = 3 + u * (ends[r] - 3 - 2.6);
+      const base = ys.map((y, i) => seg(3, y, ends[i], y, i < r ? .26 + .34 * fade : .26));
+      return [...base, seg(3, ys[r], Math.max(3, hx), ys[r], .6), seg(hx, ys[r], hx + 2.6, ys[r], 1, 1.8), seg(hx + .6, ys[r], hx + 2, ys[r], 1, 1.8)];
+    },
+    edit: (t) => {
+      const f = fract(t / 2.3);
+      let n, o;
+      if (f < .28) { n = 1 - ease(f / .28); o = .5; } else if (f < .38) { n = 0; o = 1; } else if (f < .82) { n = ease((f - .38) / .44); o = 1; } else { n = 1; o = 1; }
+      const ex = 6 + 4.2 * n;
+      const typing = f >= .38 && f < .82;
+      const blink = typing ? 1 : smooth(clamp(Math.cos(TAU * t * 1.4) * 2 + .6, 0, 1));
+      return [
+        seg(3, 4.2, 13, 4.2, .3), seg(3, 11.8, 10.6, 11.8, .3), seg(3, 8, 4.6, 8, .3),
+        seg(11.8, 8, 13, 8, .3 * smooth(n)), seg(6, 8, ex, 8, o, 1.7), seg(ex + 1.1, 5.9, ex + 1.1, 10.1, blink, 1.3),
+      ];
+    },
+    write: (t) => {
+      const f = fract(t / 3.2), ends = [13, 11.4, 8.4], ys = [4.2, 8, 11.8];
+      const g = f > .9 ? 1 - (f - .9) / .1 : 1;
+      const prog = Math.min(1, f / .75) * 3, r = Math.min(2, Math.floor(prog));
+      const lines = ys.map((y, i) => { const u = clamp(prog - i, 0, 1); return seg(3, y, 3 + (ends[i] - 3) * ease(u), y, (u > 0 ? .92 : 0) * g); });
+      const cx = 3 + (ends[r] - 3) * ease(clamp(prog - r, 0, 1)) + 1.2, cy = ys[r];
+      const blink = f > .75 ? smooth(clamp(Math.cos(TAU * t * 1.4) * 2 + .6, 0, 1)) : 1;
+      const c = seg(cx, cy - 2, cx, cy + 2, blink * g, 1.3);
+      return [...lines, c, c, c];
+    },
+    bash: (t) => {
+      const f = fract(t / 1.8), nud = f < .2 ? Math.sin(f / .2 * PI) * .9 : 0;
+      const bl = smooth(clamp(Math.cos(TAU * t / 1.1) * 3 + .5, 0, 1));
+      const c = seg(9.2, 11.6, 13, 11.6, bl, 1.6);
+      return [seg(3 + nud, 4.4, 6.8 + nud, 8), seg(6.8 + nud, 8, 3 + nud, 11.6), c, c, c, c];
+    },
+    search: (t) => {
+      const cx = 8 + 1.7 * Math.sin(t * TAU / 3.1), cy = 8 + 1.3 * Math.sin(t * TAU / 2.1 + .6);
+      const f = .5 + .5 * Math.sin(t * TAU / 1.5), a = t * TAU / 7 + PI / 4, r0 = 1.9 + 1.1 * f;
+      const ticks = [0, 1, 2, 3].map((k) => { const th = a + k * PI / 2; return seg(cx + r0 * Math.cos(th), cy + r0 * Math.sin(th), cx + (r0 + 1.9) * Math.cos(th), cy + (r0 + 1.9) * Math.sin(th), .95); });
+      const d = dot(cx, cy, .3 + .7 * (1 - f), 2.2);
+      return [...ticks, d, d];
+    },
+    web: (t) => {
+      const R = 5.6, h = Math.sqrt(R * R - 3.3 * 3.3);
+      const mer = [0, 1, 2].map((k) => {
+        const ph = t * TAU / 4.2 + k * TAU / 3, x = 8 + R * Math.sin(ph);
+        const hh = Math.sqrt(Math.max(0, R * R - (x - 8) ** 2));
+        return seg(x, 8 - hh, x, 8 + hh, .14 + .86 * Math.pow(Math.max(0, Math.cos(ph)), 1.5), 1.4);
+      });
+      return [...mer, seg(8 - R, 8, 8 + R, 8, .55), seg(8 - h, 4.7, 8 + h, 4.7, .35), seg(8 - h, 11.3, 8 + h, 11.3, .35)];
+    },
+    agents: (t) => {
+      const links = [], nodes = [];
+      for (let k = 0; k < 3; k++) {
+        const th = -PI / 2 + k * TAU / 3 + t * TAU / 12, p = fract(t / 2.4 - k / 3);
+        const e = p < .38 ? ease(p / .38) : p < .72 ? 1 : 1 - ease((p - .72) / .28);
+        links.push(arm(th, 1.3, 1.3 + 3.2 * e, .9));
+        nodes.push(dot(8 + 5.7 * Math.cos(th), 8 + 5.7 * Math.sin(th), .3 + .7 * e, 2 + .8 * e));
+      }
+      return [...links, ...nodes];
+    },
+    todo: (t) => {
+      const T = 1.6, s = Math.floor(t / T), u = ease(clamp((fract(t / T) - .4) / .6, 0, 1));
+      const ys = [4.2, 8, 11.8], lens = [6.6, 5, 5.8], lines = [], buls = [];
+      for (let i = 0; i < 3; i++) {
+        const slot = ((i - s) % 3 + 3) % 3;
+        let y, x = 0, o;
+        if (slot === 0) { y = ys[0] + (ys[2] - ys[0]) * u; x = 1.6 * Math.sin(u * PI); o = .95 - .55 * u; }
+        else { y = ys[slot] + (ys[slot - 1] - ys[slot]) * u; o = slot === 1 ? .4 + .55 * u : .4; }
+        lines.push(seg(6 + x, y, 6 + x + lens[i], y, o));
+        buls.push(dot(3.3 + x, y, o, 2.2));
+      }
+      return [...lines, ...buls];
+    },
+    retry: (t) => {
+      const st = t / .95, n = Math.floor(st), f = st - n;
+      const a = -PI / 2 - (n + backOut(clamp(f / .55, 0, 1))) * TAU / 6;
+      return K6.map((k) => arm(a + k * TAU / 6, 2.3, 5.6, .18 + .82 * (1 - k / 5)));
+    },
+  };
+
+  /* =====================================================================
+     B · 点阵场 — 5×5 field; each state is v(i, j, t) ∈ [0, 1].
+     ===================================================================== */
+  const CHEV = [[0, 0], [1, 1], [2, 2], [1, 3], [0, 4]];
+  const PERIM = [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0], [4, 1], [4, 2], [4, 3], [4, 4], [3, 4], [2, 4], [1, 4], [0, 4], [0, 3], [0, 2], [0, 1]];
+  const B = {
+    working: (i, j, t) => Math.pow(.5 + .5 * Math.sin(t * TAU / 1.9 - (i + j) * .62), 2.4),
+    thinking: (i, j, t) => { const sp = .55 + .9 * hash(i, j, 1); return Math.pow(.5 + .5 * Math.sin(t * TAU * sp / 1.7 + hash(i, j, 2) * TAU), 5); },
+    responding: (i, j, t) => {
+      if (j % 2) return .02;
+      const f = fract(t / 2.8), p = f / .8 * 15, idx = (j / 2) * 5 + i, g = f > .86 ? 1 - (f - .86) / .14 : 1;
+      if (idx < Math.floor(p)) return .6 * g;
+      if (idx === Math.floor(p)) return g;
+      return .05;
+    },
+    read: (i, j, t) => {
+      if (j % 2) return .02;
+      const idx = (j / 2) * 5 + i, pos = fract(t / 2.6) * 17 - 1, d = idx - pos;
+      return Math.max(d < 0 ? .36 : .14, Math.exp(-d * d / .9));
+    },
+    edit: (i, j, t) => {
+      if (j % 2) return .02;
+      if (j !== 2) return .26;
+      const f = fract(t / 2.3);
+      let n, o;
+      if (f < .3) { n = 5 * (1 - f / .3); o = .3; } else if (f < .4) { n = 0; o = 1; } else { n = Math.min(5, 5 * (f - .4) / .42); o = 1; }
+      const c = Math.floor(n);
+      if (i < c) return o;
+      if (i === c) return f > .4 && f < .82 ? 1 : .35 + .65 * smooth(clamp(Math.cos(TAU * t * 1.4) * 2 + .6, 0, 1));
+      return .04;
+    },
+    write: (i, j, t) => {
+      if (j % 2) return .02;
+      const idx = (j / 2) * 5 + i, f = fract(t / 3), p = f / .78 * 15, g = f > .88 ? 1 - (f - .88) / .12 : 1, d = p - idx;
+      if (d < 0) return .04;
+      return g * (d < 1 ? .4 + .6 * d : Math.max(.68, 1 - (d - 1) * .1));
+    },
+    bash: (i, j, t) => {
+      const ci = CHEV.findIndex(([a, b]) => a === i && b === j);
+      if (ci >= 0) { const f = fract(t / 1.8); return .62 + .38 * Math.exp(-Math.pow(ci - f * 7 + 1, 2) / 1.2); }
+      if (j === 4 && i >= 3) return smooth(clamp(Math.cos(TAU * t / 1.1) * 3 + .5, 0, 1));
+      if (i >= 3 && j <= 2) return hash(i, j + Math.floor(t * 2.6), 3) > .55 ? .32 : .05;
+      return .02;
+    },
+    search: (i, j, t) => {
+      const cx = 2 + 1.5 * Math.sin(t * TAU / 3), cy = 2 + 1.3 * Math.sin(t * TAU / 2.2 + .7);
+      return .08 + .92 * Math.exp(-((i - cx) ** 2 + (j - cy) ** 2) / 1.0);
+    },
+    web: (i, j, t) => {
+      const d = Math.hypot(i - 2, j - 2);
+      return .05 + .95 * Math.pow(.5 + .5 * Math.cos(TAU * (d / 1.7 - t / 1.5)), 3) * (1 - d / 3.4);
+    },
+    agents: (i, j, t) => {
+      const di = i - 2, dj = j - 2;
+      if (!di && !dj) return .95;
+      if (Math.abs(di) !== Math.abs(dj)) return .02;
+      const s = Math.abs(di), order = [0, 1, 3, 2][(di > 0 ? 1 : 0) + (dj > 0 ? 2 : 0)];
+      const p = fract(t / 2.2 - order / 4) * 3.4, v = Math.exp(-((s - p) ** 2) / .3);
+      return s === 2 ? Math.max(.28, v) : v;
+    },
+    todo: (i, j, t) => {
+      if (j % 2 || i === 1) return .02;
+      const row = j / 2, f = fract(t / 3.6), step = Math.floor(f * 4);
+      if (row < step) return i === 0 ? .95 : .12;
+      if (row === step) return i === 0 ? .4 + .6 * Math.pow(.5 + .5 * Math.sin(f * 4 * TAU * 1.5 - PI / 2), 2) : .72;
+      return i === 0 ? .3 : .36;
+    },
+    retry: (i, j, t) => {
+      const p = PERIM.findIndex(([a, b]) => a === i && b === j);
+      if (p < 0) return i === 2 && j === 2 ? .35 + .25 * Math.sin(t * TAU / 1.2) : .02;
+      const d = ((p - fract(-t / 1.4) * 16) % 16 + 16) % 16;
+      return d < 6 ? Math.pow(1 - d / 6, 1.6) : .05;
+    },
+  };
+
+  /* =====================================================================
+     C · 彗迹 — one or more glowing points; the trail is the action.
+     p(t) → [[x, y, alpha], ...]; optional ghost guide.
+     ===================================================================== */
+  const CHECK = [[3.8, 8.4], [6.7, 11.3], [12.4, 4.6]];
+  const CHECK_L1 = Math.hypot(2.9, 2.9), CHECK_L = CHECK_L1 + Math.hypot(5.7, 6.7);
+  const checkPt = (u) => {
+    const s = u * CHECK_L;
+    if (s <= CHECK_L1) { const k = s / CHECK_L1; return [CHECK[0][0] + 2.9 * k, CHECK[0][1] + 2.9 * k]; }
+    const k = (s - CHECK_L1) / (CHECK_L - CHECK_L1); return [CHECK[1][0] + 5.7 * k, CHECK[1][1] - 6.7 * k];
+  };
+  const rectPt = (s) => {
+    const x0 = 2.2, x1 = 13.8, y0 = 3.2, y1 = 12.8, w = x1 - x0, h = y1 - y0;
+    if (s < w) return [x0 + s, y0]; s -= w;
+    if (s < h) return [x1, y0 + s]; s -= h;
+    if (s < w) return [x1 - s, y1]; s -= w;
+    return [x0, y1 - s];
+  };
+  const C = {
+    working: { n: 24, p: (t) => { const a = t * TAU / 1.9 - PI / 2; return [[8 + 4.8 * Math.cos(a), 8 + 4.8 * Math.sin(a), 1]]; } },
+    thinking: { n: 32, p: (t) => { const a = t * TAU / 2.8, s = Math.sin(a), c = Math.cos(a), q = 1 + s * s; return [[8 + 5.6 * c / q, 8 + 6.2 * s * c / q, 1]]; } },
+    responding: { n: 26, p: (t) => { const f = fract(t / 1.7); return [[2.6 + 10.8 * f, 8 + 2.1 * Math.sin(f * TAU * 2.2), Math.pow(Math.sin(PI * f), .35)]]; } },
+    read: {
+      n: 22, ghost: "read",
+      p: (t) => {
+        const ys = [4.4, 8, 11.6], T = .95, k = Math.floor(t / T) % 3, u = fract(t / T);
+        if (u < .8) return [[3 + 10 * (u / .8), ys[k], 1]];
+        const e = ease((u - .8) / .2), ny = ys[(k + 1) % 3];
+        return [[13 - 10 * e, ys[k] + (ny - ys[k]) * e, .55]];
+      },
+    },
+    edit: {
+      n: 28, ghost: "edit",
+      p: (t) => { const f = fract(t / 2.2), e = f < .5 ? ease(f / .5) : 1 - ease((f - .5) / .5), x = 3.6 + 8.8 * e; return [[x, 8 + .9 * Math.sin(x * 2.4), 1]]; },
+    },
+    write: {
+      n: 46, ghost: "baseline",
+      p: (t) => { const f = fract(t / 2.6), ph = TAU * 3.5 * f; return [[2.6 + 10.6 * f - 1.25 * Math.sin(ph), 10.4 - 3.2 * (.5 - .5 * Math.cos(ph)), Math.pow(Math.sin(PI * f), .3)]]; },
+    },
+    bash: { n: 30, ghost: "term", p: (t) => [[...rectPt(fract(t / 2.6) * 42.4), 1]] },
+    search: {
+      n: 22, ghost: "lens",
+      p: (t) => { const cx = 8 + 1.9 * Math.sin(t * TAU / 3.2), cy = 8 + 1.5 * Math.sin(t * TAU / 2.3 + .5), a = t * TAU / .95; return [[cx + 2.7 * Math.cos(a), cy + 2.7 * Math.sin(a), 1]]; },
+    },
+    web: {
+      n: 26, ghost: "globe",
+      p: (t) => {
+        const a = t * TAU / 1.7, r = t * TAU / 8, ex = 5.4 * Math.cos(a), ey = 1.9 * Math.sin(a);
+        return [[8 + ex * Math.cos(r) - ey * Math.sin(r), 8 + ex * Math.sin(r) + ey * Math.cos(r), Math.sin(a) > 0 ? 1 : .35 + .65 * (1 + Math.sin(a))]];
+      },
+    },
+    agents: {
+      n: 20, ghost: "hub",
+      p: (t) => [0, 1, 2].map((k) => {
+        const f = fract(t / 1.9 - k / 3), r = 1.2 + 4.9 * easeOut(f), th = -PI / 2 + k * TAU / 3 + 1.1 * f + t * .2;
+        return [8 + r * Math.cos(th), 8 + r * Math.sin(th), Math.pow(Math.sin(PI * Math.min(1, f * 1.1)), .6)];
+      }),
+    },
+    todo: { n: 18, ghost: "check", p: (t) => { const f = fract(t / 2); return [[...checkPt(ease(clamp(f / .55, 0, 1))), f > .85 ? 1 - (f - .85) / .15 : 1]]; } },
+    retry: { n: 28, ghost: "ring", p: (t) => { const ph = t * TAU / 1.5, a = -(ph + .8 * Math.sin(ph)) - PI / 2; return [[8 + 4.8 * Math.cos(a), 8 + 4.8 * Math.sin(a), 1]]; } },
+  };
+
+  function line(ctx, x1, y1, x2, y2, w) { ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
+  function ghost(ctx, kind, t, a) {
+    ctx.lineCap = "round";
+    const g = (o) => { ctx.globalAlpha = o * a; };
+    switch (kind) {
+      case "read": g(.13); [4.4, 8, 11.6].forEach((y) => line(ctx, 3, y, 13, y, 1.3)); break;
+      case "edit": g(.13); line(ctx, 3, 4.4, 13, 4.4, 1.3); line(ctx, 3, 11.6, 10.5, 11.6, 1.3); break;
+      case "baseline": g(.14); line(ctx, 2.6, 12.6, 13.4, 12.6, 1.1); break;
+      case "term": {
+        g(.5); line(ctx, 4.8, 6.1, 6.8, 8, 1.3); line(ctx, 6.8, 8, 4.8, 9.9, 1.3);
+        g(.5 * smooth(clamp(Math.cos(TAU * t / 1.1) * 3 + .5, 0, 1))); line(ctx, 8.3, 9.9, 11, 9.9, 1.3);
+        g(.1); ctx.lineWidth = 1; ctx.strokeRect(2.2, 3.2, 11.6, 9.6);
+        break;
+      }
+      case "lens": { g(.35); const cx = 8 + 1.9 * Math.sin(t * TAU / 3.2), cy = 8 + 1.5 * Math.sin(t * TAU / 2.3 + .5); ctx.beginPath(); ctx.arc(cx, cy, .9, 0, TAU); ctx.fill(); break; }
+      case "globe": {
+        g(.15); ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(8, 8, 5.4, 0, TAU); ctx.stroke();
+        g(.1); ctx.beginPath(); ctx.ellipse(8, 8, 5.4, 1.9, t * TAU / 8, 0, TAU); ctx.stroke(); break;
+      }
+      case "hub": g(.85); ctx.beginPath(); ctx.arc(8, 8, 1.2, 0, TAU); ctx.fill(); break;
+      case "check": {
+        const f = fract(t / 2), u = ease(clamp(f / .55, 0, 1)), fade = f > .85 ? 1 - (f - .85) / .15 : 1;
+        g(.5 * fade); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(CHECK[0][0], CHECK[0][1]);
+        for (let k = 1; k <= 20; k++) { const q = checkPt(u * k / 20); ctx.lineTo(q[0], q[1]); }
+        ctx.stroke(); break;
+      }
+      case "ring": g(.1); ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(8, 8, 4.8, 0, TAU); ctx.stroke(); break;
+    }
+  }
+  function drawComet(ctx, id, t, a, color) {
+    const def = C[id], N = def.n, dt = .018;
+    ctx.strokeStyle = color; ctx.fillStyle = color;
+    if (def.ghost) ghost(ctx, def.ghost, t, a);
+    const S = []; for (let k = 0; k <= N; k++) S.push(def.p(t - k * dt));
+    ctx.lineCap = "round";
+    for (let m = 0; m < S[0].length; m++) {
+      for (let k = 0; k < N; k++) {
+        const p0 = S[k][m], p1 = S[k + 1][m];
+        if (Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) > 3.2) break;
+        const q = 1 - k / N;
+        ctx.globalAlpha = Math.pow(q, 1.5) * p0[2] * .95 * a;
+        line(ctx, p0[0], p0[1], p1[0], p1[1], 1.7 * q + .25);
+      }
+      const [x, y, o] = S[0][m];
+      ctx.globalAlpha = .14 * o * a; ctx.beginPath(); ctx.arc(x, y, 2.7, 0, TAU); ctx.fill();
+      ctx.globalAlpha = .28 * o * a; ctx.beginPath(); ctx.arc(x, y, 1.75, 0, TAU); ctx.fill();
+      ctx.globalAlpha = o * a; ctx.beginPath(); ctx.arc(x, y, 1.05, 0, TAU); ctx.fill();
+    }
+  }
+
+  /* =====================================================================
+     Icon instances + one shared frame loop.
+     ===================================================================== */
+  const NS = "http://www.w3.org/2000/svg";
+  const instances = [];
+  const POSE = { working: .2, thinking: .55, responding: .25, read: 1.4, edit: 1.6, write: 2.1, bash: .1, search: .6, web: .5, agents: .5, todo: 1.15, retry: .3 };
+
+  function makeIcon(host, scheme, size, state) {
+    const inst = { scheme, size, state, prev: null, t0: -1e9, from: null, cur: null, visible: true };
+    if (scheme === "A") {
+      const svg = document.createElementNS(NS, "svg");
+      svg.setAttribute("viewBox", "0 0 16 16"); svg.setAttribute("width", size); svg.setAttribute("height", size);
+      svg.setAttribute("class", "glyph"); svg.style.overflow = "visible";
+      inst.lines = K6.map(() => { const l = document.createElementNS(NS, "line"); svg.appendChild(l); return l; });
+      inst.svg = svg; host.appendChild(svg);
+    } else {
+      const cv = document.createElement("canvas"), dpr = Math.max(1, window.devicePixelRatio || 1);
+      cv.width = Math.round(size * dpr); cv.height = Math.round(size * dpr);
+      cv.style.width = size + "px"; cv.style.height = size + "px"; cv.className = "glyph";
+      inst.ctx = cv.getContext("2d"); inst.scale = dpr * size / 16; host.appendChild(cv);
+    }
+    inst.set = (next) => {
+      if (next === inst.state) return;
+      inst.prev = inst.state; inst.state = next; inst.t0 = performance.now();
+      inst.from = inst.cur ? inst.cur.map((s) => s.slice()) : null;
+    };
+    instances.push(inst);
+    return inst;
+  }
+
+  function render(inst, now) {
+    const tNow = now / 1000, t = opts.reduce ? POSE[inst.state] : tNow;
+    const dt = opts.reduce ? 1e9 : now - inst.t0, color = colorFor(inst.state);
+    if (inst.scheme === "A") {
+      const target = A[inst.state](t);
+      let segs = target;
+      if (inst.from && dt < 560) {
+        segs = target.map((s, i) => { const e = ease(clamp((dt - i * 24) / 420, 0, 1)); return s.map((v, j) => inst.from[i][j] + (v - inst.from[i][j]) * e); });
+      } else inst.from = null;
+      inst.cur = segs;
+      inst.svg.style.color = color;
+      segs.forEach((s, i) => {
+        const l = inst.lines[i];
+        l.setAttribute("x1", s[0].toFixed(3)); l.setAttribute("y1", s[1].toFixed(3));
+        l.setAttribute("x2", s[2].toFixed(3)); l.setAttribute("y2", s[3].toFixed(3));
+        l.setAttribute("stroke", "currentColor"); l.setAttribute("stroke-opacity", clamp(s[4], 0, 1).toFixed(3)); l.setAttribute("stroke-width", s[5].toFixed(3));
+      });
+      return;
+    }
+    const ctx = inst.ctx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.setTransform(inst.scale, 0, 0, inst.scale, 0, 0);
+    const e = inst.prev && dt < 420 ? ease(dt / 420) : 1;
+    if (inst.scheme === "B") {
+      ctx.fillStyle = color;
+      const fN = B[inst.state], fP = e < 1 ? B[inst.prev] : null;
+      for (let j = 0; j < 5; j++) for (let i = 0; i < 5; i++) {
+        let v = fN(i, j, t); if (fP) v = fP(i, j, t) + (v - fP(i, j, t)) * e;
+        v = clamp(v, 0, 1);
+        const small = inst.size < 24;
+        ctx.globalAlpha = (small ? .2 : .13) + (small ? .8 : .87) * v;
+        ctx.beginPath(); ctx.arc(2.2 + i * 2.9, 2.2 + j * 2.9, (small ? .68 : .5) + .74 * v, 0, TAU); ctx.fill();
+      }
+    } else {
+      if (e < 1) drawComet(ctx, inst.prev, t, 1 - e, colorFor(inst.prev));
+      drawComet(ctx, inst.state, t, e, color);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function frame(now) {
+    for (const inst of instances) if (inst.visible) render(inst, now);
+    tickDemo(now);
+    requestAnimationFrame(frame);
+  }
+
+  /* ---------- Page ---------- */
+  const SCHEMES = [
+    {
+      key: "A", index: "A / ASTERISK MORPH", zh: "星芒变形", en: "Asterisk Morph",
+      desc: "保留现在的星芒作为“待命”形态。它的六根笔画在操作切换时飞散、重组成新字形：三行文本、闪烁的光标、终端提示符、旋转的经纬地球、分叉的节点……同一组笔画贯穿全部状态，品牌连续性最强，也最“精密仪器”。",
+      traits: ["6 笔画连续变形", "SVG 矢量", "辨识度 ★★★★"],
+      note: "<b>适合：</b>想保留现有识别符号，同时让每个操作一眼可辨。切换时的“散开—重组”是这套的灵魂，请在上方实况里看。",
+    },
+    {
+      key: "B", index: "B / DOT FIELD", zh: "点阵场", en: "Dot Field",
+      desc: "一块 5×5 的微型 LED 点阵。每种操作是一段在点阵上流动的“光的函数”：按阅读顺序扫过、逐点写入、删掉一行再重打、提示符旁的输出滚动、放大镜在点阵上移动（被扫到的点会被放大）、涟漪外扩、对角线派发……抽象但非常统一，像设备的状态灯。",
+      traits: ["25 点函数驱动", "Canvas", "统一感 ★★★★★"],
+      note: "<b>适合：</b>偏好克制、科技感的界面。不同操作的节奏差异明显，余光里也能分辨“在读”还是“在写”。状态之间做的是逐点交融。",
+    },
+    {
+      key: "C", index: "C / COMET TRAIL", zh: "彗迹", en: "Comet Trail",
+      desc: "一颗带拖尾的光点，运动轨迹本身就是动作：逐行扫读并回车换行、连笔书写成圈、沿终端框巡游、绕着移动的焦点打转、在倾斜轨道上环绕地球、三颗流星从中心派发出去、画出一个对勾……最灵动、最有生命感。",
+      traits: ["轨迹即语义", "Canvas 拖尾", "灵动感 ★★★★★"],
+      note: "<b>适合：</b>希望状态行更有“它正在干活”的生命感。淡色辅助线（文本行、终端框、地球轮廓）帮助在 14px 下认出操作；拖尾长度按动作节奏单独调过。",
+    },
+  ];
+
+  const schemesEl = document.getElementById("schemes");
+  for (const sc of SCHEMES) {
+    const sec = document.createElement("section");
+    sec.className = "scheme";
+    sec.innerHTML = `
+      <div class="scheme-head">
+        <div>
+          <div class="scheme-index">${sc.index}</div>
+          <h2>${sc.zh}<span>${sc.en}</span></h2>
+          <p class="scheme-desc">${sc.desc}</p>
+        </div>
+        <div class="traits">${sc.traits.map((x) => `<span class="trait">${x}</span>`).join("")}</div>
+      </div>
+      <div class="grid"></div>
+      <p class="note">${sc.note}</p>`;
+    const grid = sec.querySelector(".grid");
+    for (const st of STATES) {
+      const card = document.createElement("div");
+      card.className = "card"; card.title = "点击在实况区查看";
+      card.innerHTML = `<div class="tile"></div><div class="card-label">${st.zh}<small>${st.en}</small></div><div class="card-mini"><span class="g"></span><span>14px</span></div>`;
+      makeIcon(card.querySelector(".tile"), sc.key, 46, st.id);
+      makeIcon(card.querySelector(".g"), sc.key, 14, st.id);
+      card.addEventListener("click", () => { pin(st.id); document.querySelector(".stage").scrollIntoView({ behavior: "smooth", block: "start" }); });
+      grid.appendChild(card);
+    }
+    schemesEl.appendChild(sec);
+  }
+
+  /* ---------- Live stage ---------- */
+  const live = document.getElementById("live");
+  const liveRows = SCHEMES.map((sc) => {
+    const row = document.createElement("div");
+    row.className = "live-row";
+    row.innerHTML = `
+      <div class="live-tag">${sc.key}<b>${sc.zh}</b></div>
+      <div class="activity-line"><span class="al-glyph"></span><span class="al-text"></span></div>
+      <div class="zoom"></div>`;
+    live.appendChild(row);
+    return {
+      text: row.querySelector(".al-text"),
+      small: makeIcon(row.querySelector(".al-glyph"), sc.key, 14, "working"),
+      big: makeIcon(row.querySelector(".zoom"), sc.key, 36, "working"),
+    };
+  });
+
+  const SEQ = [
+    ["working", 1800], ["thinking", 3000], ["read", 2800], ["search", 2600], ["read", 2200], ["edit", 3200],
+    ["bash", 3200], ["web", 2800], ["agents", 3200], ["write", 3200], ["todo", 2600], ["responding", 3200], ["retry", 2800],
+  ];
+  const startedAt = performance.now() - 42000;
+  let playing = true, seqIndex = 0, seqUntil = 0, current = "working", lastSec = -1;
+
+  function lineHTML(id) {
+    const st = BY_ID[id];
+    if (id === "working") return `<span class="al-label shimmer">Working</span>`;
+    if (id === "retry") return `<span class="al-label shimmer">Working</span><span class="al-sep">·</span><span class="al-detail" style="font-family:var(--ui)">${st.detail}</span>`;
+    const secs = Math.floor((performance.now() - startedAt) / 1000);
+    const el = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+    return `<span class="al-label">Working</span><span class="al-sep">·</span><span class="al-elapsed">${el}</span><span class="al-sep">·</span>` +
+      `<span class="al-op shimmer swap">${st.zh}</span>${st.detail ? `<span class="al-detail swap">${st.detail}</span>` : ""}`;
+  }
+  function apply(id) {
+    current = id;
+    for (const r of liveRows) { r.small.set(id); r.big.set(id); r.text.innerHTML = lineHTML(id); }
+    document.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.dataset.id === id));
+  }
+  function tickDemo(now) {
+    if (playing && now >= seqUntil) {
+      const [id, ms] = SEQ[seqIndex % SEQ.length];
+      seqIndex++; seqUntil = now + ms; apply(id);
+    }
+    const sec = Math.floor((now - startedAt) / 1000);
+    if (sec !== lastSec) {
+      lastSec = sec;
+      const el = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+      for (const r of liveRows) { const n = r.text.querySelector(".al-elapsed"); if (n) n.textContent = el; }
+    }
+  }
+  const playBtn = document.getElementById("t-play");
+  function setPlaying(on) { playing = on; playBtn.setAttribute("aria-pressed", String(on)); playBtn.textContent = on ? "自动演示中" : "继续自动演示"; if (on) seqUntil = 0; }
+  function pin(id) { setPlaying(false); apply(id); }
+  playBtn.addEventListener("click", () => setPlaying(!playing));
+
+  const chips = document.getElementById("chips");
+  for (const st of STATES) {
+    const b = document.createElement("button");
+    b.className = "chip"; b.dataset.id = st.id; b.textContent = st.zh;
+    b.addEventListener("click", () => pin(st.id));
+    chips.appendChild(b);
+  }
+
+  /* ---------- Toggles ---------- */
+  const readAccent = () => { accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || accent; };
+  const bindToggle = (id, fn, initial) => {
+    const el = document.getElementById(id);
+    el.setAttribute("aria-pressed", String(initial));
+    el.addEventListener("click", () => { const on = el.getAttribute("aria-pressed") !== "true"; el.setAttribute("aria-pressed", String(on)); fn(on); });
+  };
+  bindToggle("t-theme", (on) => { document.documentElement.dataset.theme = on ? "light" : "dark"; readAccent(); }, false);
+  bindToggle("t-tint", (on) => { opts.tint = on; }, false);
+  bindToggle("t-reduce", (on) => { opts.reduce = on; }, opts.reduce);
+
+  const io = new IntersectionObserver((entries) => {
+    for (const en of entries) for (const inst of instances) if (en.target.contains(inst.svg || inst.ctx.canvas)) inst.visible = en.isIntersecting;
+  }, { rootMargin: "80px" });
+  document.querySelectorAll(".card, .live-row").forEach((el) => io.observe(el));
+
+  readAccent();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

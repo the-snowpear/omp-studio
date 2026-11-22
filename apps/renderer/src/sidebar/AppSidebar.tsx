@@ -17,7 +17,6 @@ import type { ClientBootstrap, SessionId, StudioClient, WorkspaceId, WorkspaceFi
 import { AppIcon, Icon } from "../icons";
 import { MenuItem } from "../menus";
 import { useI18n } from "../i18n";
-import { SHORTCUTS, formatShortcut } from "../keyboard/shortcuts";
 import { fileLabel } from "../composer/types";
 import { formatRuntimeClassification, formatRuntimeStatusLabel, runtimeCanReconnect, runtimeCanRestart } from "../diagnosticsModel";
 import { SkillsDrawer } from "../SkillsDrawer";
@@ -47,6 +46,8 @@ import { CopySessionMenuItem } from "../composer/SessionReferences";
 import { useExecutionTarget } from "../workspaces/ExecutionTargets";
 import { previewSessionId } from "../preview/fixtures";
 import { PROJECT_THREADS_INITIAL } from "../workbench/sessionSelection";
+import { fileManagerName } from "../platformCopy";
+import type { SelectedProject } from "../workbench/sessionSelection";
 
 function relativeTime(iso: string, zh: boolean): string {
   const then = Date.parse(iso);
@@ -269,6 +270,27 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
   const runRowAction = (action?: () => void) => {
     setOpenRowMenuId(null);
     action?.();
+  };
+  const projectMenu = (project: SelectedProject, open: boolean, previewProject: boolean) => {
+    const projectMenuId = `project:${project.id}`;
+    const shellReason = previewProject
+      ? (marks ? t("common.unavailableInPreview") : t("common.unavailable"))
+      : chrome.projectShellUnavailable ?? (chrome.projectShellAction !== null ? t("common.opening") : undefined);
+    return <ThreadRowMenu
+      id={projectMenuId}
+      openId={openRowMenuId}
+      onToggle={setOpenRowMenuId}
+      contextPoint={null}
+      menu={<>
+        <div className="menu-label">{project.name}</div>
+        <MenuItem icon="plus" onClick={() => runRowAction(() => chrome.onStartChatInProject(project))}>{t("shell.newChatInProject")}</MenuItem>
+        <div className="menu-sep" />
+        <MenuItem icon="external" disabled={shellReason !== undefined} title={shellReason} onClick={() => runRowAction(() => chrome.onOpenProjectInEditor(project))}>{t("shell.openInEditor")}</MenuItem>
+        <MenuItem icon="folder-open" disabled={shellReason !== undefined} title={shellReason} onClick={() => runRowAction(() => chrome.onOpenProjectDirectory(project))}>{t("shell.openInExplorer", { fileManager: fileManagerName(t) })}</MenuItem>
+        <div className="menu-sep" />
+        <MenuItem icon={open ? "chevron-u" : "chevron-d"} onClick={() => runRowAction(() => chrome.onToggleProject(project))}>{open ? t("common.collapse") : t("common.expand")}</MenuItem>
+      </>}
+    />;
   };
   /** 行右键：光标处打开同一弹层，并抑制原生上下文菜单。 */
   const openRowMenuAtCursor = (event: ReactMouseEvent, id: string) => {
@@ -519,7 +541,6 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
         <button className="action-row new-convo-btn" aria-label={t("nav.newChat")} onClick={() => chrome.onStartNewChat()}>
           <Icon name="plus" />
           <span className="lbl">{t("nav.newChat")}</span>
-          <span className="meta"><span className="hint">{formatShortcut(SHORTCUTS.newChat)}</span></span>
         </button>
         <button className="action-row skills-btn" aria-label={t("skills.sidebarAction")} aria-expanded={chrome.skillsOpen} aria-controls="skillsDrawer" onClick={chrome.onToggleSkills}>
           <Icon name="layers" />
@@ -573,9 +594,9 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                       {project.dirty > 0 ? <span className="muted tiny">{project.dirty}</span> : null}
                     </span>
                   </button>
-                  {/* 悬停浮现的操作区：最右 + 在此项目下新建会话，其左 ⋯ 更多（功能未接入） */}
+                  {/* 悬停浮现的操作区：项目菜单与新建会话。 */}
                   <span className="p-actions">
-                    <button type="button" className="icon-btn" data-tip={t("common.moreNotImplemented")} aria-label={t("common.moreActions")} disabled><Icon name="more" extra="sm" /></button>
+                    {projectMenu({ id: project.id, name: project.name }, open, true)}
                     <button type="button" className="icon-btn" data-tip={t("shell.newChatInProject")} aria-label={t("shell.newChatInProject")} onClick={() => chrome.onStartChatInProject({ id: project.id, name: project.name })}><Icon name="plus" extra="sm" /></button>
                   </span>
                 </div>
@@ -598,7 +619,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                           className={`thread${chrome.previewThreadId === thread.id ? " active" : ""}`}
                           aria-current={chrome.previewThreadId === thread.id ? "page" : undefined}
                           data-window-drag={mdi ? "" : undefined}
-                          onPointerDown={event => { if (mdi) dragConversation(event, mdi.store, { ref: { targetId: mdi.document.ref.targetId, workspaceId: project.id, previewProjectId: project.id, previewThreadId: thread.id }, title: thread.title }); }}
+                          onPointerDown={event => { if (mdi) dragConversation(event, mdi.store, { ref: { targetId: mdi.document.ref.targetId, workspaceId: project.id, previewProjectId: project.id, previewThreadId: thread.id }, title: thread.title, identity: thread.msgs > 0 ? { sessionId: previewSessionId(thread.id), source: { targetId: null, workspaceId: project.id as WorkspaceId, workspaceName: project.name, previewThreadId: thread.id, title: thread.title }, messages: [] } : undefined }); }}
                           onClick={() => chrome.onSelectPreviewThread(thread.id)}
                         >
                           <ThreadSpin running={running} />
@@ -690,9 +711,9 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                         {waitingCount > 0 ? <span className="chip amber xs" aria-label={zh ? `等待 ${waitingCount}` : `${waitingCount} waiting`}>{waitingCount}</span> : null}
                       </span>
                     </button>
-                    {/* 悬停浮现的操作区：最右 + 在此项目下新建会话，其左 ⋯ 更多（功能未接入） */}
+                    {/* 悬停浮现的操作区：项目菜单与新建会话。 */}
                     <span className="p-actions">
-                      <button type="button" className="icon-btn" data-tip={t("common.moreNotImplemented")} aria-label={t("common.moreActions")} disabled><Icon name="more" extra="sm" /></button>
+                      {projectMenu({ id: workspace.workspaceId, name: workspace.name }, open, false)}
                       <button type="button" className="icon-btn" data-tip={t("shell.newChatInProject")} aria-label={t("shell.newChatInProject")} onClick={() => chrome.onStartChatInProject({ id: workspace.workspaceId, name: workspace.name })}><Icon name="plus" extra="sm" /></button>
                     </span>
                   </div>

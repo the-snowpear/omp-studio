@@ -696,6 +696,16 @@ export function AgentHubPage({
     selectedId: selected,
     // The lead is the main conversation, not a Hub member: its row has nothing to show here.
     onSelect: (id) => { if (inRoster(id)) select(id); },
+    onClear: () => {
+      setSelectedBySession((prev) => {
+        if (!(sessionKey in prev)) return prev;
+        const next = { ...prev };
+        delete next[sessionKey];
+        return next;
+      });
+      setChatOpen(false);
+      setDrawerOpen(false);
+    },
   };
   const deckLinks: DeckLinks = {
     onOpen: (row: DeckAgent) => {

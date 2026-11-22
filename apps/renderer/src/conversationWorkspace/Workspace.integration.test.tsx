@@ -1119,3 +1119,89 @@ describe("conversation windows", () => {
     expect(windowTabs()).toHaveLength(3);
   });
 });
+
+describe("dragging onto the input box", () => {
+  const rowFor = (title: string) => waitFor(() => {
+    const found = [...document.querySelectorAll("#projectList .thread")].find(element => element.textContent?.includes(title));
+    expect(found).toBeDefined();
+    return found!;
+  });
+  const geometry = () => {
+    vi.spyOn(document.querySelector<HTMLElement>("[data-conversation-canvas]")!, "getBoundingClientRect").mockReturnValue(new DOMRect(300, 40, 1100, 800));
+    vi.spyOn(document.querySelector<HTMLElement>("[data-dock-workbench]")!, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 40, 1400, 900));
+  };
+  const under = (elements: () => Element[]) => Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: vi.fn(elements) });
+
+  it.each([false, true])("turns a sidebar conversation into a capsule in the input box without opening a window (preview=%s)", async preview => {
+    const openContext = vi.fn();
+    await mount(preview, client({ openContext }));
+    geometry();
+    const editor = document.querySelector<HTMLElement>(".cw-main-conversation [contenteditable=true]")!;
+    editor.textContent = "compare with"; fireEvent.input(editor);
+    under(() => [editor]);
+    const title = preview ? "Audit and fix OSS" : "Second conversation";
+    fireEvent.pointerDown(await rowFor(title), { button: 0, clientX: 180, clientY: 250 });
+    fireEvent.pointerMove(window, { clientX: 760, clientY: 700 });
+    await waitFor(() => expect(document.querySelector(".capsule-ghost")?.textContent).toContain(title));
+    expect(editor.closest(".composer")?.hasAttribute("data-capsule-over")).toBe(true);
+    fireEvent.pointerUp(window, { clientX: 760, clientY: 700 });
+    await waitFor(() => expect(editor.querySelector(".cm-chip-session")?.textContent).toContain(title));
+    expect(editor.textContent).toContain("compare with");
+    expect(editor.closest(".composer")?.hasAttribute("data-capsule-over")).toBe(false);
+    expect(document.querySelector(".capsule-ghost")).toBeNull();
+    expect(document.querySelectorAll("[data-conversation-view].dock-conversation-window")).toHaveLength(0);
+    expect(openContext).not.toHaveBeenCalled();
+  });
+
+  it("drops a conversation window into another input box and leaves the window where it was", async () => {
+    await mount(false);
+    geometry();
+    under(() => []);
+    fireEvent.pointerDown(await rowFor("Second conversation"), { button: 0, clientX: 180, clientY: 250 });
+    fireEvent.pointerMove(window, { clientX: 760, clientY: 340 });
+    fireEvent.pointerUp(window, { clientX: 760, clientY: 340 });
+    const frame = await waitFor(() => { const found = document.querySelector<HTMLElement>("[data-conversation-view].dock-conversation-window"); expect(found).not.toBeNull(); return found!; });
+    await waitFor(() => expect(document.querySelector(".dock-drag-preview, .cw-content-loading")).toBeNull());
+    const before = { left: frame.style.left, top: frame.style.top };
+    const main = document.querySelector<HTMLElement>(".cw-main-conversation [contenteditable=true]")!;
+    const own = frame.querySelector<HTMLElement>("[contenteditable=true]");
+    under(() => own ? [own] : []);
+    fireEvent.pointerDown(frame.querySelector(".dock-float-titlebar")!, { button: 0, clientX: 760, clientY: 350 });
+    fireEvent.pointerMove(window, { clientX: 780, clientY: 700 });
+    await waitFor(() => expect(document.querySelector(".dock-drag-preview")).not.toBeNull());
+    // Its own input box is not a target: the window keeps its shape.
+    expect(document.querySelector(".capsule-ghost")).toBeNull();
+    under(() => [main]);
+    fireEvent.pointerMove(window, { clientX: 790, clientY: 710 });
+    await waitFor(() => expect(document.querySelector(".capsule-ghost")?.textContent).toContain("Second conversation"));
+    fireEvent.pointerUp(window, { clientX: 790, clientY: 710 });
+    await waitFor(() => expect(main.querySelector(".cm-chip-session")?.textContent).toContain("Second conversation"));
+    await waitFor(() => expect(document.querySelector(".dock-drag-preview")).toBeNull());
+    expect(frame.isConnected).toBe(true);
+    expect({ left: frame.style.left, top: frame.style.top }).toEqual(before);
+    expect(frame.classList.contains("dock-drag-source")).toBe(false);
+  });
+
+  it("opens a session capsule dragged out of the input box and takes it out of the box", async () => {
+    const openContext = vi.fn();
+    await mount(false, client({ openContext }));
+    geometry();
+    const editor = document.querySelector<HTMLElement>(".cw-main-conversation [contenteditable=true]")!;
+    under(() => [editor]);
+    fireEvent.pointerDown(await rowFor("Third conversation"), { button: 0, clientX: 180, clientY: 250 });
+    fireEvent.pointerMove(window, { clientX: 760, clientY: 700 });
+    fireEvent.pointerUp(window, { clientX: 760, clientY: 700 });
+    const chip = await waitFor(() => { const found = editor.querySelector<HTMLElement>(".cm-chip-session"); expect(found).not.toBeNull(); return found!; });
+    fireEvent.pointerDown(chip, { button: 0, clientX: 760, clientY: 700 });
+    fireEvent.pointerMove(window, { clientX: 770, clientY: 705 });
+    expect(chip.classList.contains("is-drag-origin")).toBe(true);
+    under(() => []);
+    fireEvent.pointerMove(window, { clientX: 760, clientY: 340 });
+    await waitFor(() => expect(document.querySelector(".dock-drag-preview")?.textContent).toContain("Third conversation"));
+    fireEvent.pointerUp(window, { clientX: 760, clientY: 340 });
+    await waitFor(() => expect(document.querySelectorAll("[data-conversation-view].dock-conversation-window")).toHaveLength(1));
+    expect(editor.querySelector(".cm-chip-session")).toBeNull();
+    expect(openContext).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "third-session" }));
+  });
+
+});

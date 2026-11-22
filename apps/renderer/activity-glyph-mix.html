@@ -1,0 +1,707 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Activity Glyph Mixer</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #121519;
+    --surface: #1a1b1f;
+    --surface-2: #222329;
+    --border: rgba(255, 255, 255, .075);
+    --border-2: rgba(255, 255, 255, .13);
+    --text: #e7e8eb;
+    --text-2: #a7abb4;
+    --text-3: #8b909a;
+    --accent: #9e8cfc;
+    --accent-soft: rgba(158, 140, 252, .14);
+    --mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+    --ui: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --ease-nav: cubic-bezier(0.32, 0.72, 0, 1);
+    font-family: var(--ui);
+    color: var(--text);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #fbfbfc;
+    --surface: #ffffff;
+    --surface-2: #f2f2f5;
+    --border: rgba(15, 18, 25, .09);
+    --border-2: rgba(15, 18, 25, .16);
+    --text: #1d2129;
+    --text-2: #4e5560;
+    --text-3: #6b717c;
+    --accent: #6e56cf;
+    --accent-soft: rgba(110, 86, 207, .09);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); }
+  .page { max-width: 1120px; margin: 0 auto; padding: 44px 24px 96px; }
+  header.top { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-end; justify-content: space-between; margin-bottom: 28px; }
+  .eyebrow { font: 600 11px/1 var(--mono); letter-spacing: .14em; color: var(--accent); text-transform: uppercase; }
+  h1 { margin: 12px 0 10px; font-size: 28px; font-weight: 650; letter-spacing: -.02em; }
+  .lede { margin: 0; max-width: 660px; color: var(--text-2); font-size: 14px; line-height: 1.7; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; }
+  .toggle {
+    appearance: none; border: 1px solid var(--border-2); background: var(--surface); color: var(--text-2);
+    font: 500 12px/1 var(--ui); padding: 8px 12px; border-radius: 999px; cursor: pointer;
+    transition: color .2s var(--ease-nav), border-color .2s var(--ease-nav), background .2s var(--ease-nav);
+  }
+  .toggle:hover { color: var(--text); }
+  .toggle[aria-pressed="true"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: var(--accent-soft); }
+
+  .stage {
+    position: sticky; top: 12px; z-index: 5;
+    background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(14px);
+    border: 1px solid var(--border); border-radius: 16px; padding: 16px 18px; margin-bottom: 40px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .18);
+  }
+  .stage-top { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center; }
+  .live-line { display: flex; align-items: center; gap: 18px; min-width: 0; }
+  .zoom { flex: none; width: 56px; height: 56px; border-radius: 14px; display: grid; place-items: center; background: var(--bg); border: 1px solid var(--border); }
+  .activity-line { display: flex; align-items: center; gap: 8px; min-height: 28px; font-size: 12px; color: var(--text-3); min-width: 0; }
+  .al-glyph { display: inline-flex; flex: none; width: 14px; height: 14px; }
+  .al-text { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; }
+  .al-sep { opacity: .7; }
+  .al-elapsed { font-variant-numeric: tabular-nums; }
+  .al-detail { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; }
+  .shimmer {
+    background: linear-gradient(90deg, var(--text-3) 30%, var(--text) 50%, var(--text-3) 70%);
+    background-size: 240% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+    animation: sweep 2400ms linear infinite;
+  }
+  @keyframes sweep { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+  .swap { animation: swap-in 320ms var(--ease-nav); }
+  @keyframes swap-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .chip {
+    appearance: none; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2);
+    font: 500 11.5px/1 var(--ui); padding: 6px 9px 6px 7px; border-radius: 7px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: color .2s var(--ease-nav), border-color .2s var(--ease-nav), background .2s var(--ease-nav);
+  }
+  .chip .g { width: 14px; height: 14px; display: inline-flex; }
+  .chip:hover { color: var(--text); }
+  .chip.on { color: var(--text); border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: var(--accent-soft); }
+  .combo { margin-top: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font: 500 11px/1.5 var(--mono); color: var(--text-3); }
+  .combo code { color: var(--text-2); word-break: break-all; }
+  .copy { appearance: none; border: 1px solid var(--border-2); background: transparent; color: var(--text-2); font: 500 11px/1 var(--ui); padding: 5px 9px; border-radius: 6px; cursor: pointer; }
+  .copy:hover { color: var(--text); }
+
+  .group-title { margin: 8px 0 4px; font: 600 11px/1 var(--mono); letter-spacing: .12em; color: var(--text-3); text-transform: uppercase; }
+  .state { display: grid; grid-template-columns: 148px 1fr; gap: 20px; padding: 22px 0; border-top: 1px solid var(--border); }
+  .state-name { font-size: 15px; font-weight: 650; }
+  .state-name small { display: block; margin-top: 4px; color: var(--text-3); font: 500 10.5px/1.4 var(--mono); }
+  .cands { display: grid; grid-template-columns: repeat(auto-fill, minmax(214px, 1fr)); gap: 10px; }
+  .cand {
+    position: relative; appearance: none; text-align: left; font: inherit; color: inherit;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px;
+    display: grid; grid-template-columns: 64px 1fr; gap: 14px; align-items: center; cursor: pointer;
+    transition: border-color .25s var(--ease-nav), background .25s var(--ease-nav), transform .25s var(--ease-nav);
+  }
+  .cand:hover { border-color: var(--border-2); transform: translateY(-1px); }
+  .cand[aria-checked="true"] { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: color-mix(in srgb, var(--accent-soft) 70%, var(--surface)); }
+  .cand[aria-checked="true"]::after {
+    content: ""; position: absolute; top: 10px; right: 10px; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .tile { width: 64px; height: 64px; border-radius: 16px; display: grid; place-items: center; background: radial-gradient(circle at 50% 45%, var(--accent-soft), transparent 72%); }
+  .cand-name { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding-right: 12px; }
+  .tag { font: 500 10px/1 var(--ui); padding: 3px 6px; border-radius: 5px; color: var(--text-3); border: 1px solid var(--border); }
+  .tag.line { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+  .tag.comet { color: var(--text-2); border-style: dashed; }
+  .tag.rec { color: var(--text); background: var(--surface-2); border-color: transparent; }
+  .cand-desc { margin-top: 6px; font-size: 11.5px; color: var(--text-3); line-height: 1.55; }
+  .cand-mini { margin-top: 8px; display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--text-3); }
+  .cand-mini .g { width: 14px; height: 14px; display: inline-flex; }
+
+  footer.impl { border-top: 1px solid var(--border); padding-top: 26px; margin-top: 12px; color: var(--text-2); font-size: 13px; line-height: 1.8; }
+  footer.impl h3 { font-size: 14px; color: var(--text); margin: 0 0 8px; }
+  footer.impl ul { margin: 0; padding-left: 18px; }
+  footer.impl code { font-family: var(--mono); font-size: 12px; color: var(--text); background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+  canvas.glyph { display: block; }
+
+  @media (max-width: 700px) {
+    .page { padding: 28px 16px 72px; }
+    .state { grid-template-columns: 1fr; gap: 12px; }
+    .stage { position: static; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <div>
+      <div class="eyebrow">OMP Studio · Activity Glyph · v3</div>
+      <h1>待命用点阵，干活用“看得懂”的图形</h1>
+      <p class="lede">只有「工作中」和「正在思考」保留点阵——它们没有具体动作，抽象的光点最合适。其余状态不再受点阵约束：线性图标（眼睛、铅笔、手写、终端、放大镜、地球……）或彗迹，每个状态挑最直观的那个。点选即生效，上方实况实时播放你的组合。</p>
+    </div>
+    <div class="controls">
+      <button class="toggle" id="t-theme">浅色</button>
+      <button class="toggle" id="t-tint">按操作着色</button>
+      <button class="toggle" id="t-reduce">减弱动效</button>
+      <button class="toggle" id="t-reset">恢复推荐组合</button>
+    </div>
+  </header>
+
+  <div class="stage">
+    <div class="stage-top">
+      <div class="live-line">
+        <div class="zoom" id="zoom"></div>
+        <div class="activity-line"><span class="al-glyph" id="glyph"></span><span class="al-text" id="altext"></span></div>
+      </div>
+      <button class="toggle" id="t-play" aria-pressed="true">自动演示中</button>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div class="combo"><span>当前组合</span><code id="combo"></code><button class="copy" id="copy">复制</button></div>
+  </div>
+
+  <div id="states"></div>
+
+  <footer class="impl">
+    <h3>说明</h3>
+    <ul>
+      <li>线性图标的线宽与现有 <code>icons.tsx</code> 的 1.3–1.5 一致，14px 下和文件图标、按钮图标是同一视觉重量。</li>
+      <li>点阵 → 图形的切换做 380ms 交融，不会硬切；减弱动效时每个状态停在一个能认出来的静态姿势。</li>
+      <li>选好后点「复制」把组合串发给我，我按它落到 <code>.al-glyph</code>。选择记在本页（浏览器本地），刷新不丢。</li>
+    </ul>
+  </footer>
+</div>
+
+<script>
+(() => {
+  const TAU = Math.PI * 2, PI = Math.PI;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const fract = (x) => x - Math.floor(x);
+  const ease = (x) => (x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+  const easeOut = (x) => 1 - Math.pow(1 - x, 3);
+  const smooth = (x) => x * x * (3 - 2 * x);
+  const backOut = (x) => { const c1 = 1.9, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+  const pop = (age, dur = .32) => (age <= 0 ? 0 : backOut(clamp(age / dur, 0, 1)));
+  const hash = (i, j, s) => fract(Math.sin(i * 127.1 + j * 311.7 + s * 74.7) * 43758.5453);
+  const blink = (t, hz = .9) => smooth(clamp(Math.cos(TAU * t * hz) * 2.2 + .6, 0, 1));
+  const gx = (i) => 2.2 + i * 2.9;
+
+  /* ---------- Primitives (16×16 space) ---------- */
+  const G = { ctx: null, a: 1, small: false };
+  const W = (w) => (G.small ? w + .25 : w);
+  function dot(x, y, v, scale = 1) {
+    v = clamp(v, 0, 1); const c = G.ctx;
+    c.globalAlpha = G.a * ((G.small ? .2 : .13) + (G.small ? .8 : .87) * v);
+    c.beginPath(); c.arc(x, y, Math.max(.05, ((G.small ? .66 : .5) + .74 * v) * scale), 0, TAU); c.fill();
+  }
+  function path(fn, o = 1, w = 1.35, fill = false) {
+    const c = G.ctx; c.globalAlpha = G.a * clamp(o, 0, 1); c.lineWidth = W(w);
+    c.beginPath(); fn(c); if (fill) c.fill(); else c.stroke();
+  }
+  const ln = (x1, y1, x2, y2, o = 1, w = 1.35) => path((c) => { c.moveTo(x1, y1); c.lineTo(x2, y2); }, o, w);
+  const poly = (pts, o = 1, w = 1.35, close = false) => path((c) => { pts.forEach(([x, y], k) => (k ? c.lineTo(x, y) : c.moveTo(x, y))); if (close) c.closePath(); }, o, w);
+  const ring = (x, y, r, o = 1, w = 1.35) => path((c) => c.arc(x, y, r, 0, TAU), o, w);
+  const disc = (x, y, r, o = 1) => path((c) => c.arc(x, y, r, 0, TAU), o, 0, true);
+  function erase(fn) { const c = G.ctx; c.save(); c.globalCompositeOperation = "destination-out"; c.globalAlpha = G.a; c.beginPath(); fn(c); c.fill(); c.restore(); }
+  function dashed(progress, len, draw) { const c = G.ctx; c.setLineDash([Math.max(.001, progress * len), len + 50]); draw(); c.setLineDash([]); }
+  function grid(fn) { for (let j = 0; j < 5; j++) for (let i = 0; i < 5; i++) dot(gx(i), gx(j), fn(i, j)); }
+  function check(x, y, g, o = 1, w = 1.2) {
+    const a = [x - 1, y], b = [x - .2, y + .8], c = [x + 1.1, y - .9];
+    const L1 = Math.hypot(b[0] - a[0], b[1] - a[1]), L2 = Math.hypot(c[0] - b[0], c[1] - b[1]), s = g * (L1 + L2);
+    if (s <= L1) poly([a, [a[0] + (b[0] - a[0]) * s / L1, a[1] + (b[1] - a[1]) * s / L1]], o, w);
+    else { const k = (s - L1) / L2; poly([a, b, [b[0] + (c[0] - b[0]) * k, b[1] + (c[1] - b[1]) * k]], o, w); }
+  }
+  function pencilIcon(tx, ty, o) {
+    const ux = .707, uy = -.707, nx = .707, ny = .707, h = 1.25;
+    const C1 = [tx + ux * 2.2, ty + uy * 2.2], C2 = [tx + ux * 7.2, ty + uy * 7.2], E = [tx + ux * 5.9, ty + uy * 5.9];
+    const pts = [[tx, ty], [C1[0] + nx * h, C1[1] + ny * h], [C2[0] + nx * h, C2[1] + ny * h], [C2[0] - nx * h, C2[1] - ny * h], [C1[0] - nx * h, C1[1] - ny * h]];
+    erase((c) => { c.moveTo(...pts[0]); pts.slice(1).forEach((p) => c.lineTo(...p)); c.closePath(); });
+    poly(pts, o, 1.15, true);
+    ln(C1[0] + nx * h, C1[1] + ny * h, C1[0] - nx * h, C1[1] - ny * h, o, 1);
+    ln(E[0] + nx * h, E[1] + ny * h, E[0] - nx * h, E[1] - ny * h, o * .7, 1);
+  }
+  const PAGE = [[3.2, 1.6], [10, 1.6], [12.8, 4.4], [12.8, 14.4], [3.2, 14.4], [3.2, 1.6]];
+  const FOLD = [[10, 1.6], [10, 4.4], [12.8, 4.4]];
+
+  /* ---------- Comet trail (shared by the 彗迹 candidates) ---------- */
+  const CHECK = [[3.8, 8.4], [6.7, 11.3], [12.4, 4.6]];
+  const CL1 = Math.hypot(2.9, 2.9), CL = CL1 + Math.hypot(5.7, 6.7);
+  const checkPt = (u) => { const s = u * CL; if (s <= CL1) { const k = s / CL1; return [3.8 + 2.9 * k, 8.4 + 2.9 * k]; } const k = (s - CL1) / (CL - CL1); return [6.7 + 5.7 * k, 11.3 - 6.7 * k]; };
+  const rectPt = (s) => { const w = 11.6, h = 9.6; if (s < w) return [2.2 + s, 3.2]; s -= w; if (s < h) return [13.8, 3.2 + s]; s -= h; if (s < w) return [13.8 - s, 12.8]; s -= w; return [2.2, 12.8 - s]; };
+  const CMT = {
+    responding: { n: 26, p: (t) => { const f = fract(t / 1.7); return [[2.6 + 10.8 * f, 8 + 2.1 * Math.sin(f * TAU * 2.2), Math.pow(Math.sin(PI * f), .35)]]; } },
+    read: { n: 22, ghost: (t) => [4.4, 8, 11.6].forEach((y) => ln(3, y, 13, y, .13, 1.3)),
+      p: (t) => { const ys = [4.4, 8, 11.6], T = .95, k = Math.floor(t / T) % 3, u = fract(t / T); if (u < .8) return [[3 + 10 * (u / .8), ys[k], 1]]; const e = ease((u - .8) / .2), ny = ys[(k + 1) % 3]; return [[13 - 10 * e, ys[k] + (ny - ys[k]) * e, .55]]; } },
+    edit: { n: 28, ghost: () => { ln(3, 4.4, 13, 4.4, .13, 1.3); ln(3, 11.6, 10.5, 11.6, .13, 1.3); },
+      p: (t) => { const f = fract(t / 2.2), e = f < .5 ? ease(f / .5) : 1 - ease((f - .5) / .5), x = 3.6 + 8.8 * e; return [[x, 8 + .9 * Math.sin(x * 2.4), 1]]; } },
+    write: { n: 46, ghost: () => ln(2.6, 12.6, 13.4, 12.6, .14, 1.1),
+      p: (t) => { const f = fract(t / 2.6), ph = TAU * 3.5 * f; return [[2.6 + 10.6 * f - 1.25 * Math.sin(ph), 10.4 - 3.2 * (.5 - .5 * Math.cos(ph)), Math.pow(Math.sin(PI * f), .3)]]; } },
+    bash: { n: 30, ghost: (t) => { poly([[4.8, 6.1], [6.8, 8], [4.8, 9.9]], .5, 1.3); ln(8.3, 9.9, 11, 9.9, .5 * blink(t), 1.3); path((c) => c.rect(2.2, 3.2, 11.6, 9.6), .1, 1); },
+      p: (t) => [[...rectPt(fract(t / 2.6) * 42.4), 1]] },
+    search: { n: 22, ghost: (t) => disc(8 + 1.9 * Math.sin(t * TAU / 3.2), 8 + 1.5 * Math.sin(t * TAU / 2.3 + .5), .9, .35),
+      p: (t) => { const cx = 8 + 1.9 * Math.sin(t * TAU / 3.2), cy = 8 + 1.5 * Math.sin(t * TAU / 2.3 + .5), a = t * TAU / .95; return [[cx + 2.7 * Math.cos(a), cy + 2.7 * Math.sin(a), 1]]; } },
+    web: { n: 26, ghost: (t) => { ring(8, 8, 5.4, .15, 1); path((c) => c.ellipse(8, 8, 5.4, 1.9, t * TAU / 8, 0, TAU), .1, 1); },
+      p: (t) => { const a = t * TAU / 1.7, r = t * TAU / 8, ex = 5.4 * Math.cos(a), ey = 1.9 * Math.sin(a); return [[8 + ex * Math.cos(r) - ey * Math.sin(r), 8 + ex * Math.sin(r) + ey * Math.cos(r), Math.sin(a) > 0 ? 1 : .35 + .65 * (1 + Math.sin(a))]]; } },
+    agents: { n: 20, ghost: () => disc(8, 8, 1.2, .85),
+      p: (t) => [0, 1, 2].map((k) => { const f = fract(t / 1.9 - k / 3), r = 1.2 + 4.9 * easeOut(f), th = -PI / 2 + k * TAU / 3 + 1.1 * f + t * .2; return [8 + r * Math.cos(th), 8 + r * Math.sin(th), Math.pow(Math.sin(PI * Math.min(1, f * 1.1)), .6)]; }) },
+    todo: { n: 18,
+      ghost: (t) => { const f = fract(t / 2), u = ease(clamp(f / .55, 0, 1)), fade = f > .85 ? 1 - (f - .85) / .15 : 1; const pts = [CHECK[0]]; for (let k = 1; k <= 20; k++) pts.push(checkPt(u * k / 20)); poly(pts, .5 * fade, 1.5); },
+      p: (t) => { const f = fract(t / 2); return [[...checkPt(ease(clamp(f / .55, 0, 1))), f > .85 ? 1 - (f - .85) / .15 : 1]]; } },
+    retry: { n: 28, ghost: () => ring(8, 8, 4.8, .1, 1),
+      p: (t) => { const ph = t * TAU / 1.5, a = -(ph + .8 * Math.sin(ph)) - PI / 2; return [[8 + 4.8 * Math.cos(a), 8 + 4.8 * Math.sin(a), 1]]; } },
+  };
+  function comet(id, t) {
+    const def = CMT[id], N = def.n, c = G.ctx;
+    if (def.ghost) def.ghost(t);
+    const S = []; for (let k = 0; k <= N; k++) S.push(def.p(t - k * .018));
+    for (let m = 0; m < S[0].length; m++) {
+      for (let k = 0; k < N; k++) {
+        const p0 = S[k][m], p1 = S[k + 1][m];
+        if (Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) > 3.2) break;
+        const q = 1 - k / N;
+        ln(p0[0], p0[1], p1[0], p1[1], Math.pow(q, 1.5) * p0[2] * .95, 1.7 * q + .25);
+      }
+      const [x, y, o] = S[0][m];
+      disc(x, y, 2.7, .14 * o); disc(x, y, 1.75, .28 * o); disc(x, y, 1.05, o);
+    }
+  }
+  const cometCand = (state, desc) => ({ id: "comet", name: "彗迹", kind: "comet", desc, draw: (t) => comet(state, t) });
+
+  /* ---------- Candidates ---------- */
+  const CANDS = {
+    working: [
+      { id: "wave", name: "斜向波", kind: "dot", rec: true, desc: "一道光沿对角线流过点阵，最安静的待命态。",
+        draw: (t) => grid((i, j) => Math.pow(.5 + .5 * Math.sin(t * TAU / 1.9 - (i + j) * .62), 2.4)) },
+      { id: "orbit", name: "环行", kind: "dot", desc: "十颗点围成一圈，亮头带尾巴绕行，中心轻轻呼吸。",
+        draw: (t) => {
+          const h = fract(t / 1.6) * 10;
+          for (let k = 0; k < 10; k++) { const a = -PI / 2 + k * TAU / 10, d = ((h - k) % 10 + 10) % 10; dot(8 + 5.4 * Math.cos(a), 8 + 5.4 * Math.sin(a), d < 4 ? Math.pow(1 - d / 4, 1.4) : .05); }
+          dot(8, 8, .35 + .3 * Math.sin(t * TAU / 1.6), 1.1);
+        } },
+    ],
+    thinking: [
+      { id: "twinkle", name: "星点闪烁", kind: "dot", rec: true, desc: "每颗点按自己的节奏明灭，像在发散地想。",
+        draw: (t) => grid((i, j) => { const sp = .55 + .9 * hash(i, j, 1); return Math.pow(.5 + .5 * Math.sin(t * TAU * sp / 1.7 + hash(i, j, 2) * TAU), 5); }) },
+      { id: "synapse", name: "突触", kind: "dot", desc: "随机两点被一笔细线连起又消失：在建立联系。",
+        draw: (t) => {
+          grid(() => .07);
+          for (let s = 0; s < 3; s++) {
+            const tt = t / .95 + s / 3, k = Math.floor(tt), p = tt - k;
+            const a = Math.floor(hash(k, s, 5) * 25); let b = Math.floor(hash(k, s, 6) * 25); if (b === a) b = (a + 7) % 25;
+            const ax = gx(a % 5), ay = gx(Math.floor(a / 5)), bx = gx(b % 5), by = gx(Math.floor(b / 5));
+            const e = Math.sin(PI * p), g = ease(clamp(p / .5, 0, 1));
+            ln(ax, ay, ax + (bx - ax) * g, ay + (by - ay) * g, .5 * e, .8);
+            dot(ax, ay, e); dot(bx, by, e * clamp((p - .4) / .2, 0, 1));
+          }
+        } },
+    ],
+    responding: [
+      { id: "bubble", name: "气泡三点", kind: "line", rec: true, desc: "对话气泡里三颗点依次跳动——最熟悉的“正在输入”。",
+        draw: (t) => {
+          path((c) => c.roundRect(1.8, 3, 12.4, 8.6, 2.8), .6, 1.15);
+          poly([[4.4, 11.6], [3.4, 14.2], [6.8, 11.6]], .6, 1.15);
+          for (let i = 0; i < 3; i++) { const p = fract(t / 1.2 - i * .15), h = p < .4 ? Math.sin(p / .4 * PI) : 0; disc(5 + i * 3, 7.4 - 1.5 * h, 1, .45 + .55 * h); }
+        } },
+      { id: "stream", name: "文字流出", kind: "line", desc: "一行行文字从底部长出来、向上滚走，光标领着最新一行。",
+        draw: (t) => {
+          const s = t * 1.15, top = Math.floor(s);
+          for (let n = top - 4; n <= top; n++) {
+            const age = s - n, y = 12.8 - age * 3.4; if (y < 1) continue;
+            const L = 5.5 + hash(n, 2, 3) * 6, g = ease(clamp(age * 1.5, 0, 1)), edge = clamp((y - 1.2) / 2.4, 0, 1), x2 = 2.4 + L * g;
+            ln(2.4, y, x2, y, (n === top ? 1 : .5) * edge, 1.4);
+            if (n === top) ln(x2 + 1.2, y - 1.5, x2 + 1.2, y + 1.5, g < 1 ? 1 : blink(t), 1.1);
+          }
+        } },
+      cometCand("responding", "光点画着正弦波从左往右走，像声音一样流出去。"),
+    ],
+    read: [
+      { id: "eye", name: "眼睛", kind: "line", rec: true, desc: "瞳孔一跳一跳从左看到右（像真实阅读的扫视），读完一行眨一下眼。",
+        draw: (t) => {
+          const f = fract(t / 2.6) * 5, seg = Math.floor(f), u = f - seg;
+          const stops = [-2.4, -.8, .8, 2.4, -2.4, -2.4];
+          const px = 8 + stops[seg] + (stops[seg + 1] - stops[seg]) * ease(clamp((u - .72) / .28, 0, 1));
+          const k = seg === 4 ? Math.sin(PI * clamp((u - .25) / .3, 0, 1)) : 0;
+          const up = 1.8 + 8.4 * k, lo = 14.2 - 4 * k, c = G.ctx;
+          const almond = (cc) => { cc.moveTo(1.4, 8); cc.quadraticCurveTo(8, up, 14.6, 8); cc.quadraticCurveTo(8, lo, 1.4, 8); };
+          c.save(); c.beginPath(); almond(c); c.clip();
+          ring(px, 8.2, 2.5, .95, 1.3); disc(px, 8.2, 1.05, 1); disc(px + .7, 7.4, .35, .9 * (1 - k));
+          c.restore();
+          path(almond, .95, 1.35);
+        } },
+      { id: "doc", name: "文档扫描", kind: "line", desc: "带折角的文档，一道扫描光来回扫过，经过的那行被点亮加粗。",
+        draw: (t) => {
+          poly(PAGE, .5, 1.2); poly(FOLD, .5, 1.2);
+          const f = fract(t / 2.6), y = 2.6 + 11 * (.5 - .5 * Math.cos(f * TAU));
+          [[6.6, 10.8], [9, 10.8], [11.4, 9]].forEach(([yy, x2]) => { const near = Math.exp(-((yy - y) ** 2) / 1.6); ln(5.2, yy, x2, yy, .32 + .68 * near, 1.2 + .5 * near); });
+          ln(1.6, y, 14.4, y, .14, 3.2); ln(1.6, y, 14.4, y, .9, 1);
+        } },
+      { id: "book", name: "翻书", kind: "line", desc: "摊开的书，一页纸带着弧度从右翻到左。",
+        draw: (t) => {
+          const Lp = (c) => { c.moveTo(8, 4.4); c.quadraticCurveTo(5, 2.6, 1.6, 3.6); c.lineTo(1.6, 12.6); c.quadraticCurveTo(5, 11.6, 8, 13.2); };
+          const Rp = (c) => { c.moveTo(8, 4.4); c.quadraticCurveTo(11, 2.6, 14.4, 3.6); c.lineTo(14.4, 12.6); c.quadraticCurveTo(11, 11.6, 8, 13.2); };
+          path(Lp, .85, 1.25); path(Rp, .85, 1.25); ln(8, 4.4, 8, 13.2, .6, 1.1);
+          for (const y of [6.6, 8.8, 11]) { ln(3.4, y, 6.4, y, .35, 1); ln(9.6, y, 12.6, y, .35, 1); }
+          const f = fract(t / 1.9), u = ease(clamp(f / .6, 0, 1));
+          if (u > 0 && u < 1) {
+            const co = Math.cos(u * PI), si = Math.sin(u * PI), ex = 8 + 6.4 * co;
+            const P = (c) => { c.moveTo(8, 4.4); c.quadraticCurveTo(8 + 3 * co, 2.6 - 1.4 * si, ex, 3.6 - 1.8 * si); c.lineTo(ex, 12.6 - 1.8 * si); c.quadraticCurveTo(8 + 3 * co, 11.6 - 1.4 * si, 8, 13.2); c.closePath(); };
+            erase(P); path(P, .95, 1.25);
+          }
+        } },
+      cometCand("read", "光点逐行扫过三行字，读完一行快速回车到下一行。"),
+    ],
+    edit: [
+      { id: "pencil", name: "铅笔", kind: "line", rec: true, desc: "一支铅笔在已有文字下方写出一笔波浪线，写完抬笔，墨迹淡去。",
+        draw: (t) => {
+          const f = fract(t / 2.8), u = ease(clamp(f / .62, 0, 1)), fade = f > .84 ? 1 - (f - .84) / .16 : 1;
+          const sq = (x) => 12.2 + .9 * Math.sin((x - 2.2) * 1.55), x0 = 2.2, tx = x0 + 7.2 * u;
+          ln(2.2, 3.4, 9, 3.4, .32, 1.2); ln(2.2, 6.6, 7, 6.6, .32, 1.2);
+          if (tx > x0 + .05) { const pts = []; for (let k = 0; k <= 28; k++) { const x = x0 + (tx - x0) * k / 28; pts.push([x, sq(x)]); } poly(pts, fade, 1.35); }
+          const lift = f > .66 ? ease(clamp((f - .66) / .2, 0, 1)) * 1.4 : 0;
+          pencilIcon(tx + lift, sq(tx) - lift, f < .06 ? f / .06 : fade);
+        } },
+      { id: "select", name: "选中替换", kind: "line", desc: "中间一行的一段被选中高亮，删掉，再被光标重新敲出来。",
+        draw: (t) => {
+          const f = fract(t / 3), y = 8, sx = 5.6, c = G.ctx;
+          ln(2.2, 4.2, 13.8, 4.2, .32, 1.2); ln(2.2, 11.8, 10.4, 11.8, .32, 1.2); ln(2.2, y, 4.2, y, .32, 1.2); ln(12.4, y, 13.8, y, .32, 1.2);
+          if (f < .42) {
+            const g = ease(clamp(f / .26, 0, 1)), sel = sx + 5.6 * g, v = f < .3 ? 1 : 1 - ease((f - .3) / .12);
+            ln(sx, y, sx + 5.6 * v, y, .55, 1.3);
+            c.globalAlpha = G.a * .24 * v; c.beginPath(); c.roundRect(sx - .7, y - 2, Math.max(.01, (sel - sx) * v + 1.4), 4, 1); c.fill();
+            if (f < .3) ln(sel + .8, y - 2.2, sel + .8, y + 2.2, 1, 1.1);
+          } else {
+            const g = ease(clamp((f - .42) / .4, 0, 1)), ne = sx + 4.8 * g;
+            if (g > 0) ln(sx, y, ne, y, 1, 1.5);
+            ln(ne + 1, y - 2.2, ne + 1, y + 2.2, f > .82 ? blink(t) : 1, 1.1);
+          }
+        } },
+      cometCand("edit", "光点在一行上来回划，像在反复修改同一句。"),
+    ],
+    write: [
+      { id: "newfile", name: "新建文件", kind: "line", rec: true, desc: "一页纸的轮廓被一笔描出来，折角翻下，然后三行字依次写进去。",
+        draw: (t) => {
+          const f = fract(t / 3.6), fade = f > .88 ? 1 - (f - .88) / .12 : 1;
+          dashed(ease(clamp(f / .28, 0, 1)), 43.2, () => poly(PAGE, .85 * fade, 1.25));
+          poly(FOLD, .85 * fade * clamp((f - .22) / .08, 0, 1), 1.25);
+          [[6.6, 10.8], [9, 10.8], [11.4, 8.6]].forEach(([y, x2], k) => { const g = ease(clamp((f - .3 - k * .14) / .16, 0, 1)); if (g > 0) ln(5.2, y, 5.2 + (x2 - 5.2) * g, y, fade, 1.35); });
+        } },
+      { id: "script", name: "手写", kind: "line", desc: "笔尖连笔写出一串圈，墨迹留在纸上，写完整体淡出。",
+        draw: (t) => {
+          const f = fract(t / 3), g = clamp(f / .72, 0, 1), fade = f > .86 ? 1 - (f - .86) / .14 : 1;
+          const P = (q) => { const ph = TAU * 3 * q; return [2.4 + 10.8 * q - 1.2 * Math.sin(ph), 10 - 3 * (.5 - .5 * Math.cos(ph))]; };
+          ln(2, 12.8, 14, 12.8, .25 * fade, 1);
+          const pts = []; const N = 90; for (let k = 0; k <= N * g; k++) pts.push(P(k / N)); pts.push(P(g));
+          if (pts.length > 1) poly(pts, fade, 1.35);
+          if (g < 1) { const [x, y] = P(g); disc(x, y, 1.9, .2); disc(x, y, 1, 1); }
+        } },
+      cometCand("write", "彗星拖着长尾连笔书写，轨迹本身就是字。"),
+    ],
+    bash: [
+      { id: "prompt", name: "提示符", kind: "line", rec: true, desc: ">_ 提示符：光标闪烁，> 时不时往前一顶，像回车执行。",
+        draw: (t) => {
+          const f = fract(t / 1.8), nud = f < .2 ? Math.sin(f / .2 * PI) * .9 : 0;
+          poly([[2.8 + nud, 4.4], [6.6 + nud, 8], [2.8 + nud, 11.6]], 1, 1.5);
+          ln(9, 11.6, 13.2, 11.6, blink(t), 1.6);
+        } },
+      { id: "window", name: "终端窗", kind: "line", desc: "小终端窗口：敲一行命令、块光标闪，下面冒出两行输出。",
+        draw: (t) => {
+          const c = G.ctx, f = fract(t / 3), of = f > .88 ? 1 - (f - .88) / .12 : 1;
+          path((cc) => cc.roundRect(1.4, 2, 13.2, 12, 2.2), .6, 1.15); ln(1.4, 5, 14.6, 5, .35, 1);
+          for (const x of [3.3, 4.9, 6.5]) disc(x, 3.5, .48, .6);
+          poly([[3.4, 7], [4.9, 8.2], [3.4, 9.4]], .95, 1.15);
+          const typed = ease(clamp((f - .05) / .35, 0, 1)), tx = 6.2 + 5.6 * typed;
+          if (typed > 0) ln(6.2, 8.2, tx, 8.2, .95 * of, 1.25);
+          if (f < .5) { c.globalAlpha = G.a * (f > .42 ? blink(t) : 1) * .9; c.fillRect(tx + .7, 7.2, 1.3, 2); }
+          const out = clamp((f - .5) / .2, 0, 1);
+          [[11, 9.6], [12.6, 7.4]].forEach(([y, x2], k) => { const g = ease(clamp(out * 2 - k, 0, 1)); if (g > 0) ln(3.4, y, 3.4 + (x2 - 3.4) * g, y, .5 * of, 1.1); });
+        } },
+      cometCand("bash", "光点沿终端框巡游，框里是淡淡的 >_。"),
+    ],
+    search: [
+      { id: "lens", name: "放大镜", kind: "line", rec: true, desc: "放大镜小幅环顾，镜片上一道反光在呼吸。",
+        draw: (t) => {
+          const a = t * TAU / 2.6, cx = 6.8 + 1.1 * Math.cos(a), cy = 6.8 + 1.1 * Math.sin(a), R = 3.7;
+          ring(cx, cy, R, 1, 1.4);
+          ln(cx + (R + .3) * .707, cy + (R + .3) * .707, cx + (R + 3.3) * .707, cy + (R + 3.3) * .707, 1, 2.1);
+          const g = -2.5 + .35 * Math.sin(t * TAU / 1.8);
+          path((c) => c.arc(cx, cy, R - 1.3, g, g + 1), .35 + .4 * (.5 + .5 * Math.sin(t * TAU / 1.8)), 1.1);
+        } },
+      { id: "magnify", name: "逐行搜寻", kind: "line", desc: "放大镜沿着三行字滑过，镜片下的字被真的放大。",
+        draw: (t) => {
+          const ys = [3.6, 7.6, 11.6], ends = [13.6, 12, 13], R = 3;
+          const pos = fract(t / 3.3) * 3, r = Math.floor(pos), u = pos - r;
+          let cx, cy;
+          if (u < .82) { cx = 3.6 + 8.4 * smooth(u / .82); cy = ys[r]; }
+          else { const e = ease((u - .82) / .18), ny = ys[(r + 1) % 3]; cx = 12 - 8.4 * e; cy = ys[r] + (ny - ys[r]) * e; }
+          const lines = (o, w) => ys.forEach((y, k) => ln(1.8, y, ends[k], y, o, w));
+          lines(.3, 1.2);
+          const c = G.ctx;
+          c.save(); c.beginPath(); c.arc(cx, cy, R - .3, 0, TAU); c.clip();
+          erase((cc) => cc.arc(cx, cy, R, 0, TAU));
+          c.translate(cx, cy); c.scale(1.6, 1.6); c.translate(-cx, -cy); lines(.95, 1.1);
+          c.restore();
+          ring(cx, cy, R, 1, 1.3);
+          ln(cx + (R + .2) * .707, cy + (R + .2) * .707, cx + (R + 2.2) * .707, cy + (R + 2.2) * .707, 1, 1.9);
+        } },
+      cometCand("search", "光点绕着一个四处游走的焦点打转，像在搜寻。"),
+    ],
+    web: [
+      { id: "globe", name: "地球", kind: "line", rec: true, desc: "线框地球，经线真实地从背面转到正面再转走。",
+        draw: (t) => {
+          const R = 6;
+          ring(8, 8, R, .95, 1.3);
+          ln(8 - R, 8, 8 + R, 8, .5, 1.1);
+          const h = Math.sqrt(R * R - 3.6 * 3.6);
+          ln(8 - h, 4.4, 8 + h, 4.4, .38, 1); ln(8 - h, 11.6, 8 + h, 11.6, .38, 1);
+          for (let k = 0; k < 6; k++) {
+            const lam = t * TAU / 7 + k * PI / 3, front = Math.cos(lam);
+            if (front <= 0) continue;
+            const rx = Math.max(.01, R * Math.abs(Math.sin(lam)));
+            path((c) => c.ellipse(8, 8, rx, R, 0, -PI / 2, PI / 2, Math.sin(lam) < 0), .2 + .75 * front, 1.15);
+          }
+        } },
+      cometCand("web", "光点在倾斜轨道上绕地球运行，轨道缓慢进动。"),
+    ],
+    agents: [
+      { id: "fork", name: "分叉", kind: "line", rec: true, desc: "一个节点长出三条分支，枝头的子节点依次弹出。",
+        draw: (t) => {
+          const f = fract(t / 2.8), fade = f > .86 ? 1 - (f - .86) / .14 : 1;
+          ring(3, 8, 1.5, fade, 1.3); disc(3, 8, .6, fade * (.5 + .5 * Math.sin(t * TAU / 1.4)));
+          [[12.8, 3.4], [12.8, 8], [12.8, 12.6]].forEach(([ex, ey], k) => {
+            const g = ease(clamp((f - .08 - k * .1) / .32, 0, 1)); if (g <= 0) return;
+            dashed(g, 10.5, () => path((c) => { c.moveTo(4.5, 8); c.bezierCurveTo(8, 8, 8.4, ey, ex - 1.5, ey); }, .85 * fade, 1.25));
+            const age = (f - .08 - k * .1 - .3) * 3; if (age > 0) ring(ex, ey, 1.4 * pop(age, .35), fade, 1.3);
+          });
+        } },
+      { id: "satellite", name: "卫星", kind: "line", desc: "中心节点沿三根连线发出光点，送达时卫星节点被点亮。",
+        draw: (t) => {
+          ring(8, 8, 1.9, 1, 1.3);
+          for (let k = 0; k < 3; k++) {
+            const th = -PI / 2 + k * TAU / 3 + t * TAU / 14, cx = Math.cos(th), sy = Math.sin(th), p = fract(t / 1.5 - k / 3), hit = p < .25 ? 1 - p / .25 : 0;
+            ln(8 + 2.4 * cx, 8 + 2.4 * sy, 8 + 4.3 * cx, 8 + 4.3 * sy, .4, 1);
+            const r = 2.4 + 2.6 * ease(p); disc(8 + r * cx, 8 + r * sy, .6, Math.sin(PI * p));
+            ring(8 + 5.5 * cx, 8 + 5.5 * sy, 1.1, .7 + .3 * hit, 1.2); disc(8 + 5.5 * cx, 8 + 5.5 * sy, .7, hit);
+          }
+        } },
+      cometCand("agents", "三颗流星从中心沿弧线射出去。"),
+    ],
+    todo: [
+      { id: "checklist", name: "清单勾选", kind: "line", rec: true, desc: "三个复选框依次被勾上，做完的那一行变淡。",
+        draw: (t) => {
+          const f = fract(t / 3.6), step = Math.floor(f * 4), u = fract(f * 4), ys = [3.8, 8, 12.2], ens = [13.4, 11.4, 12.6];
+          ys.forEach((y, r) => {
+            const done = r < step, cur = r === step;
+            path((c) => c.roundRect(1.8, y - 1.5, 3, 3, .8), done ? .9 : cur ? .95 : .45, 1.15);
+            const g = done ? 1 : cur ? ease(clamp((u - .25) / .45, 0, 1)) : 0;
+            if (g > 0) check(3.3, y, g, 1, 1.15);
+            ln(6.6, y, ens[r], y, done ? .28 : cur ? .95 : .45, 1.3);
+          });
+        } },
+      { id: "reorder", name: "重新排序", kind: "line", desc: "最上面一项被拿起、绕到最下面，其余各项上移。",
+        draw: (t) => {
+          const T = 1.6, s = Math.floor(t / T), u = ease(clamp((fract(t / T) - .4) / .6, 0, 1)), ys = [3.8, 8, 12.2], lens = [6.6, 5, 5.8];
+          for (let i = 0; i < 3; i++) {
+            const slot = ((i - s) % 3 + 3) % 3; let y, x = 0, o;
+            if (slot === 0) { y = ys[0] + (ys[2] - ys[0]) * u; x = 1.6 * Math.sin(u * PI); o = .95 - .55 * u; }
+            else { y = ys[slot] + (ys[slot - 1] - ys[slot]) * u; o = slot === 1 ? .4 + .55 * u : .4; }
+            ln(6 + x, y, 6 + x + lens[i], y, o, 1.35); disc(3.3 + x, y, 1, o);
+          }
+        } },
+      cometCand("todo", "光点画出一个对勾，停一下再淡去。"),
+    ],
+    retry: [
+      { id: "arrow", name: "回旋箭头", kind: "line", rec: true, desc: "带箭头的圆弧逆时针回转，一顿一顿，像在倒带重来。",
+        draw: (t) => {
+          const ph = t * TAU / 1.6, a = -(ph + .8 * Math.sin(ph)) - PI / 2 + .2, R = 5.2;
+          for (let s = 0; s < 4; s++) { const a0 = a + s * 1.2; path((c) => c.arc(8, 8, R, a0, a0 + 1.21), 1 - s * .22, 1.4); }
+          const hx = 8 + R * Math.cos(a), hy = 8 + R * Math.sin(a), dx = Math.sin(a), dy = -Math.cos(a), nx = Math.cos(a), ny = Math.sin(a);
+          const tx = hx + dx * .5, ty = hy + dy * .5;
+          poly([[tx - dx * 2 + nx * 1.4, ty - dy * 2 + ny * 1.4], [tx, ty], [tx - dx * 2 - nx * 1.4, ty - dy * 2 - ny * 1.4]], 1, 1.4);
+        } },
+      { id: "hourglass", name: "沙漏", kind: "line", desc: "沙子漏完，沙漏带一点回弹翻过来，再来一次。",
+        draw: (t) => {
+          const f = fract(t / 2.8), s = 1 - clamp(f / .78, 0, 1), rot = f > .8 ? PI * backOut(clamp((f - .8) / .2, 0, 1)) : 0, c = G.ctx;
+          c.save(); c.translate(8, 8); c.rotate(rot); c.translate(-8, -8);
+          ln(3.6, 2.2, 12.4, 2.2, 1, 1.4); ln(3.6, 13.8, 12.4, 13.8, 1, 1.4);
+          path((cc) => { cc.moveTo(4.6, 2.2); cc.quadraticCurveTo(4.6, 6.4, 7.3, 8); cc.quadraticCurveTo(4.6, 9.6, 4.6, 13.8); }, .9, 1.2);
+          path((cc) => { cc.moveTo(11.4, 2.2); cc.quadraticCurveTo(11.4, 6.4, 8.7, 8); cc.quadraticCurveTo(11.4, 9.6, 11.4, 13.8); }, .9, 1.2);
+          if (s > .02) path((cc) => { cc.moveTo(8, 7.4); cc.lineTo(8 - 2.7 * s, 7.4 - 4.2 * s); cc.lineTo(8 + 2.7 * s, 7.4 - 4.2 * s); cc.closePath(); }, .75, 0, true);
+          const h = 3.6 * (1 - s);
+          if (h > .05) path((cc) => { cc.moveTo(5.4, 13.1); cc.lineTo(10.6, 13.1); cc.lineTo(8, 13.1 - h); cc.closePath(); }, .75, 0, true);
+          if (s > .02 && f < .78) ln(8, 7.8, 8, 13.1 - h, .7, .6);
+          c.restore();
+        } },
+      cometCand("retry", "光点逆时针绕圈，忽快忽慢。"),
+    ],
+  };
+
+  const STATES = [
+    { id: "working", zh: "工作中", en: "waiting", group: "点阵 · 无具体动作" },
+    { id: "thinking", zh: "正在思考", en: "thinking · think · reflect" },
+    { id: "responding", zh: "正在回复", en: "responding", group: "具体操作 · 不限风格" },
+    { id: "read", zh: "正在读取", en: "read", detail: "ActivityLine.tsx" },
+    { id: "edit", zh: "正在修改", en: "edit · ast_edit", detail: "workbench.css" },
+    { id: "write", zh: "正在写入", en: "write", detail: "activity-glyphs.ts" },
+    { id: "bash", zh: "正在运行", en: "bash · eval · debug", detail: "npm run check -- --only renderer" },
+    { id: "search", zh: "正在搜索", en: "grep · glob · lsp", detail: "useRunWindow" },
+    { id: "web", zh: "正在联网检索", en: "web · web_search · browser", detail: "electron 33 release notes" },
+    { id: "agents", zh: "正在派发子 Agent", en: "task · hub", detail: "explore-renderer" },
+    { id: "todo", zh: "正在整理任务", en: "todo" },
+    { id: "retry", zh: "等待重试", en: "retry", detail: "Retry 2/5 · retry in 0:08" },
+  ];
+  const BY_ID = Object.fromEntries(STATES.map((s) => [s.id, s]));
+  const TINT = {
+    dark: { thinking: "#b7a3ff", read: "#7db6ff", edit: "#f2b45c", write: "#ee9bd0", bash: "#65d39c", search: "#5ccfd6", web: "#80a8ff", agents: "#c99cff", todo: "#a3d46c", retry: "#e0a23c" },
+    light: { thinking: "#7a5ae0", read: "#2f6fd6", edit: "#b26a00", write: "#b4489a", bash: "#1d8a55", search: "#11818a", web: "#3b5fd6", agents: "#8a4fd6", todo: "#4f8a14", retry: "#8f5a05" },
+  };
+  const POSE = { working: .2, thinking: .55, responding: .25, read: .3, edit: 1.3, write: 1.9, bash: .1, search: .6, web: .5, agents: 1.9, todo: 1.4, retry: .3 };
+  const KIND = { dot: ["点阵", ""], line: ["线性图标", "line"], comet: ["彗迹", "comet"] };
+
+  const STORE = "omp-activity-glyph-mix";
+  const recommended = () => Object.fromEntries(STATES.map((s) => [s.id, CANDS[s.id].find((c) => c.rec).id]));
+  let choice = recommended();
+  try { const saved = JSON.parse(localStorage.getItem(STORE) || "null"); if (saved) for (const k in saved) if (CANDS[k]?.some((c) => c.id === saved[k])) choice[k] = saved[k]; } catch {}
+  const saveChoice = () => { try { localStorage.setItem(STORE, JSON.stringify(choice)); } catch {} };
+  const candOf = (state, id) => CANDS[state].find((c) => c.id === id);
+
+  const opts = { tint: false, reduce: window.matchMedia("(prefers-reduced-motion: reduce)").matches };
+  let accent = "#9e8cfc";
+  const colorFor = (state) => (opts.tint && TINT[document.documentElement.dataset.theme][state]) || accent;
+
+  /* ---------- Instances ---------- */
+  const instances = [];
+  function makeIcon(host, size, state, candId) {
+    const cv = document.createElement("canvas"), dpr = Math.max(1, window.devicePixelRatio || 1);
+    cv.width = Math.round(size * dpr); cv.height = Math.round(size * dpr);
+    cv.style.width = size + "px"; cv.style.height = size + "px"; cv.className = "glyph";
+    host.appendChild(cv);
+    const inst = { cv, ctx: cv.getContext("2d"), scale: dpr * size / 16, size, state, cand: candId, prev: null, t0: -1e9, visible: true };
+    inst.set = (state2, cand2) => {
+      if (state2 === inst.state && cand2 === inst.cand) return;
+      inst.prev = { state: inst.state, cand: inst.cand }; inst.state = state2; inst.cand = cand2; inst.t0 = performance.now();
+    };
+    instances.push(inst);
+    return inst;
+  }
+  function paint(inst, state, cand, t, a) {
+    const c = inst.ctx, col = colorFor(state);
+    c.save();
+    c.fillStyle = col; c.strokeStyle = col; c.lineCap = "round"; c.lineJoin = "round";
+    G.ctx = c; G.a = a; G.small = inst.size < 24;
+    candOf(state, cand).draw(opts.reduce ? POSE[state] : t);
+    c.restore();
+  }
+  function render(inst, now) {
+    const c = inst.ctx;
+    c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, inst.cv.width, inst.cv.height);
+    c.setTransform(inst.scale, 0, 0, inst.scale, 0, 0);
+    const t = now / 1000, e = opts.reduce || !inst.prev ? 1 : ease(clamp((now - inst.t0) / 380, 0, 1));
+    if (e < 1) paint(inst, inst.prev.state, inst.prev.cand, t, 1 - e);
+    paint(inst, inst.state, inst.cand, t, e);
+  }
+
+  /* ---------- State rows ---------- */
+  const statesEl = document.getElementById("states");
+  const candButtons = {};
+  for (const st of STATES) {
+    if (st.group) { const g = document.createElement("div"); g.className = "group-title"; g.textContent = st.group; statesEl.appendChild(g); }
+    const row = document.createElement("div");
+    row.className = "state";
+    row.innerHTML = `<div><div class="state-name">${st.zh}<small>${st.en}</small></div></div><div class="cands" role="radiogroup" aria-label="${st.zh}"></div>`;
+    const wrap = row.querySelector(".cands");
+    candButtons[st.id] = [];
+    for (const cd of CANDS[st.id]) {
+      const [kname, kcls] = KIND[cd.kind];
+      const b = document.createElement("button");
+      b.className = "cand"; b.setAttribute("role", "radio"); b.dataset.id = cd.id;
+      b.innerHTML = `<div class="tile"></div><div><div class="cand-name">${cd.name}<span class="tag ${kcls}">${kname}</span>${cd.rec ? `<span class="tag rec">推荐</span>` : ""}</div><div class="cand-desc">${cd.desc}</div><div class="cand-mini"><span class="g"></span>14px 实际尺寸</div></div>`;
+      makeIcon(b.querySelector(".tile"), 52, st.id, cd.id);
+      makeIcon(b.querySelector(".g"), 14, st.id, cd.id);
+      b.addEventListener("click", () => { choice[st.id] = cd.id; saveChoice(); syncChoice(); pin(st.id); });
+      wrap.appendChild(b);
+      candButtons[st.id].push(b);
+    }
+    statesEl.appendChild(row);
+  }
+
+  /* ---------- Live stage ---------- */
+  const zoomIcon = makeIcon(document.getElementById("zoom"), 40, "working", choice.working);
+  const lineIcon = makeIcon(document.getElementById("glyph"), 14, "working", choice.working);
+  const altext = document.getElementById("altext");
+  const chipIcons = {};
+  const chips = document.getElementById("chips");
+  for (const st of STATES) {
+    const b = document.createElement("button");
+    b.className = "chip"; b.dataset.id = st.id;
+    b.innerHTML = `<span class="g"></span>${st.zh}`;
+    chipIcons[st.id] = makeIcon(b.querySelector(".g"), 14, st.id, choice[st.id]);
+    b.addEventListener("click", () => pin(st.id));
+    chips.appendChild(b);
+  }
+
+  const SEQ = [["working", 1800], ["thinking", 3000], ["read", 2800], ["search", 3000], ["read", 2200], ["edit", 3200], ["bash", 3200], ["web", 2800], ["agents", 3200], ["write", 3600], ["todo", 3600], ["responding", 3000], ["retry", 3000]];
+  const startedAt = performance.now() - 42000;
+  let playing = true, seqIndex = 0, seqUntil = 0, current = "working", lastSec = -1;
+  const clock = () => { const s = Math.floor((performance.now() - startedAt) / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+  function lineHTML(id) {
+    const st = BY_ID[id];
+    if (id === "working") return `<span class="shimmer">Working</span>`;
+    if (id === "retry") return `<span class="shimmer">Working</span><span class="al-sep">·</span><span class="al-detail" style="font-family:var(--ui)">${st.detail}</span>`;
+    return `<span>Working</span><span class="al-sep">·</span><span class="al-elapsed">${clock()}</span><span class="al-sep">·</span><span class="shimmer swap">${st.zh}</span>${st.detail ? `<span class="al-detail swap">${st.detail}</span>` : ""}`;
+  }
+  function apply(id) {
+    current = id;
+    zoomIcon.set(id, choice[id]); lineIcon.set(id, choice[id]);
+    altext.innerHTML = lineHTML(id);
+    document.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c.dataset.id === id));
+  }
+  function syncChoice() {
+    for (const st of STATES) {
+      candButtons[st.id].forEach((b) => b.setAttribute("aria-checked", String(b.dataset.id === choice[st.id])));
+      chipIcons[st.id].set(st.id, choice[st.id]);
+    }
+    zoomIcon.set(current, choice[current]); lineIcon.set(current, choice[current]);
+    document.getElementById("combo").textContent = STATES.map((s) => `${s.id}=${choice[s.id]}`).join(" ");
+  }
+  const playBtn = document.getElementById("t-play");
+  function setPlaying(on) { playing = on; playBtn.setAttribute("aria-pressed", String(on)); playBtn.textContent = on ? "自动演示中" : "继续自动演示"; if (on) seqUntil = 0; }
+  function pin(id) { setPlaying(false); apply(id); }
+  playBtn.addEventListener("click", () => setPlaying(!playing));
+  document.getElementById("copy").addEventListener("click", async (ev) => {
+    const text = document.getElementById("combo").textContent;
+    try { await navigator.clipboard.writeText(text); ev.target.textContent = "已复制"; } catch { ev.target.textContent = "请手动复制"; }
+    setTimeout(() => { ev.target.textContent = "复制"; }, 1400);
+  });
+
+  function frame(now) {
+    if (playing && now >= seqUntil) { const [id, ms] = SEQ[seqIndex % SEQ.length]; seqIndex++; seqUntil = now + ms; apply(id); }
+    const sec = Math.floor((now - startedAt) / 1000);
+    if (sec !== lastSec) { lastSec = sec; const n = altext.querySelector(".al-elapsed"); if (n) n.textContent = clock(); }
+    for (const inst of instances) if (inst.visible) render(inst, now);
+    requestAnimationFrame(frame);
+  }
+
+  const readAccent = () => { accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || accent; };
+  const bindToggle = (id, fn, initial) => {
+    const el = document.getElementById(id);
+    el.setAttribute("aria-pressed", String(initial));
+    el.addEventListener("click", () => { const on = el.getAttribute("aria-pressed") !== "true"; el.setAttribute("aria-pressed", String(on)); fn(on); });
+  };
+  bindToggle("t-theme", (on) => { document.documentElement.dataset.theme = on ? "light" : "dark"; readAccent(); }, false);
+  bindToggle("t-tint", (on) => { opts.tint = on; }, false);
+  bindToggle("t-reduce", (on) => { opts.reduce = on; }, opts.reduce);
+  document.getElementById("t-reset").addEventListener("click", () => { choice = recommended(); saveChoice(); syncChoice(); });
+
+  const io = new IntersectionObserver((entries) => {
+    for (const en of entries) for (const inst of instances) if (en.target.contains(inst.cv)) inst.visible = en.isIntersecting;
+  }, { rootMargin: "80px" });
+  document.querySelectorAll(".cand").forEach((el) => io.observe(el));
+
+  readAccent();
+  syncChoice();
+  apply("working");
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

@@ -2371,15 +2371,19 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     }
   };
 
-  const openProjectInEditor = () => {
-    const workspace = realActiveWorkspace;
+  const openProjectInEditor = (project?: SelectedProject) => {
+    const workspace = project === undefined
+      ? realActiveWorkspace
+      : state.model.workspaces?.workspaces.find(row => row.workspaceId === project.id);
     const openInEditor = globalThis.ompStudioChrome?.openProjectInEditor;
     if (workspace === undefined || openInEditor === undefined) return;
     void runProjectShellAction("editor", () => openInEditor(workspace.workspaceId, executionTarget.id ?? undefined));
   };
 
-  const openProjectDirectory = () => {
-    const workspace = realActiveWorkspace;
+  const openProjectDirectory = (project?: SelectedProject) => {
+    const workspace = project === undefined
+      ? realActiveWorkspace
+      : state.model.workspaces?.workspaces.find(row => row.workspaceId === project.id);
     const openDirectory = globalThis.ompStudioChrome?.openProjectDirectory;
     if (workspace === undefined || openDirectory === undefined) return;
     void runProjectShellAction("directory", async () => {

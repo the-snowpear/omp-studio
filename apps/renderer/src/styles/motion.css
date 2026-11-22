@@ -228,13 +228,49 @@
    A theme change is the whole window changing state. Left alone, each surface
    goes at its own pace (panels snap, the page background and some borders are
    still fading 250ms later) and the window tears along its panel edges, so the
-   window is cross-faded as one snapshot instead. themeTransition.ts sets the
-   attribute for the length of the dissolve. */
+   window changes as one snapshot instead. themeTransition.ts sets the
+   attribute for the length of the change.
+
+   The new theme spreads out from the point the user acted on (the click, or
+   the middle of the window when it came from the keyboard or another window)
+   as a circle with a feathered rim, over the old picture held still beneath.
+   themeTransition.ts writes the origin (`--theme-x/-y`) and the radius that
+   clears the farthest corner plus the rim (`--theme-reveal-end`) on `<html>`;
+   the view-transition pseudo-elements inherit them from there. Only the
+   radius moves, on --ease-emphasis: a large shape that leaves the click and
+   settles into the far corners, with the sweep spread over the middle of the
+   hero beat. (--ease-nav spent three quarters of the window in the first
+   120ms, which read as a flash rather than a movement.) */
+@property --theme-reveal { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@keyframes omp-theme-reveal {
+  from { --theme-reveal: 0px; }
+  to { --theme-reveal: var(--theme-reveal-end, 150vmax); }
+}
+/* Anything else that carries its own name still dissolves in step. */
 :root[data-theme-transition]::view-transition-group(*),
 :root[data-theme-transition]::view-transition-old(*),
 :root[data-theme-transition]::view-transition-new(*) {
-  animation-duration: var(--dur-slow);
-  animation-timing-function: var(--ease);
+  animation-duration: var(--dur-hero);
+  animation-timing-function: var(--ease-emphasis);
+}
+:root[data-theme-transition]::view-transition-old(root),
+:root[data-theme-transition]::view-transition-new(root) {
+  /* The UA's cross-fade adds the two pictures together; one covers the other here. */
+  mix-blend-mode: normal;
+}
+:root[data-theme-transition]::view-transition-old(root) {
+  animation: none;
+}
+:root[data-theme-transition]::view-transition-new(root) {
+  --theme-rim: 72px;
+  mask-image: radial-gradient(
+    circle at var(--theme-x, 50%) var(--theme-y, 50%),
+    #000 calc(var(--theme-reveal) - var(--theme-rim)),
+    rgb(0 0 0 / 0.5) calc(var(--theme-reveal) - var(--theme-rim) * 0.4),
+    transparent var(--theme-reveal)
+  );
+  mask-repeat: no-repeat;
+  animation: omp-theme-reveal var(--dur-hero) var(--ease-emphasis) both;
 }
 /* The window stays usable under the dissolve. */
 :root[data-theme-transition]::view-transition {

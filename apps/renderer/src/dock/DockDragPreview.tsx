@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "../icons";
 import { DockMeterRing, DockMeterSummary, usePanelMeter } from "./panelMeters";
-import { transitionMs } from "../motion";
+import { MOTION_EASE, MOTION_MS, motionReduced, transitionMs } from "../motion";
 import { dragPreview, type DragPreview } from "./dragPreview";
 import { locatePanel } from "./model";
 import type { PanelHosts } from "./hosts";
@@ -124,10 +124,47 @@ export function DockDragPreview({ hosts, definitions, conversationTitle }: { hos
     motion.current.animation?.cancel();
     if (dragPreview.snapshot()?.hosts === hosts) dragPreview.show(null);
   }, [hosts]);
+  // Over an input box the window folds into the capsule under the pointer and
+  // unfolds from it when the pointer leaves; both shapes ride the pointer.
+  const fold = useRef<{ source: DragPreview["source"] | null; offset: DockRect | null; animation: Animation | null }>({ source: null, offset: null, animation: null });
+  useLayoutEffect(() => {
+    const element = preview.current, current = fold.current;
+    const active = state && state.hosts === hosts ? state : null;
+    if (!element || !active) { current.source = null; current.offset = null; current.animation = null; return; }
+    const fresh = current.source !== active.source;
+    current.source = active.source;
+    if (fresh) current.offset = null;
+    const box = element.getBoundingClientRect();
+    const insetOf = (offset: DockRect) => `inset(${offset.y}px ${Math.max(0, box.width - offset.x - offset.width)}px ${Math.max(0, box.height - offset.y - offset.height)}px ${offset.x}px round 999px)`;
+    const open = "inset(0px round 8px)";
+    const animate = (frames: Keyframe[]) => {
+      current.animation?.cancel();
+      current.animation = motionReduced() || typeof element.animate !== "function" ? null : element.animate(frames, { duration: MOTION_MS.slow, easing: MOTION_EASE.emphasis });
+    };
+    if (active.capsule) {
+      const offset = { x: active.capsule.rect.x - box.left, y: active.capsule.rect.y - box.top, width: active.capsule.rect.width, height: active.capsule.rect.height };
+      const folded = current.offset !== null;
+      current.offset = offset;
+      element.style.clipPath = insetOf(offset);
+      element.style.opacity = "0";
+      if (!folded && !fresh) animate([{ clipPath: open, opacity: 1 }, { opacity: 0.5, offset: 0.55 }, { clipPath: insetOf(offset), opacity: 0 }]);
+      return;
+    }
+    if (current.offset === null) return;
+    const from = insetOf(current.offset);
+    current.offset = null;
+    element.style.removeProperty("clip-path");
+    element.style.removeProperty("opacity");
+    animate([{ clipPath: from, opacity: 0 }, { opacity: 0.6, offset: 0.4 }, { clipPath: open, opacity: 1 }]);
+  }, [hosts, state]);
   if (!state || state.hosts !== hosts) return null;
   const { target, layout, panels, rect } = state;
-  if (state.conversation) return createPortal(<div ref={preview} className={`dock-drag-preview${state.snapped ? " is-snapped" : ""}`} aria-hidden="true" style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}>
+  const folding = state.capsule ? " is-capsule" : "";
+  if (state.conversation) return createPortal(<div ref={preview} className={`dock-drag-preview${state.snapped ? " is-snapped" : ""}${folding}`} aria-hidden="true" style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}>
     <ConversationPreview content={state.conversation} rect={rect} {...(panels.length ? { target, layout, panels, definitions } : {})} /><div className="dock-drag-label">{state.label}</div>
+  </div>, document.body);
+  if (state.file) return createPortal(<div ref={preview} className={`dock-drag-preview${folding}`} aria-hidden="true" style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}>
+    <FilePreview content={state.file} rect={rect} /><div className="dock-drag-label">{state.label}</div>
   </div>, document.body);
   const definition = (id: PanelId) => definitionFor(definitions, id);
   const cards = target.region === "left" || target.region === "rail";
@@ -164,6 +201,18 @@ export function DockDragPreview({ hosts, definitions, conversationTitle }: { hos
     </div>}
     <div className="dock-drag-label">{state.label}</div>
   </div>, document.body);
+}
+
+/** A file window that does not exist yet: the frame it will open in, with its name. */
+function FilePreview({ content, rect }: { content: NonNullable<DragPreview["file"]>; rect: DockRect }) {
+  const { resolvedLanguage } = useI18n();
+  return <WindowFrame title={content.title} icon="file" preview rect={{ x: 0, y: 0, width: rect.width, height: rect.height }} bounds={{ x: 0, y: 0, width: rect.width, height: rect.height }}
+    frameProps={{ className: "dock-preview-group dock-file-window", style: { position: "relative", zIndex: "auto" } }}
+    titleContent={<span className="cw-window-title-slot"><i className="dock-window-mark" aria-hidden="true"><Icon name="file" extra="sm" /></i><span className="cw-window-title-text">{content.title}</span></span>}
+    controls={<><span className="dock-icon-button"><Icon name="minimize" extra="sm" /></span><span className="dock-icon-button"><Icon name="maximize" extra="sm" /></span></>}
+    onRectChange={() => {}} onControl={() => {}} onClose={() => {}} closeLabel={resolvedLanguage === "zh" ? "关闭文件" : "Close file"}>
+    <div className="dock-group-body"><div className="empty" role="status">{content.loadingLabel}</div></div>
+  </WindowFrame>;
 }
 
 export function ConversationPreview({ content, rect, target, layout, panels, definitions = [] }: { content: NonNullable<DragPreview["conversation"]>; rect: DockRect; target?: DockTarget; layout?: DockLayout; panels?: PanelId[]; definitions?: readonly PanelDefinition[] }) {

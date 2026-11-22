@@ -1,6 +1,8 @@
 import { useOpenFileBrowser } from "../fileBrowser/fileBrowserLinks";
 import { useOpenFile } from "../files/fileLinks";
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { dragFile, explorerChip } from "../files/fileDrag";
+import { useConversationView, useConversationWorkspace } from "../conversationWorkspace/Context";
+import { useEffect, useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type { GitCommitChangesReadModel, GitCommitDiffReadModel, GitLogListReadModel, WorkspaceId } from "@omp-studio/client-contract";
 import { useI18n } from "../i18n";
 import { Icon } from "../icons";
@@ -42,8 +44,9 @@ function collectOpen(nodes: PreviewFileNode[], prefix: string, into: Set<string>
   }
 }
 
-function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction, fileMenu }: {
+function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction, onDrag, fileMenu }: {
   nodes: PreviewFileNode[];
+  onDrag: (event: ReactPointerEvent<HTMLDivElement>, path: string, kind: "file" | "dir") => void;
   depth: number;
   prefix: string;
   expanded: Set<string>;
@@ -74,6 +77,7 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction,
                 aria-label={zh ? `${node.name} 文件夹` : `${node.name} folder`}
                 style={pad}
                 onClick={() => onToggle(path)}
+                onPointerDown={(event) => onDrag(event, path, "dir")}
                 onContextMenu={(event) => fileMenu.onContext(event, path)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
@@ -101,14 +105,14 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction,
                 </span>
               </div>
               <div className="tree-children" role="group">
-                {node.children ? <TreeNodes nodes={node.children} depth={depth + 1} prefix={path} expanded={expanded} onToggle={onToggle} onFile={onFile} onAction={onAction} fileMenu={fileMenu} /> : null}
+                {node.children ? <TreeNodes nodes={node.children} depth={depth + 1} prefix={path} expanded={expanded} onToggle={onToggle} onFile={onFile} onAction={onAction} onDrag={onDrag} fileMenu={fileMenu} /> : null}
               </div>
             </div>
           );
         }
         const ftype = fileTypeOf(node.name);
         return (
-          <div key={path} className={`tree-row${node.turn ? " turn-file" : ""}`} data-file={path} data-git={node.status ? GIT_STATUS_META[node.status].className : undefined} data-ftype={ftype ?? undefined} data-secret={isSensitive(node.name) || undefined} data-noise={isNoiseDir(node.name) || undefined} role="treeitem" tabIndex={0} style={pad} onClick={() => onFile(path)} onContextMenu={(event) => fileMenu.onContext(event, path)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onFile(path); } }}>
+          <div key={path} className={`tree-row${node.turn ? " turn-file" : ""}`} data-file={path} data-git={node.status ? GIT_STATUS_META[node.status].className : undefined} data-ftype={ftype ?? undefined} data-secret={isSensitive(node.name) || undefined} data-noise={isNoiseDir(node.name) || undefined} role="treeitem" tabIndex={0} style={pad} onClick={() => onFile(path)} onPointerDown={(event) => onDrag(event, path, "file")} onContextMenu={(event) => fileMenu.onContext(event, path)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onFile(path); } }}>
             <span className="tw" />
             <span className="fi"><Icon name={iconNameFor(ftype, node.name)} /></span>
             <span className="fname ellipsis">{node.name}</span>
@@ -151,6 +155,12 @@ export function PreviewFileTree({ label, search, onContext, onFileAction, worksp
   });
   const openInViewer = useOpenFile();
   const openBrowser = useOpenFileBrowser();
+  const conversationView = useConversationView(), conversationWorkspace = useConversationWorkspace();
+  /* Same drag as the real tree: an input box takes a capsule, the workbench opens the demo file there. */
+  const onDrag = (event: ReactPointerEvent<HTMLDivElement>, path: string, kind: "file" | "dir") => {
+    if (event.button !== 0 || (event.target as Element).closest("button, input, a")) return;
+    dragFile(event, conversationView?.store ?? conversationWorkspace?.store, { chip: explorerChip(path, kind), open: rect => openInViewer({ workspaceId, path, rect }) });
+  };
   // 行「⋯ 更多」菜单：与真实树同一 FileRowMenu；演示路径不执行桌面动作
   // （打开/打开方式/资源管理器/绝对路径禁用），仅保留复制相对路径与添加上下文。
   const [fileMenuOpenId, setFileMenuOpenId] = useState<string | null>(null);
@@ -209,7 +219,7 @@ export function PreviewFileTree({ label, search, onContext, onFileAction, worksp
     : tree;
   return (
     <div className="tree" role="tree" aria-label={zh ? `${label} 文件树` : `${label} file tree`}>
-      <TreeNodes nodes={visible} depth={0} prefix="" expanded={expanded} onToggle={onToggle} onFile={path => { openInViewer({ workspaceId, path }); }} onAction={(path, action) => {
+      <TreeNodes nodes={visible} depth={0} prefix="" expanded={expanded} onToggle={onToggle} onDrag={onDrag} onFile={path => { openInViewer({ workspaceId, path }); }} onAction={(path, action) => {
         if (action === "context" || action === "context-dir") {
           onContext?.(path, action === "context-dir" ? "dir" : "file");
         }

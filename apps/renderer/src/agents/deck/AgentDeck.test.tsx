@@ -32,9 +32,9 @@ function client() {
   } as unknown as StudioClient & { command: ReturnType<typeof vi.fn> };
 }
 
-function deck(agents: readonly StudioAgentSnapshot[], options: { links: DeckLinks; client?: StudioClient; language?: "zh" | "en"; width?: number; online?: boolean; viewingLive?: boolean }) {
+function deck(agents: readonly StudioAgentSnapshot[], options: { links: DeckLinks; client?: StudioClient; language?: "zh" | "en"; width?: number; height?: number; online?: boolean; viewingLive?: boolean }) {
   return <I18nProvider forcedLanguage={options.language ?? "zh"}>
-    <AgentDeck instanceKey="test|agents" scope="test" agents={agents} ready source="live" visible width={options.width ?? 0} height={0} region="right"
+    <AgentDeck instanceKey="test|agents" scope="test" agents={agents} ready source="live" visible width={options.width ?? 0} height={options.height ?? 0} region="right"
       openedIds={[]} links={options.links} commandContext={{ client: options.client, capabilities, preview: false, viewingLive: options.viewingLive ?? true, online: options.online ?? true }} />
   </I18nProvider>;
 }
@@ -274,6 +274,26 @@ describe("Agents deck", () => {
     view.rerender(deck(agents, { links: link }));
     expect(screen.getByRole("tab", { name: "时间线" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("dialog", { name: "deps 子 Agent" })).toBeTruthy();
+  });
+
+  it("closes an open agent card when switching deck views", () => {
+    const agents = getPreviewDockAgents(true);
+    render(deck(agents, { links: links() }));
+    fireEvent.click(card(/deps 子 Agent/));
+    expect(screen.getByRole("dialog", { name: "deps 子 Agent" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "时间线" }));
+    expect(screen.queryByRole("dialog", { name: "deps 子 Agent" })).toBeNull();
+    expect(screen.getByRole("tab", { name: "时间线" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("keeps bridge view tabs clickable while a compact detail sheet is open", () => {
+    const agents = getPreviewDockAgents(true);
+    render(deck(agents, { links: links(), width: 1100, height: 300 }));
+    fireEvent.click(card(/deps 子 Agent/));
+    expect(screen.getByRole("dialog", { name: "deps 子 Agent" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "时间线" }));
+    expect(screen.queryByRole("dialog", { name: "deps 子 Agent" })).toBeNull();
+    expect(screen.getByRole("tab", { name: "时间线" }).getAttribute("aria-selected")).toBe("true");
   });
 
   it("lets a host page own the selection: no inspector of its own, and Esc keeps the pick", () => {

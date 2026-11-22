@@ -1083,15 +1083,10 @@
 }
 .sb-actions .action-row:hover .meta .chev { color: var(--text-3); }
 
-/* 新建对话：第一行，主操作。加号在文字左边，右侧仅文案提示。 */
+/* 新建对话：第一行，主操作。加号在文字左边，右侧不显示快捷键提示。 */
 .sb-actions .new-convo-btn .icon { color: var(--accent); }
 .sb-actions .new-convo-btn:hover .icon { color: var(--accent-hover); }
 .sb-actions .new-convo-btn .lbl { font-weight: var(--fw-medium); }
-.sb-actions .new-convo-btn .meta .hint {
-  font-family: var(--font-ui);
-  font-size: var(--fs-11);
-  color: var(--text-faint);
-}
 
 /* 技能 & 插件：第二行，toggle chip。选中态 = 行底色变 accent-soft，徽章实心。 */
 .sb-actions .skills-btn[aria-expanded="true"] {
