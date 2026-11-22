@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <b><a href="#窗口化工作台">0.2.0 新工作台</a></b>
+  <b><a href="#窗口化工作台">窗口化工作台</a></b>
   &nbsp;·&nbsp; <a href="#能力全景">能力全景</a>
   &nbsp;·&nbsp; <a href="#下载安装">下载安装</a>
   &nbsp;·&nbsp; <a href="#从源码运行">从源码运行</a>
@@ -38,12 +38,12 @@
 
 **OMP Studio** 是 [oh-my-pi](https://github.com/can1357/oh-my-pi)（`omp`）AI Coding Agent 的跨平台桌面 GUI 与可视化工作台（支持 Windows、macOS 与 Linux）。它基于 Electron 与 React，将多会话并行对话、审批、子 Agent、Git / Worktree、文件、终端、托管浏览器、电脑操作（Computer Use）、MCP / Skills 与模型配置放进同一扇窗口，通过类型化的 **Studio Bridge** 直接对接 Runtime，不解析 TUI 文本或 ANSI 输出，也不模拟按键。
 
-0.2.0 重做了整个工作台：**对话和工具都可以拖成窗口，吸附分屏，停到任意一侧，或钉成独立系统窗口。** 你可以同时开几场对话，每场各带自己的工具。
+**工作台里的对话和工具都可以拖成窗口、吸附分屏、停到任意一侧，或钉成独立系统窗口。** 你可以同时开几场对话，每场各带自己的工具。
 
 <p align="center">
   <img src="docs/readme/demo-windows.webp" width="100%" alt="演示：拖动对话顶栏变成浮窗，再吸附成左半屏、右上、右下三个窗口">
   <br>
-  <sub>▲ 拖动顶栏把对话变成窗口，拖到边缘和角落吸附，三场对话并排运行（真实界面录制，预览模式演示数据）</sub>
+  <sub>▲ 拖动顶栏打开浮窗，用布局选择器放到左半屏，再从侧栏拖入两场对话，分别吸附到右上和右下（预览模式录制）</sub>
 </p>
 
 <p align="center">
@@ -91,10 +91,10 @@ Git / Worktree、文件、终端、托管浏览器、电脑操作、SSH / WSL 2 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/readme/workbench-dark.webp">
-    <img src="docs/readme/workbench-light.webp" width="100%" alt="三窗口布局：左侧对话、右上 Plan Review 对话、右下网页工具窗口">
+    <img src="docs/readme/workbench-light.webp" width="100%" alt="三窗口布局，左侧对话正在运行命令，右上等待计划审批，右下等待用户回答">
   </picture>
   <br>
-  <sub>两场对话和一个网页工具共用一套分区：左边正在跑命令，右上等待审批计划，右下是托管浏览器</sub>
+  <sub>三场对话各占一块区域。左边正在运行命令，右上等待计划审批，右下等待用户回答。</sub>
 </p>
 
 ### 1 · 拖出来就是一个窗口
@@ -175,11 +175,11 @@ Files、Changes、Git、Browser、Computer、Agents、Terminal、Logs、BTW 等�
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/readme/tour-dark.webp">
-    <img src="docs/readme/tour-light.webp" width="88%" alt="0.2.0 首次启动教程：认识新工作台">
+    <img src="docs/readme/tour-light.webp" width="88%" alt="首次启动教程的第一步「认识工作台」">
   </picture>
 </p>
 
-首次进入 0.2.0 时，教程用 8 段低保真动画演示工作台布局、拖出对话窗口、吸附分屏、停靠工具、标签与窗口互相拖放、对话工具区、独立窗口和常用快捷键。
+首次打开工作台教程时，可以通过 8 段动画了解工作台布局、拖出对话窗口、吸附分屏、停靠工具、标签与窗口互相拖放、对话工具区、独立窗口和常用快捷键。
 
 </details>
 
@@ -240,7 +240,7 @@ Anthropic、OpenAI、OpenRouter、本地 LM Studio 等供应商在同一页管�
 <td width="50%" valign="top">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/settings-dark.webp">
-  <img src="docs/readme/settings-light.webp" width="100%" alt="设置：常规、外观、对话、权限与更新">
+  <img src="docs/readme/settings-light.webp" width="100%" alt="设置页的分类导航与手机访问配对流程">
 </picture>
 <h3>设置与更新</h3>
 设置分类清楚，并支持搜索；Runtime 配置按全局、项目和会话分层保存。应用内更新会验证签名，可选组件按需安装。详见 <a href="docs/settings.md">设置说明</a>。

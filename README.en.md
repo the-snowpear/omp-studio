@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <b><a href="#windowed-workbench">0.2.0 Workbench</a></b>
+  <b><a href="#windowed-workbench">Windowed Workbench</a></b>
   &nbsp;·&nbsp; <a href="#capabilities">Capabilities</a>
   &nbsp;·&nbsp; <a href="#download--install">Download &amp; Install</a>
   &nbsp;·&nbsp; <a href="#run-from-source">Run from Source</a>
@@ -38,12 +38,12 @@
 
 **OMP Studio** is a cross-platform desktop GUI and arrangeable workbench for the [oh-my-pi](https://github.com/can1357/oh-my-pi) (`omp`) AI coding agent on Windows, macOS, and Linux. Built with Electron and React, it brings parallel conversations, plan approvals, subagents, Git / worktrees, files, a terminal, a managed browser, computer use, MCP / Skills, and model configuration into a single window — talking directly to the Runtime through a typed **Studio Bridge** without scraping TUI text, parsing ANSI output, or simulating keystrokes.
 
-0.2.0 rebuilds the entire workbench: **conversations and tools can both be dragged into windows, snapped into split layouts, docked to any side, or pinned as independent system windows.** You can run several conversations side by side, each with its own tools.
+**Drag workbench conversations and tools into windows, snap them into split layouts, dock them to any side, or pin them as independent system windows.** You can run several conversations side by side, each with its own tools.
 
 <p align="center">
   <img src="docs/readme/demo-windows.webp" width="100%" alt="Demo: drag a conversation header to turn it into a floating window, then snap into left half, top right, and bottom right">
   <br>
-  <sub>▲ Drag a header to turn a conversation into a window, snap to edges and corners, and run three conversations side by side (recorded from the live UI with preview-mode demo data)</sub>
+  <sub>▲ Drag the header to open a floating window, use the layout picker to snap it left, then drag two conversations from the sidebar into the right-hand corners (recorded in preview mode)</sub>
 </p>
 
 <p align="center">
@@ -91,10 +91,10 @@ Git / worktrees, files, terminal, managed browser, computer use, SSH / WSL 2 wor
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/readme/workbench-dark.webp">
-    <img src="docs/readme/workbench-light.webp" width="100%" alt="Three-window layout: conversation on the left, Plan Review conversation top-right, and web tool window bottom-right">
+    <img src="docs/readme/workbench-light.webp" width="100%" alt="Three-window layout with a command running on the left, a plan awaiting approval top-right, and a conversation awaiting a reply bottom-right">
   </picture>
   <br>
-  <sub>Two conversations and a browser tool share one partition layout: running commands on the left, waiting on plan review top-right, and a managed browser bottom-right</sub>
+  <sub>Three conversations share the workbench. A command runs on the left, a plan awaits approval top-right, and a conversation awaits a reply bottom-right.</sub>
 </p>
 
 ### 1 · Drag Out into a Window
@@ -175,11 +175,11 @@ Hidden tools can be restored from **View → Tools**; the first-run tutorial can
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/readme/tour-dark.webp">
-    <img src="docs/readme/tour-light.webp" width="88%" alt="0.2.0 first-run tutorial: Meet the new workbench">
+    <img src="docs/readme/tour-light.webp" width="88%" alt="Meet the workbench, the first step of the onboarding tutorial">
   </picture>
 </p>
 
-On first launch into 0.2.0, an 8-step low-fidelity animated tutorial walks through the workbench layout, dragging conversations into windows, snap splitting, docking tools, dragging between tabs and windows, conversation tools, independent windows, and essential shortcuts.
+An eight-step animated tutorial introduces the workbench layout, dragging conversations into windows, snap splitting, docking tools, dragging between tabs and windows, conversation tools, independent windows, and essential shortcuts.
 
 </details>
 
@@ -240,7 +240,7 @@ Toggle and probe Skills, Plugins, MCP, and Slash Commands on one page, or open t
 <td width="50%" valign="top">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/settings-dark.webp">
-  <img src="docs/readme/settings-light.webp" width="100%" alt="Settings: general, appearance, conversation, permissions, and updates">
+  <img src="docs/readme/settings-light.webp" width="100%" alt="Settings navigation and the mobile access pairing flow">
 </picture>
 <h3>Settings &amp; Updates</h3>
 Clearly categorized, searchable settings; Runtime config saves across global, project, and session scopes. In-app updates verify signatures, and optional components install on demand. See <a href="docs/settings.md">Settings</a>.
