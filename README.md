@@ -47,7 +47,7 @@
 </p>
 
 > [!NOTE]
-> **0.2.8** 新增会话引用、消息摘录和批量清理归档，并更新对话活动图标、Advisor 折叠、Office 与表格预览以及 SSH 连接流程。内置 Runtime 为 `19.0.1-studio.1`。 [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.8) · [发布说明与界面截图](docs/releases/v0.2.8.md)
+> **0.2.9** 支持会话与文件拖入输入框生成引用胶囊，统一子 Agent 头像，并修复项目菜单、Agent 编排、Worktree 启动和输入框键盘编辑。内置 Runtime 为 `19.0.1-studio.1`。 [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.9) · [发布说明](docs/releases/v0.2.9.md)
 
 <table>
 <tr>

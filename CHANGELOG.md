@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-11-22
+
+### Added
+
+- 将侧栏会话、对话窗口或 Explorer 项目拖到输入框，在落点插入引用胶囊。胶囊可以在草稿里重排或移到另一个输入框，也可以把有来源的会话或可打开的文件拖出为窗口。
+
+### Changed
+
+- 子 Agent 的像素头像统一用于对话、悬停预览、名册及停靠窗口。子 Agent 对话增加头像快速切换，输入框沿用主对话样式。
+- 调整 Plan 紧凑卡的正文滚动与底部渐变。切换主题时，新主题从触发位置展开，并遵循系统减弱动效设置。
+
+### Fixed
+
+- 修复项目行「⋯」按钮无法打开项目操作菜单。 [#63](https://github.com/the-snowpear/omp-studio/issues/63)
+- 减少子 Agent 运行时编排窗口的闪烁。打开 Agent 详情后，仍可切换编队、时间线和星图，切换时收起详情。 [#64](https://github.com/the-snowpear/omp-studio/issues/64) · [#65](https://github.com/the-snowpear/omp-studio/issues/65)
+- 恢复 Worktree 启动确认期间的键盘编辑。创建并进入 Worktree 或留在当前工作区时，操作会使用当前 Runtime 会话，启动检查遇到会话切换会重试。 [#66](https://github.com/the-snowpear/omp-studio/issues/66) · [#67](https://github.com/the-snowpear/omp-studio/issues/67)
+- 修复对话中的 Markdown 文件引用有时打不开的问题。打开时确认路径，并按文件或目录进入对应视图。
+- 从子 Agent 卡片移到悬停预览时，预览保持打开并可滚动。右侧工具区可以随窗口加宽。
+- 文件胶囊拖放会校验来源工作区，文件窗口打开失败时保留原胶囊。拖动会话引用时保留已选摘录。
+
+
 ## [0.2.8] - 2026-11-22
 
 ### Added
@@ -661,7 +682,8 @@ Agent 改代码改嗨了、或者聊到第五轮发现方向歪了，以前想�
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.2.8...HEAD
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.2.9...HEAD
+[0.2.9]: https://github.com/the-snowpear/omp-studio/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/the-snowpear/omp-studio/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/the-snowpear/omp-studio/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/the-snowpear/omp-studio/compare/v0.2.5...v0.2.6

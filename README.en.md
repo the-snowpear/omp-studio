@@ -47,7 +47,7 @@
 </p>
 
 > [!NOTE]
-> **0.2.8** adds session references with excerpts and bulk archive cleanup, and updates conversation activity, Advisor review groups, Office and spreadsheet previews, and SSH setup. This release bundles Runtime `19.0.1-studio.1`. [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.8) · [Release notes and screenshots](docs/releases/v0.2.8.md)
+> **0.2.9** adds drag-and-drop references for chats and files, unifies subagent avatars, and fixes the project menu, Agent Deck, Worktree startup, and typing in Composer. It bundles Runtime `19.0.1-studio.1`. [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.9) · [Release notes](docs/releases/v0.2.9.md)
 
 <table>
 <tr>
