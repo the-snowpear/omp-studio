@@ -306,6 +306,54 @@ it("keeps a missing prediction receipt from showing a composer error", async () 
   }
 });
 
+it("swallows the transient Runtime-snapshot rejection without surfacing a composer error", async () => {
+  localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
+  vi.useFakeTimers();
+  try {
+    // The exact rejection the desktop transport produces while the Host has
+    // isolated its Runtime snapshot (Runtime (re)starting): a plain
+    // `{ code, message }` object carrying Electron's invoke wrapper.
+    const snapshotReject = {
+      code: "TRANSPORT_ERROR",
+      message:
+        "Error invoking remote method 'omp-studio:desktop:command': UNAVAILABLE: prediction.prepare requires a Runtime snapshot",
+    };
+    let rejectPrepare!: (error: unknown) => void;
+    const prepare = new Promise<never>((_, reject) => { rejectPrepare = reject; });
+    const command = vi.fn(async (name: string) => {
+      if (name === "prediction.prepare") return prepare;
+      return { requestId: "other" };
+    });
+    const client = { command, subscribe: () => () => {} } as unknown as StudioClient;
+    const attachPrediction = vi.fn();
+    vi.stubGlobal("ompStudioChrome", {
+      attachPrediction,
+      predictionInput: vi.fn(),
+      onPrediction: () => () => {},
+    });
+    const mounted = render(
+      <PreviewModeProvider switchEnabled>
+        <ChipComposer prediction={{ client, sessionId: "s", available: true, nextMessageAvailable: true }} />
+      </PreviewModeProvider>,
+    );
+    // The debounce fires ensure(), which issues prediction.prepare.
+    await act(() => vi.advanceTimersByTimeAsync(200));
+    expect(command).toHaveBeenCalledWith("prediction.prepare", { sessionId: "s", protocolVersion: 2 });
+    // The Host rejects: no live Runtime snapshot yet.
+    await act(async () => {
+      rejectPrepare(snapshotReject);
+      for (let i = 0; i < 8; i++) await Promise.resolve();
+    });
+    // Transient and self-resolving: the best-effort ghost is cleared silently
+    // — the raw technical string must never reach the composer.
+    expect(attachPrediction).not.toHaveBeenCalled();
+    expect(mounted.container.querySelector(".cm-prediction-error")).toBeNull();
+    expect(screen.queryByText(/requires a Runtime snapshot/)).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("shows a suggestion when a hidden composer becomes visible", async () => {
   localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "1");
   const resize: ResizeObserverCallback[] = [];

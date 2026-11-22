@@ -38,19 +38,57 @@ const TERMINAL = {
   outcome_unknown: true,
 } as const;
 
-/** Prefer Host `ClientError.message`; never collapse to a generic toast. */
+const INVOKE_PREFIX = /^Error invoking remote method '[^']+': ([\s\S]+)$/;
+
+/**
+ * Electron wraps a rejected `ipcRenderer.invoke` with
+ * `Error invoking remote method '<channel>': <inner>`. The inner message is
+ * the Host `ClientError.message`. Strip the wrapper so surfaces show the Host
+ * message, not the transport plumbing.
+ */
+function stripInvokePrefix(message: string): string | undefined {
+  const inner = message.match(INVOKE_PREFIX)?.[1]?.trim();
+  return inner !== undefined && inner !== "" && inner !== "[object Object]" ? inner : undefined;
+}
+
+/**
+ * Prefer Host `ClientError.message`; never collapse to a generic toast. The
+ * invoke prefix is stripped for both `Error` instances and plain objects —
+ * transport rejections cross the Studio client as plain `{ code, message }`
+ * objects (`toClientError`), not `Error` instances.
+ */
 export function hostErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.length > 0) {
-    const invoke = error.message.match(/^Error invoking remote method '[^']+': ([\s\S]+)$/);
-    const inner = invoke?.[1]?.trim();
-    if (inner && inner !== "[object Object]") return inner;
+    const inner = stripInvokePrefix(error.message);
+    if (inner !== undefined) return inner;
   }
   if (error && typeof error === "object" && "message" in error) {
     const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.length > 0 && message !== "[object Object]") return message;
+    if (typeof message === "string" && message.length > 0 && message !== "[object Object]") {
+      const inner = stripInvokePrefix(message);
+      if (inner !== undefined) return inner;
+      return message;
+    }
   }
   if (error instanceof Error && error.message.length > 0) return error.message;
   return fallback;
+}
+
+/**
+ * True when a command was rejected because the Host has no live Runtime
+ * snapshot (`<command> requires a Runtime snapshot`). The Runtime is (re)
+ * starting, so this is transient and self-resolving. The original `UNAVAILABLE`
+ * code is flattened to `TRANSPORT_ERROR` across the desktop IPC boundary, so
+ * match the message.
+ */
+export function isRuntimeSnapshotUnavailable(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : error && typeof error === "object" && "message" in error
+        ? (error as { message?: unknown }).message
+        : undefined;
+  return typeof message === "string" && message.includes("requires a Runtime snapshot");
 }
 
 function isTerminalReceipt(value: CommandState | undefined): value is CommandReceipt {
