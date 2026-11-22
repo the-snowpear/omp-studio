@@ -109,6 +109,7 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
   const memories = useRef(new Map<string, Map<string, unknown>>());
   const selecting = useRef(false);
   const refreshSequence = useRef(0);
+  const initialized = useRef(false);
   const mounted = useRef(true);
   const memoryKey = id ?? "local";
   if (!memories.current.has(memoryKey)) memories.current.set(memoryKey, new Map());
@@ -191,31 +192,26 @@ export function ExecutionTargets({ client, children }: { client: StudioClient; c
     catch (error) { if (mounted.current && sequence === refreshSequence.current) setInventoryError(error instanceof Error ? error.message : text("无法读取工作位置", "Unable to read execution targets")); throw error; }
     if (!mounted.current || sequence !== refreshSequence.current) return;
     adoptInventory(next);
+    if (!initialized.current) {
+      initialized.current = true;
+      if (next.activeId) {
+        clientFor(next.activeId);
+        setId(next.activeId);
+      }
+      setReady(true);
+    }
     await Promise.allSettled(next.statuses.filter(status => {
       const state = stateFor(status.id);
       return status.state === "connected" && clients.current.has(status.id) && !state.synchronized;
     }).map(status => synchronize(status.id)));
-  }, [api, adoptInventory, stateFor, synchronize]);
+  }, [api, adoptInventory, clientFor, stateFor, synchronize]);
 
   useEffect(() => {
     if (!api) return;
-    let active = true;
-    const initialize = async () => {
-      try {
-        const next = await api.list();
-        if (!active) return;
-        adoptInventory(next);
-        if (next.activeId) {
-          clientFor(next.activeId); setId(next.activeId);
-          if (stateFor(next.activeId).available) void synchronize(next.activeId).catch(() => {});
-        }
-        setReady(true);
-      } catch (error) { if (active) setInventoryError(error instanceof Error ? error.message : text("无法读取当前工作位置", "Unable to read the active execution target")); }
-    };
-    void initialize();
     const off = api.onChanged(() => { void refresh().catch(() => {}); });
-    return () => { active = false; off(); };
-  }, [api, adoptInventory, clientFor, refresh, stateFor, synchronize]);
+    void refresh().catch(() => {});
+    return off;
+  }, [api, refresh]);
 
   useEffect(() => {
     mounted.current = true;

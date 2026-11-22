@@ -250,7 +250,7 @@ Anthropic、OpenAI、OpenRouter、本地 LM Studio 等供应商在同一页管�
 | **电脑操作** | 动作与截图联动、历史画面、按会话停止和显式继续、只读界面结构 | [computer-use.md](docs/computer-use.md) |
 | **Git / Changes** | 暂存、diff、提交、Fetch / Pull / Push、提交图和 Worktree；Changes 按回合列出文件变化 | [feature-index.md](doc/feature-index.md) |
 | **文件查看器** | 文本编辑、Markdown、PDF、图片、音视频、Excel / CSV；Word / PPT 通过可选组件打开 | [file-viewer.md](docs/file-viewer.md) |
-| **SSH 工作区** | 在本机或远端工作，支持系统密钥和账号密码，远端 Runtime 可有限恢复（开发预览） | [ssh-workspaces.md](docs/ssh-workspaces.md) |
+| **SSH 工作区** | 连接远程项目并按需部署签名运行环境，在远端运行 Agent、编辑文件、使用 Git 和终端。短时断线时会尝试重新附加原 Host | [ssh-workspaces.md](docs/ssh-workspaces.md) |
 | **WSL 2 工作区** | 从 Windows 桌面版选择 Linux 发行版和目录，在其中运行 Agent、Git 和终端 | [wsl-workspaces.md](docs/wsl-workspaces.md) |
 | **手机访问** | 在同一局域网内配对手机，继续所选本地项目中的已有会话 | [mobile-access.md](docs/mobile-access.md) |
 | **BTW 旁路追问** | 不打断主线程地追问；支持图片、分支和子代理复用 | [btw.md](docs/btw.md) |

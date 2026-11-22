@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { createReadStream, createWriteStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { rename, rm, stat } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ClientTransport, SystemFileInfo, WorkspaceId } from "@omp-studio/client-contract";
@@ -53,7 +53,16 @@ export class FileResources {
     }
   }
   async copy(id: string, destination: string, signal?: AbortSignal): Promise<void> {
-    await pipeline(Readable.from(this.bytes(id, 0, undefined, signal)), createWriteStream(destination), { signal: signal ?? this.get(id).controller.signal });
+    const leaseSignal = this.get(id).controller.signal;
+    const copySignal = signal ? AbortSignal.any([leaseSignal, signal]) : leaseSignal;
+    const temporary = resolve(dirname(destination), `.omp-download-${randomUUID()}`);
+    try {
+      await pipeline(Readable.from(this.bytes(id, 0, undefined, copySignal)), createWriteStream(temporary, { flags: "wx", mode: 0o600 }), { signal: copySignal });
+      copySignal.throwIfAborted();
+      await rename(temporary, destination);
+    } finally {
+      await rm(temporary, { force: true });
+    }
   }
   async response(request: Request, origin: string): Promise<Response> {
     let url: URL;

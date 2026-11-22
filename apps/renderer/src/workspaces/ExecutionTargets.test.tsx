@@ -29,6 +29,20 @@ function bootstrap(): ClientBootstrap {
 function api() {
   return { list: vi.fn(async () => ({ profiles: [{ id: "remote", name: "Test", host: "test", platform: "linux" }], statuses: [{ id: "remote", state: "connected" }] })), onChanged: () => () => {}, onEvent: () => () => {}, select: vi.fn(async () => {}), bootstrap: vi.fn(async () => bootstrap()), connect: vi.fn(), save: vi.fn(), disconnect: vi.fn() } as unknown as RemoteApi;
 }
+it("restores the active SSH target from the latest inventory while the initial read is pending", async () => {
+  const remote = api();
+  const profile = { id: "remote", name: "Test", host: "test" };
+  const initial = Promise.withResolvers<RemoteInventory>();
+  remote.list = vi.fn(async (): Promise<RemoteInventory> => ({ profiles: [profile], statuses: [{ id: "remote", state: "connected", generation: 2 }], activeId: "remote" })).mockReturnValueOnce(initial.promise);
+  let changed = () => {};
+  remote.onChanged = listener => { changed = listener; return () => {}; };
+  globalThis.ompStudioRemote = remote;
+  render(<ExecutionTargets client={local}>{() => <Surface />}</ExecutionTargets>);
+  await act(async () => changed());
+  await act(async () => initial.resolve({ profiles: [profile], statuses: [{ id: "remote", state: "disconnected", generation: 1 }], activeId: null }));
+  expect(screen.getByTestId("target").textContent).toBe("remote");
+  expect(remote.bootstrap).toHaveBeenCalledWith("remote", undefined);
+});
 it("keeps drafts on their original execution target when switching back", async () => {
   globalThis.ompStudioRemote = api();
   render(<ExecutionTargets client={local}>{(_client, key) => <Surface key={key} />}</ExecutionTargets>);

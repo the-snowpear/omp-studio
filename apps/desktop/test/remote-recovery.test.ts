@@ -7,7 +7,7 @@ import { PassThrough } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import type { ClientBootstrap } from "@omp-studio/client-contract";
-import { RemoteConnectionManager, type RemoteRecoveryPolicy } from "../src/remote/manager.js";
+import { RemoteConnectionManager, type RemoteManagerOptions, type RemoteRecoveryPolicy } from "../src/remote/manager.js";
 import { RemoteConnectionError, connectionCancelled, sshFailure } from "../src/remote/errors.js";
 import { RemotePeer, REMOTE_PROTOCOL_VERSION, type RemoteAttachment } from "../src/remote/wire.js";
 import { SshRemoteTransport } from "../src/remote/transport.js";
@@ -30,7 +30,7 @@ function channel(instanceId = "original-host") {
   transport.hello = { protocolVersion: REMOTE_PROTOCOL_VERSION, platform: "linux", arch: "x64", bundleVersion: "bundle", instanceId };
   return { transport, server, writes };
 }
-async function fixture(t: TestContext, overrides: Partial<RemoteRecoveryPolicy> = {}, password = false, wsl = false) {
+async function fixture(t: TestContext, overrides: Partial<RemoteRecoveryPolicy> = {}, password = false, wsl = false, connected?: RemoteManagerOptions["connected"]) {
   const root = await mkdtemp(join(tmpdir(), "omp-recovery-"));
   const channels: ReturnType<typeof channel>[] = [];
   const attachments: RemoteAttachment[] = [];
@@ -46,7 +46,9 @@ async function fixture(t: TestContext, overrides: Partial<RemoteRecoveryPolicy> 
     createPasswordAuthentication: async () => { calls.authentication++; return { request: () => ({ env: {}, dispose: () => {} }), close: async () => { calls.clearAuthentication++; } }; },
   };
   const policy = { maxAttempts: 3, budgetMs: 2_000, delaysMs: [2], stableMs: 60_000, random: () => 0.5, ...overrides };
-  const manager = new RemoteConnectionManager(join(root, "profiles.json"), root, services, root, policy, wsl ? { prepare: services.deployRemote } : {});
+  const options: RemoteManagerOptions = wsl ? { prepare: services.deployRemote } : {};
+  if (connected) options.connected = connected;
+  const manager = new RemoteConnectionManager(join(root, "profiles.json"), root, services, root, policy, options);
   const profile = await manager.save({ ...(wsl ? { kind: "wsl" as const, distro: "Ubuntu" } : {}), name: "Recovery test", host: "example.invalid", platform: "linux", ...(password ? { authMode: "password", user: "test" } : {}) });
   t.after(async () => { await manager.close(); for (const c of channels) c.server.close(); await rm(root, { recursive: true, force: true }); });
   return { manager, profile, calls, channels, attachments, setAttach: (fn: typeof attach) => { attach = fn; }, setProbe: (fn: typeof probe) => { probe = fn; }, connect: () => manager.connect(profile.id, password ? { password: "test-only" } : undefined) };
@@ -156,6 +158,27 @@ test("the overall recovery deadline aborts a hung attachment and releases its pa
   const failed = await status(f.manager, f.profile.id, row => row.state === "failed");
   assert.match(failed.message!, /Auto-recovery stopped/);
   assert.equal(f.calls.attach, 2); assert.equal(f.calls.clearAuthentication, 1);
+});
+
+test("cancelling during connected service setup releases late resources and keeps SSH disconnected", async t => {
+  let finishSetup!: (dispose: () => void) => void;
+  const setup = new Promise<() => void>(resolve => { finishSetup = resolve; });
+  let markStarted!: () => void;
+  const started = new Promise<void>(resolve => { markStarted = resolve; });
+  let released = false;
+  const f = await fixture(t, {}, false, false, async () => {
+    markStarted();
+    return setup;
+  });
+  const connecting = f.connect();
+  const rejected = assert.rejects(connecting, /cancelled/);
+  await started;
+  const stopping = f.manager.disconnect(f.profile.id);
+  finishSetup(() => { released = true; });
+  await stopping;
+  await rejected;
+  assert.equal(released, true);
+  assert.throws(() => f.manager.get(f.profile.id), /SSH is disconnected/);
 });
 
 test("auto-detected system overrides legacy profile metadata and handshake mismatch clears the password", async t => {

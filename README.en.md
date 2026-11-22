@@ -250,7 +250,7 @@ Clearly categorized, searchable settings; Runtime config saves across global, pr
 | **Computer Use** | Action-linked screenshots, visual history, per-session stop and explicit resume, read-only UI structure | [computer-use.md](docs/computer-use.md) |
 | **Git / Changes** | Staging, diffs, commits, Fetch / Pull / Push, commit graph, and Worktrees; Changes lists file edits per turn | [feature-index.md](doc/feature-index.md) |
 | **File Viewer** | Text editing, Markdown, PDF, images, audio/video, Excel / CSV; Word / PPT via optional component | [file-viewer.md](docs/file-viewer.md) |
-| **SSH Workspaces** | Work locally or remotely with system keys or credentials, with bounded remote Runtime recovery (dev preview) | [ssh-workspaces.md](docs/ssh-workspaces.md) |
+| **SSH Workspaces** | Open a remote project and deploy a signed environment on demand. Run agents, edit files, and use Git and terminals on the remote machine. Studio attempts to reattach to the original Host after a brief disconnection | [ssh-workspaces.md](docs/ssh-workspaces.md) |
 | **WSL 2 Workspaces** | Pick a Linux distribution and folder from the Windows desktop to run agents, Git, and terminals there | [wsl-workspaces.md](docs/wsl-workspaces.md) |
 | **Mobile Access** | Pair a phone on the local network and continue chats from a selected local project | [mobile-access.md](docs/mobile-access.md) |
 | **BTW Aside** | Ask side questions without interrupting the main thread; supports images, branching, and subagent reuse | [btw.md](docs/btw.md) |

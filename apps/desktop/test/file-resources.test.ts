@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { FileResources } from "../src/file-resources.js";
 import type { ClientTransport, WorkspaceFileInfo, WorkspaceId } from "@omp-studio/client-contract";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -38,6 +38,29 @@ test("closing an Office view also aborts its converted PDF stream", async () => 
     assert.equal((await reader.read()).done, false);
     resources.release(lease.id, 12);
     await assert.rejects(async () => { while (!(await reader.read()).done) {} }, /abort/i);
+  } finally { resources.dispose(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test("an interrupted SSH download preserves the destination and can be retried", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "omp-ssh-download-"));
+  const destination = join(directory, "report.txt");
+  const file = { id: "report", path: "/srv/report.txt", name: "report.txt", size: 6, version: "v1" };
+  let connected = false;
+  const resources = new FileResources(() => ({ query: async (request: { queryName: string; input: { offset?: number } }) => {
+    if (request.queryName === "fs.file.inspect") return { ok: true, result: file };
+    if (request.input.offset && !connected) throw new Error("SSH disconnected");
+    const part = Buffer.from(request.input.offset ? "def" : "abc");
+    return { ok: true, result: { data: part.toString("base64"), bytes: part.length } };
+  } }) as Pick<ClientTransport, "query">);
+  try {
+    await writeFile(destination, "existing");
+    const lease = await resources.open({ targetId: "ssh", workspaceId: "", path: file.path, source: "system" }, 1);
+    await assert.rejects(resources.copy(lease.id, destination), /SSH disconnected/);
+    assert.equal(await readFile(destination, "utf8"), "existing");
+    assert.deepEqual(await readdir(directory), ["report.txt"]);
+    connected = true;
+    await resources.copy(lease.id, destination);
+    assert.equal(await readFile(destination, "utf8"), "abcdef");
   } finally { resources.dispose(); await rm(directory, { recursive: true, force: true }); }
 });
 

@@ -240,6 +240,7 @@ export class RemoteConnectionManager {
 
   async #attach(id: string, profile: RemoteConnectionProfile, prepared: PreparedRemote, signal: AbortSignal, authentication?: SshAuthentication): Promise<void> {
     let transport: SshRemoteTransport | undefined;
+    let disposeResources: (() => void) | undefined;
     try {
       const attachment = { key: prepared.attachment.key, sequence: ++prepared.attachment.sequence };
       transport = await this.services.attachRemote(profile, prepared.environment, prepared, signal, authentication, attachment);
@@ -254,9 +255,10 @@ export class RemoteConnectionManager {
       const hostRestarted = Boolean(prepared.instanceId && transport.hello?.instanceId !== prepared.instanceId);
       const live: LiveRemote = { ...prepared, transport, generation: ++this.#generation, connectedAt: Date.now(), healthVersion: 0, hostRestarted };
       if (this.options.connected) {
-        this.#resources.get(id)?.();
-        const dispose = await this.options.connected(id, live, signal, patch => this.#setStatus({ ...this.#status.get(id)!, ...patch, id }));
-        this.#resources.set(id, dispose);
+        disposeResources = await this.options.connected(id, live, signal, patch => {
+          if (!signal.aborted) this.#setStatus({ ...this.#status.get(id)!, ...patch, id });
+        });
+        signal.throwIfAborted();
       }
       this.#live.set(id, live);
       transport.subscribe({ scope: "all" }, event => {
@@ -266,10 +268,15 @@ export class RemoteConnectionManager {
       transport.onHealth(healthy => { void this.#healthChanged(id, live, healthy); });
       transport.onDisconnect(error => this.#transportLost(id, live, error));
       if (this.#live.get(id) !== live) throw new RemoteConnectionError("network", desktopText(`${targetNoun(profile)} 在同步期间断开`, `${targetNoun(profile)} disconnected during synchronization`));
+      if (disposeResources) {
+        this.#resources.set(id, disposeResources);
+        disposeResources = undefined;
+      }
       if (transport.hello) prepared.instanceId = transport.hello.instanceId;
       this.#connected(id, live);
       transport.startHealthChecks();
     } catch (error) {
+      disposeResources?.();
       if (this.#live.get(id)?.transport === transport) this.#live.delete(id);
       await transport?.close();
       if (error instanceof RemoteRequestTimeout) throw new RemoteConnectionError("network", desktopText("远端快照同步超时，尚未恢复写操作", "Remote snapshot sync timed out; write operations have not resumed"));
@@ -358,7 +365,13 @@ export class RemoteConnectionManager {
     if (this.#connecting.has(id)) throw new Error(desktopText("请等待工作区准备完成", "Wait for workspace preparation to finish"));
     this.get(id);
     const run = Promise.resolve().then(() => action({
-      disconnect: async () => { const live = this.#live.get(id); this.#live.delete(id); await live?.transport.close(); this.#setStatus({ id, state: "disconnected", message: desktopText("正在维护远端 Runtime", "Maintaining remote Runtime") }); },
+      disconnect: async () => {
+        const live = this.#live.get(id);
+        this.#live.delete(id);
+        this.#resources.get(id)?.(); this.#resources.delete(id);
+        await live?.transport.close();
+        this.#setStatus({ id, state: "disconnected", message: desktopText("正在维护远端 Runtime", "Maintaining remote Runtime") });
+      },
       reconnect: async () => { if (!this.#closed) await this.#connect(id, undefined, undefined, false, true); },
       progress: message => this.#setStatus({ ...this.#status.get(id)!, id, message }),
     }));
