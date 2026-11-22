@@ -755,8 +755,19 @@ describe("conversation windows", () => {
     expect(document.querySelector("#sidePanel")?.classList.contains("open")).toBe(!wasSideOpen);
     if (wasSideOpen) fireEvent.click(document.querySelector(".topbar [data-dock-entry=right]")!);
     expect(document.querySelector("#sidePanel")?.classList.contains("open")).toBe(true);
+    vi.spyOn(document.querySelector<HTMLElement>(".cw-workbench")!, "clientWidth", "get").mockReturnValue(1400);
     fireEvent.keyDown(document.querySelector("#spResizer")!, { key: "End" });
-    expect(document.querySelector("#spResizer")?.getAttribute("aria-valuenow")).toBe("640");
+    expect(document.querySelector("#spResizer")?.getAttribute("aria-valuenow")).toBe("840");
+    expect(document.querySelector("#spResizer")?.getAttribute("aria-valuemax")).toBe("840");
+    const panelResizer = document.querySelector<HTMLElement>("#spResizer")!;
+    panelResizer.setPointerCapture = vi.fn();
+    vi.spyOn(document.querySelector<HTMLElement>("#sidePanel")!, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 840, 800));
+    fireEvent.pointerDown(panelResizer, { button: 0, clientX: 200 });
+    fireEvent.pointerMove(panelResizer, { clientX: 300 });
+    expect(document.querySelector<HTMLElement>(".conversation-workspace")!.style.getPropertyValue("--panel-w")).toBe("740px");
+    fireEvent.pointerMove(panelResizer, { clientX: 50 });
+    expect(document.querySelector<HTMLElement>(".conversation-workspace")!.style.getPropertyValue("--panel-w")).toBe("840px");
+    fireEvent.pointerUp(panelResizer);
     const ownedDocument = floating.querySelector<HTMLElement>(".cw-document")!.dataset.conversationDocument;
     const originalBounds = HTMLElement.prototype.getBoundingClientRect;
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function(this: HTMLElement) {
@@ -772,7 +783,7 @@ describe("conversation windows", () => {
     fireEvent.pointerDown(first);
     expect(document.querySelector<HTMLElement>(".cw-shared-sidebar")?.dataset.conversationOwner).toBe((first as HTMLElement).dataset.conversationDocument);
     expect(document.querySelector<HTMLElement>(".cw-shared-right")?.dataset.conversationOwner).toBe((first as HTMLElement).dataset.conversationDocument);
-    expect(document.querySelector("#spResizer")?.getAttribute("aria-valuenow")).toBe("640");
+    expect(document.querySelector("#spResizer")?.getAttribute("aria-valuenow")).toBe("840");
     const conversationOrder = Number(floating.style.zIndex);
     fireEvent.pointerDown(document.querySelector("[data-dock-float] .dock-float-titlebar")!);
     expect(document.querySelector<HTMLElement>(".cw-shared-sidebar")?.dataset.conversationOwner).toBe(ownedDocument);

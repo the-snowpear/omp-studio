@@ -1,15 +1,35 @@
-import { useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useDockEngine } from "../dock/DockContext";
 import { beforeConversationLayoutChange } from "../conversation/conversationReflow";
-import { panelSize, SIDE_PANEL_LIMITS } from "./workbenchLayout";
+import { CONVERSATION_MIN_WIDTH, panelSize, SIDE_PANEL_LIMITS } from "./workbenchLayout";
 import { clampBottomHeight, BOTTOM_PANEL_MAX, BOTTOM_PANEL_MIN } from "../workbench/BottomPanelChrome";
+
+function panelResizeBounds(handle: HTMLElement) {
+  const root = handle.closest<HTMLElement>(".conversation-workspace, .adaptive-workbench") ?? handle.ownerDocument.documentElement;
+  const area = handle.closest<HTMLElement>(".cw-workbench, #workbench") ?? root;
+  const max = root.dataset.layoutOverlay === "side" ? Math.max(0, root.clientWidth - 24) : Math.max(SIDE_PANEL_LIMITS.min, area.clientWidth - CONVERSATION_MIN_WIDTH);
+  const min = Math.min(SIDE_PANEL_LIMITS.min, max);
+  handle.setAttribute("aria-valuemin", String(min));
+  handle.setAttribute("aria-valuemax", String(max));
+  return { root, area, min, max };
+}
 
 export function useWorkbenchResizers({ sideOpen, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomHeight, onResizeBottom }: { sideOpen: boolean; panelWidth: number; onResizePanel(width: number): void; bottomOpen: boolean; onBottomOpenChange(open: boolean): void; bottomHeight: number; onResizeBottom(height: number): void }) {
   const dock = useDockEngine();
   const [bottomResizing, setBottomResizing] = useState(false);
+  const panelResizerRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const handle = panelResizerRef.current;
+    if (!handle || !sideOpen) return;
+    const { root, area } = panelResizeBounds(handle);
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(() => { panelResizeBounds(handle); });
+    observer?.observe(root);
+    if (area !== root) observer?.observe(area);
+    return () => observer?.disconnect();
+  }, [sideOpen, panelWidth]);
   // 右侧面板拖拽调宽：照左栏 sidebar-resizer 的模式，pointer capture 期间直接写
   // 元素宽度与 --panel-w（收起动画的 margin 偏移量依赖该变量），松手后提交 state。
-  // 夹取范围与 .side-panel 的 min/max-width（360/640）保持一致。
+  // 上限取当前工具区的可用宽度，给主对话保留最小阅读宽度。
   const onPanelResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (dock.store.getSnapshot().preferences.locked) return;
     if (!sideOpen) return;
@@ -22,8 +42,7 @@ export function useWorkbenchResizers({ sideOpen, panelWidth, onResizePanel, bott
     handle.setPointerCapture(event.pointerId);
     const startX = event.clientX;
     const startWidth = panel.getBoundingClientRect().width;
-    const root = handle.closest<HTMLElement>(".conversation-workspace, .adaptive-workbench") ?? document.documentElement;
-    const maxWidth = root.dataset.layoutOverlay === "side" ? Math.min(640, root.clientWidth - 24) : Math.min(640, Math.max(360, root.clientWidth - 560));
+    const { root, min, max } = panelResizeBounds(handle);
     beforeConversationLayoutChange();
     handle.classList.add("dragging");
     document.body.classList.add("is-resizing");
@@ -37,7 +56,7 @@ export function useWorkbenchResizers({ sideOpen, panelWidth, onResizePanel, bott
     const move = (next: PointerEvent) => {
       next.preventDefault();
       // 面板贴右缘：指针左移变宽、右移变窄。
-      apply(Math.min(maxWidth, Math.max(Math.min(360, maxWidth), startWidth - (next.clientX - startX))));
+      apply(Math.min(max, Math.max(min, startWidth - (next.clientX - startX))));
     };
     const up = () => {
       handle.classList.remove("dragging");
@@ -54,12 +73,13 @@ export function useWorkbenchResizers({ sideOpen, panelWidth, onResizePanel, bott
   };
   const onPanelResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const current = event.currentTarget.closest(".side-panel")?.getBoundingClientRect().width ?? panelWidth;
+    const { min, max } = panelResizeBounds(event.currentTarget);
     const step = event.shiftKey ? 32 : 16;
-    const value = event.key === "ArrowLeft" ? current + step : event.key === "ArrowRight" ? current - step : event.key === "Home" ? 360 : event.key === "End" ? 640 : undefined;
+    const value = event.key === "ArrowLeft" ? current + step : event.key === "ArrowRight" ? current - step : event.key === "Home" ? min : event.key === "End" ? max : undefined;
     if (value === undefined) return;
     event.preventDefault();
     beforeConversationLayoutChange();
-    onResizePanel(panelSize(value, SIDE_PANEL_LIMITS));
+    onResizePanel(panelSize(value, { ...SIDE_PANEL_LIMITS, min, max }));
   };
   // 底栏拖拽调高：照右侧 sp-resizer。收起时拖动先展开；拖动期间关掉 height
   // 过渡（.resizing），否则每一步都在追光标。夹取 120–480，对齐 ver1。
@@ -125,5 +145,5 @@ export function useWorkbenchResizers({ sideOpen, panelWidth, onResizePanel, bott
       onResizeBottom(BOTTOM_PANEL_MIN);
     }
   };
-  return { bottomResizing, onPanelResizePointerDown, onPanelResizeKeyDown, onBottomResizePointerDown, onBottomResizeKeyDown };
+  return { bottomResizing, panelResizerRef, onPanelResizePointerDown, onPanelResizeKeyDown, onBottomResizePointerDown, onBottomResizeKeyDown };
 }

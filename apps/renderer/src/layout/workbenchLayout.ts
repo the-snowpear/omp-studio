@@ -1,7 +1,7 @@
 export const CONVERSATION_MIN_WIDTH = 560;
 export const LAYOUT_RESTORE_GAP = 32;
 export const SIDEBAR_LIMITS = { min: 200, max: 400, initial: 272 };
-export const SIDE_PANEL_LIMITS = { min: 360, max: 640, initial: 480 };
+export const SIDE_PANEL_LIMITS = { min: 360, max: Infinity, initial: 480 };
 export const BOTTOM_PANEL_LIMITS = { min: 120, max: 480, initial: 240 };
 
 export type LayoutPanel = "sidebar" | "side" | "bottom";

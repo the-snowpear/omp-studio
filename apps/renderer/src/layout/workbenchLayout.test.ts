@@ -20,6 +20,15 @@ describe("workbench space budget", () => {
     expect(prefs).toEqual(original);
     expect(fitWorkbench({ ...prefs, sideOpen: false }, at(2560))).toMatchObject({ sideShown: false });
   });
+  it("keeps a wide side panel preference through narrower windows", () => {
+    const widePrefs = { ...prefs, panelWidth: 1200 };
+    const wide = fitWorkbench(widePrefs, at(2560));
+    expect(wide).toMatchObject({ panelWidth: 1200, sidebarWidth: 272, sideShown: true });
+    const narrow = fitWorkbench(widePrefs, at(1280), null, wide);
+    expect(narrow).toMatchObject({ panelWidth: 448, sidebarWidth: 272, sideShown: true });
+    expect(fitWorkbench(widePrefs, at(2560), null, narrow).panelWidth).toBe(1200);
+    expect(widePrefs.panelWidth).toBe(1200);
+  });
   it("allows manual opening as an overlay without consuming the conversation", () => {
     expect(fitWorkbench(prefs, at(480), "sidebar")).toMatchObject({ sidebarShown: true, sidebarWidth: 272, sideShown: false, overlay: "sidebar" });
     expect(fitWorkbench(prefs, at(480), "side")).toMatchObject({ sideShown: true, panelWidth: 456, sidebarShown: false, overlay: "side" });

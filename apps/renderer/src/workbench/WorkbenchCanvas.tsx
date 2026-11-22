@@ -336,7 +336,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   const composerBarRef = useComposerCollisionCollapse();
   const dock = useDockEngine();
   const agentDockLayout = useAgentDockLayout();
-  const { bottomResizing, onPanelResizePointerDown, onPanelResizeKeyDown, onBottomResizePointerDown, onBottomResizeKeyDown } = useWorkbenchResizers({ sideOpen, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomHeight, onResizeBottom });
+  const { bottomResizing, panelResizerRef, onPanelResizePointerDown, onPanelResizeKeyDown, onBottomResizePointerDown, onBottomResizeKeyDown } = useWorkbenchResizers({ sideOpen, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomHeight, onResizeBottom });
   const [composerError, setComposerError] = useState<string | undefined>(undefined);
   const [statusToast, setStatusToast] = useState<string | null>(null);
   const toastedStatusIds = useRef(new Set<string>());
@@ -3098,7 +3098,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
         </div>
         <SharedSurface region="right">
         <aside className={`side-panel${sideOpen ? " open" : ""}`} id="sidePanel" inert={!sideOpen} aria-label={t("shell.rightPanel")}>
-          <div className="sp-resizer" id="spResizer" role="separator" tabIndex={0} aria-orientation="vertical" aria-label={t("shell.adjustPanelWidth")} aria-valuemin={360} aria-valuemax={640} aria-valuenow={panelWidth} onPointerDown={onPanelResizePointerDown} onKeyDown={onPanelResizeKeyDown} onDoubleClick={() => onResizePanel(480)} />
+          <div ref={panelResizerRef} className="sp-resizer" id="spResizer" role="separator" tabIndex={0} aria-orientation="vertical" aria-label={t("shell.adjustPanelWidth")} aria-valuenow={panelWidth} onPointerDown={onPanelResizePointerDown} onKeyDown={onPanelResizeKeyDown} onDoubleClick={() => onResizePanel(480)} />
           <DockGroupRegion region="right" visible={sideOpen} />
         </aside>
         </SharedSurface>
