@@ -214,7 +214,7 @@ Files、Changes、Git、Browser、Computer、Agents、Terminal、Logs、BTW 等�
 <td width="50%" valign="top">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/agent-hub-dark.webp">
-  <img src="docs/readme/agent-hub-light.webp" width="100%" alt="Agent Hub：主会话与子 Agent 的状态、用量和花费">
+  <img src="docs/readme/agent-hub-light.webp" width="100%" alt="Agent Hub 星图展示主 Agent 与各子 Agent 的派生和通讯关系，右侧显示所选子 Agent 的详情">
 </picture>
 <h3>Agent Hub</h3>
 集中查看主对话和全部子 Agent 的状态、请求数、Token 用量和花费；支持 worker 子 Agent、任务文件和按子代理设置账号策略。

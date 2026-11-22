@@ -214,7 +214,7 @@ Save workspace snapshots per turn, preview file changes, and restore code only, 
 <td width="50%" valign="top">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/agent-hub-dark.webp">
-  <img src="docs/readme/agent-hub-light.webp" width="100%" alt="Agent Hub: status, usage, and cost for the main session and subagents">
+  <img src="docs/readme/agent-hub-light.webp" width="100%" alt="Agent Hub Orbit view showing agent relationships, communication, and the selected subagent details">
 </picture>
 <h3>Agent Hub</h3>
 Inspect status, request counts, Token usage, and spend for the main conversation and all subagents in one place; supports worker subagents, task files, and per-subagent account policies.
