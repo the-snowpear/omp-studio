@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { Icon, type IconName } from "../icons";
 import { useI18n } from "../i18n";
 import { MenuItem } from "../menus";
+import { AgentAvatar, avatarTone } from "../agents/AgentAvatar";
 import { formatShortcut } from "../keyboard/shortcuts";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { useDock } from "./DockContext";
@@ -99,8 +100,10 @@ function DockToolItems({ onClose, onPick, exclude }: { onClose?: (() => void) | 
   // 子 Agent 跟着「常用」里的 Agents 走，放在常用组末尾；常用整组都进过标签时
   // 仍兜底渲染一次，别让会话里的实例从菜单里消失。
   const agentSection = <MenuSection label={copy("子 Agent", "Subagents")} icon="bot">
-    {entries.map(entry => <MenuItem key={entry.agentId} icon="message" title={`${entry.name} · ${entry.status} · ${entry.model}`} onClick={() => { agentCatalog?.open(entry.agentId); onClose?.(); }}>{entry.name}</MenuItem>)}
-    {known.map(([id, descriptor]) => <MenuItem key={id} icon="message" onClick={() => { store.dispatch({ type: "agent-open", panel: id as AgentPanelId, descriptor }); onClose?.(); }}>{descriptor.target.displayName ?? descriptor.target.agentId}</MenuItem>)}
+    {entries.map(entry => <MenuItem key={entry.agentId} leading={<AgentAvatar agentId={entry.agentId} name={entry.name} tone={entry.stale ? "stopped" : avatarTone(entry.tone)} size={16} />}
+      title={`${entry.name} · ${entry.status} · ${entry.model}`} onClick={() => { agentCatalog?.open(entry.agentId); onClose?.(); }}>{entry.name}</MenuItem>)}
+    {known.map(([id, descriptor]) => <MenuItem key={id} leading={<AgentAvatar agentId={descriptor.target.agentId} tone="stopped" size={16} />}
+      onClick={() => { store.dispatch({ type: "agent-open", panel: id as AgentPanelId, descriptor }); onClose?.(); }}>{descriptor.target.displayName ?? descriptor.target.agentId}</MenuItem>)}
     {!entries.length && !known.length ? <MenuItem icon="bot" disabled>{copy("当前会话没有子 Agent", "No agents in this session")}</MenuItem> : null}
   </MenuSection>;
   // A page tab can sit in a hidden region or a minimized window; this finds it again.

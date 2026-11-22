@@ -42,6 +42,7 @@ function sameToolTabs(a: readonly ToolTabInfo[], b: readonly ToolTabInfo[]): boo
       || x.mark.id !== y.mark.id
       || x.mark.title !== y.mark.title
       || x.mark.icon !== y.mark.icon
+      || x.mark.agentId !== y.mark.agentId
       || x.mark.glyph !== y.mark.glyph
       || x.mark.status !== y.mark.status
       || Boolean(x.mark.stale) !== Boolean(y.mark.stale)

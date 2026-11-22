@@ -429,12 +429,6 @@
   width: 3px; border-radius: var(--r-full);
   background: var(--accent);
 }
-.hub-tg-head .tg-ic {
-  width: 24px; height: 24px; flex: none;
-  display: inline-flex; align-items: center; justify-content: center;
-  border-radius: var(--r-6);
-  background: var(--accent-soft); color: var(--accent);
-}
 .hub-tg-head .tg-name {
   display: inline-flex; align-items: center; gap: var(--sp-6);
   min-width: 0; font-weight: var(--fw-semibold); font-size: var(--fs-12);

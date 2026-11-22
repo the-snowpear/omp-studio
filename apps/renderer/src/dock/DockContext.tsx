@@ -83,7 +83,7 @@ export function DockProvider({ children, definitions, store, ownerId, conversati
       const entry = descriptor.scope === agentCatalog?.scope ? agentCatalog.entries.find(item => item.agentId === descriptor.target.agentId) : undefined;
       const duplicates = entry && (agentCatalog?.entries.filter(item => item.name === entry.name).length ?? 0) > 1;
       const title = `${entry?.name ?? descriptor.target.displayName ?? descriptor.target.agentId}${duplicates ? ` · ${descriptor.target.agentId.slice(-5)}` : ""}`;
-      return { id: id as PanelId, title, icon: "message" as const, initialHeight: 480, ...(entry ? { status: entry.tone, stale: entry.stale } : {}),
+      return { id: id as PanelId, title, icon: "message" as const, agentId: descriptor.target.agentId, initialHeight: 480, ...(entry ? { status: entry.tone, stale: entry.stale } : {}),
         compactLabel: (entry?.name ?? descriptor.target.displayName ?? descriptor.target.agentId).slice(0, 2), detail: entry ? `${title}\n${entry.status}\n${entry.model}` : descriptor.target.resolvedModel ? `${title}\n${resolvedLanguage === "zh" ? "最近记录模型" : "Last recorded model"}: ${descriptor.target.resolvedModel}` : title };
     }), ...Object.entries(snapshot.layout.browserPages).map(([id, descriptor]): PanelDefinition => pageDefinitions.find(definition => definition.id === id)
       ?? { id: id as PanelId, title: descriptor.title || "Browser", icon: "globe", initialHeight: 320, minHeight: 180, compactLabel: (descriptor.title || "Browser").slice(0, 2) }), ...Object.entries(snapshot.layout.fileViews ?? {}).map(([id, descriptor]): PanelDefinition => fileDefinitions.find(definition => definition.id === id) ?? { id: id as PanelId, title: descriptor.title, icon: "file" })];

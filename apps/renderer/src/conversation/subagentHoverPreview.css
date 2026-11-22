@@ -28,17 +28,6 @@
 .sa-hover-preview:is(.idle, .done, .succeeded, .completed, .released) { --sa-accent: var(--green); }
 .sa-hover-preview:is(.error, .failed, .aborted, [data-activity="aborted"]) { --sa-accent: var(--red); }
 .sa-hover-head { display: flex; flex: none; align-items: flex-start; gap: 12px; padding: 18px 18px 12px; }
-.sa-hover-avatar {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  color: var(--sa-accent);
-  background: color-mix(in srgb, var(--sa-accent) 10%, transparent);
-}
-.sa-hover-avatar .icon { width: 20px; height: 20px; }
 .sa-hover-identity { flex: 1; min-width: 0; }
 .sa-hover-heading { display: flex; align-items: flex-start; gap: 8px; }
 .sa-hover-heading strong {

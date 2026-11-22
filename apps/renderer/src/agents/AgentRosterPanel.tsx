@@ -6,6 +6,8 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { formatSubagentDuration, metricsFromUsage, subagentDurationMs } from "../conversation/SubagentMetrics";
 import { useAppSettings, type AgentRosterDensity } from "../settings/appSettings";
 import { agentPresentation } from "./agentPresentation";
+import { AgentAvatar } from "./AgentAvatar";
+import { deckTone } from "./deck/deckModel";
 import type { AgentRosterSource } from "./AgentRosterMeter";
 import { useWideLayout } from "../layout/useWideLayout";
 
@@ -84,7 +86,8 @@ export function AgentRosterPanel({ agents, selectedId, openedIds = [], visible, 
           style={wide ? { ["--depth" as string]: Math.min(depth, 3) } : { marginLeft: Math.min(depth, 3) * 12 }} aria-pressed={!main && selectedId === agent.agentId}
           aria-label={main ? (zh ? "返回主 Agent 对话" : "Return to main conversation") : `${zh ? "打开子 Agent" : "Open agent"} ${agent.displayName}`}
           onClick={() => main ? onMain() : onOpen(agent)}>
-          <span className={`agent-avatar${main ? " is-main" : ""}`}><Icon name={main ? "network" : "bot"} extra="sm" /></span>
+          <AgentAvatar agentId={agent.agentId} name={agent.displayName} main={main} tone={!preview && source !== "live" ? "stopped" : deckTone(agent.status, tone)}
+            size={minimal ? 20 : 24} className="agent-roster-avatar" />
           {wide ? <>
             <span className="agent-roster-cell is-identity"><strong title={agent.displayName}>{agent.displayName}</strong>
               {!minimal && agent.assignment ? <span className="agent-roster-task" title={agent.assignment}>{agent.assignment}</span> : null}</span>

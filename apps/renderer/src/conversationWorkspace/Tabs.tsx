@@ -119,7 +119,7 @@ export function ToolWindowTabs({ workspace, documentId }: { workspace: Conversat
     const several = group.panels.length > 1, pages = group.panels.some(panel => definitionFor(definitions, panel).close);
     return {
       windowId: store.windowId(group.id), title: floatTitle(definition.title, conversationTitle), count: group.panels.length,
-      mark: { id: definition.id, title: definition.title, icon: definition.icon, ...(definition.glyph ? { glyph: definition.glyph } : {}), ...(definition.status ? { status: definition.status } : {}), ...(definition.stale ? { stale: true } : {}) },
+      mark: { id: definition.id, title: definition.title, icon: definition.icon, ...(definition.agentId ? { agentId: definition.agentId } : {}), ...(definition.glyph ? { glyph: definition.glyph } : {}), ...(definition.status ? { status: definition.status } : {}), ...(definition.stale ? { stale: true } : {}) },
       closeTip: pages ? several ? text("关闭网页并隐藏其余工具", "Close pages and hide other tools") : text("关闭网页", "Close page") : several ? text("隐藏整组", "Hide group") : text("隐藏工具", "Hide tool"),
       focus: () => store.dispatch({ type: "open", panel: group.active }),
       close: () => closePanels(store, definitions, group.panels),

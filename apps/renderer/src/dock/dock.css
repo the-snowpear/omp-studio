@@ -217,14 +217,7 @@ body.dock-modal-active .dock-menu-popover { z-index: 87; }
 .dock-tab.is-active { min-width: 112px; color: var(--text); background: var(--bg-inset); border-color: var(--border-strong); }
 .dock-tab > .dock-tab-label { display: flex; flex: 1 1 auto; align-items: center; gap: var(--sp-6); min-width: 0; height: 30px; padding: 0 2px 0 8px; font-size: var(--fs-12); font-weight: var(--fw-medium); border-radius: var(--r-6); cursor: pointer; touch-action: none; }
 .dock-tab > .dock-tab-label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dock-agent-dot { display: inline-block; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
-.dock-agent-dot:is([data-status="running"], [data-status="starting"], [data-status="reviving"]):not([data-stale]) { background: var(--green); }
-.dock-agent-dot[data-status="waiting"]:not([data-stale]) { background: var(--amber); }
-.dock-agent-dot[data-status="failed"]:not([data-stale]) { background: var(--red); }
-.dock-agent-abbr { font-size: var(--fs-11); font-weight: var(--fw-semibold); max-width: 24px; overflow: hidden; }
-.dock-rail-icon:has(.dock-agent-dot) { position: relative; }
-.dock-rail-icon .dock-agent-dot { position: absolute; right: 2px; bottom: 2px; }
-.dock-agent-dot:is([data-status="running"], [data-status="starting"], [data-status="reviving"]):not([data-stale]) { animation: agent-running-breathe var(--loop-drift) var(--ease-loop) infinite; }
+.dock-agent-avatar { flex: none; }
 .dock-tab .icon { flex: 0 0 auto; }
 .dock-tab > .dock-tab-close { display: flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 26px; padding: 3px; margin: 0 1px; border-radius: var(--r-4); opacity: 0; cursor: pointer; }
 .dock-tab:is(:hover, :focus-within, .is-active) > .dock-tab-close { opacity: 1; }

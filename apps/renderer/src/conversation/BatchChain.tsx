@@ -1,6 +1,7 @@
 import { memo, useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject, type PointerEvent as ReactPointerEvent } from "react";
 import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { Icon } from "../icons";
+import { AgentAvatar, avatarTone } from "../agents/AgentAvatar";
 import { ToolBody, TruncationMark } from "./ToolBody";
 import { ToolCardScroll } from "./useToolCardFollowScroll";
 import { ChunkedText } from "./textChunks";
@@ -112,7 +113,7 @@ function SubagentCard({ source, onInspectSubagent }: {
   const description = agent.task;
   const body = <>
     <div className="sa-top">
-      <span className="sa-avatar" aria-hidden="true"><Icon name="bot" /></span>
+      <AgentAvatar agentId={source.agentId} name={agent.name} tone={avatarTone(pill.cls)} size={36} className="sa-avatar" />
       <div className="sa-identity">
         <div className="sa-heading">
           <span className="sa-name">{agent.name}</span>

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import type { SessionId } from "@omp-studio/client-contract";
 import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { Icon } from "../icons";
+import { AgentAvatar, avatarTone } from "../agents/AgentAvatar";
 import { useI18n } from "../i18n";
 import { SurfaceProvider, surfaceWindow } from "../dock/SurfaceContext";
 import { usePreviewMode } from "../preview/PreviewContext";
@@ -175,7 +176,7 @@ function SubagentHoverPreview({ request, preview, close, client, agents, runtime
     className={`sa-hover-preview ${agent.status}`} data-activity={pill.cls} data-placement={box?.side} data-density={density}
     style={box ? { top: box.top, left: box.left, width: box.width, height: box.height } : { visibility: "hidden" }}>
     <header className="sa-hover-head">
-      <span className="sa-hover-avatar" aria-hidden="true"><Icon name="bot" /></span>
+      <AgentAvatar agentId={request.target?.agentId ?? agent.agentId} name={agent.name} tone={avatarTone(pill.cls)} size={36} className="sa-hover-avatar" />
       <div className="sa-hover-identity">
         <div className="sa-hover-heading">
           <strong>{agent.name}</strong>

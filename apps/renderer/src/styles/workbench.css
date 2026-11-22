@@ -1130,17 +1130,6 @@
   width: 100%;
   min-width: 0;
 }
-.subagent-strip .sa-avatar {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--r-6);
-  color: var(--sa-accent);
-  background: color-mix(in srgb, var(--sa-accent) 9%, transparent);
-}
-.subagent-strip .sa-avatar .icon { width: 20px; height: 20px; }
 .subagent-strip .sa-identity {
   display: flex;
   flex-direction: column;
@@ -5578,7 +5567,6 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   display: flex;
   flex-direction: column;
   min-width: 360px;
-  max-width: 640px;
   position: relative;
   margin-right: calc(-1 * var(--panel-w));
   visibility: hidden;

@@ -861,7 +861,7 @@ function RailIcon({ definition, active, overlayId, onPointerDown, onClick, onCon
     data-dock-drag="" data-dock-card={definition.id} data-dock-rail-icon={definition.id} data-tip={definition.meter ? meter?.detail ?? label : definition.detail ?? label} aria-label={label}
     style={isInstancePanelId(definition.id) ? undefined : { viewTransitionName: `dock-rail-${panelTransitionName(definition.id)}` }} aria-expanded={active} aria-controls={active ? overlayId : undefined}
     onPointerDown={onPointerDown} onClick={onClick} onContextMenu={onContextMenu} onKeyDown={onKeyDown}>
-    {definition.meter ? <DockMeterRing meter={meter} /> : null}{isAgentPanelId(definition.id) ? <><span className="dock-agent-abbr">{definition.compactLabel}</span><PanelGlyph definition={definition} /></> : <PanelGlyph definition={definition} size="" />}
+    {definition.meter ? <DockMeterRing meter={meter} /> : null}<PanelGlyph definition={definition} size="" />
     {definition.meter ? <DockMeterBadge meter={meter} /> : null}
   </button>;
 }

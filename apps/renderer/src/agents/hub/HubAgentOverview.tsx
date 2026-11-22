@@ -3,6 +3,7 @@ import { Icon, type IconName } from "../../icons";
 import { type HubAgent } from "./types";
 import { fmtCost, fmtDur, fmtNum, hubDurationMs, hubTone, isAdvisor } from "./projection";
 import { DossierDisclosure, DossierSection, HubSigil } from "./HubDossier";
+import { AgentAvatar } from "../AgentAvatar";
 
 interface HubAgentOverviewProps {
   zh: boolean;
@@ -195,7 +196,7 @@ export function HubAgentOverview({ zh, agent, roster, now, select, onOpenMain, o
                   <AgentChip key={id} agent={child} onClick={() => select(id, { scroll: true })} />
                 ) : (
                   <button key={id} type="button" className="hub-dossier-agent" onClick={() => select(id, { scroll: true })}>
-                    <Icon name="bot" extra="sm" />
+                    <AgentAvatar agentId={id} tone="stopped" size={16} />
                     <span>{id}</span>
                   </button>
                 );

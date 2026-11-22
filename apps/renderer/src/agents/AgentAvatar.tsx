@@ -20,6 +20,21 @@ export type AgentAvatarProps = {
 };
 
 /**
+ * The avatar expression for a status word from any agent surface: a Runtime
+ * lifecycle status, a delegation card's activity class, or a dock tab status.
+ */
+export function avatarTone(status: string | undefined): DeckTone {
+  switch (status) {
+    case "running": case "starting": case "reviving": case "tool": case "thinking": return "running";
+    case "waiting": return "waiting";
+    case "failed": case "error": case "aborted": return "failed";
+    case "idle": case "done": case "succeeded": case "completed": return "idle";
+    case "parked": case "pending": return "parked";
+    default: return "stopped";
+  }
+}
+
+/**
  * An agent's avatar anywhere in Studio: the same pixel face and hue it has in the
  * deck, so one agent is recognisable across the Hub, the workbench and the
  * conversation. Decorative (`aria-hidden`); the caller names the agent in text.

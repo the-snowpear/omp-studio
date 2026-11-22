@@ -2,6 +2,7 @@ import { useI18n } from "../../i18n";
 import { CompletionRing } from "../../conversation/JobWidget";
 import { Icon, type IconName } from "../../icons";
 import { type HubAgent, type HubStatus, type HubTreeNode } from "./types";
+import { HubSigil } from "./HubDossier";
 import { activityPill, flattenTreeNodes, fmtAge, fmtCost, fmtDur, fmtHM, fmtNum, hubDurationMs, sparkLevel } from "./projection";
 
 export function KbdHint() {
@@ -288,9 +289,7 @@ export function TreeGroup({
         data-hub-id={head.id}
         onClick={() => onSelect(head.id)}
       >
-        <span className="tg-ic">
-          <Icon name="bot" extra="sm" />
-        </span>
+        <HubSigil agent={head} size={24} />
         <span className={`hub-act ${pill.cls}`}>{pill.label}</span>
         <span className="tg-name">
           <StatusDot status={head.status} />

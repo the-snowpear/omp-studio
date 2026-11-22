@@ -15,8 +15,10 @@ import { useI18n } from "./i18n";
 import { PLATFORM } from "./platform";
 import { fileManagerName } from "./platformCopy";
 
-export function MenuItem({ icon, children, hint, kbd, disabled, title, current, onClick }: {
+export function MenuItem({ icon, leading, children, hint, kbd, disabled, title, current, onClick }: {
   icon?: IconName;
+  /** A custom mark in the icon's place (an agent's avatar). */
+  leading?: ReactNode;
   children: ReactNode;
   hint?: string;
   /** 右侧快捷键徽标；只标注当前真实存在的快捷键（aria-hidden 避免读屏重复播报）。 */
@@ -36,7 +38,7 @@ export function MenuItem({ icon, children, hint, kbd, disabled, title, current, 
       aria-current={current ? "true" : undefined}
       onClick={onClick}
     >
-      {icon ? <Icon name={icon} extra="sm" /> : null}
+      {leading ?? (icon ? <Icon name={icon} extra="sm" /> : null)}
       <span>{children}</span>
       {hint ? <span className="hint">{hint}</span> : null}
       {kbd ? <span className="kbd" aria-hidden="true">{kbd}</span> : null}

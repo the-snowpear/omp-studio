@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Icon } from "../icons";
+import { AgentAvatar, avatarTone } from "../agents/AgentAvatar";
 import type { DockStore } from "./store";
 import { isAgentPanelId, isBrowserPagePanelId, type PanelDefinition, type PanelId } from "./types";
 
@@ -14,9 +15,10 @@ function SiteIcon({ definition, size }: { definition: PanelDefinition; size: str
   return <img className="dock-glyph-image" src={image} alt="" draggable={false} onError={() => setFailed(image)} />;
 }
 
-/** The mark before a panel title: an Agent's status dot, a page's site icon or state, else the tool icon. */
+/** The mark before a panel title: an Agent's avatar, a page's site icon or state, else the tool icon. */
 export function PanelGlyph({ definition, size = "sm" }: { definition: PanelDefinition; size?: "sm" | "" }) {
-  if (isAgentPanelId(definition.id)) return <i className="dock-agent-dot" data-status={definition.status ?? "inactive"} data-stale={definition.stale || undefined} aria-hidden="true" />;
+  if (isAgentPanelId(definition.id)) return <AgentAvatar agentId={definition.agentId} name={definition.title}
+    tone={definition.stale ? "stopped" : avatarTone(definition.status)} size={size ? 14 : 18} className="dock-agent-avatar" />;
   const glyph = definition.glyph;
   if (!glyph) return <Icon name={definition.icon} {...(size ? { extra: size } : {})} />;
   const mark = glyph.state === "busy" ? <i className="dock-glyph-spinner" aria-hidden="true" />
