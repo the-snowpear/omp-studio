@@ -3246,7 +3246,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
           onMain={() => { revealMainWindow(); onRoute("workbench"); composerInputRef.current?.focus(); }}
           onOpenHub={agentId => { setHubIntent(agentId, "chat"); onRoute("agent-hub"); }}
           onRevealSource={target => target.toolCallId === undefined ? Promise.resolve(false) : revealConversationTarget(convoScrollerRef.current, { toolCallId: target.toolCallId })} />}</DockPanel>)}
-      <FileDockInstances workspaceId={workspaceId ? String(workspaceId) : undefined} targetId={executionTarget.id} onSettings={() => { setSettingsIntent("maintenance", "office-preview"); onRoute("settings"); }} actions={fileViewerActions} />
+      <FileDockInstances client={client} workspaceId={workspaceId ? String(workspaceId) : undefined} targetId={executionTarget.id} onSettings={() => { setSettingsIntent("maintenance", "office-preview"); onRoute("settings"); }} actions={fileViewerActions} />
       <FileBrowserDock workspaceId={workspaceId ? String(workspaceId) : undefined} targetId={executionTarget.id} targetName={executionTarget.name} actions={fileViewerActions} />
       <BrowserDockInstances client={client} sessionId={browserChatId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} capabilities={capabilities} remote={!!executionTarget.id} onReferences={insertBrowserReferences} />
       <ToastHost message={statusToast} icon="info" onDismiss={() => setStatusToast(null)} />

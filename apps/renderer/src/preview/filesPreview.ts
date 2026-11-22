@@ -1,5 +1,8 @@
-import type { WorkspaceFileInfo, WorkspaceFileText } from "@omp-studio/client-contract";
+import type { WorkspaceFileInfo, WorkspaceFileText, WorkspacePathKind } from "@omp-studio/client-contract";
 import { isZh } from "../i18n";
+import { normalizeFileIdentityPath } from "../files/fileTypes";
+import { demoPath } from "./demoPaths";
+import { getPreviewFileTree, type PreviewFileNode } from "./fixtures";
 import workbookUrl from "./fileAssets/usage.xlsx?url";
 import legacyWorkbookUrl from "./fileAssets/usage.xls?url";
 
@@ -7,6 +10,26 @@ const CSV = "Model,Requests,Tokens\nClaude,128,52400\nGPT,96,41800\nGemini,64,28
 const buildReadme = (zh: boolean) => zh
   ? "# OMP Studio\n\n直接在工作台阅读和编辑项目文件。\n\n## 文件窗口\n\n- 文件树单击打开\n- 拖动标题栏停靠\n- Ctrl / Cmd + S 保存文本\n\n[查看数据](./usage.csv)\n\n```ts\nconst workspace = 'OMP Studio';\nconsole.log(workspace);\n```\n"
   : "# OMP Studio\n\nRead and edit project files right inside the workbench.\n\n## File windows\n\n- Click a file in the tree to open\n- Drag the title bar to dock\n- Ctrl / Cmd + S to save text\n\n[View data](./usage.csv)\n\n```ts\nconst workspace = 'OMP Studio';\nconsole.log(workspace);\n```\n";
+const PREVIEW_PATHS = new Map<string, WorkspacePathKind>([
+  ["README.md", "file"], ["usage.csv", "file"], ["docs/usage.csv", "file"],
+]);
+function addPreviewPaths(nodes: readonly PreviewFileNode[], prefix = "") {
+  for (const node of nodes) {
+    const path = `${prefix}${node.name}`;
+    PREVIEW_PATHS.set(path, node.type === "dir" ? "directory" : "file");
+    if (node.children) addPreviewPaths(node.children, `${path}/`);
+  }
+}
+addPreviewPaths(getPreviewFileTree(true));
+addPreviewPaths(getPreviewFileTree(false));
+
+const PREVIEW_PROJECT_ROOT = normalizeFileIdentityPath(demoPath("omp-web"));
+export function previewPathKind(path: string): WorkspacePathKind {
+  const normalized = normalizeFileIdentityPath(path);
+  if (normalized === PREVIEW_PROJECT_ROOT) return "directory";
+  const projectPath = normalized.startsWith(`${PREVIEW_PROJECT_ROOT}/`) ? normalized.slice(PREVIEW_PROJECT_ROOT.length + 1) : normalized;
+  return PREVIEW_PATHS.get(projectPath) ?? "missing";
+}
 export function previewFile(path: string, workspaceId: string, zh = isZh()): WorkspaceFileInfo {
   path = path.replaceAll("\\", "/").split("/").reduce<string[]>((parts, part) => { if (part === "..") parts.pop(); else if (part && part !== ".") parts.push(part); return parts; }, []).join("/");
   return { workspaceId: workspaceId as WorkspaceFileInfo["workspaceId"], path, id: `preview:${path}`, name: path.split(/[\\/]/).pop() ?? path, size: buildReadme(zh).length, version: "demo-1", mime: "text/plain", writable: true };

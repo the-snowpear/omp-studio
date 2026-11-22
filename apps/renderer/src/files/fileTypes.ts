@@ -54,12 +54,16 @@ export function formatBytes(size: number | undefined): string {
   while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }
-/** The kinds the transcript links on sight; other slash-separated text waits for the Host verdict. */
-const KNOWN_FILE_EXTENSION = /\.(?:[cm]?js|jsx|tsx?|py|rs|go|java|c|h|cpp|hpp|cs|rb|php|sh|ps1|sql|json|ya?ml|toml|ini|conf|txt|log|md|mdx|markdown|html?|css|scss|xml|csv|tsv|xlsx?|xlsm|xlsb|ods|pdf|png|jpe?g|gif|webp|bmp|avif|svg|mp4|webm|mov|mkv|mp3|wav|ogg|flac|m4a|docx?|docm|pptx?|pptm|odt|odp|rtf)$/i;
+/** File formats shared by viewer badges and display-only preview references. */
 export function hasKnownFileExtension(path: string): boolean {
-  return KNOWN_FILE_EXTENSION.test(path);
+  const name = path.split(/[\\/]/).pop() ?? path;
+  return name.includes(".") && (LANGUAGES[extension(name)] !== undefined || fileKind(name) !== "text" || extension(name) === "conf");
 }
-export interface FileReference { path: string; line?: number; column?: number }
+export interface FileReference { path: string; line?: number; column?: number; fragment?: string }
+
+function decodeUriPath(value: string): string {
+  try { return decodeURIComponent(value); } catch { return value; }
+}
 
 function decodeFileUrlPath(rawUrl: string): string | null {
   try {
@@ -71,9 +75,7 @@ function decodeFileUrlPath(rawUrl: string): string | null {
     }
     return /^\/[A-Za-z]:\//.test(decoded) ? decoded.slice(1) : decoded;
   } catch {
-    let fallback = rawUrl.replace(/^file:(?:\/\/(?:localhost)?)?/i, "");
-    try { fallback = decodeURIComponent(fallback); } catch { /* Keep literal percent if malformed. */ }
-    fallback = fallback.replace(/[?#].*$/, "");
+    const fallback = decodeUriPath(rawUrl.replace(/^file:(?:\/\/(?:localhost)?)?/i, "").replace(/[?#].*$/, ""));
     return /^\/[A-Za-z]:[\\/]/.test(fallback) ? fallback.slice(1) : fallback || null;
   }
 }
@@ -118,25 +120,43 @@ export function normalizeFileIdentityPath(value: string): string {
 }
 
 export function parseFileReference(value: string, explicitLink = false): FileReference | null {
-  const text = value.trim();
-  if (!text || /^[#?]/.test(text) || /^(?:https?:|mailto:|data:|javascript:|tel:)/i.test(text)) return null;
-  if (/^[a-z][\w+.-]*:/i.test(text) && !/^(?:file:|[a-z]:[\\/])/i.test(text)) return null;
-  const location = /(?::(\d+)(?::(\d+))?|#L(\d+)(?:C(\d+))?(?:-L?\d+)?)$/.exec(text);
-  let path = location ? text.slice(0, location.index) : text;
+  let text = value.trim();
+  const quoted = !explicitLink && /^(".*"|'.*')$/s.test(text);
+  if (quoted) text = text.slice(1, -1);
+  if (!text || /^[#?]/.test(text) || explicitLink && text.startsWith("//")) return null;
+  let fragment: string | undefined;
+  let location: RegExpExecArray | null = null;
+  if (explicitLink) {
+    const hash = text.indexOf("#");
+    if (hash >= 0) {
+      const section = text.slice(hash + 1);
+      location = /^L(\d+)(?:C(\d+))?(?:-L?\d+)?$/.exec(section);
+      if (!location && section) fragment = decodeUriPath(section);
+      text = text.slice(0, hash);
+    }
+    text = text.split("?")[0]!;
+  } else {
+    const hashLocation = /#L(\d+)(?:C(\d+))?(?:-L?\d+)?$/.exec(text);
+    if (hashLocation) { location = hashLocation; text = text.slice(0, hashLocation.index); }
+  }
+  if (!location) {
+    const colonLocation = /:(\d+)(?::(\d+))?$/.exec(text);
+    if (colonLocation) { location = colonLocation; text = text.slice(0, colonLocation.index); }
+  }
+  let path = text;
   if (/^file:/i.test(path)) {
     const decodedUrl = decodeFileUrlPath(path);
     if (!decodedUrl) return null;
     path = decodedUrl;
-  } else {
-    try { path = decodeURIComponent(path); } catch { /* A literal percent is also a valid filename. */ }
-  }
-  if (!explicitLink && (/[\n\r<>{}=]/.test(path))) return null;
+  } else if (explicitLink) path = decodeUriPath(path);
+  if (!path || /^(?:https?:|mailto:|data:|javascript:|tel:)/i.test(path)) return null;
+  if (/^[a-z][\w+.-]*:/i.test(path) && !/^[a-z]:[\\/]/i.test(path)) return null;
+  if (!explicitLink && /[\n\r<>{}=|;`]/.test(path)) return null;
   if (!explicitLink && !/[/\\]/.test(path)) {
-    const named = ["README", "LICENSE", "Dockerfile", "Makefile", ".gitignore", ".gitattributes", ".env"].includes(path);
-    const formats = hasKnownFileExtension(path);
-    if (!named && (!formats || path.startsWith(".") || !/^[\p{L}\p{N}_ .@+-]+$/u.test(path))) return null;
+    if (!/^[\p{L}\p{N}_ .@+%~-]+$/u.test(path)) return null;
+    if (!quoted && path.includes(" ") && !hasKnownFileExtension(path)) return null;
   }
-  return { path, ...(location ? { line: Number(location[1] ?? location[3]), ...(location[2] || location[4] ? { column: Number(location[2] ?? location[4]) } : {}) } : {}) };
+  return { path, ...(location ? { line: Number(location[1]), ...(location[2] ? { column: Number(location[2]) } : {}) } : {}), ...(fragment ? { fragment } : {}) };
 }
 export function relativeFileReference(base: string, path: string): string {
   if (/^file:/i.test(path)) {

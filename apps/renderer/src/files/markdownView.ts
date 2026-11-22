@@ -10,6 +10,21 @@ export function markdownModes(zh: boolean, split: boolean): FileModeOption[] {
   return options;
 }
 
+/** Resolve a Markdown section within this file without adding global heading IDs. */
+export function revealMarkdownFragment(root: HTMLElement, fragment: string): boolean {
+  const headings = new Map<string, HTMLElement>();
+  for (const heading of root.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6")) {
+    const base = (heading.textContent ?? "").trim().toLowerCase().replace(/[^\p{L}\p{N}\p{M}_ -]/gu, "").replaceAll(" ", "-");
+    let anchor = base, index = 1;
+    while (headings.has(anchor)) anchor = `${base}-${index++}`;
+    headings.set(anchor, heading);
+  }
+  const heading = headings.get(fragment) ?? headings.get(fragment.replace(/^user-content-/, ""));
+  if (!heading) return false;
+  heading.scrollIntoView({ block: "start", behavior: "auto" });
+  return true;
+}
+
 /** Source and rendered Markdown scroll by proportion, even when their line heights differ. */
 export function useMarkdownScroll(controller: RefObject<EditorController | null>) {
   const markdownRef = useRef<HTMLDivElement>(null), following = useRef(false);

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { StudioClient, WorkspaceFileInfo } from "@omp-studio/client-contract";
 import { I18nProvider } from "../i18n";
 import type { FilePanelDescriptor } from "../dock/types";
+import { PreviewSurface } from "../preview/PreviewContext";
 import FilePane from "./FilePane";
 import { FileDocument } from "./fileDocuments";
 
@@ -13,19 +14,61 @@ vi.mock("./FileTextEditor", () => ({ default: ({ gitMarks }: { gitMarks?: { addi
 beforeEach(() => { vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} }); viewer.start.mockClear(); viewer.stop.mockClear(); });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-function setup(path = "report.pdf") {
+function setup(path = "report.pdf", preview = false) {
   let visibility: DocumentVisibilityState = "visible";
   vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
   const file: WorkspaceFileInfo = { workspaceId: "workspace" as WorkspaceFileInfo["workspaceId"], id: "pdf", path, name: path, mime: path.endsWith("webm") ? "video/webm" : path.endsWith("pdf") ? "application/pdf" : "text/plain", size: 128, version: "v1", writable: true };
   const query = vi.fn(async (_name?: string, _input?: unknown): Promise<unknown> => file), client = { query } as unknown as StudioClient;
-  const session = new FileDocument(file, async () => client), setVisible = vi.spyOn(session, "setVisible");
+  const session = new FileDocument(file, async () => client, preview), setVisible = vi.spyOn(session, "setVisible");
   const open = vi.fn(async () => ({ id: "lease", url: "omp-file://viewer/lease", file })), release = vi.fn(async () => {});
   vi.stubGlobal("ompStudioChrome", { files: { open, release } });
   const descriptor: FilePanelDescriptor = { targetId: null, workspaceId: "workspace", path: file.path, fileId: file.id, title: file.name, scope: "conversation" };
   const onViewState = vi.fn();
-  const pane = (visible: boolean) => <I18nProvider forcedLanguage="zh"><FilePane id="file-view:pdf" descriptor={descriptor} session={session} visible={visible} onSettings={() => {}} onViewState={onViewState} /></I18nProvider>;
-  return { pane, session, query, open, release, setVisible, onViewState, hideDocument: () => { visibility = "hidden"; document.dispatchEvent(new Event("visibilitychange")); } };
+  const pane = (visible: boolean, language: "zh" | "en" = "zh") => <I18nProvider forcedLanguage={language}><PreviewSurface preview={preview}><FilePane id="file-view:pdf" descriptor={descriptor} session={session} visible={visible} onSettings={() => {}} onViewState={onViewState} /></PreviewSurface></I18nProvider>;
+  return { pane, descriptor, session, query, open, release, setVisible, onViewState, hideDocument: () => { visibility = "hidden"; document.dispatchEvent(new Event("visibilitychange")); } };
 }
+
+it("updates a preview Markdown fixture with the mounted language while retaining the file", async () => {
+  const source = setup("docs/README.md", true), view = render(source.pane(true));
+  await screen.findByRole("heading", { name: "文件窗口" });
+  const fileId = source.session.getSnapshot().file.id;
+  view.rerender(source.pane(true, "en"));
+  await screen.findByRole("heading", { name: "File windows" });
+  view.rerender(source.pane(true));
+  await screen.findByRole("heading", { name: "文件窗口" });
+  expect(source.session.getSnapshot().file.id).toBe(fileId);
+  expect(source.query).not.toHaveBeenCalled();
+  view.unmount(); source.session.dispose();
+});
+
+it("opens a Markdown fragment in preview and keeps the reading position through language changes", async () => {
+  const source = setup("README.md"), file = source.session.getSnapshot().file;
+  source.descriptor.fragment = "installation-1";
+  source.descriptor.mode = "source";
+  source.query.mockImplementation(async name => name === "workspace.file.readText"
+    ? { file, text: "# Guide\n\n## Installation\n\nFirst section.\n\n## Installation\n\nSecond section.\n", encoding: "utf8", bom: false, lineEnding: "lf" }
+    : name === "git.repository.summary" ? { isRepository: false } : file);
+  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollIntoView"), scroll = vi.fn();
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scroll });
+  const view = render(source.pane(true));
+  try {
+    await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1));
+    const sections = screen.getAllByRole("heading", { name: "Installation" });
+    expect(scroll.mock.contexts[0]).toBe(sections[1]);
+    expect(scroll).toHaveBeenCalledWith({ block: "start", behavior: "auto" });
+    view.rerender(source.pane(true, "en"));
+    expect(scroll).toHaveBeenCalledTimes(1);
+    view.rerender(source.pane(true, "zh"));
+    expect(scroll).toHaveBeenCalledTimes(1);
+    source.descriptor.jump = 1;
+    view.rerender(source.pane(true));
+    await waitFor(() => expect(scroll).toHaveBeenCalledTimes(2));
+  } finally {
+    view.unmount(); source.session.dispose();
+    if (original) Object.defineProperty(HTMLElement.prototype, "scrollIntoView", original);
+    else delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+  }
+});
 
 it("releases hidden PDF views, stops their reads, and reopens them on reveal", async () => {
   const source = setup(), view = render(source.pane(true));

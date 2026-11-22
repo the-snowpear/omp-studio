@@ -31,16 +31,16 @@ export class FileDocument {
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private patch(patch: Partial<FileDocumentSnapshot>) { const wasDirty = this.state.dirty; this.state = { ...this.state, ...patch }; for (const listener of this.listeners) listener(); if (wasDirty !== this.state.dirty) for (const listener of dirtyListeners) listener(); }
   edit(text: string) { this.patch({ text, dirty: text !== this.state.baseline }); }
-  private previewText() {
-    const value = previewFileText(previewFile(this.state.file.path, this.state.file.workspaceId));
+  private previewText(zh?: boolean) {
+    const value = previewFileText(previewFile(this.state.file.path, this.state.file.workspaceId, zh), zh);
     return { ...value, file: { ...value.file, ...(this.state.file.source ? { source: this.state.file.source } : {}) } };
   }
-  async load(discard = false): Promise<void> {
+  async load(discard = false, zh?: boolean): Promise<void> {
     if (this.state.loading || this.state.dirty && !discard) return;
     const text = this.state.text;
     this.patch({ loading: true, error: "" });
     try {
-      const value = this.preview ? this.previewText() : await readFileBackend(await this.client(), this.state.file);
+      const value = this.preview ? this.previewText(zh) : await readFileBackend(await this.client(), this.state.file);
       // Reload discards the draft that was present when requested, never typing that began during the read.
       if (this.state.text !== text || !discard && this.state.dirty) { this.patch({ external: value.file }); return; }
       this.format = { encoding: value.encoding, bom: value.bom, lineEnding: value.lineEnding };

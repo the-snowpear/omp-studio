@@ -26,10 +26,16 @@ const HIGHLIGHT: Options["rehypePlugins"] = [[rehypeHighlight, { detect: false, 
 const MAX_HIGHLIGHT_CHARS = 96 * 1024;
 
 export function isSafeMarkdownUrl(value: string, image = false): boolean {
-  const url = value.trim();
+  const url = markdownWebUrl(value.trim());
   if (image) return /^https?:\/\//i.test(url) || parseFileReference(url, true) !== null;
   if (parseFileReference(url, true)) return true;
   return /^(?:https?:|mailto:)/i.test(url) || /^(?:[/.#?]|[^:\s]+$)/.test(url);
+}
+
+function markdownWebUrl(url: string): string {
+  if (!url.startsWith("//")) return url;
+  const protocol = globalThis.location?.protocol;
+  return `${protocol === "http:" || protocol === "https:" ? protocol : "https:"}${url}`;
 }
 
 function nodeText(node: ReactNode): string {
@@ -104,13 +110,13 @@ function componentsFor(streaming: boolean, magic: boolean, highlightEligible = f
       if (staticPreview) return <span className="md-static-link">{prose(children)}</span>;
       const url = typeof href === "string" ? href.trim() : "";
       if (isSpillUri(url)) return <SpillLink uri={url}>{children}</SpillLink>;
-      return parseFileReference(url, true) ? <FileLink href={url}>{prose(children)}</FileLink> : <ExtensionAwareLink href={url} safe={isSafeMarkdownUrl(url)}>{prose(children)}</ExtensionAwareLink>;
+      return parseFileReference(url, true) ? <FileLink href={url}>{prose(children)}</FileLink> : <ExtensionAwareLink href={markdownWebUrl(url)} safe={isSafeMarkdownUrl(url)}>{prose(children)}</ExtensionAwareLink>;
     },
     img: ({ src, alt }) => {
       if (staticPreview) return alt ? <span className="md-static-image">{alt}</span> : null;
       const url = typeof src === "string" ? src.trim() : "";
       if (parseFileReference(url, true)) return <LocalFileImage src={url} alt={alt ?? ""} />;
-      return isSafeMarkdownUrl(url, true) ? <img src={url} alt={alt ?? ""} loading="lazy" decoding="async" referrerPolicy="no-referrer" /> : null;
+      return isSafeMarkdownUrl(url, true) ? <img src={markdownWebUrl(url)} alt={alt ?? ""} loading="lazy" decoding="async" referrerPolicy="no-referrer" /> : null;
     },
     table: ({ children,node }) => staticPreview
       ? <div className="md-table-wrap"><table>{children}</table></div>
@@ -133,7 +139,8 @@ function componentsFor(streaming: boolean, magic: boolean, highlightEligible = f
       const props = child && typeof child === "object" && "props" in child ? (child as { props: { className?: string; children?: ReactNode } }).props : {};
       const language = /language-([\w+#.-]+)/.exec(props.className ?? "")?.[1] ?? "";
       const text = nodeText(props.children).replace(/\n$/, "");
-      if (staticPreview) return <pre className="codeblock md-code-pre">{children}</pre>;
+      const code = <code className={props.className}>{props.children}</code>;
+      if (staticPreview) return <pre className="codeblock md-code-pre">{code}</pre>;
       if (language !== "mermaid" && graphicFormat("graphic."+language) && (!streaming || language === "svg")) return <GraphicPreview name={"graphic."+language} text={text}/>;
       if (language === "mermaid" && !streaming) return performanceOptions.boundedMermaid ? <LazyMermaid code={text} /> : <LegacyMermaid key={text} code={text} />;
       if (performanceOptions.highlightWorker && highlightEligible && language && language !== "mermaid") {
@@ -141,7 +148,7 @@ function componentsFor(streaming: boolean, magic: boolean, highlightEligible = f
           <HighlightedCode language={language} code={nodeText(props.children)} />
         </CodeFrame>;
       }
-      return <CodeFrame language={language} text={text} streaming={streaming}>{children}</CodeFrame>;
+      return <CodeFrame language={language} text={text} streaming={streaming}>{code}</CodeFrame>;
     },
   };
   componentCache.set(key, components);

@@ -9,7 +9,7 @@ describe("file links", () => {
     expect(parseFileReference("docs/说明%20文档.md", true)).toEqual({ path: "docs/说明 文档.md" });
     expect(parseFileReference("https://example.org/report.pdf", true)).toBeNull();
     expect(parseFileReference("#heading", true)).toBeNull();
-    expect(parseFileReference("client.query")).toBeNull();
+    expect(parseFileReference("client.query")).toEqual({ path: "client.query" }); // Candidate only; the Host decides whether it exists.
     expect(parseFileReference("说明.md")).toEqual({ path: "说明.md" });
   });
   it("routes Office, spreadsheets, SVG and source HTML to their intended viewers", () => {

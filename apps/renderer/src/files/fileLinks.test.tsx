@@ -42,7 +42,7 @@ it("switches conversation images to fixtures in preview mode and releases the re
 it("drops the link once the workspace reports the path is gone", async () => {
   const stop = registerPathResolver("standalone", async paths => paths.map(path => ({ path, kind: "missing" as const })));
   const view = render(<FileLink href="src/Gone.tsx" inline>src/Gone.tsx</FileLink>);
-  expect(view.container.querySelector("a.file-reference")).not.toBeNull();
+  expect(view.container.querySelector("a.file-reference")).toBeNull();
   await waitFor(() => expect(view.container.querySelector("a.file-reference")).toBeNull());
   expect(view.container.textContent).toBe("src/Gone.tsx");
   stop();
@@ -67,11 +67,11 @@ it("reveals a workspace directory in Explorer and opens a classified file", asyn
   const folder = render(<FileLink href="docs/sql" inline>docs/sql</FileLink>);
   const file = render(<FileLink href="src/Main.kt" inline>src/Main.kt</FileLink>);
   await waitFor(() => expect(folder.container.querySelector("a.file-reference")).not.toBeNull());
-  fireEvent.click(folder.container.querySelector("a.file-reference")!);
+  await act(async () => fireEvent.click(folder.container.querySelector("a.file-reference")!));
   expect(reveal).toHaveBeenCalledWith({ path: "docs/sql", workspaceId: "current-workspace", targetId: "current-ssh" });
   expect(open).not.toHaveBeenCalled();
   await waitFor(() => expect(file.container.querySelector("a.file-reference")).not.toBeNull());
-  fireEvent.click(file.container.querySelector("a.file-reference")!);
+  await act(async () => fireEvent.click(file.container.querySelector("a.file-reference")!));
   expect(open).toHaveBeenCalledWith({ path: "src/Main.kt", workspaceId: "current-workspace", targetId: "current-ssh" });
   stop(); stopOpener(); stopBrowser();
 });
@@ -85,9 +85,9 @@ it("opens absolute files on the chat's Host and redirects absolute directories t
   const folder = render(<FileLink href="/Users/demo/notes" inline>/Users/demo/notes</FileLink>);
   await waitFor(() => expect(file.container.querySelector("a.file-reference")).not.toBeNull());
   await waitFor(() => expect(folder.container.querySelector("a.file-reference.is-directory")).not.toBeNull());
-  fireEvent.click(file.container.querySelector("a.file-reference")!);
+  await act(async () => fireEvent.click(file.container.querySelector("a.file-reference")!));
   expect(open).toHaveBeenCalledWith({ path: "/Users/demo/report.pdf", workspaceId: "", targetId: "current-ssh", source: "system" });
-  fireEvent.click(folder.container.querySelector("a.file-reference")!);
+  await act(async () => fireEvent.click(folder.container.querySelector("a.file-reference")!));
   expect(reveal).toHaveBeenCalledWith({ path: "/Users/demo/notes", targetId: "current-ssh" });
   expect(open).toHaveBeenCalledTimes(1);
   stop(); stopOpener(); stopBrowser();
@@ -118,7 +118,7 @@ it("retries only the omitted paths and leaves the queue idle after a second omis
 
   await advance(1200);
   expect(screen.getByRole("link", { name: "First" })).toBeTruthy();
-  expect(screen.queryByRole("link", { name: "Omitted" })).toBeNull();
+  expect(screen.getByRole("link", { name: "Omitted" }).classList.contains("is-deferred")).toBe(true);
   expect(resolve).toHaveBeenCalledTimes(2);
   expect(resolve.mock.calls[1]).toEqual([["src/later.kt"], { workspaceId: "current-workspace", targetId: "current-ssh" }]);
   view.unmount();
@@ -166,7 +166,7 @@ it("recovers from a missing file on the bounded retry or on a later remount", as
   render(links);
   await advance(40);
   expect(screen.getByRole("link", { name: "Later" })).toBeTruthy();
-  expect(resolve.mock.calls[2]?.[0]).toEqual(["generated/later.txt"]);
+  expect(resolve.mock.calls[2]?.[0]).toEqual(["generated/soon.txt", "generated/later.txt"]);
 });
 
 it("classifies and opens markdown links relative to the file on its own Host", async () => {
@@ -186,7 +186,7 @@ it("classifies and opens markdown links relative to the file on its own Host", a
     [["docs/note.txt", "docs/assets"], { workspaceId: "other-workspace", targetId: "other-ssh" }],
     [["~/home.txt", "/D:/logs/run.txt"], { workspaceId: "", targetId: "other-ssh" }],
   ]));
-  for (const label of ["Note", "Assets", "Home", "Drive"]) fireEvent.click(screen.getByRole("link", { name: label }));
+  for (const label of ["Note", "Assets", "Home", "Drive"]) await act(async () => fireEvent.click(screen.getByRole("link", { name: label })));
   expect(open).toHaveBeenCalledWith({ path: "docs/note.txt", line: 5, column: 2, workspaceId: "other-workspace", targetId: "other-ssh" });
   expect(open).toHaveBeenCalledWith({ path: "~/home.txt", workspaceId: "", targetId: "other-ssh", source: "system" });
   expect(open).toHaveBeenCalledWith({ path: "/D:/logs/run.txt", workspaceId: "", targetId: "other-ssh", source: "system" });

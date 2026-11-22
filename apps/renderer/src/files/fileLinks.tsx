@@ -2,9 +2,10 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import { isSystemFilePath } from "@omp-studio/client-contract";
 import { useConversationView } from "../conversationWorkspace/Context";
 import { usePreviewMode } from "../preview/PreviewContext";
-import { previewFile, previewFileBlob } from "../preview/filesPreview";
+import { previewFile, previewFileBlob, previewPathKind } from "../preview/filesPreview";
 import { useOpenFileBrowser } from "../fileBrowser/fileBrowserLinks";
-import { hasKnownFileExtension, parseFileReference, relativeFileReference, type FileReference } from "./fileTypes";
+import { useI18n } from "../i18n";
+import { parseFileReference, relativeFileReference, type FileReference } from "./fileTypes";
 import { resolvePathOnOpen, useFilePathKind } from "./pathResolution";
 
 export interface FileOpenIntent extends FileReference { source?: "system"; workspaceId?: string; ownerId?: string; targetId?: string | null }
@@ -24,6 +25,8 @@ export function useOpenFile() {
 export function FileLink({ href, children, inline = false }: { href: string; children: ReactNode; inline?: boolean }) {
   const document = useContext(FileDocumentContext), open = useOpenFile(), openBrowser = useOpenFileBrowser();
   const view = useConversationView(), mode = usePreviewMode();
+  const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
+  const [opening, setOpening] = useState(false), [failure, setFailure] = useState<"missing" | "unavailable">();
   const preview = document?.preview ?? mode.preview;
   const reference = parseFileReference(href, !inline);
   const path = reference && (document ? relativeFileReference(document.basePath, reference.path) : reference.path);
@@ -34,18 +37,31 @@ export function FileLink({ href, children, inline = false }: { href: string; chi
   const target = { targetId, workspaceId: workspaceId ?? "" };
   // Network references stay clickable and skip the automatic query.
   const probe = !preview && (system || workspaceId !== undefined) && path !== null && !isNetworkPath(path);
-  const { kind, resolvable } = useFilePathKind(probe ? path : undefined, target);
-  if (!reference || path === null || kind === "missing") return <>{children}</>;
-  if (probe && resolvable && kind === undefined && inline && !system && !hasKnownFileExtension(path)) return <>{children}</>;
-  return <a href={href} className={kind === "directory" ? "file-reference is-directory" : "file-reference"} onClick={async event => {
-    event.preventDefault();
-    const resolved = kind ?? (preview ? undefined : await resolvePathOnOpen(owner, path, target));
-    if (resolved === "directory") {
-      openBrowser({ path, ...(workspaceId ? { workspaceId } : {}), targetId });
-      return;
-    }
-    open({ ...reference, path, ...(workspaceId === undefined ? {} : { workspaceId }), targetId, ...(system ? { source: "system" } : {}) });
-  }}>{children}</a>;
+  const { kind: reported, refresh } = useFilePathKind(probe ? path : undefined, target);
+  const kind = path === null ? undefined : preview ? previewPathKind(path) : isNetworkPath(path) ? "deferred" : reported;
+  useEffect(() => { setFailure(undefined); }, [path, targetId, workspaceId, preview]);
+  useEffect(() => { if (kind === "file" || kind === "directory") setFailure(undefined); }, [kind]);
+  if (!reference || path === null) return <>{children}</>;
+  const message = failure === "missing" ? (zh ? "路径不存在" : "Path does not exist")
+    : failure === "unavailable" ? (zh ? "暂时无法确认此路径，请重试" : "Unable to resolve this path right now. Try again.") : undefined;
+  const clickable = kind === "file" || kind === "directory" || kind === "deferred";
+  return <span className="file-path-reference" onMouseEnter={preview ? undefined : refresh}>
+    {clickable ? <a href={href} className={`file-reference${kind === "directory" ? " is-directory" : kind === "deferred" ? " is-deferred" : ""}`}
+      aria-busy={opening || undefined} data-tip={opening ? (zh ? "正在确认路径…" : "Checking path…") : kind === "deferred" ? (zh ? "点击确认并打开此路径" : "Check and open this path") : undefined}
+      onFocus={preview ? undefined : refresh} onClick={async event => {
+        event.preventDefault();
+        if (opening) return;
+        setOpening(true); setFailure(undefined);
+        try {
+          const resolved = preview ? kind : await resolvePathOnOpen(owner, path, target);
+          if (resolved === "directory") openBrowser({ path, ...(workspaceId ? { workspaceId } : {}), targetId });
+          else if (resolved === "file") {
+            if (!open({ ...reference, path, ...(workspaceId === undefined ? {} : { workspaceId }), targetId, ...(system ? { source: "system" } : {}) })) setFailure("unavailable");
+          } else setFailure(resolved === "missing" ? "missing" : "unavailable");
+        } finally { setOpening(false); }
+      }}>{children}</a> : children}
+    {message ? <span className="file-path-notice" role="status">{message}</span> : null}
+  </span>;
 }
 
 const isNetworkPath = (path: string) => /^[\\/]{2}/.test(path);
@@ -59,7 +75,7 @@ export function LocalFileImage({ src, alt }: { src: string; alt: string }) {
   const reference = parseFileReference(src, true)?.path ?? src;
   const path = context ? relativeFileReference(context.basePath, reference) : reference;
   const network = isNetworkPath(path);
-  const isSystem = context?.source === "system" || Boolean(context && isSystemFilePath(reference));
+  const isSystem = context?.source === "system" || isSystemFilePath(path);
   useEffect(() => {
     setUrl(undefined);
     let active = true, id: string | undefined, blob: string | undefined;

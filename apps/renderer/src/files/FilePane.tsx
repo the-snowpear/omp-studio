@@ -24,7 +24,7 @@ import { FileHeader, MOD_KEY, type FileMenuEntry, type FileModeOption, type File
 import { FileStatusBar } from "./FileStatusBar";
 import type { EditorCommands, EditorController, EditorCursor } from "./FileTextEditor";
 import { OfficePane } from "./OfficePane";
-import { MARKDOWN_SPLIT_MIN_WIDTH, markdownModes, useMarkdownScroll } from "./markdownView";
+import { MARKDOWN_SPLIT_MIN_WIDTH, markdownModes, revealMarkdownFragment, useMarkdownScroll } from "./markdownView";
 
 const TextEditor = lazy(() => import("./FileTextEditor"));
 const PdfPane = lazy(() => import("./PdfPane"));
@@ -34,7 +34,7 @@ const NARROW_WIDTH = 560;
 export default function FilePane({ id, descriptor, session, visible, onSettings, onViewState, actions }: { id: string; descriptor: FilePanelDescriptor; session: FileDocument; visible: boolean; onSettings: () => void; onViewState: (patch: Partial<FilePanelDescriptor>) => void; actions?: FileViewerActions | undefined }) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot), { preview, marks } = usePreviewMode();
   const { t, resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh", surface = useSurfaceDocument();
-  const kind = fileKind(descriptor.path), editable = textEditable(descriptor.path), badge = fileBadge(descriptor.path);
+  const kind = fileKind(descriptor.path), editable = textEditable(descriptor.path), badge = fileBadge(descriptor.path, zh);
   const surfaceVisible = useSyncExternalStore(useCallback(notify => { surface.addEventListener("visibilitychange", notify); return () => surface.removeEventListener("visibilitychange", notify); }, [surface]), useCallback(() => surface.visibilityState !== "hidden", [surface]));
   const active = visible && surfaceVisible, needsResource = !editable || (kind === "spreadsheet" && !state.loaded && Boolean(state.error));
   const [resource, setResource] = useState<FileResource | null>(null), [error, setError] = useState(""), [reload, setReload] = useState(0);
@@ -45,9 +45,15 @@ export default function FilePane({ id, descriptor, session, visible, onSettings,
   const [notice, setNotice] = useState(""), [width, setWidth] = useState(900);
   const controller = useRef<EditorController | null>(null), pane = useRef<HTMLElement>(null);
   const { markdownRef, followEditor, previewScroll } = useMarkdownScroll(controller);
+  const fragmentNavigation = useRef("");
   useEffect(() => { session.setVisible(id, active); if (active) void session.refresh(); return () => session.setVisible(id, false); }, [id, session, active]);
-  useEffect(() => { if (active && editable && !state.loaded) void session.load(); }, [session, editable, state.file.version, active]);
-  useEffect(() => { if (preview && active && editable && state.loaded && !state.dirty) void session.load(); }, [preview, active, editable, resolvedLanguage]);
+  const previewLocale = preview ? zh : undefined;
+  useEffect(() => {
+    if (active && editable && !state.loaded) void session.load(false, previewLocale);
+  }, [session, editable, state.file.version, active, previewLocale]);
+  useEffect(() => {
+    if (preview && active && editable && state.loaded && !state.dirty) void session.load(false, previewLocale);
+  }, [session, preview, active, editable, previewLocale]);
   useEffect(() => {
     setError(""); setResource(null);
     if (!visible || !needsResource) return;
@@ -85,6 +91,12 @@ export default function FilePane({ id, descriptor, session, visible, onSettings,
   const view: FileViewMode = !editable ? "preview" : mode === "diff" ? (git ? "diff" : fallback) : mode === "split" ? (canSplit ? "split" : "preview") : kind === "text" ? "source" : mode;
   const showsEditor = editable && state.loaded && (view === "source" || view === "split");
   const changeMode = (next: FileViewMode) => { setMode(next); onViewState({ mode: next }); };
+  useEffect(() => { if (kind === "markdown" && descriptor.fragment) setMode("preview"); }, [kind, descriptor.fragment, descriptor.jump]);
+  useEffect(() => {
+    const navigation = `${descriptor.fragment}:${descriptor.jump ?? ""}`;
+    if (!descriptor.fragment || !active || !state.loaded || view !== "preview" && view !== "split" || fragmentNavigation.current === navigation || !markdownRef.current) return;
+    if (revealMarkdownFragment(markdownRef.current, descriptor.fragment)) fragmentNavigation.current = navigation;
+  }, [descriptor.fragment, descriptor.jump, state.loaded, view, active, markdownRef]);
   const modes: FileModeOption[] | null = !editable ? null : [
     ...(kind === "markdown" ? markdownModes(zh, canSplit)
       : kind === "spreadsheet" ? [{ id: "preview", label: zh ? "表格" : "Table", icon: "table" }, { id: "source", label: zh ? "源码" : "Source", icon: "code" }] as FileModeOption[]
@@ -120,7 +132,7 @@ export default function FilePane({ id, descriptor, session, visible, onSettings,
       : action.type === "reveal" ? chrome.systemFileReveal({ path: relativePath }) : undefined;
     void operation?.then(result => { if (result.status === "failed") setNotice(result.message); }).catch(error => setNotice(String(error)));
   };
-  const refresh = () => { if (editable && !state.dirty) void session.load(); else void session.refresh(); setReload(value => value + 1); };
+  const refresh = () => { if (editable && !state.dirty) void session.load(false, previewLocale); else void session.refresh(); setReload(value => value + 1); };
   const commands: EditorCommands = {
     onCursor: setCursor, onReady: value => { controller.current = value; if (!value) setCursor(null); },
     onToggleWrap: toggleWrap, onFontSize: setFont, onCopy: text => copy(text, zh ? "已复制选区" : "Copied selection"),
@@ -163,7 +175,7 @@ export default function FilePane({ id, descriptor, session, visible, onSettings,
   else if (view === "diff") body = <div className="file-diff"><div className="file-subbar"><span className="file-subbar-title"><Icon name="diff" extra="sm" />{zh ? "工作区改动" : "Working-tree changes"}</span><span className="file-delta"><b className="add">+{gitMarks.additions}</b><b className="del">−{gitMarks.deletions}</b></span><span className="file-subbar-spacer" /><DiffDisplayMode split={splitDiff} onSplit={setSplitDiff} /></div><div className={`file-diff-body diff-scroll${splitDiff ? " diff-split" : ""}`}><GitPatch patch={hunksOnly(patch)} split={splitDiff} /></div></div>;
   else if (editable && (view === "source" || kind === "text")) body = editor();
   else if (editable && kind === "markdown" && view === "split") body = <div className="file-split">{editor(followEditor)}<div ref={markdownRef} className="file-markdown" onScroll={previewScroll}>{visible ? markdown : null}</div></div>;
-  else if (kind === "markdown") body = <div className="file-markdown">{markdown}</div>;
+  else if (kind === "markdown") body = <div ref={markdownRef} className="file-markdown">{markdown}</div>;
   else if (kind === "office") body = <OfficePane resource={resource} preview={preview} onSettings={onSettings} initialPage={descriptor.page} onPage={page => onViewState({ page })} />;
   else if (kind === "pdf" && source) body = <PdfPane url={source} initialPage={descriptor.page} onPage={page => onViewState({ page })} onPages={pages => setInfo(zh ? `${pages} 页` : `${pages} pages`)} />;
   else if (kind === "image" && source) body = <ImagePane url={source} name={name} onInfo={setInfo} />;
