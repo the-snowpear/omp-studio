@@ -3,8 +3,15 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/readme/hero-en-dark.svg">
-    <img src="docs/readme/hero-en-light.svg" width="100%" alt="OMP Studio: Put agents in an arrangeable workbench">
+    <img src="docs/readme/hero-en-light.svg" width="100%" alt="OMP Studio — Desktop GUI &amp; Arrangeable Workbench for oh-my-pi (omp) AI Coding Agent">
   </picture>
+</p>
+
+<h1 align="center">OMP Studio</h1>
+
+<p align="center">
+  <b>Cross-platform desktop GUI &amp; arrangeable workbench for the <a href="https://github.com/can1357/oh-my-pi">oh-my-pi</a> (<code>omp</code>) AI coding agent</b><br>
+  Windows · macOS · Linux — Multi-window chats, subagents, Git, terminal, browser, computer use, MCP, SSH &amp; WSL 2
 </p>
 
 <p align="center">
@@ -24,12 +31,12 @@
   &nbsp;·&nbsp; <a href="#run-from-source">Run from Source</a>
   &nbsp;·&nbsp; <a href="#architecture">Architecture</a>
   &nbsp;·&nbsp; <a href="docs/README.md">Docs</a>
-  &nbsp;·&nbsp; <a href="README.md">中文</a>
+  &nbsp;·&nbsp; <b><a href="README.md">中文</a></b>
 </p>
 
 <br>
 
-**OMP Studio** is a desktop workbench for [oh-my-pi](https://github.com/can1357/oh-my-pi) (OMP). It brings conversations, approvals, subagents, Git, a terminal, a browser, and model configuration into a single window, talking directly to the Runtime through a typed **Studio Bridge** — without scraping TUI text, parsing ANSI output, or simulating keystrokes.
+**OMP Studio** is a cross-platform desktop GUI and arrangeable workbench for the [oh-my-pi](https://github.com/can1357/oh-my-pi) (`omp`) AI coding agent on Windows, macOS, and Linux. Built with Electron and React, it brings parallel conversations, plan approvals, subagents, Git / worktrees, files, a terminal, a managed browser, computer use, MCP / Skills, and model configuration into a single window — talking directly to the Runtime through a typed **Studio Bridge** without scraping TUI text, parsing ANSI output, or simulating keystrokes.
 
 0.2.0 rebuilds the entire workbench: **conversations and tools can both be dragged into windows, snapped into split layouts, docked to any side, or pinned as independent system windows.** You can run several conversations side by side, each with its own tools.
 
@@ -69,7 +76,7 @@ The UI communicates with the Runtime via `query` / `command` / `event`. The rend
 
 ### All-in-One Local Capabilities
 
-Git, files, terminal, browser, computer use, Time Travel, evaluation, and dictation all live inside the workbench — no hopping between a TUI and a pile of web pages.
+Git / worktrees, files, terminal, managed browser, computer use, SSH / WSL 2 workspaces, LAN mobile access, Time Travel, BTW asides, evaluation, and voice dictation all live inside the workbench — no hopping between a TUI and a pile of web pages.
 
 </td>
 </tr>

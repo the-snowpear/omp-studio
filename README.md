@@ -3,8 +3,15 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/readme/hero-dark.svg">
-    <img src="docs/readme/hero-light.svg" width="100%" alt="OMP Studio：把 Agent 装进一张随你摆放的工作台">
+    <img src="docs/readme/hero-light.svg" width="100%" alt="OMP Studio — Desktop GUI &amp; Arrangeable Workbench for oh-my-pi (omp) AI Coding Agent｜把 Agent 装进一张随你摆放的工作台">
   </picture>
+</p>
+
+<h1 align="center">OMP Studio</h1>
+
+<p align="center">
+  <b>Desktop GUI &amp; arrangeable workbench for <a href="https://github.com/can1357/oh-my-pi">oh-my-pi</a> (<code>omp</code>) AI coding agent</b><br>
+  Windows · macOS · Linux 桌面工作台 — 多窗口对话、子 Agent、Git、终端、浏览器、电脑操作、MCP 与 SSH
 </p>
 
 <p align="center">
@@ -24,12 +31,12 @@
   &nbsp;·&nbsp; <a href="#从源码运行">从源码运行</a>
   &nbsp;·&nbsp; <a href="#架构">架构</a>
   &nbsp;·&nbsp; <a href="docs/README.md">文档</a>
-  &nbsp;·&nbsp; <a href="README.en.md">English</a>
+  &nbsp;·&nbsp; <b><a href="README.en.md">English</a></b>
 </p>
 
 <br>
 
-**OMP Studio** 是 [oh-my-pi](https://github.com/can1357/oh-my-pi)（OMP）的桌面工作台。它把对话、审批、子 Agent、Git、终端、浏览器和模型配置放进同一扇窗口，通过类型化的 **Studio Bridge** 直接对接 Runtime，不解析 TUI 文本或 ANSI 输出，也不模拟按键。
+**OMP Studio** 是 [oh-my-pi](https://github.com/can1357/oh-my-pi)（`omp`）AI Coding Agent 的跨平台桌面 GUI 与可视化工作台（支持 Windows、macOS 与 Linux）。它基于 Electron 与 React，将多会话并行对话、审批、子 Agent、Git / Worktree、文件、终端、托管浏览器、电脑操作（Computer Use）、MCP / Skills 与模型配置放进同一扇窗口，通过类型化的 **Studio Bridge** 直接对接 Runtime，不解析 TUI 文本或 ANSI 输出，也不模拟按键。
 
 0.2.0 重做了整个工作台：**对话和工具都可以拖成窗口，吸附分屏，停到任意一侧，或钉成独立系统窗口。** 你可以同时开几场对话，每场各带自己的工具。
 
@@ -69,7 +76,7 @@
 
 ### 一站式本机能力
 
-Git、文件、终端、浏览器、电脑操作、Time Travel、评测和语音输入都在工作台内，不必在 TUI 和一堆网页之间切换。
+Git / Worktree、文件、终端、托管浏览器、电脑操作、SSH / WSL 2 工作区、局域网手机访问、Time Travel、BTW、评测与语音输入都在工作台内，不必在 TUI 和一堆网页之间切换。
 
 </td>
 </tr>
