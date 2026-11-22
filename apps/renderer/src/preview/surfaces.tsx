@@ -159,7 +159,7 @@ export function PreviewFileTree({ label, search, onContext, onFileAction, worksp
   /* Same drag as the real tree: an input box takes a capsule, the workbench opens the demo file there. */
   const onDrag = (event: ReactPointerEvent<HTMLDivElement>, path: string, kind: "file" | "dir") => {
     if (event.button !== 0 || (event.target as Element).closest("button, input, a")) return;
-    dragFile(event, conversationView?.store ?? conversationWorkspace?.store, { chip: explorerChip(path, kind), open: rect => openInViewer({ workspaceId, path, rect }) });
+    dragFile(event, conversationView?.store ?? conversationWorkspace?.store, { chip: explorerChip(path, kind), fileScope: { targetId: null, workspaceId }, zh, open: rect => openInViewer({ workspaceId, path, rect }) });
   };
   // 行「⋯ 更多」菜单：与真实树同一 FileRowMenu；演示路径不执行桌面动作
   // （打开/打开方式/资源管理器/绝对路径禁用），仅保留复制相对路径与添加上下文。

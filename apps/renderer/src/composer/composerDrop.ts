@@ -10,7 +10,15 @@ import type { ComposerChip } from "./types";
 export type DropPoint = { readonly x: number; readonly y: number };
 export type DroppedChip = Omit<ComposerChip, "id"> & { id?: string };
 
+export type ComposerFileScope = { targetId: string | null; workspaceId: string | undefined };
+export type CapsuleOrigin = { readonly element: HTMLElement; readonly chipId: string; readonly target: ComposerDropTarget };
+
+export function acceptsFileScope(target: ComposerDropTarget, source: ComposerFileScope | undefined): boolean {
+  return source === undefined || (target.fileScope?.targetId === source.targetId && target.fileScope.workspaceId === source.workspaceId);
+}
+
 export type ComposerDropTarget = {
+  readonly fileScope?: ComposerFileScope | undefined;
   /** Owning conversation document; a window never drops into its own input. */
   readonly documentId: string | undefined;
   /** Conversation session, so a row or capsule never references its own conversation. */

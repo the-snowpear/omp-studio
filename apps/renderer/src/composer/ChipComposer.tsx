@@ -65,7 +65,7 @@ import {
   type StudioSlashCommand,
 } from "./commands";
 
-import { caretBox, dropRangeAt, insertNodesAtRange, registerComposerDrop, type ComposerDropTarget } from "./composerDrop";
+import { caretBox, dropRangeAt, insertNodesAtRange, registerComposerDrop, type ComposerDropTarget, type ComposerFileScope } from "./composerDrop";
 import { DictationEditor, insertDictationText } from "./dictationEditor";
 import { DictationKeyboard } from "./dictationKeyboard";
 import type { ComposerDictationBinding, ComposerDictationHandle } from "./dictationTypes";
@@ -120,7 +120,7 @@ type Props = {
   onPointerDown?: (event: PointerEvent<HTMLDivElement>) => void;
   onError?: (message: string) => void;
   /** Accept dragged capsules (rows, windows, files) for this conversation's main input. */
-  dropTarget?: { documentId: string | undefined; sessionId: string | undefined } | undefined;
+  dropTarget?: { documentId: string | undefined; sessionId: string | undefined; fileScope?: ComposerFileScope } | undefined;
   /** A capsule was grabbed; the owner runs the drag (reorder, move, open). */
   onCapsuleDrag?: ((event: PointerEvent<HTMLElement>, chip: HTMLElement, target: ComposerDropTarget) => void) | undefined;
 };
@@ -486,7 +486,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     const editor = editorRef.current;
     if (!editor) return null;
     if (draft.sessionReference) {
-      const existing = existingSessionChip(editor, draft.sessionReference);
+      const existing = existingSessionChip(editor, draft.sessionReference, draft.sessionReference.messages.length > 0);
       if (existing) return moveChipTo(existing, point);
     }
     dictationEditorRef.current?.beforeEdit();
@@ -503,6 +503,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   dropActions.current = { insertChipAt, moveChipTo, removeChip, disabled: !!disabled, onCapsuleDrag };
   const dropTargetRef = useRef<ComposerDropTarget | null>(null);
   const dropDocumentId = dropTarget?.documentId, dropSessionId = dropTarget?.sessionId, dropEnabled = dropTarget !== undefined;
+  const dropWorkspaceId = dropTarget?.fileScope?.workspaceId, dropExecutionTargetId = dropTarget?.fileScope?.targetId;
   useEffect(() => {
     const root = rootRef.current, editor = editorRef.current;
     if (!dropEnabled || !root || !editor) return;
@@ -513,6 +514,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     root.append(caret);
     const target: ComposerDropTarget = {
       documentId: dropDocumentId, sessionId: dropSessionId, element, editor,
+      fileScope: dropExecutionTargetId === undefined ? undefined : { targetId: dropExecutionTargetId, workspaceId: dropWorkspaceId },
       accepts: () => !dropActions.current.disabled && editor.isConnected,
       showCaret: point => {
         const box = caretBox(dropRangeAt(editor, point), editor), origin = root.getBoundingClientRect();
@@ -535,7 +537,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     dropTargetRef.current = target;
     const release = registerComposerDrop(target);
     return () => { release(); caret.remove(); if (dropTargetRef.current === target) dropTargetRef.current = null; };
-  }, [document, dropEnabled, dropDocumentId, dropSessionId]);
+  }, [document, dropEnabled, dropDocumentId, dropSessionId, dropExecutionTargetId, dropWorkspaceId]);
   const onCapsulePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     const target = dropTargetRef.current, drag = dropActions.current.onCapsuleDrag;
     if (!target || !drag || disabled || event.button !== 0 || chipRemoveTarget(event.target) !== null) return;
@@ -1000,10 +1002,11 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   };
 
   const sessionChipElements = (editor: HTMLElement) => [...editor.querySelectorAll<HTMLElement>(".cm-chip-session")];
-  const existingSessionChip = (editor: HTMLElement, reference: SessionReference) =>
+  const existingSessionChip = (editor: HTMLElement, reference: SessionReference, matchExcerpts = false) =>
     sessionChipElements(editor).find(element => {
       const existing = parseChipPayload(element.dataset.chip ?? "")?.sessionReference;
-      return existing?.sessionId === reference.sessionId && sameSessionSource(existing.source, reference.source);
+      return existing?.sessionId === reference.sessionId && sameSessionSource(existing.source, reference.source)
+        && (!matchExcerpts || JSON.stringify(existing.messages) === JSON.stringify(reference.messages));
     });
 
   const pasteSessionId = (editor: HTMLDivElement, text: string): boolean => {

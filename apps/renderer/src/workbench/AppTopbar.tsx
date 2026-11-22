@@ -269,7 +269,7 @@ export function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpe
       if (!conversationWorkspace) return;
       const state = conversationWorkspace.store.getSnapshot();
       const main = state.views.find(view => view.placement === "main" && !view.minimized);
-      if (main && !state.documents.find(record => record.id === state.activeDocumentId)?.page) dragConversation(event, conversationWorkspace.store, { viewId: main.id });
+      if (main && !state.documents.find(record => record.id === state.activeDocumentId)?.page) dragConversation(event, conversationWorkspace.store, { viewId: main.id }, zh);
     }}>
       {windowed ? null : <div className="tb-left">
         <nav className="tb-crumb" aria-label={t("shell.currentLocation")}>

@@ -11,30 +11,19 @@ import { dockReducer } from "../dock/model";
 import { conversationPanelId, type DockTarget } from "../dock/types";
 import { measureCardPlacement, cardPlacementRect } from "../dock/cardDrag";
 import { conversationDocument } from "./dom";
-import { isZh } from "../i18n";
-import { composerDropAt, type ComposerDropTarget, type DroppedChip } from "../composer/composerDrop";
-import { hideCapsuleGhost, landCapsuleGhost, showCapsuleGhost } from "../composer/capsuleGhost";
+import { composerDropAt, type CapsuleOrigin, type ComposerDropTarget, type DroppedChip } from "../composer/composerDrop";
+import { capsuleCaptions, hideCapsuleGhost, landCapsuleGhost, showCapsuleGhost } from "../composer/capsuleGhost";
 import { sessionReferenceChip, type SessionReference } from "../composer/sessionReference";
 import { MOTION_EASE, MOTION_MS, motionReduced } from "../motion";
+import { findPreviewThread, previewSessionId } from "../preview/fixtures";
 import type { WorkspaceId } from "@omp-studio/client-contract";
 
-/** A capsule grabbed inside an input box: dropping it elsewhere opens it and takes it out of that box. */
-export type CapsuleOrigin = { readonly element: HTMLElement; readonly chipId: string; readonly target: ComposerDropTarget };
-
-export function capsuleCaptions(zh: boolean) {
-  return {
-    insert: zh ? "插入到输入框" : "Insert into input",
-    move: zh ? "移动胶囊" : "Move capsule",
-    cancel: zh ? "松手取消" : "Release to cancel",
-    unknown: zh ? "无法打开：来源未确定" : "Can't open: source unknown",
-    locked: zh ? "布局已锁定，松手取消" : "Layout locked: release to cancel",
-  };
-}
-
 /** The session reference a conversation turns into when it is dropped on an input box. */
-export function conversationReference(ref: ConversationRef, title: string): SessionReference | null {
-  if (!ref.sessionId || !ref.workspaceId) return null;
-  return { sessionId: ref.sessionId, messages: [], source: {
+export function conversationReference(ref: ConversationRef, title: string, zh: boolean): SessionReference | null {
+  const fixture = ref.previewThreadId ? findPreviewThread(ref.previewThreadId, zh) : undefined;
+  const sessionId = ref.sessionId ?? (ref.previewThreadId && fixture && fixture.thread.msgs > 0 ? previewSessionId(ref.previewThreadId) : undefined);
+  if (!sessionId || !ref.workspaceId) return null;
+  return { sessionId, messages: [], source: {
     targetId: ref.targetId, workspaceId: ref.workspaceId as WorkspaceId, title,
     ...(ref.historyId ? { historyId: ref.historyId as NonNullable<SessionReference["source"]>["historyId"] } : {}),
     ...(ref.threadId ? { threadId: ref.threadId as NonNullable<SessionReference["source"]>["threadId"] } : {}),
@@ -61,8 +50,7 @@ export function settleInPlace(element: HTMLElement | null | undefined) {
 /** `identity`: what the row's「复制会话 ID」carries, for rows whose ref has no session (preview stories). */
 type ConversationDragSource = { viewId: string } | { ref: ConversationRef; title: string; identity?: SessionReference | undefined } | { reference: SessionReference; title: string; capsule: CapsuleOrigin };
 
-export function dragConversation(event: PointerEvent<HTMLElement>, store: ConversationWorkspaceStore, input: ConversationDragSource) {
-  const zh = isZh();
+export function dragConversation(event: PointerEvent<HTMLElement>, store: ConversationWorkspaceStore, input: ConversationDragSource, zh: boolean) {
   const captions = capsuleCaptions(zh);
   const capsule = "capsule" in input ? input.capsule : undefined;
   const capsuleRef = "reference" in input ? referenceRef(input.reference) : null;
@@ -82,8 +70,8 @@ export function dragConversation(event: PointerEvent<HTMLElement>, store: Conver
   // A locked layout still lets a conversation become a capsule; it only refuses to move windows.
   const locked = tools.store.getSnapshot().preferences.locked;
   const title = record?.title ?? (source && "title" in source ? source.title : "title" in input ? input.title : (zh ? "新对话" : "New conversation"));
-  const reference = "reference" in input ? input.reference : "identity" in input && input.identity ? input.identity : conversationReference(record?.ref ?? (source && "ref" in source ? source.ref : { targetId: null }), title);
-  const chip: DroppedChip | null = reference ? sessionReferenceChip(reference, zh) : null;
+  const reference = "reference" in input ? input.reference : "identity" in input && input.identity ? input.identity : conversationReference(record?.ref ?? (source && "ref" in source ? source.ref : { targetId: null }), title, zh);
+  const chip: DroppedChip | null = capsule ? capsule.target.chipOf(capsule.element) : reference ? sessionReferenceChip(reference, zh) : null;
   const opens = !!source && !locked && !(capsule && view?.placement === "native");
   if (!opens && !chip) return;
   const moving = view && view.placement !== "native" ? view : undefined;
@@ -179,7 +167,7 @@ export function dragConversation(event: PointerEvent<HTMLElement>, store: Conver
         // The conversation only lent its shape to the capsule: every window stays where it was.
         store.windows.restoreCheckpoint(checkpoint);
         const landed = capsule && into === capsule.target ? into.moveTo(capsule.element, point) : into.insertAt(chip, point);
-        if (capsule && into !== capsule.target) capsule.target.remove(capsule.chipId);
+        if (landed && capsule && into !== capsule.target) capsule.target.remove(capsule.chipId);
         landCapsuleGhost(surface, landed);
         if (moving) settleInPlace(frame);
         return;

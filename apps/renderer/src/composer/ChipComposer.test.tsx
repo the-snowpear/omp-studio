@@ -1084,7 +1084,7 @@ describe("dragging capsules", () => {
     vi.stubGlobal("PointerEvent", MouseEvent);
     const ref = createRef<ChipComposerHandle>();
     const change = vi.fn();
-    render(<div className="composer"><ChipComposer ref={ref} onChange={change} dropTarget={{ documentId: "doc-a", sessionId: "session-a" }} onCapsuleDrag={(event, chip, target) => dragComposerCapsule(event, chip, target, { store: null })} /></div>);
+    render(<div className="composer"><ChipComposer ref={ref} onChange={change} dropTarget={{ documentId: "doc-a", sessionId: "session-a", fileScope: { targetId: null, workspaceId: "preview-workspace" } }} onCapsuleDrag={(event, chip, target) => dragComposerCapsule(event, chip, target, { store: null, zh: true })} /></div>);
     return { ref, change, editor: screen.getByRole("textbox") };
   };
   const order = (ref: { current: ChipComposerHandle | null }) => ref.current!.getSnapshot().doc.nodes.map(node => node.type === "chip" ? `[${node.chip.label}]` : node.value).join("");
@@ -1127,6 +1127,22 @@ describe("dragging capsules", () => {
     act(() => { target.insertAt(chip, { x: 1, y: 1 }); target.insertAt(chip, { x: 1, y: 1 }); });
     expect(editor.querySelectorAll(".cm-chip-session")).toHaveLength(1);
     expect(document.activeElement).toBe(editor);
+
+    const withExcerpt = { ...chip, sessionReference: { ...chip.sessionReference, messages: [{ role: "user" as const, text: "Keep this excerpt" }] } };
+    act(() => { target.insertAt(withExcerpt, { x: 1, y: 1 }); target.insertAt(withExcerpt, { x: 1, y: 1 }); });
+    expect(ref.current!.getSnapshot().text).toContain("Keep this excerpt");
+    expect(editor.querySelectorAll(".cm-chip-session")).toHaveLength(2);
+  });
+
+  it("keeps files in their source workspace when dragging into a composer", () => {
+    const { editor } = mountComposer();
+    render(<PreviewFileTree label="Another project" workspaceId="other-workspace" />);
+    const row = document.querySelector<HTMLElement>(".tree-row[data-file]")!;
+    under(() => [editor]);
+    fireEvent.pointerDown(row, { button: 0, clientX: 10, clientY: 300 });
+    fireEvent.pointerMove(window, { clientX: 60, clientY: 20 });
+    fireEvent.pointerUp(window, { clientX: 60, clientY: 20 });
+    expect(editor.querySelector(".cm-chip")).toBeNull();
   });
 
   it("turns an Explorer file into a capsule in the input box", async () => {

@@ -110,7 +110,7 @@ import { executeUserMessageBranch, executeUserMessageRestore, userMessageRestore
 import { useUserMessageTreeConfirm } from "../conversation/UserMessageTreeConfirm";
 import { claimTransientToast, isTransientStatusNotice, transientStatusFamily } from "../conversation/transientStatusNotice";
 import { usePreviewMode } from "../preview/PreviewContext";
-import { PREVIEW_LEDGER_COMMANDS, PREVIEW_SHELL_EVENTS, PREVIEW_TODO_FILES, findPreviewProject, getPreviewProjects, getPreviewQueuedMessages, getPreviewRunActivity, getPreviewTodos } from "../preview/fixtures";
+import { PREVIEW_LEDGER_COMMANDS, PREVIEW_SHELL_EVENTS, PREVIEW_TODO_FILES, findPreviewProject, getPreviewProjects, getPreviewQueuedMessages, getPreviewRunActivity, getPreviewTodos, previewSessionId } from "../preview/fixtures";
 import { PreviewChanges, PreviewLogs, PreviewProblems, PreviewTests } from "../preview/surfaces";
 import { PreviewDeck } from "../preview/PreviewDeck";
 import { ContentGallerySamples } from "../preview/ContentGallerySamples";
@@ -2847,8 +2847,11 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
                 prediction={{client,sessionId:snapshot?.sessionId,available:runtimeConnected&&executionMatches&&can("prediction.prepare"),nextMessageAvailable:can("composer.predictions")}}
                 ref={composerInputRef}
                 id="composerInput"
-                dropTarget={{ documentId: mdi?.document.id, sessionId: mdi?.document.ref.sessionId ?? selectedSessionId }}
-                onCapsuleDrag={(event, chip, target) => dragComposerCapsule(event, chip, target, { store: mdi?.store, openFile: (path, rect) => { openFileInViewer({ path, rect, ...(workspaceId === undefined ? {} : { workspaceId }) }); } })}
+                dropTarget={{ documentId: mdi?.document.id, sessionId: mdi?.document.ref.sessionId ?? (preview && previewThreadId ? previewSessionId(previewThreadId) : selectedSessionId), fileScope: { targetId: preview ? null : executionTarget.id, workspaceId: preview ? previewProjectId : workspaceId } }}
+                onCapsuleDrag={(event, chip, target) => dragComposerCapsule(event, chip, target, { store: mdi?.store, zh, openFile: (path, rect, onOpened) => {
+                  const fileWorkspace = preview ? previewProjectId : workspaceId;
+                  openFileInViewer({ path, rect, ...(fileWorkspace === undefined ? {} : { workspaceId: fileWorkspace }), ...(onOpened ? { onOpened } : {}) });
+                } })}
                 submitDisabled={worktreeGated}
                 compact={composerRunning && !composerExpanded}
                 sessionReferences

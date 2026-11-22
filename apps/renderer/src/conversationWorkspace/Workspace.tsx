@@ -176,7 +176,7 @@ function ConversationDocumentHost({ enabled, record, client: initialClient, stor
         const releaseSurface = store.windows.attach(slot.ownerDocument);
         return () => { detach(); release(); releaseSurface(); delete slot.dataset.conversationView; delete slot.dataset.dockWindow; delete slot.dataset.conversationOwner; };
       },
-      drag: event => { dragConversation(event, store, { viewId: id }); },
+      drag: event => { dragConversation(event, store, { viewId: id }, zhRef.current); },
       activate: () => store.manager.activate(id),
     };
   }, [store, hosts, record.id, view?.id]);
@@ -277,7 +277,7 @@ function ConversationWindow({ view, store, hosts, bounds, order, snapLayer }: { 
     return <WindowOwnerContext.Provider value={record.id}><WindowFrame title={record.title} icon="message" tint={conversationWindowTint(record.id, store)} rect={rect} bounds={area} minWidth={MIN_VIEW.width} minHeight={MIN_VIEW.height}
       maximized={view.maximized} nativeKey={nativeKey} order={order} frameRef={frame} windowId={`conversation:${view.id}`} visible={!view.minimized} locked={locked} resizable={!snapped}
       frameProps={{ className: `dock-conversation-window${snapped ? " is-snapped" : ""}${dragging ? " dock-drag-source" : ""}`, ...{ "data-conversation-view": view.id, "data-conversation-owner": view.documentId, "data-workbench-surface": view.pin === "none" ? "" : undefined, "data-dock-group": conversationPanelId(view.id), "data-dock-region": "float" }, style: snapped ? { position: "absolute" } : undefined }}
-      onTitleDrag={event => { if (!nativeKey) dragConversation(event, store, { viewId: view.id }); }}
+      onTitleDrag={event => { if (!nativeKey) dragConversation(event, store, { viewId: view.id }, zh); }}
       onRectChange={rect => store.setWindow(view.id, { rect })}
       onControl={action => { if (nativeKey) void globalThis.ompStudioChrome!.controlFloatWindow!({ key: nativeKey, action }); else control(action); }}
       onClose={() => store.close(view.id)} closeLabel={zh ? "关闭对话视图" : "Close conversation view"}

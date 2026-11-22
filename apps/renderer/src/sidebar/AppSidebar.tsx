@@ -619,7 +619,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                           className={`thread${chrome.previewThreadId === thread.id ? " active" : ""}`}
                           aria-current={chrome.previewThreadId === thread.id ? "page" : undefined}
                           data-window-drag={mdi ? "" : undefined}
-                          onPointerDown={event => { if (mdi) dragConversation(event, mdi.store, { ref: { targetId: mdi.document.ref.targetId, workspaceId: project.id, previewProjectId: project.id, previewThreadId: thread.id }, title: thread.title, identity: thread.msgs > 0 ? { sessionId: previewSessionId(thread.id), source: { targetId: null, workspaceId: project.id as WorkspaceId, workspaceName: project.name, previewThreadId: thread.id, title: thread.title }, messages: [] } : undefined }); }}
+                          onPointerDown={event => { if (mdi) dragConversation(event, mdi.store, { ref: { targetId: mdi.document.ref.targetId, workspaceId: project.id, previewProjectId: project.id, previewThreadId: thread.id }, title: thread.title, identity: thread.msgs > 0 ? { sessionId: previewSessionId(thread.id), source: { targetId: null, workspaceId: project.id as WorkspaceId, workspaceName: project.name, previewThreadId: thread.id, title: thread.title }, messages: [] } : undefined }, zh); }}
                           onClick={() => chrome.onSelectPreviewThread(thread.id)}
                         >
                           <ThreadSpin running={running} />
@@ -746,7 +746,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                             {...(chrome.activeProvisionalSessionId === thread.sessionId ? { "aria-current": "page" as const } : {})}
                             aria-label={transientTitle}
                             data-window-drag={mdi ? "" : undefined}
-                            onPointerDown={event => { if (mdi) dragConversation(event, mdi.store, { ref: { targetId: mdi.document.ref.targetId, workspaceId: thread.workspaceId, ...(thread.submitted ? { sessionId: thread.sessionId } : { draftId: thread.sessionId }) }, title: transientTitle }); }}
+                            onPointerDown={event => { if (mdi) dragConversation(event, mdi.store, { ref: { targetId: mdi.document.ref.targetId, workspaceId: thread.workspaceId, ...(thread.submitted ? { sessionId: thread.sessionId } : { draftId: thread.sessionId }) }, title: transientTitle }, zh); }}
                             onClick={() => chrome.onSelectProvisionalThread(thread)}
                           >
                             <ThreadSpin running={thread.running} />
@@ -832,7 +832,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                             className={`thread${chrome.selectedHistoryId === entry.historyId || chrome.activeProvisionalSessionId === entry.sessionId ? " active" : ""}`}
                             aria-current={chrome.selectedHistoryId === entry.historyId ? "page" : undefined}
                             data-window-drag={mdi ? "" : undefined}
-                            onPointerDown={event => { if (mdi) dragConversation(event, mdi.store, { ref: { targetId: mdi.document.ref.targetId, workspaceId: workspace.workspaceId, sessionId: entry.sessionId, threadId: entry.threadId, historyId: entry.historyId }, title: resolvedEntryTitle }); }}
+                            onPointerDown={event => { if (mdi) dragConversation(event, mdi.store, { ref: { targetId: mdi.document.ref.targetId, workspaceId: workspace.workspaceId, sessionId: entry.sessionId, threadId: entry.threadId, historyId: entry.historyId }, title: resolvedEntryTitle }, zh); }}
                             onClick={() => chrome.onSelectThread(entry, workspace.workspaceId as WorkspaceId)}
                           >
                             <ThreadSpin running={running} />

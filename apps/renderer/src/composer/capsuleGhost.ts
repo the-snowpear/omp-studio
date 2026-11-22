@@ -2,7 +2,9 @@ import { iconSvg } from "../icons";
 import { MOTION_EASE, MOTION_MS, motionReduced } from "../motion";
 import { chipIconName } from "./ingest";
 import type { ComposerChipKind } from "./types";
-import type { DropPoint } from "./composerDrop";
+import { acceptsFileScope, composerDropAt, type CapsuleOrigin, type ComposerDropTarget, type ComposerFileScope, type DropPoint, type DroppedChip } from "./composerDrop";
+import { beginPointerDrag } from "../dock/pointerDrag";
+import type { PointerEvent } from "react";
 
 /**
  * The capsule that follows the pointer while something is dragged towards an
@@ -108,4 +110,49 @@ export function landCapsuleGhost(surface: Document, target: HTMLElement | null):
   const animation = ghost.element.animate([{ transform: translate(ghost) }, { transform: landed }], { duration: MOTION_MS.slow, easing: MOTION_EASE.ios, fill: "forwards" });
   animation.onfinish = reveal;
   animation.oncancel = reveal;
+}
+
+export function capsuleCaptions(zh: boolean) {
+  return {
+    insert: zh ? "插入到输入框" : "Insert into input",
+    move: zh ? "移动胶囊" : "Move capsule",
+    cancel: zh ? "松手取消" : "Release to cancel",
+    unknown: zh ? "无法打开：来源未确定" : "Can't open: source unknown",
+    locked: zh ? "布局已锁定，松手取消" : "Layout locked: release to cancel",
+  };
+}
+
+/**
+ * A capsule that has nowhere to open (a folder, an image, a skill…): it only
+ * travels between input boxes. Outside them it says "release to cancel" and
+ * flies back to where it came from.
+ */
+export function dragCapsuleOnly(event: PointerEvent<HTMLElement>, chip: DroppedChip, zh: boolean, origin?: CapsuleOrigin, fileScope?: ComposerFileScope) {
+  const surface = event.currentTarget.ownerDocument;
+  const captions = capsuleCaptions(zh);
+  let hovered: ComposerDropTarget | null = null;
+  const finish = () => { hovered?.hideCaret(); origin?.element.classList.remove("is-drag-origin"); };
+  const back = () => origin ? landCapsuleGhost(surface, origin.element) : hideCapsuleGhost(surface);
+  return beginPointerDrag(event, {
+    onStart: () => origin?.element.classList.add("is-drag-origin"),
+    onMove: point => {
+      if (origin && !origin.element.isConnected) return;
+      const candidate = composerDropAt(surface, point);
+      const next = candidate && acceptsFileScope(candidate, fileScope) ? candidate : null;
+      if (next !== hovered) hovered?.hideCaret();
+      hovered = next;
+      hovered?.showCaret(point);
+      const caption = !hovered ? captions.cancel : origin && hovered === origin.target ? captions.move : captions.insert;
+      showCapsuleGhost(surface, { kind: chip.kind, label: chip.label, caption, muted: !hovered }, point);
+    },
+    onDrop: point => {
+      const into = origin && !origin.element.isConnected ? null : hovered;
+      finish();
+      if (!into) { back(); return; }
+      const landed = origin && into === origin.target ? into.moveTo(origin.element, point) : into.insertAt(chip, point);
+      if (landed && origin && into !== origin.target) origin.target.remove(origin.chipId);
+      landCapsuleGhost(surface, landed);
+    },
+    onCancel: () => { finish(); back(); },
+  });
 }

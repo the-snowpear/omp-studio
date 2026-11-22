@@ -487,8 +487,8 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
   /* Rows drag towards an input box (capsule) or the workbench (a floating file window there). */
   const dragNode = useCallback((event: ReactPointerEvent<HTMLDivElement>, path: string, kind: "file" | "dir") => {
     if (event.button !== 0 || (event.target as Element).closest("button, input, a")) return;
-    dragFile(event, conversationView?.store ?? conversationWorkspace?.store, { chip: explorerChip(path, kind), open: rect => openInViewer({ workspaceId: String(workspaceId), path, rect }) });
-  }, [conversationView?.store, conversationWorkspace?.store, openInViewer, workspaceId]);
+    dragFile(event, conversationView?.store ?? conversationWorkspace?.store, { chip: explorerChip(path, kind), fileScope: { targetId: executionTarget.id, workspaceId: String(workspaceId) }, zh, open: rect => openInViewer({ workspaceId: String(workspaceId), path, rect }) });
+  }, [conversationView?.store, conversationWorkspace?.store, executionTarget.id, openInViewer, workspaceId, zh]);
   const selectPath = useCallback((path: string) => {
     setActivePath(path);
     const node = model === null ? undefined : findWorkspaceNode(model.nodes, path);

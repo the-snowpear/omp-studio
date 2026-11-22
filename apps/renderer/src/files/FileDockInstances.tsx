@@ -146,7 +146,9 @@ export function FileDockInstances({ workspaceId, targetId, client, onSettings, a
           ...(intent.fragment ? { fragment: intent.fragment, mode: "preview", jump: Date.now() } : {}),
         };
         if (Object.keys(patch).length > 0) other.store.dispatch({ type: "file-state", panel, patch });
-        other.store.dispatch({ type: "open", panel }); return;
+        other.store.dispatch({ type: "open", panel });
+        intent.onOpened?.();
+        return;
       }
     }
     const panel: FilePanelId = `file-view:${crypto.randomUUID()}`;
@@ -157,6 +159,7 @@ export function FileDockInstances({ workspaceId, targetId, client, onSettings, a
     store.dispatch({ type: "file-open", panel, descriptor, ...(rect ? { rect } : {}) });
     if (scope === "workspace") { const location = locatePanel(store.getSnapshot().layout, panel); if (location?.groupId) store.setPin(location.groupId, "workspace"); }
     store.dispatch({ type: "open", panel });
+    intent.onOpened?.();
   }, [catalog, preview, store]);
   useEffect(() => registerFileOpener(view?.document.id ?? "standalone", intent => { void open(intent); }), [view?.document.id, open]);
   useEffect(() => {
