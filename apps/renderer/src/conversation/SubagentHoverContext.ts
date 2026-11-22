@@ -13,6 +13,7 @@ export type SubagentHoverCard = {
 export type SubagentHoverControl = {
   open(card: SubagentHoverCard): void;
   update(card: SubagentHoverCard): void;
+  leave(anchor: HTMLElement, relatedTarget: EventTarget | null): void;
   close(anchor?: HTMLElement): void;
 };
 

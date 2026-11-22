@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { SessionId } from "@omp-studio/client-contract";
 import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
@@ -44,6 +44,7 @@ export function SubagentHoverProvider({ scope, enabled = true, children, ...sour
   options.current = { identity, enabled, client: source.client };
   const [shown, setShown] = useState<HoverRequest | null>(null);
   const current = useRef<HoverRequest | null>(null);
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
   const teardown = useRef<() => void>(() => {});
 
   const close = useCallback((anchor?: HTMLElement) => {
@@ -53,6 +54,13 @@ export function SubagentHoverProvider({ scope, enabled = true, children, ...sour
     current.current = null;
     setShown(null);
   }, []);
+
+  const leave = useCallback((anchor: HTMLElement, relatedTarget: EventTarget | null) => {
+    const win = surfaceWindow(anchor.ownerDocument);
+    if (relatedTarget instanceof win.Node
+      && (anchor.contains(relatedTarget) || surfaceRef.current?.contains(relatedTarget))) return;
+    close(anchor);
+  }, [close]);
 
   const open = useCallback((card: SubagentHoverCard) => {
     if (!options.current.enabled || current.current?.anchor === card.anchor) return;
@@ -99,7 +107,7 @@ export function SubagentHoverProvider({ scope, enabled = true, children, ...sour
     current.current = next;
     setShown(value => value?.anchor === card.anchor ? next : value);
   }, []);
-  const control = useMemo(() => ({ open, update, close }), [open, update, close]);
+  const control = useMemo(() => ({ open, update, leave, close }), [open, update, leave, close]);
   useLayoutEffect(() => { close(); }, [identity, source.client, enabled, close]);
   useEffect(() => () => { teardown.current(); current.current = null; }, []);
 
@@ -112,16 +120,18 @@ export function SubagentHoverProvider({ scope, enabled = true, children, ...sour
       <SurfaceProvider document={doc}>
         <SubagentHoverContext.Provider value={null}>
           <SubagentHoverPreview key={JSON.stringify([identity, request.target?.agentId, generation])}
-            request={request} preview={preview} close={close} {...source} />
+            request={request} preview={preview} surfaceRef={surfaceRef} leave={leave} close={close} {...source} />
         </SubagentHoverContext.Provider>
       </SurfaceProvider>, doc.body,
     ) : null}
   </SubagentHoverContext.Provider>;
 }
 
-function SubagentHoverPreview({ request, preview, close, client, agents, runtimeConnected, parentSessionId, liveSessionId }: PreviewSource & {
+function SubagentHoverPreview({ request, preview, surfaceRef, leave, close, client, agents, runtimeConnected, parentSessionId, liveSessionId }: PreviewSource & {
   readonly request: HoverRequest;
   readonly preview: boolean;
+  readonly surfaceRef: RefObject<HTMLDivElement | null>;
+  readonly leave: (anchor: HTMLElement, relatedTarget: EventTarget | null) => void;
   readonly close: () => void;
 }) {
   const { marks } = usePreviewMode();
@@ -129,7 +139,8 @@ function SubagentHoverPreview({ request, preview, close, client, agents, runtime
   const zh = resolvedLanguage === "zh";
   const doc = request.anchor.ownerDocument;
   const win = surfaceWindow(doc);
-  const [box, setBox] = useState<{ top: number; left: number; width: number; height: number; side: "above" | "below"; largeUi: boolean } | null>(null);
+  const [box, setBox] = useState<{ top: number; left: number; width: number; height: number; side: "above" | "below"; largeUi: boolean;
+    bridgeLeft: number; bridgeWidth: number } | null>(null);
   useLayoutEffect(() => {
     const place = () => {
       const rect = request.anchor.getBoundingClientRect();
@@ -140,8 +151,10 @@ function SubagentHoverPreview({ request, preview, close, client, agents, runtime
       const height = Math.min(HEIGHT, side === "above" ? above : below);
       if (height === 0 || width === 0) { close(); return; }
       const uiScale = Number(win.getComputedStyle(doc.documentElement).getPropertyValue("--ui-font-scale"));
+      const left = Math.max(EDGE, Math.min(rect.left, win.innerWidth - EDGE - width));
+      const bridgeLeft = Math.min(rect.left, left);
       setBox({ width, height, side, largeUi: uiScale > 1.25,
-        left: Math.max(EDGE, Math.min(rect.left, win.innerWidth - EDGE - width)),
+        left, bridgeLeft, bridgeWidth: Math.max(rect.right, left + width) - bridgeLeft,
         top: side === "above" ? rect.top - GAP - height : rect.bottom + GAP });
     };
     place();
@@ -172,9 +185,8 @@ function SubagentHoverPreview({ request, preview, close, client, agents, runtime
   const openHint = zh ? density ? "点击打开完整对话" : "点击卡片打开完整对话" : density ? "Open full conversation" : "Click to open the full conversation";
   const metrics = resolveSubagentMetrics(preview ? undefined : live?.usage, agent);
 
-  return <aside id={request.id} role="tooltip" aria-label={zh ? `${agent.name} 的对话预览` : `${agent.name} conversation preview`}
-    className={`sa-hover-preview ${agent.status}`} data-activity={pill.cls} data-placement={box?.side} data-density={density}
-    style={box ? { top: box.top, left: box.left, width: box.width, height: box.height } : { visibility: "hidden" }}>
+  const content = <aside id={request.id} role="tooltip" aria-label={zh ? `${agent.name} 的对话预览` : `${agent.name} conversation preview`}
+    className={`sa-hover-preview ${agent.status}`} data-activity={pill.cls} data-placement={box?.side} data-density={density}>
     <header className="sa-hover-head">
       <AgentAvatar agentId={request.target?.agentId ?? agent.agentId} name={agent.name} tone={avatarTone(pill.cls)} size={36} className="sa-hover-avatar" />
       <div className="sa-hover-identity">
@@ -198,8 +210,8 @@ function SubagentHoverPreview({ request, preview, close, client, agents, runtime
       {!preview && !runtimeConnected ? <span className="sa-hover-offline">{zh ? "已离线" : "Offline"}</span> : null}
       {(preview || runtimeConnected) && state.hydrateStatus === "resyncing" ? <span>{zh ? "正在同步" : "Syncing"}</span> : null}
     </div>
-    <section ref={scrollerRef} className="convo-scroll conversation-surface sa-hover-scroll" inert onScroll={scroll.onScroll}>
-      <div className="convo-doc sa-hover-doc" role="log" aria-live="off">
+    <section ref={scrollerRef} className="convo-scroll conversation-surface sa-hover-scroll" onScroll={scroll.onScroll}>
+      <div className="convo-doc sa-hover-doc" role="log" aria-live="off" inert>
         {loading ? <div className="sa-hover-skeleton" role="status" aria-label={zh ? "正在读取子 Agent 对话…" : "Loading agent conversation…"}>
           <span /><span /><span />
         </div> : null}
@@ -219,4 +231,11 @@ function SubagentHoverPreview({ request, preview, close, client, agents, runtime
       </div>
     </footer> : null}
   </aside>;
+
+  return <div ref={surfaceRef} className="sa-hover-surface" onPointerLeave={event => leave(request.anchor, event.relatedTarget)}
+    style={box ? { top: box.top, left: box.left, width: box.width, height: box.height } : { visibility: "hidden" }}>
+    {box ? <div className="sa-hover-bridge" aria-hidden="true"
+      style={{ top: box.side === "above" ? box.height : -GAP, left: box.bridgeLeft - box.left, width: box.bridgeWidth, height: GAP }} /> : null}
+    {content}
+  </div>;
 }

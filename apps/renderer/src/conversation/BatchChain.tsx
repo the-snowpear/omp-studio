@@ -98,7 +98,7 @@ function SubagentCard({ source, onInspectSubagent }: {
         hover?.open(card(event.currentTarget));
       }
     },
-    onPointerLeave: close,
+    onPointerLeave: (event: ReactPointerEvent<HTMLElement>) => hover?.leave(event.currentTarget, event.relatedTarget),
     onFocus: () => {
       if (anchorRef.current) {
         lastOpenedAnchorRef.current = anchorRef.current;

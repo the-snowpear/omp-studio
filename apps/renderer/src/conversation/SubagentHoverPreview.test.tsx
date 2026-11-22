@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 import type { ClientEvent, ConversationRuntimeEvent, SessionId } from "@omp-studio/client-contract";
 import type { AgentId, Generation, RuntimeEpoch, StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { conversationPages } from "@omp-studio/testkit";
+import { I18nProvider } from "../i18n/I18nContext";
 import { PreviewModeProvider } from "../preview/PreviewContext";
 import { __resetAppSettingsForTests, updateAppSettings } from "../settings/appSettings";
 import { BatchChain } from "./BatchChain";
@@ -58,14 +59,14 @@ function Surface({ client, scope = "parent", runtimeConnected = true, agents = [
   client: SubagentConversationClient | null; scope?: string; runtimeConnected?: boolean;
   agents?: readonly StudioAgentSnapshot[]; onInspect?: Mock<(target: SubagentHubTarget) => void>; inputTool?: ToolView;
 }) {
-  return <PreviewModeProvider switchEnabled>
+  return <I18nProvider><PreviewModeProvider switchEnabled>
     <SubagentHoverProvider scope={scope} client={client} agents={agents} runtimeConnected={runtimeConnected}
       parentSessionId={parent} liveSessionId={parent}>
       <main className="convo-scroll" data-testid="parent-scroll">
         <BatchChain items={[{ kind: "tool", tool: inputTool }]} batchKey="delegation" liveAgents={agents} onInspectSubagent={onInspect} />
       </main>
     </SubagentHoverProvider>
-  </PreviewModeProvider>;
+  </PreviewModeProvider></I18nProvider>;
 }
 
 async function advance(ms = 300) {
@@ -77,6 +78,11 @@ async function frames(count = 3) {
   });
 }
 function rendererCard() { return screen.getByRole("button", { name: /Renderer.*打开对话/ }); }
+function pointerLeaveTo(from: Element, relatedTarget: EventTarget | null) {
+  // JSDOM has no PointerEvent constructor; MouseEvent preserves pointerout's relatedTarget.
+  const win = from.ownerDocument.defaultView!;
+  fireEvent(from, new win.MouseEvent("pointerout", { bubbles: true, relatedTarget }));
+}
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -148,6 +154,48 @@ describe("subagent hover preview", () => {
     expect(activeSubagentConversationEngineCount()).toBe(base);
     await act(async () => { await Promise.resolve(); });
     expect(report).toHaveBeenLastCalledWith(expect.objectContaining({ visibleSessionIds: [] }));
+  });
+
+  it.each([{ mode: "real", preview: false }, { mode: "preview", preview: true }])("keeps the preview open across the card, gap, and conversation in $mode mode", async ({ preview: demo }) => {
+    if (demo) window.history.replaceState(null, "", "/?preview=1&marks=off");
+    const host = clientFixture();
+    const base = activeSubagentConversationEngineCount();
+    const inputTool = demo ? { ...tool, arguments: { agents: [{ id: "agent-019fcb01", name: "deps", status: "running" }] } } : tool;
+    render(<Surface client={host.client} inputTool={inputTool} />);
+    const card = demo ? screen.getByRole("button", { name: /deps.*打开对话/ }) : rendererCard();
+    fireEvent.pointerEnter(card);
+    await advance();
+    await frames();
+    const preview = screen.getByRole("tooltip");
+
+    pointerLeaveTo(card, preview);
+    await advance(1000);
+    expect(screen.getByRole("tooltip")).toBe(preview);
+
+    pointerLeaveTo(preview, card);
+    fireEvent.pointerEnter(card);
+    await advance(1000);
+    expect(screen.getByRole("tooltip")).toBe(preview);
+
+    const gap = preview.parentElement!.querySelector(".sa-hover-bridge")!;
+    pointerLeaveTo(card, gap);
+    await advance(1000);
+    expect(screen.getByRole("tooltip")).toBe(preview);
+    pointerLeaveTo(gap, preview.querySelector(".sa-hover-scroll"));
+    expect(screen.getByRole("tooltip")).toBe(preview);
+    fireEvent.scroll(preview.querySelector(".sa-hover-scroll")!);
+    expect(screen.getByRole("tooltip")).toBe(preview);
+    await act(async () => { updateAppSettings({ language: "en" }); });
+    expect(screen.getByRole("tooltip", { name: /conversation preview/ })).toBe(preview);
+    await act(async () => { updateAppSettings({ language: "zh" }); });
+    expect(screen.getByRole("tooltip", { name: /对话预览/ })).toBe(preview);
+    expect(host.query).toHaveBeenCalledTimes(demo ? 0 : 1);
+    expect(host.listeners.size).toBe(demo ? 0 : 1);
+
+    pointerLeaveTo(preview, screen.getByTestId("parent-scroll"));
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(host.listeners.size).toBe(0);
+    expect(activeSubagentConversationEngineCount()).toBe(base);
   });
 
   it("cancels a brief sweep without reading or reopening after the delay", async () => {
@@ -359,7 +407,10 @@ describe("subagent hover preview", () => {
     await advance();
     expect(doc.body.querySelector(".sa-hover-preview")).toBeTruthy();
     expect(document.body.querySelector(".sa-hover-preview")).toBeNull();
-    fireEvent.pointerLeave(card);
+    pointerLeaveTo(card, doc.body.querySelector(".sa-hover-preview"));
+    const preview = doc.body.querySelector(".sa-hover-preview")!;
+    expect(preview).toBeTruthy();
+    pointerLeaveTo(preview, doc.body);
     expect(doc.body.querySelector(".sa-hover-preview")).toBeNull();
     cleanup();
     iframe.remove();
