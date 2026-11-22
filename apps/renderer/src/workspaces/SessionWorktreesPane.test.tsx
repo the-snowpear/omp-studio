@@ -9,7 +9,7 @@ vi.mock("../hostError", async original => ({ ...await original<typeof import("..
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 function setup() {
-  const command = vi.fn(async (kind: string) => ({ requestId: kind }));
+  const command = vi.fn(async (kind: string, _input?: unknown) => ({ requestId: kind }));
   const client = { command } as unknown as StudioClient;
   const context = { available: true, sessionId: "session-1", capabilities: { capabilities: [{ id: "worktrees.session.startPolicy", grade: "supported" }] } } as never;
   const onGateChange = vi.fn();
@@ -96,4 +96,27 @@ it("removes the modal when the Runtime becomes unavailable", async () => {
   view.rerender(<WorktreeLaunchGate {...props} context={{ ...props.context as object, available: false } as never} />);
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(props.onGateChange).toHaveBeenLastCalledWith(false);
+});
+
+it("uses the current Runtime session when the rendered context is one step behind", async () => {
+  const props = setup();
+  const liveClient = {
+    ...props.client,
+    getState: () => ({ entities: { snapshot: { sessionId: "session-2" } } }),
+  } as StudioClient;
+  render(<WorktreeLaunchGate {...props} client={liveClient} />);
+  await screen.findByRole("dialog");
+  expect(props.command.mock.calls.find(([kind]) => kind === "worktrees.session.startPolicy")?.[1]).toEqual({ sessionId: "session-2" });
+
+  fireEvent.click(screen.getByRole("button", { name: "留在当前工作区" }));
+  await waitFor(() => expect(props.onGateChange).toHaveBeenLastCalledWith(false));
+  expect(props.command.mock.calls.find(([kind]) => kind === "worktrees.session.continueHere")?.[1]).toEqual({ sessionId: "session-2" });
+});
+
+it("rechecks the policy once when the Runtime changes during the first probe", async () => {
+  const props = setup();
+  vi.mocked(waitReceipt).mockRejectedValueOnce(new Error("Worktree session changed"));
+  render(<WorktreeLaunchGate {...props} />);
+  await screen.findByRole("dialog");
+  expect(props.command.mock.calls.filter(([kind]) => kind === "worktrees.session.startPolicy")).toHaveLength(2);
 });

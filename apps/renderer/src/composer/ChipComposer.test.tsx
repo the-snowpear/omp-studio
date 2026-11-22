@@ -362,6 +362,19 @@ describe("splitChipLabel", () => {
 });
 
 describe("ChipComposer", () => {
+  it("keeps the editor editable while submission is gated", () => {
+    const onSubmit = vi.fn();
+    render(<ChipComposer placeholder="msg" submitDisabled onSubmit={onSubmit} />);
+    const editor = editorOf();
+    expect(editor.getAttribute("contenteditable")).toBe("true");
+    editor.focus();
+    editor.textContent = "typed";
+    fireEvent.input(editor, { inputType: "insertText", data: "typed" });
+    fireEvent.keyDown(editor, { key: "Enter" });
+    expect(editor.textContent).toBe("typed");
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("opens the command menu from a leading slash and does not insert a skill chip", async () => {
     const ref = createRef<ChipComposerHandle>();
     const onRunCommand = vi.fn();

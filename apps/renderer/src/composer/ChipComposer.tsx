@@ -97,6 +97,8 @@ type Props = {
   sessionReferences?: boolean;
   placeholder?: string;
   disabled?: boolean;
+  /** Keep the editor editable while the surrounding surface waits to submit. */
+  submitDisabled?: boolean;
   compact?: boolean;
   workspaceId?: string;
   describedBy?: string;
@@ -193,6 +195,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     sessionReferences,
     placeholder,
     disabled,
+    submitDisabled = false,
     compact,
     dictation,
     prediction,
@@ -1214,6 +1217,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       return;
     }
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    if (submitDisabled) return;
     event.preventDefault();
     if (isPrimaryModifier(event)) {
       onFollowUp?.();

@@ -1349,6 +1349,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   const promptChannelReady =
     !targetOffline &&
     !busy &&
+    !worktreeGated &&
     !connection?.resyncRequired &&
     !sending &&
     sessionCreating !== true &&
@@ -1378,6 +1379,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   const followUpChannelReady =
     !targetOffline &&
     !busy &&
+    !worktreeGated &&
     !connection?.resyncRequired &&
     !sending &&
     sessionCreating !== true &&
@@ -1390,7 +1392,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     followUpChannelReady,
   });
   const steerNowEnabled =
-    !targetOffline && !sending && sessionCreating !== true && promptTargetReady && !connection?.resyncRequired && can("core.steer");
+    !targetOffline && !sending && !worktreeGated && sessionCreating !== true && promptTargetReady && !connection?.resyncRequired && can("core.steer");
   const restorePending = (requestId: string) => {
     const pending = convo.state.pendingUsers.find((entry) => entry.requestId === requestId);
     if (!pending) return;
@@ -1574,7 +1576,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     && !composerRunning
     && queueEdit === undefined
     && pendingInteraction === null;
-  const continueEnabled = preview ? true : retryTurnDisabledReason === undefined;
+  const continueEnabled = preview ? true : !worktreeGated && retryTurnDisabledReason === undefined;
   const continueTurn = () => {
     if (!continueEnabled) return;
     if (preview) {
@@ -2842,7 +2844,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
                 prediction={{client,sessionId:snapshot?.sessionId,available:runtimeConnected&&executionMatches&&can("prediction.prepare"),nextMessageAvailable:can("composer.predictions")}}
                 ref={composerInputRef}
                 id="composerInput"
-                disabled={worktreeGated}
+                submitDisabled={worktreeGated}
                 compact={composerRunning && !composerExpanded}
                 sessionReferences
                 placeholder={queueEdit === undefined ? t("conversation.composerPlaceholder") : t("conversation.editingQueuedMessage")}
@@ -3051,7 +3053,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
                   ) : (
                     <button
                       className="send-btn"
-                      disabled={queueEdit === undefined && !((btwMode || skipAsk) && textReady || promptEnabled || queueEnabled || slashExecuteReady || (preview && running) || (composerRunning && textReady))}
+                      disabled={worktreeGated || (queueEdit === undefined && !((btwMode || skipAsk) && textReady || promptEnabled || queueEnabled || slashExecuteReady || (preview && running) || (composerRunning && textReady)))}
                       onClick={() => {
                         setComposerExpanded(true);
                         if (queueEdit !== undefined) {
