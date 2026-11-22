@@ -3238,6 +3238,11 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
           viewState={agentViewBook.get(subagentViewKey(descriptor.scope, descriptor.target.agentId))}
           {...(agentBtwIntent !== null && agentBtwIntent.scope === descriptor.scope && agentBtwIntent.agentId === descriptor.target.agentId && descriptor.scope === agentScope ? { btwIntent: agentBtwIntent.serial } : {})}
           onActivate={() => dock.store.dispatch({ type: "agent-focus", panel: id as AgentPanelId })}
+          {...(descriptor.scope === agentScope ? { onSwitchAgent: (agentId: string) => {
+            // The new tab joins this one's group, the place the user is switching from.
+            dock.store.dispatch({ type: "agent-focus", panel: id as AgentPanelId });
+            openAgentFromCatalog(agentId);
+          } } : {})}
           onMain={() => { revealMainWindow(); onRoute("workbench"); composerInputRef.current?.focus(); }}
           onOpenHub={agentId => { setHubIntent(agentId, "chat"); onRoute("agent-hub"); }}
           onRevealSource={target => target.toolCallId === undefined ? Promise.resolve(false) : revealConversationTarget(convoScrollerRef.current, { toolCallId: target.toolCallId })} />}</DockPanel>)}

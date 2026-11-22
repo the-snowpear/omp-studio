@@ -14,6 +14,9 @@ import type { SubagentViewState } from "../conversation/subagentViewState";
 import { AgentBtwPane } from "../btw/AgentBtwPane";
 import { useWideLayout } from "../layout/useWideLayout";
 import { agentStatusText } from "./agentPresentation";
+import { AgentAvatar } from "./AgentAvatar";
+import { AgentSwitcher } from "./AgentSwitcher";
+import { deckTone } from "./deck/deckModel";
 import { TaskStepsView } from "./TaskStepsView";
 import { previewTaskStepsForAgent } from "../preview/taskStepsPreview";
 
@@ -46,13 +49,15 @@ type AgentDetailProps = {
   onOpenHub: (agentId: string) => void;
   onRevealSource: (target: SubagentHubTarget) => Promise<boolean>;
   onActivate?: () => void;
+  /** Opens (or focuses) another agent's tab; without it the tab row has no switcher. */
+  onSwitchAgent?: (agentId: string) => void;
   contextAvailable?: boolean;
   /** A request (by serial) to show the BTW page, from the Agents deck. */
   btwIntent?: number;
 };
 
 function AgentDetailContent({ target, agents, visible, client, conversationClient, canSend, canBtw, runtimeConnected,
-  parentSessionId, liveSessionId, pendingInteractionSessionId, workspaceId, loadMentions, viewState, onMain, onOpenHub, onRevealSource, onActivate, contextAvailable = true, btwIntent,
+  parentSessionId, liveSessionId, pendingInteractionSessionId, workspaceId, loadMentions, viewState, onMain, onOpenHub, onRevealSource, onActivate, onSwitchAgent, contextAvailable = true, btwIntent,
 }: Omit<AgentDetailProps, "target"> & { target: SubagentHubTarget }) {
   const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
@@ -67,6 +72,7 @@ function AgentDetailContent({ target, agents, visible, client, conversationClien
   const parent = agents.find(row => row.agentId === agent?.parentAgentId);
   const demo = preview ? previewAgentDisplay(target.agentId, zh) : undefined;
   const historical = !preview && parentSessionId !== liveSessionId;
+  const inactive = !preview && (historical || !runtimeConnected);
   const duration = agent ? subagentDurationMs(agent) : undefined;
   const name = agent?.displayName ?? target.displayName ?? target.agentId;
   const model = agent?.resolvedModel ?? target.resolvedModel;
@@ -114,7 +120,7 @@ function AgentDetailContent({ target, agents, visible, client, conversationClien
   return <section className={`agent-detail${wide ? " is-wide" : ""}`} ref={rootRef} data-live={visible && (preview || runtimeConnected && !historical) || undefined} aria-label={zh ? `子 Agent ${target.agentId}` : `Agent ${target.agentId}`} onPointerDownCapture={onActivate} onFocusCapture={onActivate}>
     <header className="agent-detail-head">
       <div className="agent-detail-identity">
-        <span className="agent-avatar"><Icon name="bot" extra="sm" /></span>
+        <AgentAvatar agentId={target.agentId} name={name} tone={inactive || !agent ? "stopped" : deckTone(agent.status, demo?.tone)} size={24} className="agent-detail-avatar" />
         <div className="agent-detail-breadcrumb"><button type="button" onClick={onMain} disabled={!contextAvailable} title={!contextAvailable ? (zh ? "请先返回所属会话" : "Return to the parent session first") : undefined}>{zh ? "主 Agent" : "Main agent"}</button>
           {parent && parent.kind !== "main" ? <><Icon name="chevron-r" extra="sm" /><span title={parent.displayName}>{parent.displayName}</span></> : null}
           <Icon name="chevron-r" extra="sm" />
@@ -122,9 +128,8 @@ function AgentDetailContent({ target, agents, visible, client, conversationClien
         <h2 title={name}>{name}</h2>
         <span className="agent-detail-model" title={`${!contextAvailable ? (zh ? "最近记录模型" : "Last recorded model") : (zh ? "实际模型" : "Model")}: ${model ?? (zh ? "模型未知" : "Unknown model")}`}>{model ?? (zh ? "模型未知" : "Unknown model")}</span>
         {preview && marks ? <span className="chip gray xs">{zh ? "演示" : "Demo"}</span> : null}
-        {agent ? <span className={`agent-status is-${!preview && (historical || !runtimeConnected) ? "inactive" : demo?.tone ?? agent.status}`} title={status}><span>{status}</span></span> : null}
+        {agent ? <span className={`agent-status is-${inactive ? "inactive" : demo?.tone ?? agent.status}`} title={status}><span>{status}</span></span> : null}
       </div>
-      {task ? <p className="agent-detail-task" title={task}>{task}</p> : null}
       {!contextAvailable ? <div className="agent-detail-notice small muted" role="status">{zh ? "所属会话未激活 · 只读" : "Parent session inactive · read only"}</div> : null}
       {historical ? <div className="agent-detail-notice small muted">{zh ? "历史对话 · 只读" : "History · read only"}</div> : null}
       {sourceMissing ? <p className="agent-detail-notice small muted" role="status">{zh ? "来源不在已加载的主对话中，请加载更早消息后再定位。" : "Load earlier messages in the main conversation to locate the source."}</p> : null}
@@ -134,6 +139,8 @@ function AgentDetailContent({ target, agents, visible, client, conversationClien
         {([['chat', zh ? '对话' : 'Conversation'], ...(wide ? [] : [['details', zh ? '详情' : 'Details']] as const), ...(preview || canBtw ? [['btw', 'BTW']] : [])] as const).map(([id, label]) =>
           <button type="button" key={id} role="tab" aria-selected={shown === id} onClick={() => chooseTab(id as typeof tab)}>{label}</button>)}
       </div>
+      {onSwitchAgent ? <AgentSwitcher agents={agents} currentId={target.agentId} preview={preview} zh={zh} inactive={inactive}
+        onSwitch={onSwitchAgent} onMain={onMain} mainAvailable={contextAvailable} /> : null}
       <div className="agent-detail-actions">
         {target.toolCallId && contextAvailable ? <button type="button" className="btn small ghost" aria-label={zh ? "定位委派" : "Show delegation"} title={zh ? "定位委派" : "Show delegation"} onClick={() => { void onRevealSource(target).then(found => setSourceMissing(!found)); }}><Icon name="undo" extra="sm" /><span>{zh ? "定位委派" : "Show delegation"}</span></button> : null}
         <button type="button" className="btn small ghost" aria-label="Agent Hub" title={zh ? "前往 Agent Hub" : "Open Agent Hub"} onClick={() => onOpenHub(target.agentId)}><Icon name="external" extra="sm" /><span>Agent Hub</span></button>
