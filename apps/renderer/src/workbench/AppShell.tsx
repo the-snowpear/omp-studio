@@ -140,7 +140,7 @@ const noSubscription = () => () => {};
 
 /** 侧栏项目行「移除项目」确认框（与 HistoryPage 会话删除确认同一样式家族）。
     移除只删注册表记录：项目文件与会话历史保留在磁盘。 */
-function RemoveProjectDialog({
+export function RemoveProjectDialog({
   name,
   busy,
   onConfirm,
@@ -148,10 +148,11 @@ function RemoveProjectDialog({
 }: {
   name: string;
   busy: boolean;
-  onConfirm: () => void;
+  onConfirm: (deleteSessions: boolean) => void;
   onCancel: () => void;
 }) {
   const { t } = useI18n();
+  const [deleteSessions, setDeleteSessions] = useState(false);
   useEffect(() => {
     if (busy) return;
     const onKey = (event: KeyboardEvent) => {
@@ -181,10 +182,19 @@ function RemoveProjectDialog({
         </div>
         <div className="create-project-body">
           <p className="create-branch-hint">{t("shell.removeProjectKeep")}</p>
+          <label className="remove-project-sessions">
+            <input
+              type="checkbox"
+              checked={deleteSessions}
+              disabled={busy}
+              onChange={(event) => setDeleteSessions(event.target.checked)}
+            />
+            <span>{t("shell.removeSessions")}</span>
+          </label>
         </div>
         <div className="create-project-foot">
           <button type="button" className="btn outline" autoFocus disabled={busy} onClick={onCancel}>{t("common.cancel")}</button>
-          <button type="button" className="btn danger" disabled={busy} onClick={onConfirm}>
+          <button type="button" className="btn danger" disabled={busy} onClick={() => onConfirm(deleteSessions)}>
             {busy
               ? <><span className="spinner" aria-hidden="true" />{t("shell.removingProject")}</>
               : <><Icon name="trash" extra="sm" /><span>{t("shell.removeProject")}</span></>}
@@ -2470,7 +2480,8 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   };
 
   /** 侧栏项目行 ⋯「移除项目」：workspace.remove 只删注册表记录，
-      项目文件与会话历史保留（与 workspace.forgetUnavailable 同一语义的单项目版）。
+      项目文件保留（与 workspace.forgetUnavailable 同一语义的单项目版）；勾选
+      「同时删除会话记录」时 Host 会一并清掉该项目的活动+归档会话。
       活动项目被移除时注册表把活动权移到最近的可用记录，AppShell 的
       workspaces 同步 effect 随后把 selectedProject / 顶栏 crumb 带过去。 */
   const requestRemoveProject = (workspaceId: WorkspaceId) => {
@@ -2480,13 +2491,13 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     setRemoveProjectFor({ id: workspaceId, name: row.name });
   };
 
-  const confirmRemoveProject = () => {
+  const confirmRemoveProject = (deleteSessions: boolean) => {
     const target = removeProjectFor;
     if (target === null || removeProjectBusy) return;
     setRemoveProjectBusy(true);
     void workspaceActionQueue.enqueue(async () => {
       try {
-        const handle = await client.command("workspace.remove", { workspaceId: target.id });
+        const handle = await client.command("workspace.remove", { workspaceId: target.id, ...(deleteSessions ? { deleteSessions: true } : {}) });
         const workspaces = await waitReceipt<WorkspaceListReadModel>(client, handle.requestId);
         onWorkspacesChange(workspaces);
         setRemoveProjectFor(null);

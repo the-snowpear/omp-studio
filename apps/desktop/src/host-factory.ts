@@ -623,6 +623,17 @@ export function createProductionHostFactory(options?: {
         cwd: stored.canonicalPath,
       }, { launchIfMissing: false });
     },
+    // Sweep a project's session records when `workspace.remove` asks for it.
+    // Reads the live composition lazily; the sweep is mostly disk work, so it
+    // does not require the Runtime to be ready (resident sessions, if any, are
+    // evacuated by the sweep itself).
+    deleteWorkspaceSessions: async (cwd: string) => {
+      const composition = activeComposition;
+      if (composition === undefined || composition.deleteWorkspaceSessions === undefined) {
+        throw new Error("Session cleanup is not available on this Host");
+      }
+      return composition.deleteWorkspaceSessions(cwd);
+    },
   });
   const workspaces = {
     list: () => innerWorkspaces.list(),

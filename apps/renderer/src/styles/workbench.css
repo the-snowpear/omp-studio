@@ -4894,6 +4894,21 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   letter-spacing: 0.12em;
 }
 .create-project-body { padding: 0 var(--sp-24) var(--sp-8); }
+.remove-project-sessions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--sp-12);
+  color: var(--text-muted);
+  font-size: var(--fs-13);
+  cursor: pointer;
+  user-select: none;
+}
+.remove-project-sessions input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.remove-project-sessions input[type="checkbox"]:disabled { cursor: default; }
 .create-project-name {
   display: flex;
   align-items: stretch;

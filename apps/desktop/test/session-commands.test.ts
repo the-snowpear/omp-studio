@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import { test } from "node:test";
 
 import type { HostCatalogEntry, HostSessionCatalogProvider } from "@omp-studio/host-client-api";
@@ -240,4 +244,71 @@ test("queue takeback retries a failed attachment promotion before acknowledging 
   assert.equal(restored.result.images[0]?.artifactId,"33333333-3333-3333-3333-333333333333");
   assert.deepEqual(kinds,["session.queue.takeback","session.queue.takeback"]);
   // Only the renderer acknowledges after actually loading the recovered draft.
+});
+
+test("deleteWorkspaceSessions sweeps active and archived sessions under a cwd, cleans residue, and counts per-session failures", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "omp-sweep-"));
+  const agentDir = join(profile, "agent");
+  const sessionsRoot = join(agentDir, "sessions");
+  const archiveRoot = join(agentDir, "archive", "sessions");
+  const projectCwd = join(profile, "project");
+  const previousAgentDir = process.env.OMP_AGENT_DIR;
+  const attempted: string[] = [];
+  const artifacts: string[] = [];
+  const telemetry: string[] = [];
+  const unbound: ThreadId[] = [];
+  const leased: string[] = [];
+  try {
+    await Promise.all([sessionsRoot, archiveRoot, projectCwd].map(dir => mkdir(dir, { recursive: true })));
+    const sessionLine = (id: string) => JSON.stringify({ type: "session", id, timestamp: T0, studioOrigin: "studio-host", cwd: projectCwd });
+    // One active session (plain .jsonl) and one cold-archived session (.jsonl.gz).
+    await writeFile(join(sessionsRoot, "session-a.jsonl"), sessionLine("session-a") + "\n" + JSON.stringify({ type: "message" }) + "\n");
+    await writeFile(join(archiveRoot, "session-b.jsonl.gz"), gzipSync(Buffer.from(sessionLine("session-b") + "\n" + JSON.stringify({ type: "message" }) + "\n")));
+    process.env.OMP_AGENT_DIR = agentDir;
+
+    const commands = createDesktopSemanticCommands({
+      ...baseOptions,
+      sessionRef: { current: undefined },
+      makeDeleteService: (cwd) => {
+        assert.equal(cwd, projectCwd);
+        return {
+          delete: async (sessionId: string) => {
+            attempted.push(sessionId);
+            // session-b vanishes between scan and delete: a per-session failure
+            // that must not fail the sweep.
+            if (sessionId === "session-b") throw new SessionDeleteServiceError("SESSION_NOT_FOUND", "gone");
+            return { sessionId, deleted: true, nativeCleanup: { status: "complete" } };
+          },
+        } as unknown as StudioSessionDeleteService;
+      },
+      finishManagedArtifacts: async (sessionId) => { artifacts.push(sessionId); },
+      telemetryStore: () => ({ remove: async (sessionId) => { telemetry.push(sessionId); } }),
+      bindings: { unbind: (threadId) => { unbound.push(threadId); } },
+      leaseStore: { removeForSession: (sessionId) => { leased.push(sessionId); } },
+      agentDir: () => agentDir,
+    });
+
+    const result = await commands.deleteWorkspaceSessions!(projectCwd);
+    // Both sessions were enumerated (active + archived) and attempted.
+    assert.deepEqual([...attempted].sort(), ["session-a", "session-b"]);
+    assert.equal(result.deleted, 1);
+    assert.equal(result.warnings, 1);
+    // Residue cleanup ran only for the session that actually deleted.
+    assert.deepEqual(artifacts, ["session-a"]);
+    assert.deepEqual(telemetry, ["session-a"]);
+    assert.deepEqual(unbound, [threadIdFor("session-a")]);
+    assert.deepEqual(leased, ["session-a"]);
+  } finally {
+    if (previousAgentDir === undefined) delete process.env.OMP_AGENT_DIR;
+    else process.env.OMP_AGENT_DIR = previousAgentDir;
+    await rm(profile, { recursive: true, force: true });
+  }
+});
+
+test("deleteWorkspaceSessions reports CAPABILITY_UNAVAILABLE when no delete factory is wired", async () => {
+  const commands = createDesktopSemanticCommands({ ...baseOptions, sessionRef: { current: undefined } });
+  await assert.rejects(
+    () => commands.deleteWorkspaceSessions!("/tmp/never"),
+    { code: "CAPABILITY_UNAVAILABLE" },
+  );
 });

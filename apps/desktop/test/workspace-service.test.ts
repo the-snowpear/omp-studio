@@ -167,6 +167,71 @@ test("remove drops one record and re-activates the surviving workspace", async (
   }
 });
 
+test("remove with deleteSessions sweeps the stored project's sessions before dropping the record", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "omp-ws-service-"));
+  const dirA = join(profile, "aaa"), dirB = join(profile, "bbb");
+  try {
+    await Promise.all([dirA, dirB].map(dir => mkdir(dir)));
+    const registry = new WorkspaceRegistry(join(profile, "workspaces.json"));
+    await registry.load();
+    const a = await registry.upsertByPath(dirA, "2026-08-14T00:00:00.000Z");
+    const b = await registry.upsertByPath(dirB, "2026-08-14T01:00:00.000Z");
+    const swept: string[] = [];
+    const service = createOmpWorkspaceService({
+      registry,
+      pickDirectory: async () => undefined,
+      onActivated: async () => undefined,
+      deleteWorkspaceSessions: async (cwd) => { swept.push(cwd); return { deleted: 3, warnings: 0 }; },
+    });
+
+    // Sweeping runs against the removed project's canonical cwd, then the
+    // record drops and the survivor activates.
+    const model = await service.remove!({ workspaceId: b.workspaceId as WorkspaceId, deleteSessions: true });
+    assert.deepEqual(swept, [await canonicalWorkspacePath(dirB)]);
+    assert.equal(model.workspaces.length, 1);
+    assert.equal(model.workspaces[0]!.workspaceId, a.workspaceId);
+    assert.equal(model.activeWorkspaceId, a.workspaceId);
+    assert.ok(existsSync(dirB));
+
+    // Without the flag the sweep is not requested.
+    swept.length = 0;
+    await service.remove!({ workspaceId: a.workspaceId as WorkspaceId });
+    assert.equal(swept.length, 0);
+    assert.equal(registry.list().length, 0);
+  } finally {
+    await rm(profile, { recursive: true, force: true });
+  }
+});
+
+test("remove keeps the record when the session sweep fails (no half-removed project)", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "omp-ws-service-"));
+  const dirA = join(profile, "aaa"), dirB = join(profile, "bbb");
+  try {
+    await Promise.all([dirA, dirB].map(dir => mkdir(dir)));
+    const registry = new WorkspaceRegistry(join(profile, "workspaces.json"));
+    await registry.load();
+    await registry.upsertByPath(dirA, "2026-08-14T00:00:00.000Z");
+    const b = await registry.upsertByPath(dirB, "2026-08-14T01:00:00.000Z");
+    const service = createOmpWorkspaceService({
+      registry,
+      pickDirectory: async () => undefined,
+      onActivated: async () => undefined,
+      deleteWorkspaceSessions: async () => { throw new Error("Session cleanup is not available on this Host"); },
+    });
+
+    // The sweep throws before the record is removed, so the command fails and
+    // the project stays in the list (retryable).
+    await assert.rejects(
+      () => service.remove!({ workspaceId: b.workspaceId as WorkspaceId, deleteSessions: true }),
+      /Session cleanup is not available/u,
+    );
+    assert.equal(registry.list().length, 2);
+    assert.ok(registry.get(b.workspaceId) !== undefined);
+  } finally {
+    await rm(profile, { recursive: true, force: true });
+  }
+});
+
 test("a stale workspace and failed saved session restore do not block a fresh Runtime in the available project", async () => {
   const profile = await mkdtemp(join(tmpdir(), "omp-workspace-recovery-"));
   let port: DesktopRuntimeSessionPort | undefined;

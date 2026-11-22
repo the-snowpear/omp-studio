@@ -3597,7 +3597,7 @@ export class StudioHostClientFacade implements ClientTransport {
         : request.commandName === "workspace.openPath"
         ? await service.openPath!(request.input as { readonly path: string })
         : request.commandName === "workspace.remove"
-          ? await service.remove!(request.input as { readonly workspaceId: WorkspaceId })
+          ? await service.remove!(request.input as { readonly workspaceId: WorkspaceId; readonly deleteSessions?: boolean })
           : request.commandName === "workspace.open"
           ? await service.open(request.input as { readonly workspaceId: WorkspaceId })
           : await service.pick(request.input as { readonly name?: string });

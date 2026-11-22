@@ -191,6 +191,13 @@ export function createDesktopSemanticCommands(options: {
   readonly archive?: () => StudioSessionArchiveService;
   /** Lazy factory: the delete service is rebuilt when the workspace changes. */
   readonly deleteService?: () => StudioSessionDeleteService;
+  /**
+   * Build a delete service scoped to an explicit working directory. Used by
+   * `deleteWorkspaceSessions` to sweep every session recorded under a cwd
+   * that is no longer the active workspace (so `deleteService`, which is bound
+   * to the live cwd, cannot reach it).
+   */
+  readonly makeDeleteService?: (cwd: string) => StudioSessionDeleteService;
   /** Shared by the root Host and all of its scoped conversation clients. */
   readonly sessionFileOperations?: Map<ThreadId, Promise<unknown>>;
   readonly finishManagedArtifacts?: (sessionId: string, deleteManagedArtifacts: boolean) => Promise<void>;
@@ -281,6 +288,48 @@ export function createDesktopSemanticCommands(options: {
       return { applied: true, runtimeEffect: "immediate", message: messages.join(" "), cleanup };
     });
   };
+  /**
+   * Sweep every session recorded under `cwd` (active tree plus cold archive),
+   * applying the same evacuation + cleanup `removeSession` uses. A per-session
+   * failure never fails the sweep — it is counted as a warning, so the
+   * workspace removal still completes.
+   */
+  const deleteWorkspaceSessions = async (cwd: string): Promise<{ readonly deleted: number; readonly warnings: number }> => {
+    if (options.makeDeleteService === undefined) {
+      throw new StudioHostError("CAPABILITY_UNAVAILABLE", desktopText("此 Host 无法清理项目会话记录。", "Session cleanup is not available on this Host."));
+    }
+    const service = options.makeDeleteService(cwd);
+    const catalog = await scanSessionCatalog({ allowedCwd: cwd, includeCliSessions: true });
+    let deleted = 0;
+    let warnings = 0;
+    for (const entry of catalog.sessions) {
+      const threadId = threadIdFor(entry.sessionId);
+      try {
+        await withSessionFileOperation(threadId, async () => {
+          if (!entry.archived) await releaseResidentSession(options, entry.sessionId);
+          const removed = await service.delete(entry.sessionId, { archivedOnly: entry.archived }).catch((error: unknown) => {
+            if (error instanceof SessionDeleteServiceError && error.code === "SESSION_NOT_ARCHIVED") {
+              throw new StudioHostError("INVALID_ARGUMENT", desktopText("此会话已取消归档，已跳过。", "Skipped because the session was unarchived."));
+            }
+            throw error;
+          });
+          let artifactsWarning = false;
+          await options.finishManagedArtifacts?.(entry.sessionId, true).catch(() => { artifactsWarning = true; });
+          await Promise.resolve(options.telemetryStore?.().remove?.(entry.sessionId)).catch(() => undefined);
+          await Promise.resolve(options.bindings?.unbind(threadId)).catch(() => undefined);
+          await Promise.resolve(options.leaseStore?.removeForSession(entry.sessionId)).catch(() => undefined);
+          if (options.agentDir !== undefined) {
+            await Promise.resolve(removeSessionPin(entry.sessionId, options.agentDir())).catch(() => undefined);
+          }
+          if (removed.nativeCleanup.status === "partial" || removed.artifactsCleanupFailed || artifactsWarning) warnings += 1;
+        });
+        deleted += 1;
+      } catch {
+        warnings += 1;
+      }
+    }
+    return { deleted, warnings };
+  };
   return {
     ...(archiveFactory === undefined
       ? {}
@@ -313,6 +362,7 @@ export function createDesktopSemanticCommands(options: {
       }
       return removeSession(input.threadId, false, true);
     },
+    deleteWorkspaceSessions: (cwd: string) => deleteWorkspaceSessions(cwd),
     create: async (input) => {
       if (input?.noContextFiles !== undefined && typeof input.noContextFiles !== "boolean") {
         throw new StudioHostError("INVALID_ARGUMENT", "Choose a boolean noContextFiles startup option");
