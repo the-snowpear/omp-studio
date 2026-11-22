@@ -8,10 +8,17 @@ import { AppSidebar } from "../App";
 import { DockProvider } from "../dock/DockContext";
 import { WORKBENCH_PANELS } from "../panels/registry";
 import { I18nProvider } from "../i18n";
+import { zh } from "../i18n/locales/zh";
+import { PLATFORM } from "../platform";
 import { PreviewModeProvider } from "../preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
 
 vi.mock("../TerminalPane", () => ({ TerminalPane: () => null }));
+
+// 目录项标签随平台变（fileManagerName），用 i18n 字典推导精确值——
+// 项目行菜单还带「在终端中打开」，正则 /中打开$/ 不再唯一。
+const explorerLabel = zh.shell.openInExplorer.replace("{fileManager}",
+  PLATFORM === "darwin" ? zh.shell.fileManagerMac : PLATFORM === "linux" ? zh.shell.fileManagerLinux : zh.shell.fileManagerWindows);
 
 afterEach(() => {
   cleanup();
@@ -125,7 +132,7 @@ describe("AppSidebar thread row more menu", () => {
     fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "更多操作" }));
     const menu = screen.getByRole("menu");
     expect(within(menu).getByRole("menuitem", { name: "在外部编辑器中打开项目" })).toBeTruthy();
-    expect(within(menu).getByRole("menuitem", { name: /中打开$/ })).toBeTruthy();
+    expect(within(menu).getByRole("menuitem", { name: explorerLabel })).toBeTruthy();
 
     fireEvent.click(within(menu).getByRole("menuitem", { name: "在外部编辑器中打开项目" }));
     expect(onOpenProjectInEditor).toHaveBeenCalledWith(project);

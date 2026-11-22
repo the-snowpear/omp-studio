@@ -168,7 +168,7 @@ describe("AppSidebar project row more menu", () => {
 
     fireEvent.click(within(projectRow("omp-studio")).getByRole("button", { name: "更多操作" }));
     const menu = screen.getByRole("menu");
-    for (const label of ["在外部编辑器中打开项目", "打开项目目录"]) {
+    for (const label of ["在外部编辑器中打开项目", explorerLabel]) {
       const item = within(menu).getByRole("menuitem", { name: label }) as HTMLButtonElement;
       expect(item.disabled).toBe(true);
       expect(item.getAttribute("data-tip")).toBe("仅桌面端可用");
