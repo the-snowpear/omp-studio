@@ -11,14 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- 项目菜单支持在该项目打开终端和移除项目。默认保留会话，可选择永久删除活动与归档会话。
+- 右键项目行或点击「⋯」可打开项目菜单，从中打开该项目的终端或移除项目。默认保留会话，重新打开原目录后可查看历史。也可选择永久删除该项目的活动会话、归档会话和关联的托管产物。 [#68](https://github.com/the-snowpear/omp-studio/pull/68)
+
+### Changed
+
+- 权限菜单注明工作区模式会自动允许读写工具，普通终端命令通常仍需审批。
+- 更新中英文 README 的工作台演示、Agent Hub 星图截图和 SSH 工作区说明。 [SSH 工作区](docs/ssh-workspaces.md)
 
 ### Fixed
 
-- 模型选择器显示完整模型名称和标识。 [#69](https://github.com/the-snowpear/omp-studio/issues/69)
-- Bash 工具卡片在收到结果后结束加载状态。 [#70](https://github.com/the-snowpear/omp-studio/issues/70)
-- 修复切换项目后会话归属、SSH 连接状态及中断下载的处理。
-- 修复 Windows 安装向导偶尔读不到已完成安装的目录。
+- 模型选择器的长名称和完整 `provider/model` 标识可在窄菜单中换行，具体思考档位收进图标提示。 [#69](https://github.com/the-snowpear/omp-studio/issues/69)
+- 同一轮里连续调用 Bash 时，即使模型重复使用临时调用 ID，工具卡片收到各自的结果后也会立即结束加载状态。 [#70](https://github.com/the-snowpear/omp-studio/issues/70)
+- 切换项目后，已打开的对话仍按各自的工作区查询历史和绑定会话。批量删除项目会话时，Host 会停止活动会话的 Runtime Worker，并在处理完成后返回结果。清理未完成时，界面会显示已处理的数量并保留项目记录。
+- SSH 恢复时以最新状态更新界面。远端文件完整下载后才替换目标文件，中断时保留已有副本。
+- Runtime 启动或重连期间，输入预测会暂时收起提示，输入框可继续使用。 [#68](https://github.com/the-snowpear/omp-studio/pull/68)
+- Windows 安装向导会在安装目录写入完成后收到完成通知，修复完成页偶尔读不到目录的问题。
 
 ## [0.2.9] - 2026-11-22
 
