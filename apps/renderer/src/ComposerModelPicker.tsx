@@ -30,7 +30,7 @@ import { useI18n } from "./i18n";
 import { hostErrorMessage } from "./hostError";
 import { MODEL_THINKING, createPreviewModelConfig } from "./preview/modelConfigFixtures";
 import { usePreviewMode } from "./preview/PreviewContext";
-import { ModelPickCaps, ProviderGlyph, ROLE_ICONS, ROLE_TINTS, groupModelsByProvider } from "./models/modelPresentation";
+import { ModelPickCaps, ModelPickCopy, ModelThinkingBadge, ProviderGlyph, ROLE_ICONS, ROLE_TINTS, groupModelsByProvider } from "./models/modelPresentation";
 
 type MenuKind = "none" | "model" | "thinking";
 
@@ -217,10 +217,8 @@ export function ComposerModelMenu({
           ) : (
             rolesWithModel.map((role) => {
               const on = isRoleSelected(role);
-              const modelName = bySelector.get(role.primary)?.name ?? modelShortName(role.primary);
-              const think = role.thinking && role.thinking !== "off"
-                ? MODEL_THINKING.find((item) => item.id === role.thinking)?.label ?? role.thinking
-                : null;
+              const model = bySelector.get(role.primary);
+              const modelName = model?.name ?? modelShortName(role.primary);
               return (
                 <button
                   type="button"
@@ -239,11 +237,11 @@ export function ComposerModelMenu({
                       {role.name}
                       <span className="cmp-role-alias">{role.alias}</span>
                     </b>
-                    <span>
-                      {modelName}
-                      {think ? ` · ${think}` : ""}
+                    <span className="rms-option-line" data-tip={`${modelName}\n${role.primary}`}>
+                      <span className="rms-option-scroll">{modelName}</span>
                     </span>
                   </span>
+                  <ModelThinkingBadge model={model} />
                   {on ? <Icon name="check" extra="sm" /> : null}
                 </button>
               );
@@ -324,10 +322,7 @@ export function ComposerModelMenu({
                         disabled={disabled}
                         onClick={() => onChooseModel(model.selector, effort)}
                       >
-                        <span className="rms-option-copy">
-                          <b>{model.name}</b>
-                          {model.id !== model.name ? <span>{model.id}</span> : null}
-                        </span>
+                        <ModelPickCopy model={model} />
                         <ModelPickCaps model={model} />
                         {on ? <Icon name="check" extra="sm" /> : null}
                       </button>

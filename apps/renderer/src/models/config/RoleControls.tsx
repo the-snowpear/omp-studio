@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import type { AvailableModelRecord, ModelRoleRecord } from "@omp-studio/client-contract";
 import { Icon } from "../../icons";
 import { useI18n } from "../../i18n";
-import { ModelPickCaps, ProviderGlyph, ROLE_ICONS, type ModelPickItem, type ModelPickGroup } from "../modelPresentation";
+import { ModelPickCaps, ModelPickCopy, ProviderGlyph, ROLE_ICONS, type ModelPickItem, type ModelPickGroup } from "../modelPresentation";
 import { assignedRoleIds, roleAssignDiff, roleThinkingUi } from "./drafts";
 import { type ModelRoleDraft } from "./types";
 
@@ -481,10 +481,7 @@ export function RoleModelPicker({
                             onFocus={() => setActive(model.selector)}
                             onClick={() => pick(model.selector)}
                           >
-                            <span className="rms-option-copy">
-                              <b>{model.name}</b>
-                              {on && unavailableReason ? <span>{unavailableReason}</span> : model.id !== model.name ? <span>{model.id}</span> : null}
-                            </span>
+                            <ModelPickCopy model={model} {...(on && unavailableReason ? { unavailableReason } : {})} />
                             <ModelPickCaps model={model} />
                             {on ? <Icon name="check" extra="sm" /> : null}
                           </button>

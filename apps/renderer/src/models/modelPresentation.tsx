@@ -94,13 +94,35 @@ export function ThinkingProbe({ config }: { config: AvailableModelRecord["thinki
   </span>;
 }
 
+export function ModelPickCopy({ model, unavailableReason }: { model: ModelPickItem; unavailableReason?: string }) {
+  const detail = unavailableReason || (model.id !== model.name ? model.selector : undefined);
+  return (
+    <span className="rms-option-copy" data-tip={`${model.name}\n${model.selector}`}>
+      <b className="rms-option-line"><span className="rms-option-scroll">{model.name}</span></b>
+      {detail ? <span className="rms-option-line"><span className="rms-option-scroll">{detail}</span></span> : null}
+    </span>
+  );
+}
+
+export function ModelThinkingBadge({ model }: { model: Pick<ModelPickItem, "reasoning" | "thinkingConfig"> | undefined }) {
+  const { t } = useI18n();
+  if (!model?.reasoning && !model?.thinkingConfig) return null;
+  const label = t("modelConfig.tipThinking");
+  return (
+    <span className="chip purple xs chip-icon" data-tip={label}>
+      <Icon name="brain" extra="sm" />
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
 export function ModelPickCaps({ model }: { model: ModelPickItem }) {
   const { t, resolvedLanguage } = useI18n();
   const metadata = model.execution;
   const modelInfo = [t("modelConfig.tipContext"), metadata?.serviceTiers ? `${resolvedLanguage === "zh" ? "公布的服务档位" : "Advertised service tiers"}: ${metadata.serviceTiers.join(", ") || "—"}` : "", metadata?.promptCache ? `${resolvedLanguage === "zh" ? "缓存时长（秒）" : "Cache lifetime (seconds)"}: ${Object.entries(metadata.promptCache).map(([tier, seconds]) => `${tier} ${seconds}`).join(", ") || "—"}` : ""].filter(Boolean).join("\n");
   return (
     <span className="rms-option-caps">
-      {model.thinkingConfig ? <ThinkingProbe config={model.thinkingConfig} /> : model.reasoning ? <span className="chip purple xs chip-icon" data-tip={t("modelConfig.tipThinking")}><Icon name="brain" extra="sm" /></span> : null}
+      <ModelThinkingBadge model={model} />
       {model.image ? <span className="chip blue xs chip-icon" data-tip={t("modelConfig.tipMultimodal")}><Icon name="image" extra="sm" /></span> : null}
       {model.tools ? <span className="chip gray xs chip-icon" data-tip={t("modelConfig.tipTools")}><Icon name="wrench" extra="sm" /></span> : null}
       <span className="chip gray xs" data-tip={modelInfo}>{fmtK(model.contextWindow)}</span>
