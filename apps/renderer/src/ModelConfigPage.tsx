@@ -218,12 +218,18 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     }
   }, [client, preview, workspaceId]);
 
+  // Cold-start ordering: models.get can run before the selected session or
+  // the Runtime snapshot exist; the Host then answers with the honest
+  // unverified read (configuration visible, model list empty) that would
+  // otherwise persist until the page is reopened. Re-run the read when the
+  // session or Runtime readiness changes so the model list fills in on its
+  // own, and re-read on session switches (the catalog is per-workspace).
   useEffect(() => {
     void refresh();
     return () => {
       refreshEpoch.current += 1;
     };
-  }, [refresh]);
+  }, [refresh, sessionId, runtimeAvailable]);
   useEffect(() => () => {
     testEpochRef.current += 1;
   }, []);

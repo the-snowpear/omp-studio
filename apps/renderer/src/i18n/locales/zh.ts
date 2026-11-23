@@ -980,6 +980,7 @@ const zhRaw = {
     "moreModels": "更多模型",
     "allModels": "全部模型",
     "noAvailableModels": "没有可用模型",
+    "noMatchingModels": "没有匹配的模型",
     "previewModelNote": "演示数据，不写入本机配置",
     "model": "模型",
     "thinkingNotSupported": "不支持",
@@ -1755,7 +1756,14 @@ const zhRaw = {
     "cannotSaveRoleNoPrimary": "无法保存：角色 {labels} 取消后没有主模型，请先设置另一个模型",
     "localOauthCredential": "本机 OAuth 凭据",
     "noWorkspaceTip": "无工作区",
-    "statusDemoNoHost": "演示 · 未写入 Host"
+    "statusDemoNoHost": "演示 · 未写入 Host",
+    "statusOmpResolved": "OMP 已解析到可用模型",
+    "statusReadFromModelsYml": "已从 models.yml 读取",
+    "statusDisabledInConfig": "已在 disabledProviders 中禁用",
+    "statusDisabled": "已禁用",
+    "statusNoCredentials": "尚未配置凭据",
+    "statusApiKeySaved": "API Key 已保存",
+    "statusLocalServiceNotRunning": "本地服务未运行"
   },
   "settings": {
     "title": "设置",

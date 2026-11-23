@@ -30,15 +30,17 @@ export const GUI_SETTING_DEFINITIONS = {
 		zh: "服务商并发请求上限",
 		en: "Max in-flight requests per provider",
 		note: "键为服务商 ID（如 openai），值为 ≥1 的正整数；未列出的服务商不限。同一配置根下的本地 OMP 进程共享计数。",
-		noteEn: "Keyed by provider id (e.g. openai) with positive integers >= 1; omitted providers are unlimited. Counted across local OMP processes sharing this config root.",
+		noteEn:
+			"Keyed by provider id (e.g. openai) with positive integers >= 1; omitted providers are unlimited. Counted across local OMP processes sharing this config root.",
 	},
 	"providers.modelMaxInFlightRequests": {
 		type: "numberRecord",
 		default: {},
 		zh: "模型并发请求上限",
 		en: "Max in-flight requests per model",
-		note: "键为 \"provider/modelId\"（如 anthropic/claude-opus-4），值为 ≥1 的正整数；与服务商级上限叠加，请求需同时持有两个维度的名额；未列出的模型不限。",
-		noteEn: 'Keyed "provider/modelId" (e.g. anthropic/claude-opus-4) with positive integers >= 1; stacks with the provider-level cap, so a request needs a slot in both dimensions. Omitted models are unlimited.',
+		note: '键为 "provider/modelId"（如 anthropic/claude-opus-4），值为 ≥1 的正整数；与服务商级上限叠加，请求需同时持有两个维度的名额；未列出的模型不限。',
+		noteEn:
+			'Keyed "provider/modelId" (e.g. anthropic/claude-opus-4) with positive integers >= 1; stacks with the provider-level cap, so a request needs a slot in both dimensions. Omitted models are unlimited.',
 	},
 	"telemetry.otlpExportEnabled": {
 		type: "boolean",
@@ -174,9 +176,9 @@ type DefinitionValue<D> = D extends { type: "enum"; values: readonly (infer V)[]
 				? string[]
 				: D extends { type: "thresholds" }
 					? Record<string, number | string | null>
-				: D extends { type: "numberRecord" }
-					? Record<string, number>
-					: string;
+					: D extends { type: "numberRecord" }
+						? Record<string, number>
+						: string;
 export type GuiSettingsSnapshot = { [K in GuiSettingKey]?: DefinitionValue<(typeof GUI_SETTING_DEFINITIONS)[K]> };
 export const GUI_SETTING_KEYS = Object.keys(GUI_SETTING_DEFINITIONS) as GuiSettingKey[];
 export function isGuiSettingKey(key: string): key is GuiSettingKey {
@@ -233,7 +235,9 @@ export function validateGuiSetting(key: GuiSettingKey, value: unknown): void {
 					name.length <= 256 &&
 					!/[\u0000-\u001f]/u.test(name) &&
 					!["__proto__", "constructor", "prototype"].includes(name) &&
-					typeof v === "number" && Number.isSafeInteger(v) && v > 0
+					typeof v === "number" &&
+					Number.isSafeInteger(v) &&
+					v > 0,
 			)
 		)
 			return;
