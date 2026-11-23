@@ -9,9 +9,64 @@ import type {
   Unsubscribe,
 } from "@omp-studio/client-contract";
 
-import { waitReceipt } from "./hostError";
+import { hostErrorMessage, isRuntimeSnapshotUnavailable, waitReceipt } from "./hostError";
 
 const REQ = "req-1" as CommandRequestId;
+
+describe("hostErrorMessage", () => {
+  // The exact rejection the desktop transport produces for a Host
+  // `UNAVAILABLE` ClientError: a plain `{ code, message }` object (NOT an
+  // Error instance) whose message carries Electron's invoke wrapper.
+  const snapshotReject = {
+    code: "TRANSPORT_ERROR",
+    message:
+      "Error invoking remote method 'omp-studio:desktop:command': UNAVAILABLE: prediction.prepare requires a Runtime snapshot",
+  } as const;
+
+  it("strips the invoke prefix from a plain object (transport rejections)", () => {
+    expect(hostErrorMessage(snapshotReject, "Prediction unavailable")).toBe(
+      "UNAVAILABLE: prediction.prepare requires a Runtime snapshot",
+    );
+  });
+
+  it("strips the invoke prefix from an Error instance", () => {
+    const error = new Error(
+      "Error invoking remote method 'omp-studio:desktop:command': UNAVAILABLE: prediction.prepare requires a Runtime snapshot",
+    );
+    expect(hostErrorMessage(error, "Prediction unavailable")).toBe(
+      "UNAVAILABLE: prediction.prepare requires a Runtime snapshot",
+    );
+  });
+
+  it("keeps an unprefixed message intact", () => {
+    expect(hostErrorMessage({ code: "FAILED", message: "boom" }, "fallback")).toBe("boom");
+  });
+
+  it("falls back when there is no usable message", () => {
+    expect(hostErrorMessage(undefined, "Prediction unavailable")).toBe("Prediction unavailable");
+    expect(hostErrorMessage({ code: "FAILED" }, "Prediction unavailable")).toBe("Prediction unavailable");
+  });
+});
+
+describe("isRuntimeSnapshotUnavailable", () => {
+  it("matches the transient Runtime-snapshot rejection", () => {
+    const snapshotReject = {
+      code: "TRANSPORT_ERROR",
+      message:
+        "Error invoking remote method 'omp-studio:desktop:command': UNAVAILABLE: prediction.prepare requires a Runtime snapshot",
+    };
+    expect(isRuntimeSnapshotUnavailable(snapshotReject)).toBe(true);
+    expect(
+      isRuntimeSnapshotUnavailable(new Error("UNAVAILABLE: prediction.prepare requires a Runtime snapshot")),
+    ).toBe(true);
+  });
+
+  it("does not match unrelated rejections", () => {
+    expect(isRuntimeSnapshotUnavailable({ code: "FAILED", message: "boom" })).toBe(false);
+    expect(isRuntimeSnapshotUnavailable(new Error("Error invoking remote method 'omp-studio:desktop:command': CAPABILITY_UNAVAILABLE: nope"))).toBe(false);
+    expect(isRuntimeSnapshotUnavailable(undefined)).toBe(false);
+  });
+});
 
 interface FakeClientHooks {
   setCommand(id: string, command: unknown): void;

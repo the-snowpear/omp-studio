@@ -6,7 +6,7 @@ import type {
   PredictionInput,
 } from "@omp-studio/studio-protocol";
 import { usePreviewMode } from "../preview/PreviewContext";
-import { HostReceiptTimeout, hostErrorMessage, waitReceipt } from "../hostError";
+import { HostReceiptTimeout, hostErrorMessage, isRuntimeSnapshotUnavailable, waitReceipt } from "../hostError";
 import { insertPlainText } from "./editorDom";
 import { isZh, useI18n } from "../i18n";
 import { getPreviewNextMessages } from "../preview/nextMessagePreview";
@@ -414,6 +414,16 @@ export function useWordPrediction(
       })()
         .catch((cause) => {
           if (cause instanceof HostReceiptTimeout || !eligible()) return;
+          if (isRuntimeSnapshotUnavailable(cause)) {
+            // The Host isolated its Runtime snapshot while the Runtime is (re)
+            // starting: transient and self-resolving. Prediction is best-effort
+            // ghost text, so clear it silently instead of surfacing a technical
+            // message on every keystroke. `attachment` is not set yet (prepare
+            // threw), so there is nothing to close.
+            clearPrediction();
+            setError("");
+            return;
+          }
           setError(hostErrorMessage(cause, zhRef.current ? "输入预测不可用" : "Prediction unavailable"));
         })
         .finally(() => {

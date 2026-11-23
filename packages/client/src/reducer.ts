@@ -425,6 +425,7 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "fs.trash": true,
   "workspace.pick": true,
   "workspace.forgetUnavailable": true,
+  "workspace.remove": true,
   "workspace.file.create": true,
   "workspace.file.writeText": true,
   "workspace.directory.create": true,
@@ -661,6 +662,7 @@ function preserveHostOwnedCommand(command: CommandState): boolean {
     || command.commandName.startsWith("fs.")
     || command.commandName === "workspace.pick"
     || command.commandName === "workspace.forgetUnavailable"
+    || command.commandName === "workspace.remove"
     || command.commandName === "session.archive"
     || command.commandName === "session.unarchive"
     || command.commandName === "session.delete"

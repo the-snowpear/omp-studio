@@ -690,6 +690,8 @@ interface CoreCommandInputMap {
   "workspace.pick": { readonly name?: string };
   /** Forget unavailable registry records; project and session files stay intact. */
   "workspace.forgetUnavailable": EmptyInput;
+  /** Remove one registry record; project and session files stay intact. */
+  "workspace.remove": { readonly workspaceId: WorkspaceId; readonly deleteSessions?: boolean };
   /** Create an empty file inside the selected workspace. */
   "workspace.file.create": { readonly workspaceId: WorkspaceId; readonly path: string };
   "workspace.file.writeText": import("./files.js").WorkspaceFileWrite;
@@ -840,6 +842,7 @@ interface CoreCommandResultMap {
   "workspace.openPath": WorkspaceListReadModel;
   "workspace.pick": WorkspaceListReadModel;
   "workspace.forgetUnavailable": WorkspaceListReadModel;
+  "workspace.remove": WorkspaceListReadModel;
   "workspace.file.create": WorkspaceFileMutationResult;
   "workspace.file.writeText": import("./files.js").WorkspaceFileSaveResult;
   "fs.file.writeText": import("./system-files.js").SystemFileSaveResult;

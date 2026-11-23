@@ -726,7 +726,7 @@ function projectAdapterFactories(backend: HostBackend, openUrl: DesktopFacadeSea
   };
 }
 
-function buildFacade(context: FacadeContext): StudioHostClientFacade {
+function buildFacade(context: FacadeContext): { readonly facade: StudioHostClientFacade; readonly commands: HostSemanticCommandService } {
   const seams = context.seams;
   const projectAdapters = projectAdapterFactories(context.backend, seams.openUrl, seams.revealDirectory);
   const sessionRef = context.sessionRef;
@@ -782,6 +782,18 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
       });
     }
     return deleteService;
+  };
+  // A delete service scoped to an explicit cwd (not the live one), so a workspace
+  // being removed can have its sessions swept after it is no longer active.
+  const makeDeleteService = (cwd: string): StudioSessionDeleteService => {
+    return new StudioSessionDeleteService({
+      allowedCwd: cwd,
+      purgeRows: input => context.sessionPurge.run(input),
+      timeTravel: timeTravelService(context.profileDirectory),
+      isResident: (sessionId) =>
+        context.runtimeSession?.isResident?.(sessionId) === true
+        || sessionRef.current?.controller.publication()?.snapshot?.sessionId === sessionId,
+    });
   };
   // Durable single-writer lease store mirrors the one created in runtime-session.ts.
   const sessionLeaseCleanup = new FileSessionLeaseStore({
@@ -866,6 +878,7 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
       },
       archive: currentArchiveService,
       deleteService: currentDeleteService,
+      makeDeleteService,
       sessionFileOperations: context.sessionFileOperations,
       finishManagedArtifacts: async (sessionId, cascade) => {
         const library = artifactLibraryForProfile(context.profileDirectory);
@@ -1039,7 +1052,7 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
       onInteractionEvent: (listener) => context.interaction.subscribe(listener),
     } satisfies HostRuntimeAccess,
   };
-  return new StudioHostClientFacade(options);
+  return { facade: new StudioHostClientFacade(options), commands: runtimeCommandService };
 }
 
 function assertCompositionOptions(options: DesktopCompositionOptions): void {
@@ -1165,6 +1178,15 @@ async function openSessionContext(root: FacadeContext, scope: import("@omp-studi
       ...(root.seams.workspaces ? { workspaces: {
         list,
         ...(root.seams.workspaces.forgetUnavailable ? { forgetUnavailable: () => root.seams.workspaces!.forgetUnavailable!() } : {}),
+        ...(root.seams.workspaces.remove ? { remove: async (input: { readonly workspaceId: WorkspaceId }) => {
+          const model = await root.seams.workspaces!.remove!(input);
+          if (model.activeWorkspaceId) {
+            workspace.current = await resolveWorkspace(model.activeWorkspaceId);
+            context.workspaceCwd.current = workspace.current.cwd;
+            wanted = undefined; bind(undefined);
+          }
+          return list();
+        } } : {}),
         open: async ({ workspaceId }) => {
           if (workspaceId !== workspace.current.workspaceId) {
             workspace.current = await resolveWorkspace(workspaceId);
@@ -1195,7 +1217,7 @@ async function openSessionContext(root: FacadeContext, scope: import("@omp-studi
       } } : {}),
     },
   };
-  const facade = buildFacade(context);
+  const { facade } = buildFacade(context);
   if (wanted) bind(pool.sessionFor(wanted));
   const offResidents = pool.attachResidentsSink?.(() => { if (wanted && !startup.closing) bind(pool.sessionFor!(wanted)); });
   return {
@@ -1240,6 +1262,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
   #unsubscribeComputer: (() => void) | undefined;
   #closed = false;
   #shutdownStarted = false;
+  #deleteWorkspaceSessions: ((cwd: string) => Promise<{ readonly deleted: number; readonly warnings: number }>) | undefined;
 
   constructor(options: {
     readonly facade: StudioHostClientFacade;
@@ -1249,10 +1272,12 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     readonly endpointLease: DesktopEndpointLease;
     readonly runtimeSession: DesktopRuntimeSessionPort | undefined;
     readonly sessionStarted: boolean;
+    readonly deleteWorkspaceSessions?: ((cwd: string) => Promise<{ readonly deleted: number; readonly warnings: number }>) | undefined;
   }) {
     this.#facade = options.facade;
     this.#status = options.status;
     this.#facadeContext = options.facadeContext;
+    this.#deleteWorkspaceSessions = options.deleteWorkspaceSessions;
     this.#enableContexts();
     this.#lease = options.lease;
     this.#endpointLease = options.endpointLease;
@@ -1538,10 +1563,25 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     // Renderer reboots. Replacing the facade here would reopen write access.
     if (this.#facade.runtimeInstallInProgress) return this;
     await this.#facade.close();
-    this.#facade = buildFacade(this.#facadeContext);
+    const { facade: nextFacade, commands } = buildFacade(this.#facadeContext);
+    this.#facade = nextFacade;
+    this.#deleteWorkspaceSessions = commands.deleteWorkspaceSessions;
     this.#enableContexts();
     this.#replayCurrentPublication();
     return this;
+  }
+
+  /**
+   * Sweep a workspace's session records (active and archived) by cwd. Main-only
+   * helper used by `workspace.remove` when the user also asks to delete the
+   * project's conversations. Fails closed when the Host has no session cleanup
+   * wired.
+   */
+  deleteWorkspaceSessions(cwd: string): Promise<{ readonly deleted: number; readonly warnings: number }> {
+    if (this.#deleteWorkspaceSessions === undefined) {
+      return Promise.reject(new Error("Session cleanup is not available on this Host"));
+    }
+    return this.#deleteWorkspaceSessions(cwd);
   }
 
   /**
@@ -1734,14 +1774,16 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
         ...(installerOptions === undefined ? {} : { installerOptions }),
         ...(options.managedInstall === undefined ? {} : { managedInstall: options.managedInstall }),
       };
+      const { facade, commands } = buildFacade(facadeContext);
       const composition = new DesktopHostCompositionImpl({
-        facade: buildFacade(facadeContext),
+        facade,
         status: "read-only",
         facadeContext,
         lease,
         endpointLease,
         runtimeSession,
         sessionStarted: false,
+        deleteWorkspaceSessions: commands.deleteWorkspaceSessions,
       });
       startupStage("host", startedAt, seams);
       startup.start(() => composition.initializeRuntime(options));

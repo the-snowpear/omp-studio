@@ -1326,8 +1326,9 @@ export class StudioHostClientFacade implements ClientTransport {
       case "workspace.open":
       case "workspace.openPath":
       case "workspace.forgetUnavailable":
+      case "workspace.remove":
       case "workspace.pick": {
-        return this.#commandWorkspace(request as ClientCommandRequest<"workspace.open" | "workspace.pick" | "workspace.openPath" | "workspace.forgetUnavailable">);
+        return this.#commandWorkspace(request as ClientCommandRequest<"workspace.open" | "workspace.pick" | "workspace.openPath" | "workspace.forgetUnavailable" | "workspace.remove">);
       }
       case "workspace.file.writeText":
       case "fs.file.writeText":
@@ -3494,7 +3495,7 @@ export class StudioHostClientFacade implements ClientTransport {
    * never as a fabricated success.
    */
   async #commandWorkspace(
-    request: ClientCommandRequest<"workspace.open" | "workspace.pick" | "workspace.openPath" | "workspace.forgetUnavailable">,
+    request: ClientCommandRequest<"workspace.open" | "workspace.pick" | "workspace.openPath" | "workspace.forgetUnavailable" | "workspace.remove">,
   ): Promise<ClientCommandAccepted> {
     validateEnvelope(request);
     const service = this.#options.workspaces;
@@ -3584,17 +3585,20 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   async #runWorkspaceCommand(
-    request: ClientCommandRequest<"workspace.open" | "workspace.pick" | "workspace.openPath" | "workspace.forgetUnavailable">,
+    request: ClientCommandRequest<"workspace.open" | "workspace.pick" | "workspace.openPath" | "workspace.forgetUnavailable" | "workspace.remove">,
     service: HostWorkspaceService,
   ): Promise<void> {
     try {
       if (request.commandName === "workspace.openPath" && !service.openPath) throw clientError("CAPABILITY_UNAVAILABLE", hostText("此 Host 不支持从路径打开项目，请更新 Host", "This Host does not support opening projects by path; please update the Host"));
       if (request.commandName === "workspace.forgetUnavailable" && !service.forgetUnavailable) throw clientError("CAPABILITY_UNAVAILABLE", hostText("此 Host 不支持清理失效项目记录，请更新 Host", "This Host does not support forgetting unavailable projects; please update the Host"));
+      if (request.commandName === "workspace.remove" && !service.remove) throw clientError("CAPABILITY_UNAVAILABLE", hostText("此 Host 不支持移除项目记录，请更新 Host", "This Host does not support removing project records; please update the Host"));
       const result = request.commandName === "workspace.forgetUnavailable"
         ? await service.forgetUnavailable!()
         : request.commandName === "workspace.openPath"
         ? await service.openPath!(request.input as { readonly path: string })
-        : request.commandName === "workspace.open"
+        : request.commandName === "workspace.remove"
+          ? await service.remove!(request.input as { readonly workspaceId: WorkspaceId; readonly deleteSessions?: boolean })
+          : request.commandName === "workspace.open"
           ? await service.open(request.input as { readonly workspaceId: WorkspaceId })
           : await service.pick(request.input as { readonly name?: string });
       this.#lastWorkspaceModel = result;

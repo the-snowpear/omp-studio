@@ -39,6 +39,12 @@ export interface OmpWorkspaceAdapterOptions {
   readonly pickDirectory: () => Promise<string | undefined>;
   /** Desktop uses this to restart the Runtime under the new workspace cwd. */
   readonly onActivated?: (workspace: StoredWorkspace) => Promise<void>;
+  /**
+   * Bulk-delete every session recorded under a working directory, used when a
+   * workspace is removed with `deleteSessions`. Absent = the Host cannot sweep
+   * sessions (the workspace record is still removed).
+   */
+  readonly deleteWorkspaceSessions?: (cwd: string) => Promise<{ readonly deleted: number; readonly warnings: number }>;
   readonly now?: () => string;
 }
 
@@ -84,6 +90,22 @@ export function createOmpWorkspaceService(options: OmpWorkspaceAdapterOptions): 
     async forgetUnavailable(): Promise<WorkspaceListReadModel> {
       const previous = options.registry.activeWorkspaceId;
       await options.registry.forgetUnavailable();
+      const active = options.registry.activeWorkspaceId;
+      if (active !== undefined && active !== previous) await activate(options.registry.get(active)!);
+      return toModel(options.registry);
+    },
+
+    async remove(input: { readonly workspaceId: WorkspaceId; readonly deleteSessions?: boolean }): Promise<WorkspaceListReadModel> {
+      const stored = options.registry.get(input.workspaceId);
+      // Sweep sessions before the record is removed: if the sweep fails (the
+      // Host cannot clean sessions), the record stays intact so the command
+      // fails cleanly instead of leaving a removed project with stranded
+      // sessions. `stored` is read first for its canonical cwd.
+      if (input.deleteSessions === true && options.deleteWorkspaceSessions !== undefined && stored !== undefined) {
+        await options.deleteWorkspaceSessions(stored.canonicalPath);
+      }
+      const previous = options.registry.activeWorkspaceId;
+      await options.registry.remove(input.workspaceId);
       const active = options.registry.activeWorkspaceId;
       if (active !== undefined && active !== previous) await activate(options.registry.get(active)!);
       return toModel(options.registry);

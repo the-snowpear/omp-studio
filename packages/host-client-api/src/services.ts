@@ -574,6 +574,7 @@ export interface HostWorkspaceService {
   openPath?(input: { readonly path: string }): Promise<WorkspaceListReadModel>;
   pick(input?: { readonly name?: string }): Promise<WorkspaceListReadModel>;
   forgetUnavailable?(): Promise<WorkspaceListReadModel>;
+  remove?(input: { readonly workspaceId: WorkspaceId; readonly deleteSessions?: boolean }): Promise<WorkspaceListReadModel>;
 }
 
 /** Host-owned workspace-relative file tree and mutation adapter. */
@@ -737,6 +738,14 @@ export interface HostSemanticCommandService {
    */
   delete?(input: { readonly threadId: ThreadId; readonly deleteManagedArtifacts?: boolean }): ConfigWriteResult | Promise<ConfigWriteResult>;
   deleteArchived?(input: { readonly threadId: ThreadId }): ConfigWriteResult | Promise<ConfigWriteResult>;
+  /**
+   * Permanently delete every session that recorded this working directory as
+   * its `cwd` (active tree plus cold archive): the same evacuation and
+   * cleanup `delete` performs, applied in bulk. Returns how many sessions
+   * were removed and how many could not be (each counts as a warning, never
+   * an error, so a partial sweep still completes the workspace removal).
+   */
+  deleteWorkspaceSessions?(cwd: string): Promise<{ readonly deleted: number; readonly warnings: number }>;
 }
 
 /** Default diagnostics factory: real timestamps and random opaque entry ids. */

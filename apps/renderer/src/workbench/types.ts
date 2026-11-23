@@ -143,11 +143,17 @@ export type ShellChrome = {
   onOpenDialog: (dialog: ShellDialog) => void;
   /** 左上应用菜单「打开终端」：切到终端页签并展开底部面板（Ctrl J 同款语义）。 */
   onOpenTerminalPanel: () => void;
-  /** 项目 shell 动作（AppShell 统一实现，顶栏面包屑菜单与侧栏应用菜单共用）。 */
+  /** 项目 shell 动作（AppShell 统一实现，顶栏面包屑菜单、侧栏应用菜单与侧栏项目行 ⋯ 菜单共用）。
+      显式 project 指向所在行的项目；缺省回落到当前活动项目。 */
   onOpenProjectInEditor: (project?: SelectedProject) => void;
   onOpenProjectDirectory: (project?: SelectedProject) => void;
+  /** 侧栏项目行 ⋯ 菜单「移除项目」：打开确认对话框（AppShell 内），确认后发 workspace.remove。 */
+  onRemoveProject: (workspaceId: WorkspaceId) => void;
   /** undefined = 可用；否则为禁用原因（无真实 workspace / 非桌面端）。 */
   projectShellUnavailable: string | undefined;
+  /** undefined = 桌面 shell 函数（外部编辑器 / 项目目录）存在；否则为原因（非桌面端）。
+      与 projectShellUnavailable 不同，不要求有活动项目——侧栏项目行 ⋯ 菜单按行禁用用它。 */
+  projectShellFunctionsUnavailable: string | undefined;
   /** 进行中的 shell 动作类型；null = 空闲。 */
   projectShellAction: "editor" | "directory" | null;
   onAddComposerContext: (chip: { kind: "file" | "dir"; path: string; label: string }) => void;

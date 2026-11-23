@@ -8,6 +8,7 @@
  */
 
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -160,6 +161,79 @@ test("forgetting stale records preserves session files and a record whose direct
     assert.equal(await readFile(session, "utf8"), "history to preserve\n");
     const copy = (await readdir(profile)).find(name => name.startsWith("workspaces.json.recovery-"))!;
     assert.equal(JSON.parse(await readFile(join(profile, copy), "utf8")).workspaces.length, 3);
+  });
+});
+
+test("remove drops the record only, keeping the directory and sessions on disk", async () => {
+  await withRegistry(async (registry, profile) => {
+    const dirA = join(profile, "aaa"), dirB = join(profile, "bbb");
+    await Promise.all([dirA, dirB].map(dir => mkdir(dir)));
+    const session = join(profile, "session.jsonl");
+    await writeFile(session, "history to preserve\n");
+    const kept = await registry.upsertByPath(dirA, T0);
+    const removed = await registry.upsertByPath(dirB, "2026-08-14T01:00:00.000Z");
+
+    await registry.remove(removed.workspaceId);
+
+    assert.equal(registry.get(removed.workspaceId), undefined);
+    assert.equal(registry.activeWorkspaceId, kept.workspaceId);
+    assert.ok(existsSync(dirA) && existsSync(dirB));
+    assert.equal(await readFile(session, "utf8"), "history to preserve\n");
+    const copy = (await readdir(profile)).find(name => name.startsWith("workspaces.json.recovery-"))!;
+    assert.equal(JSON.parse(await readFile(join(profile, copy), "utf8")).workspaces.length, 2);
+    const reloaded = new WorkspaceRegistry(registry.path);
+    await reloaded.load();
+    assert.equal(reloaded.list().length, 1);
+    assert.equal(reloaded.list()[0]!.name, "aaa");
+  });
+});
+
+test("remove rejects an unknown id without touching the registry", async () => {
+  await withRegistry(async (registry, profile) => {
+    const dir = join(profile, "alpha");
+    await mkdir(dir);
+    await registry.upsertByPath(dir, T0);
+    const before = (await readdir(profile)).filter(name => name.startsWith("workspaces.json.recovery-")).length;
+    await assert.rejects(() => registry.remove("nope"), /unknown workspace id/u);
+    assert.equal((await readdir(profile)).filter(name => name.startsWith("workspaces.json.recovery-")).length, before);
+    assert.equal(registry.list().length, 1);
+  });
+});
+
+test("remove migrates activity through each surviving record down to none", async () => {
+  await withRegistry(async (registry, profile) => {
+    const dirA = join(profile, "aaa"), dirB = join(profile, "bbb"), dirC = join(profile, "ccc");
+    await Promise.all([dirA, dirB, dirC].map(dir => mkdir(dir)));
+    const a = await registry.upsertByPath(dirA, T0);
+    const b = await registry.upsertByPath(dirB, "2026-08-14T01:00:00.000Z");
+    const c = await registry.upsertByPath(dirC, "2026-08-14T02:00:00.000Z");
+    assert.equal(registry.activeWorkspaceId, c.workspaceId);
+
+    await registry.remove(c.workspaceId);
+    assert.equal(registry.activeWorkspaceId, b.workspaceId);
+    await registry.remove(b.workspaceId);
+    assert.equal(registry.activeWorkspaceId, a.workspaceId);
+    await registry.remove(a.workspaceId);
+    assert.equal(registry.activeWorkspaceId, undefined);
+
+    const reloaded = new WorkspaceRegistry(registry.path);
+    await reloaded.load();
+    assert.equal(reloaded.list().length, 0);
+    assert.equal(reloaded.activeWorkspaceId, undefined);
+  });
+});
+
+test("removing an active record whose directory vanished migrates to a live record", async () => {
+  await withRegistry(async (registry, profile) => {
+    const live = join(profile, "live"), vanished = join(profile, "old-install");
+    await Promise.all([live, vanished].map(dir => mkdir(dir)));
+    const liveRecord = await registry.upsertByPath(live, T0);
+    const stale = await registry.upsertByPath(vanished, "2026-08-14T01:00:00.000Z");
+    await rm(vanished, { recursive: true, force: true });
+    assert.equal(registry.activeWorkspaceId, stale.workspaceId, "no refreshAvailability ran");
+
+    await registry.remove(stale.workspaceId);
+    assert.equal(registry.activeWorkspaceId, liveRecord.workspaceId);
   });
 });
 

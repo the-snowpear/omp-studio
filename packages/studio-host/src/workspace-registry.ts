@@ -135,6 +135,24 @@ export class WorkspaceRegistry {
   }
 
   /**
+   * Explicit removal: drop the registry record only, preserving the project
+   * directory and its sessions on disk. When the removed record is active,
+   * activation moves to the most recent still-available record (or clears).
+   */
+  async remove(workspaceId: string): Promise<void> {
+    if (this.#workspaces.get(workspaceId) === undefined) {
+      throw new Error(`unknown workspace id: ${workspaceId}`);
+    }
+    await this.#saveRecoveryCopy();
+    this.#workspaces.delete(workspaceId);
+    this.#unavailable.delete(workspaceId);
+    if (this.#activeWorkspaceId === workspaceId) {
+      this.#activeWorkspaceId = this.list().find(entry => !entry.unavailable)?.workspaceId;
+    }
+    await this.#flush();
+  }
+
+  /**
    * Register (or refresh) a workspace from a real directory. The directory
    * must exist and be a real directory (symlinks rejected). Re-adding the
    * same canonical path (case-insensitive on win32) reuses its id, updates

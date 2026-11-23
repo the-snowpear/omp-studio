@@ -63,6 +63,12 @@ export interface DesktopHostComposition {
   /** Main-only maintenance; absent when managed installation is unavailable. */
   rollbackRuntime?(): Promise<void>;
   pruneRuntimes?(): Promise<void>;
+  /**
+   * Sweep a workspace's session records (active and archived) by cwd. Main-only
+   * helper for `workspace.remove` with `deleteSessions`; absent when the Host
+   * has no session cleanup wired.
+   */
+  deleteWorkspaceSessions?(cwd: string): Promise<{ readonly deleted: number; readonly warnings: number }>;
   updateRestartBlocker?(): string | undefined;
   prepareUpdateRestart?(onShutdownStarted?: () => void): Promise<void>;
 }
