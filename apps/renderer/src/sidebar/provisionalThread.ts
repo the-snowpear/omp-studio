@@ -68,6 +68,20 @@ export type ProvisionalProjectThreadChange = {
   readonly title?: string;
   readonly running: boolean;
   readonly submitted: boolean;
+  /**
+   * The workbench surface just stopped owning this session (the composer owner
+   * moved on to another session or a fresh chat). Sent conversations keep
+   * their row — it is a real conversation; never-sent drafts are removed, or
+   * they linger as rows that cannot be deleted or restored until a restart.
+   */
+  readonly final?: boolean;
+  /**
+   * Workspace the Runtime's resident binding attributes this session to.
+   * Authoritative: it may move a row to the session's true project, unlike
+   * the surface-reported `workspaceId` (the currently selected project),
+   * which is only a fallback and must not move a row mid-switch.
+   */
+  readonly authoritativeWorkspaceId?: WorkspaceId | undefined;
 };
 
 export function buildProvisionalProjectThread(input: {
@@ -131,6 +145,7 @@ export function reconcileProvisionalProjectThread(
     return next;
   };
   if (context.excludedSessionIds?.has(key) === true) return removeCurrent();
+  if (change.final === true) return current[key]?.submitted === true ? current : removeCurrent();
   if (!change.visible && current[key]?.submitted === true) return current;
   // Selecting a persisted history row briefly clears the Workbench-local
   // composer while Runtime selection catches up. Keep the provisional row so
@@ -149,17 +164,20 @@ export function reconcileProvisionalProjectThread(
     selectedTitleIsPlaceholder: context.selectedTitleIsPlaceholder,
     composer: change,
     sessionId: change.sessionId,
-    // The session decides its own workspace. During a project switch the shell
-    // already reports the incoming project while `composerOwner` still names the
-    // session just left, so a re-emitted report must not move the row.
-    workspaceId: current[key]?.workspaceId ?? change.workspaceId,
+    // The session decides its own workspace. The Runtime resident binding
+    // (`authoritativeWorkspaceId`) is authoritative and may correct a row that
+    // was first reported under the wrong project. Without it, the first
+    // surface-reported workspace wins: during a project switch the shell
+    // already reports the incoming project while `composerOwner` still names
+    // the session just left, so a re-emitted report must not move the row.
+    workspaceId: change.authoritativeWorkspaceId ?? current[key]?.workspaceId ?? change.workspaceId,
     untitledTitle: context.untitledTitle,
   });
   if (nextThread === undefined) return current;
   const previous = current[key];
-  const sameSession = previous !== undefined
-    && previous.workspaceId === nextThread.workspaceId
-    && previous.sessionId === nextThread.sessionId;
+  // Session ids are global; a workspace correction keeps the same title and
+  // submission state, so identity is the session id alone.
+  const sameSession = previous !== undefined && previous.sessionId === nextThread.sessionId;
   const freezePreviousPromptTitle = sameSession
     && previous.titleState === "missing"
     && !isPlaceholderSessionTitle(previous.title)

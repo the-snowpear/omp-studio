@@ -723,6 +723,8 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     ? (previewThread?.thread.title ?? (zh ? "跟踪上游 pi-web 更新到 omp-web" : "Track upstream pi-web updates to omp-web"))
     : currentThreadTitle ?? (state.route === "history" ? t("menu.history") : state.route === "home" ? t("menu.home") : state.route === "agent-hub" ? "Agent Hub" : state.route === "capabilities" ? t("menu.capabilities") : state.route === "model-config" ? t("menu.modelConfig") : untitledThreadTitle);
   const selectedTitleIsPlaceholder = isPlaceholderSessionTitle(selected?.title);
+  /** Final hides deferred while the Runtime snapshot still describes the session. */
+  const pendingFinalHidesRef = useRef<Set<string>>(new Set());
   const onProvisionalSessionChange = useCallback((change: {
     readonly sessionId?: SessionId;
     readonly workspaceId?: WorkspaceId;
@@ -730,10 +732,30 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     readonly title?: string;
     readonly running: boolean;
     readonly submitted: boolean;
+    readonly final?: boolean;
   }) => {
     if (change.sessionId === undefined) return;
+    // The surface owner moved away, but the snapshot still describes this
+    // session (the selection/resume switch is in flight). Applying the hide
+    // now would remove the live session's row and the transition already
+    // happened, so defer it until the snapshot actually moves on.
+    if (change.final === true) {
+      if (String(change.sessionId) === String(snapshot?.sessionId ?? "")) {
+        pendingFinalHidesRef.current.add(String(change.sessionId));
+        return;
+      }
+      pendingFinalHidesRef.current.delete(String(change.sessionId));
+    }
+    // The Runtime's resident binding is the authority for which project a
+    // live session belongs to; the surface report only says which project is
+    // selected. Passing both through keeps a row from sticking under the
+    // wrong project when it is first reported mid-switch.
+    const authoritativeWorkspaceId = residentForSession(residentModel, String(change.sessionId))?.workspaceId;
     setProvisionalThreadsBySession((current) =>
-      reconcileProvisionalProjectThread(current, change, {
+      reconcileProvisionalProjectThread(current, {
+        ...change,
+        ...(authoritativeWorkspaceId !== undefined ? { authoritativeWorkspaceId } : {}),
+      }, {
         preview: previewMode.preview,
         sessionCreating: creatingSession,
         selectedHistoryId,
@@ -742,7 +764,15 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         excludedSessionIds: provisionalStore.excludedSessionIds,
       }),
     );
-  }, [creatingSession, previewMode.preview, provisionalStore, selectedHistoryId, selectedTitleIsPlaceholder, setProvisionalThreadsBySession, t]);
+  }, [creatingSession, previewMode.preview, provisionalStore, residentModel, selectedHistoryId, selectedTitleIsPlaceholder, setProvisionalThreadsBySession, snapshot?.sessionId, t]);
+  useEffect(() => {
+    if (pendingFinalHidesRef.current.size === 0) return;
+    for (const id of [...pendingFinalHidesRef.current]) {
+      if (id === String(snapshot?.sessionId ?? "")) continue;
+      pendingFinalHidesRef.current.delete(id);
+      onProvisionalSessionChange({ sessionId: id as SessionId, visible: false, running: false, submitted: false, final: true });
+    }
+  }, [onProvisionalSessionChange, snapshot?.sessionId]);
   useEffect(() => {
     const untitledTitle = t("conversation.untitledSession");
     setProvisionalThreadsBySession((current) => {

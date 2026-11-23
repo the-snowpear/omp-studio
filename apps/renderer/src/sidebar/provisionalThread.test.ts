@@ -222,6 +222,65 @@ describe("provisional project thread", () => {
     expect(next).toBe(current);
   });
 
+  it("removes an unsent draft row when the composer owner moves on, even with a history row selected", () => {
+    const context = { preview: false, sessionCreating: false, selectedHistoryId: "history-new", untitledTitle: "未命名会话" };
+    const drafted = { [String(sessionId)]: { ...provisional, submitted: false, running: false } };
+    const finalHide = reconcileProvisionalProjectThread(drafted, {
+      sessionId,
+      workspaceId: provisional.workspaceId,
+      visible: false,
+      running: false,
+      submitted: false,
+      final: true,
+    }, context);
+    expect(finalHide).toEqual({});
+
+    // A sent conversation is a real thread: its row survives the final hide
+    // until persistence takeover or an explicit archive/delete.
+    const sent = { [String(sessionId)]: { ...provisional, running: false } };
+    const sentFinal = reconcileProvisionalProjectThread(sent, {
+      sessionId,
+      workspaceId: provisional.workspaceId,
+      visible: false,
+      running: false,
+      submitted: false,
+      final: true,
+    }, context);
+    expect(sentFinal[String(sessionId)]).toBeDefined();
+  });
+
+  it("moves a row to the workspace the Runtime binding attributes the session to", () => {
+    const context = { preview: false, sessionCreating: false, selectedHistoryId: null, untitledTitle: "未命名会话" };
+    // First report arrived while the shell still selected project B, so the row
+    // froze under B; the session's file and the Runtime binding say A. Without
+    // the correction the same session shows up in both project lists.
+    const frozenUnderB = { [String(sessionId)]: { ...provisional, workspaceId: "workspace-b" as WorkspaceId } };
+    const corrected = reconcileProvisionalProjectThread(frozenUnderB, {
+      sessionId,
+      workspaceId: "workspace-b" as WorkspaceId,
+      authoritativeWorkspaceId: "workspace-a" as WorkspaceId,
+      visible: true,
+      title: provisional.title,
+      running: true,
+      submitted: true,
+    }, context);
+    expect(corrected[String(sessionId)]?.workspaceId).toBe("workspace-a");
+    // The correction keeps the title and submission state.
+    expect(corrected[String(sessionId)]).toMatchObject({ title: provisional.title, titleState: "missing", submitted: true });
+
+    // A row already under A stays under A while the canvas keeps reporting B.
+    const settled = reconcileProvisionalProjectThread(corrected, {
+      sessionId,
+      workspaceId: "workspace-b" as WorkspaceId,
+      authoritativeWorkspaceId: "workspace-a" as WorkspaceId,
+      visible: true,
+      title: provisional.title,
+      running: false,
+      submitted: true,
+    }, context);
+    expect(settled[String(sessionId)]?.workspaceId).toBe("workspace-a");
+  });
+
   it("freezes the first prompt title through send and identity-reset reports", () => {
     const context = {
       preview: false,
