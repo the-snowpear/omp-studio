@@ -44,6 +44,7 @@ import { AuthTypeSelect, BrandMark, DiscoveryResultBlock, ModelCaps, ProviderTes
 import { FetchedModelsPanel } from "./models/config/FetchedModelsPanel";
 import { RoleAssignControl, RoleModelPicker, RoleThinkingSeg } from "./models/config/RoleControls";
 import { ModelParametersDialog } from "./models/config/ModelParametersDialog";
+import type { StudioRuntimeSettingsGetResult } from "@omp-studio/studio-protocol";
 
 export { MC_INTENT_KEY, setModelConfigIntent, type McTab } from "./pageIntents";
 
@@ -61,6 +62,12 @@ const TAB_BUTTON_ID: Record<McTab, string> = {
   accounts: "mcTabAccounts",
 };
 const mcTabRank = (tab: McTab): number => Object.keys(TAB_BUTTON_ID).indexOf(tab);
+
+/* Per-provider in-flight request cap. It lives in the runtime settings record
+   (not the provider YAML) and is edited inside the provider form, so the page
+   loads the record once and syncs it alongside provider saves. */
+const PROVIDER_CAPS_KEY = "providers.maxInFlightRequests";
+const PREVIEW_PROVIDER_CAPS: Record<string, number> = { "anthropic": 2, "openai": 4 };
 
 export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailable = false, capabilities }: { capabilities?: ClientBootstrap["capabilityManifest"] | undefined; client: StudioClient; sessionId?: string | undefined; workspaceId?: string | undefined; runtimeAvailable?: boolean }) {
   const { resolvedLanguage } = useI18n();
@@ -97,6 +104,21 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<"all" | "native" | "third">("all");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [providerCaps, setProviderCaps] = useState<Record<string, number>>({});
+  const capsSupported = !preview && Boolean(runtimeAvailable && sessionId &&
+    capabilities?.capabilities.some(row => row.id === "runtime.settings.get" && row.grade !== "unavailable")
+    && capabilities?.capabilities.some(row => row.id === "runtime.settings.set" && row.grade !== "unavailable"));
+  useEffect(() => {
+    if (preview) { setProviderCaps({ ...PREVIEW_PROVIDER_CAPS }); return; }
+    if (!capsSupported) return;
+    let live = true;
+    void (async () => {
+      const handle = await client.command("runtime.settings.get", { keys: [PROVIDER_CAPS_KEY] });
+      const settings = await waitReceipt<StudioRuntimeSettingsGetResult>(client, handle.requestId);
+      if (live) setProviderCaps((settings.values[PROVIDER_CAPS_KEY] ?? {}) as Record<string, number>);
+    })().catch(() => { if (live) setProviderCaps({}); });
+    return () => { live = false; };
+  }, [client, preview, capsSupported]);
   const [editorState, setEditor] = useState<Draft | null>(null);
   const [showKey, setShowKey] = useState(false);
   const { shown: editor, phase: editorPhase, live: editorLive, dir: editorDir } = useDeferredPresence(editorState);
@@ -196,12 +218,18 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     }
   }, [client, preview, workspaceId]);
 
+  // Cold-start ordering: models.get can run before the selected session or
+  // the Runtime snapshot exist; the Host then answers with the honest
+  // unverified read (configuration visible, model list empty) that would
+  // otherwise persist until the page is reopened. Re-run the read when the
+  // session or Runtime readiness changes so the model list fills in on its
+  // own, and re-read on session switches (the catalog is per-workspace).
   useEffect(() => {
     void refresh();
     return () => {
       refreshEpoch.current += 1;
     };
-  }, [refresh]);
+  }, [refresh, sessionId, runtimeAvailable]);
   useEffect(() => () => {
     testEpochRef.current += 1;
   }, []);
@@ -659,6 +687,29 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       toast(t("modelConfig.fillSecretCommand"));
       return;
     }
+    // The in-flight cap is a runtime setting, not provider YAML: validate it up
+    // front, then ride it along with whichever save path actually runs.
+    const capRaw = (editorState.maxInFlight ?? "").trim();
+    if (capRaw !== "" && (!Number.isInteger(Number(capRaw)) || Number(capRaw) < 1)) {
+      toast(t("modelConfig.inFlightCapsInvalid"));
+      return;
+    }
+    const capProviderId = editorState.id.trim();
+    const nextCaps = { ...providerCaps };
+    if (capRaw === "") delete nextCaps[capProviderId];
+    else nextCaps[capProviderId] = Number(capRaw);
+    const capsChanged = JSON.stringify(nextCaps) !== JSON.stringify(providerCaps);
+    const syncCaps = async () => {
+      if (!capsChanged) return;
+      if (preview || !capsSupported) { setProviderCaps(nextCaps); return; }
+      try {
+        const handle = await client.command("runtime.settings.set", { key: PROVIDER_CAPS_KEY, value: nextCaps, persist: true });
+        await waitReceipt(client, handle.requestId);
+        setProviderCaps(nextCaps);
+      } catch {
+        toast(t("modelConfig.inFlightCapsSaveFailed"));
+      }
+    };
     const roleUpdates = rolePrimaryUpdates(roles, roleAssignDraft);
     // A hand-edited card or an unsaved form both go through the YAML write: the
     // form's model list, overrides and advanced fields only reach models.yml
@@ -666,6 +717,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     if (modelsYmlDirty || providerFormDirty) {
       const saved = await persistModelsYml(modelsYmlValue, true, true);
       if (saved) {
+        await syncCaps();
         await applyRolePrimaryUpdates(roleUpdates);
         setRoleAssignDraft({});
       }
@@ -683,6 +735,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         return next;
       });
       setRoleAssignDraft({});
+      await syncCaps();
       setEditor(null);
       if (marks) toast(roleUpdates.length > 0 ? t("modelConfig.demoUpdatedListAndRoles") : t("modelConfig.demoUpdatedList"));
       return;
@@ -694,6 +747,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         "models.provider.upsert",
         providerUpsertFromDraft(editorState, data?.contentHash),
       );
+      await syncCaps();
       await applyRolePrimaryUpdates(roleUpdates, { announce: false, refreshAfter: false });
       setRoleAssignDraft({});
       mergeContentHash(result.contentHash);
@@ -1526,6 +1580,11 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                   </div>
                   <div className="field"><label htmlFor="f-site">{t("modelConfig.websiteLabel")}</label><input className="input mono" id="f-site" value={editor.website} onChange={(event) => setEditor({ ...editor, website: event.target.value })} /></div>
                   <div className="field"><label htmlFor="f-note">{t("modelConfig.notesLabel")}</label><input className="input" id="f-note" value={editor.note} onChange={(event) => setEditor({ ...editor, note: event.target.value })} /></div>
+                  <div className="field">
+                    <label htmlFor="f-inflight">{t("modelConfig.inFlightCapsLabel")}</label>
+                    <input className="input" id="f-inflight" type="number" min={1} step={1} inputMode="numeric" placeholder={t("modelConfig.inFlightCapsUnlimited")} value={editor.maxInFlight ?? ""} onChange={(event) => setEditor({ ...editor, maxInFlight: event.target.value })} />
+                    <span className="desc">{t("modelConfig.inFlightCapsDesc")}</span>
+                  </div>
                 </div>
 
                 <div className="mp-sec-divider" aria-hidden="true" />
@@ -1919,6 +1978,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
               {filtered.length === 0 ? <div className="empty"><Icon name="search" />{providers.length === 0 ? t("modelConfig.noProviders") : t("modelConfig.noMatchingProviders")}</div> : null}
               <div className={`pv-list${draggingId && dragPhase === "dragging" ? " is-sorting" : ""}`} ref={listRef}>
               {filtered.map((provider) => {
+                const inFlightCap = providerCaps[provider.id];
                 const open = expanded.has(provider.id);
                 const st = STATUS_META[provider.status] ?? STATUS_META.available;
                 const cardCls = !provider.enabled || provider.status === "disabled" ? "is-disabled"
@@ -1943,13 +2003,14 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                           <span className="chip-code">{provider.id}</span>
                           <span className={`chip ${SOURCE_GROUP(provider.source) === "native" ? "blue" : "gray"} xs`}>{SOURCE_GROUP(provider.source) === "native" ? t("modelConfig.nativeProviderBadge") : t("modelConfig.customProviderBadge")}</span>
                           <span className="pv-count"><span className={`pv-dot dot ${st?.dot || "gray"}`} />{t("modelConfig.modelCount", { count: provider.models.length })}</span>
+                          {inFlightCap ? <span className="chip gray xs" data-tip={t("modelConfig.inFlightCapTooltip", { count: inFlightCap })}>{t("modelConfig.inFlightCapBadge", { count: inFlightCap })}</span> : null}
                         </div>
                         <div className="pv-sub"><span className="pv-url ellipsis">{provider.endpointUrl || formatProviderStatusDetail(provider.statusDetail, t, marks, resolvedLanguage === "zh")}</span></div>
                       </div>
                       <div className="pv-acts">
                         <button type="button" className={`pv-act is-action${testing.has(provider.id) ? " is-testing" : ""}`} disabled={busy || testing.has(provider.id)} data-tip={t("common.test")} aria-label={t("modelConfig.testConnection")} onClick={() => void onTest("list", provider.id)}><Icon name="pulse" /></button>
                         <button type="button" className="pv-act is-action" disabled={busy} data-tip={t("common.refresh")} aria-label={t("modelConfig.refreshModels")} onClick={() => void refreshDiscovery()}><Icon name="refresh" /></button>
-                        <button type="button" className="pv-act is-action is-edit" data-tip={t("common.edit")} aria-label={t("modelConfig.editProvider")} onClick={() => { setModelEdit(null); setEditor(draftFromProvider(provider)); setEditExisting(true); setConfirmDelete(false); setTestResult(null); }}><Icon name="pencil" /></button>
+                        <button type="button" className="pv-act is-action is-edit" data-tip={t("common.edit")} aria-label={t("modelConfig.editProvider")} onClick={() => { setModelEdit(null); setEditor({ ...draftFromProvider(provider), maxInFlight: providerCaps[provider.id] === undefined ? "" : String(providerCaps[provider.id]) }); setEditExisting(true); setConfirmDelete(false); setTestResult(null); }}><Icon name="pencil" /></button>
                         <button type="button" className="pv-act is-action is-copy" data-tip={t("common.copy")} aria-label={t("modelConfig.copyProviderId")} onClick={() => { void navigator.clipboard.writeText(provider.id); toast(`${t("common.copied")} ${provider.id}`); }}><Icon name="copy" /></button>
                         <span className="pv-act is-switch">
                           <button

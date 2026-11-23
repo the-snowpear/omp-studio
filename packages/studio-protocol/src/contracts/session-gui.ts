@@ -10,7 +10,7 @@ export interface SessionQueueItem { id: string; queue: "steering" | "followUp"; 
 export interface SessionQueueSnapshot { sessionId: string; items: SessionQueueItem[]; total: number; followUpMode: "all" | "one-at-a-time"; steeringMode: "all" | "one-at-a-time" }
 export interface QueueImageAsset { artifactId: string; kind: "image"; name: string; mimeType: string; bytes: number; sha256: string }
 export interface QueueTakeback { recoveryId?: string; removed: boolean; text?: string; images: QueueImageAsset[] }
-export interface RuntimeSkillIdentity { id: string; name: string; description: string; namespace?: string; source: string; scope?: "workspace" | "global" | "builtin" | "runtime"; conflict: boolean }
+export interface RuntimeSkillIdentity { id: string; name: string; description: string; namespace?: string; source: string; scope?: "workspace" | "global" | "builtin" | "runtime"; conflict: boolean; path?: string }
 export type SessionGuiOperation =
  | ResourceOperation
  | AgentBtwOperation

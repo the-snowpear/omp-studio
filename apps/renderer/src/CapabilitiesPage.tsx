@@ -281,10 +281,16 @@ export function CapabilitiesPage({
         try {
           const identities = await loadRuntimeSkills(client, sessionId);
           if (epoch !== refreshEpoch.current) return;
+          // The runtime only lists skills it loaded (loaded/session are
+          // known-true); the enabled flag is host state (SKILL.md
+          // frontmatter) that the toggle rewrites, so merge it from the
+          // host's own inventory by name instead of hard-coding it on.
+          const hostSkillsByName = new Map(skillsResult.value.skills.map(skill => [skill.name, skill]));
           nextSkills = identities.map(skill => ({kind: "skill", name: skill.name,
             desc: skill.description + (skill.conflict ? (zh ? " · 名称冲突" : " · Name conflict") : ""),
             src: [skill.namespace, skill.source].filter(Boolean).join(" · "),
-            scope: skill.scope ?? "runtime", path: "", enabled: true, loaded: true, session: true}));
+            scope: skill.scope ?? "runtime", path: skill.path ?? "",
+            enabled: hostSkillsByName.get(skill.name)?.enabled ?? true, loaded: true, session: true}));
         } catch (error) {
           if (epoch !== refreshEpoch.current) return;
           nextSkills = [];
@@ -600,7 +606,7 @@ export function CapabilitiesPage({
                     <span className={`cap-scope ${scope.cls}`}>{scope.label}</span>
                     {skill.src ? <span className="chip outline xs">{skill.src}</span> : null}
                   </div>
-                  <Stepper loaded={skill.loaded} session={skill.session} configuredOnly={!preview} />
+                  <Stepper loaded={skill.loaded} session={skill.session} configuredOnly={!preview && !sessionId} />
                 </div>
                 <div className="cap-item-actions">
                   {preview ? (

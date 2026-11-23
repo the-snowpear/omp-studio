@@ -60,6 +60,26 @@ index e5b7d6e9c3..bed6adbfdc 100644
  			this.#restoreUndeliveredQueuedMessages(loopAbortController);
  			resolveRun?.();
  			if (this.#abortController === loopAbortController) {
+diff --git a/packages/agent/src/compaction/anthropic.ts b/packages/agent/src/compaction/anthropic.ts
+index 8a51002715..ea27c61a7b 100644
+--- a/packages/agent/src/compaction/anthropic.ts
++++ b/packages/agent/src/compaction/anthropic.ts
+@@ -247,6 +247,7 @@ export interface AnthropicNativeCompactionOptions
+ 			| "promptCacheKey"
+ 			| "providerSessionState"
+ 			| "maxInFlightRequests"
++			| "modelMaxInFlightRequests"
+ 		>,
+ 		Pick<InstrumentedChatSpanOptions, "completeImpl" | "telemetry" | "retry"> {}
+ 
+@@ -289,6 +290,7 @@ export async function requestAnthropicNativeCompaction(
+ 			promptCacheKey: options.promptCacheKey,
+ 			providerSessionState: options.providerSessionState,
+ 			maxInFlightRequests: options.maxInFlightRequests,
++			modelMaxInFlightRequests: options.modelMaxInFlightRequests,
+ 			anthropicCompaction: { instructions: request.instructions, filesDueBefore: request.filesDueBefore },
+ 		},
+ 		{
 diff --git a/packages/coding-agent/src/archive/archive.ts b/packages/coding-agent/src/archive/archive.ts
 index abeb1e7884..fe09760d7a 100644
 --- a/packages/coding-agent/src/archive/archive.ts
@@ -623,7 +643,7 @@ index 56fe7892e6..ee93cc3054 100644
  	attribution?: MessageAttribution;
  	/** Called synchronously with the messages pushed onto the steering queue. See {@link PromptOptions.onPromptQueued}. */
 diff --git a/packages/coding-agent/src/session/agent-session.ts b/packages/coding-agent/src/session/agent-session.ts
-index e4cfb6ab48..39272188ef 100644
+index e4cfb6ab48..db0c6b5817 100644
 --- a/packages/coding-agent/src/session/agent-session.ts
 +++ b/packages/coding-agent/src/session/agent-session.ts
 @@ -152,6 +152,7 @@ import { RawSseDebugBuffer } from "@oh-my-pi/pi-tui/apps/debug/raw-sse-buffer";
@@ -1219,7 +1239,24 @@ index e4cfb6ab48..39272188ef 100644
  			shouldContinue: () => {
  				this.#queuedMessageDrainScheduled = false;
  				return (
-@@ -11354,6 +11543,16 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -11227,9 +11416,13 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		try {
+ 			if (!(await this.#runUsageAwarePreflightForNextModelCall())) return false;
+ 			const acceptTerminalEmptyStop = options?.acceptTerminalEmptyStop === true;
+-			if (acceptTerminalEmptyStop) {
+-				this.#resetPromptMaintenanceState();
+-			}
++			// An agent-initiated wake is a fresh turn: reset per-prompt recovery
++			// state unconditionally (matching queued delivery), not only when the
++			// wake accepts a terminal empty stop. A stale retry latch from an
++			// aborted earlier turn would otherwise disable the whole retry
++			// machinery for this turn (the abort set #retryCancelled and this
++			// path is the only new-turn admission that skipped the reset).
++			this.#resetPromptMaintenanceState();
+ 			this.#recovery.setAcceptTerminalEmptyStop(acceptTerminalEmptyStop);
+ 			const prepared = await this.#prepareUserAuthoredWake(message, setupAbort.signal, sessionGeneration);
+ 			if (!prepared) return false;
+@@ -11354,6 +11547,16 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  			this.#resumeStrandedIrcAsides();
  			return;
  		}
@@ -1236,7 +1273,7 @@ index e4cfb6ab48..39272188ef 100644
  		this.#allowQueuedMessageDrainRetry();
  		// Keyword notices and their user message must enter the queue in one synchronous phase.
  		if (deliverAs === "followUp") {
-@@ -11714,15 +11913,24 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -11714,15 +11917,24 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 *  `forInterrupt` also withdraws input the run already dequeued but never recorded — live-steered
  	 *  into the aborted response, or taken for its next model call — and treats it as queued ahead of
  	 *  the rest (it was queued first). */
@@ -1264,7 +1301,7 @@ index e4cfb6ab48..39272188ef 100644
  		const recordable = (m: AgentMessage): boolean =>
  			m.role !== "developer" && isDisplayableQueuedMessage(m) && !isUserAuthoredQueuedMessage(m);
  		const recordedOnInterrupt = new Set<AgentMessage>();
-@@ -11776,6 +11984,39 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -11776,6 +11988,39 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		);
  	}
  
@@ -1304,7 +1341,7 @@ index e4cfb6ab48..39272188ef 100644
  	/** Whether an empty submit should interrupt the streaming turn: displayable input is
  	 *  queued, or live steering sits in the in-flight response, which the abort requeues
  	 *  for the continuation turn. */
-@@ -11785,17 +12026,154 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -11785,17 +12030,154 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  
  	/** Chip texts for the queue display. Steering live steering took for the streaming response
  	 *  stays listed until the transcript records it, when the model actually switches to it. */
@@ -1465,7 +1502,7 @@ index e4cfb6ab48..39272188ef 100644
  	/** Last {@link getQueuedMessages} snapshot emitted as a `queue_update` event.
  	 *  Coalesces the agent's internal `onQueueChange` notification down to the
  	 *  externally observable transitions RPC/ACP/TUI subscribers actually care
-@@ -11838,7 +12216,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -11838,7 +12220,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * already delivered target changes nothing; repeated calls may remove further
  	 * duplicates.
  	 */
@@ -1474,7 +1511,7 @@ index e4cfb6ab48..39272188ef 100644
  		return this.takeQueuedMessage(text, queue) !== undefined;
  	}
  
-@@ -11860,7 +12238,19 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -11860,7 +12242,19 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * {@link removeQueuedMessage}, returning the removed message as editor-restorable
  	 * content (its chip text and images); undefined when nothing matched.
  	 */
@@ -1495,7 +1532,7 @@ index e4cfb6ab48..39272188ef 100644
  		const selected = queue === "steering" ? this.agent.peekSteeringQueue() : this.agent.peekFollowUpQueue();
  		const index = this.#findQueuedUserMessage(selected, text);
  		if (index < 0) return undefined;
-@@ -11877,7 +12267,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -11877,7 +12271,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * {@link removeQueuedMessage}; agent-attributed handoffs are never promoted. A missing
  	 * or already delivered target changes nothing; repeated calls may promote duplicates.
  	 */
@@ -1504,7 +1541,7 @@ index e4cfb6ab48..39272188ef 100644
  		const followUp = this.agent.peekFollowUpQueue();
  		const index = this.#findQueuedUserMessage(followUp, text);
  		if (index < 0) return false;
-@@ -11903,7 +12293,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -11903,7 +12297,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * matches the raw text the caller originally submitted first, then the queued chip text
  	 * itself (exact); -1 when nothing matches.
  	 */
@@ -1517,7 +1554,7 @@ index e4cfb6ab48..39272188ef 100644
  		let index = queue.findIndex(
  			message => isUserAuthoredQueuedMessage(message) && this.#queuedMessageRawText.get(message) === text,
  		);
-@@ -11916,7 +12310,13 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -11916,7 +12314,13 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	/** Companions are inserted contiguously before their user; this is where that group starts. */
  	#queuedUserGroupStart(queue: readonly AgentMessage[], userIndex: number): number {
  		let start = userIndex;
@@ -1532,7 +1569,7 @@ index e4cfb6ab48..39272188ef 100644
  		return start;
  	}
  
-@@ -12051,6 +12451,10 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -12051,6 +12455,10 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		return this.#promptSkills;
  	}
  
@@ -1543,7 +1580,7 @@ index e4cfb6ab48..39272188ef 100644
  	/** Start skill and MCP namespace hint compression held by `deferHintCompression` (see `createAgentSession`). */
  	startHintCompression(): void {
  		this.#skillDescriptions.startCompression();
-@@ -12721,7 +13125,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -12721,7 +13129,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		deliverQueuedMessages?: boolean;
  		/** Internal `/compact` startup keeps the manual-compaction marker alive while aborting the active turn. */
  		preserveCompaction?: boolean;
@@ -1555,7 +1592,7 @@ index e4cfb6ab48..39272188ef 100644
  		const userInterrupt = options?.reason === USER_INTERRUPT_LABEL;
  		this.#pendingAbortErrorId = userInterrupt ? AIError.create(AIError.Flag.UserInterrupt) : undefined;
  		// Latch only when the interrupt stops something; an idle Esc would otherwise fold
-@@ -12832,6 +13240,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -12832,6 +13244,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  				} else this.#recordWithoutTurn([message]);
  			}
  		} finally {
@@ -1563,7 +1600,7 @@ index e4cfb6ab48..39272188ef 100644
  			this.#abortInProgress = false;
  			this.#drainStrandedQueuedMessages();
  			if (forceQueuedDelivery) this.#forcedQueuedMessageDeliveryCount--;
-@@ -13978,6 +14387,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -13978,6 +14391,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  
  	/** Retry the last failed assistant turn when the session is idle. */
  	async retry(): Promise<boolean> {
@@ -1573,7 +1610,7 @@ index e4cfb6ab48..39272188ef 100644
  		const didRetry = await this.#recovery.retry(this.#prunedTerminalFailure);
  		// A manual retry is the user resuming the run they interrupted, so it lifts the
  		// interrupt's auto-resume suppression the same way a typed prompt does.
-@@ -15339,6 +15751,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -15339,6 +15755,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		options: {
  			summarize?: boolean;
  			customInstructions?: string;
@@ -1582,7 +1619,7 @@ index e4cfb6ab48..39272188ef 100644
  			/**
  			 * Opts into the two-phase `ask` toolResult re-answer protocol
  			 * (issue #5642): set only by the interactive `/tree` selector, which
-@@ -15393,7 +15807,12 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -15393,7 +15811,12 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		// navigated straight onto the ask result), and must still return
  		// `reopenAsk` / branch the new answer instead of silently reporting a
  		// no-op (chatgpt-codex review on #5895).
@@ -1596,7 +1633,7 @@ index e4cfb6ab48..39272188ef 100644
  			return { cancelled: false };
  		}
  
-@@ -15540,7 +15959,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -15540,7 +15963,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		// model consumes it, mirroring a live `ask` completion (issue #6483).
  		let isAskReanswerCompletion = false;
  
@@ -1609,7 +1646,7 @@ index e4cfb6ab48..39272188ef 100644
  			// User request (plain prompt, or a user-invoked skill/collab prompt): leaf = parent
  			// (null if root), the draft the user typed goes back to the editor with its images.
  			newLeafId = targetEntry.parentId;
-@@ -15966,7 +16389,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -15966,7 +16393,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		];
  		const keyList = keys.map(key => key.id).join(", ");
  		const runner = this.#extensionRunner;
@@ -1618,7 +1655,7 @@ index e4cfb6ab48..39272188ef 100644
  			if (!coordinator.notifiedKeys.has(actions[0].attemptKey)) {
  				coordinator.notifiedKeys.add(actions[0].attemptKey);
  				this.emitNotice(
-@@ -15999,10 +16422,12 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -15999,10 +16426,12 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  				? `Spend a saved ${providerLabel} rate-limit reset?\n${lines[0]}`
  				: `Spend ${actions.length} saved ${providerLabel} rate-limit resets?\n${lines.join("\n")}`;
  		try {
@@ -1635,7 +1672,7 @@ index e4cfb6ab48..39272188ef 100644
  			if (choice === "Yes" || choice === "No") {
  				for (const key of keys) {
  					if (key.get(this.settings) === "unset") key.set(this.settings, choice === "Yes" ? "yes" : "no");
-@@ -16561,7 +16986,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -16561,7 +16990,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * @returns the archive path and member names, or `undefined` when the main
  	 * session has no messages.
  	 */
@@ -1644,7 +1681,7 @@ index e4cfb6ab48..39272188ef 100644
  		const messages = this.messages;
  		if (messages.length === 0) return undefined;
  		const entries: Array<readonly [string, string]> = [["session.md", `${this.formatSessionAsText()}\n`]];
-@@ -16604,7 +17029,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -16604,7 +17033,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  			entries.push([`subagents/${key}.md`, `${text}\n`]);
  			subagentCount++;
  		}
@@ -2386,6 +2423,31 @@ index ac31d4b636..22df54c499 100644
  		return manager;
  	}
  
+diff --git a/packages/coding-agent/src/session/session-provider-boundary.ts b/packages/coding-agent/src/session/session-provider-boundary.ts
+index 1ac44e7f1d..4979c7e0ae 100644
+--- a/packages/coding-agent/src/session/session-provider-boundary.ts
++++ b/packages/coding-agent/src/session/session-provider-boundary.ts
+@@ -31,8 +31,10 @@ import {
+ 	cfgModelLoopGuardEnabled,
+ 	cfgProvidersAntigravityEndpoint,
+ 	cfgProvidersMaxInFlightRequests,
++	cfgProvidersModelMaxInFlightRequests,
+ 	cfgProvidersOpenrouterVariant,
+ 	validateProviderMaxInFlightRequests,
++	validateProviderModelMaxInFlightRequests,
+ } from "./settings";
+ 
+ type NormalizableContentBlock = AssistantMessage["content"][number] | TextContent | ImageContent;
+@@ -247,6 +249,9 @@ export class SessionProviderBoundary {
+ 			maxInFlightRequests: validateProviderMaxInFlightRequests(
+ 				options.maxInFlightRequests ?? cfgProvidersMaxInFlightRequests.get(this.#host.settings),
+ 			),
++			modelMaxInFlightRequests: validateProviderModelMaxInFlightRequests(
++				options.modelMaxInFlightRequests ?? cfgProvidersModelMaxInFlightRequests.get(this.#host.settings),
++			),
+ 			loopGuard: {
+ 				enabled: cfgModelLoopGuardEnabled.get(this.#host.settings),
+ 				checkAssistantContent: cfgModelLoopGuardCheckAssistantContent.get(this.#host.settings),
 diff --git a/packages/coding-agent/src/session/session-transfer.ts b/packages/coding-agent/src/session/session-transfer.ts
 index fe0d01485b..e6c5cf7b05 100644
 --- a/packages/coding-agent/src/session/session-transfer.ts
@@ -2443,11 +2505,167 @@ index fe0d01485b..e6c5cf7b05 100644
  			const placed = await placeSession(() => SessionManager.forkFrom(stagedFile, cwd, sessionDir), arrival);
  			logger.info("Unpacked session as a fork of a diverged local copy", { parent: id, ...placed });
  			return { ...placed, mode: "forked" };
+diff --git a/packages/coding-agent/src/session/settings-stream-fn.ts b/packages/coding-agent/src/session/settings-stream-fn.ts
+index cdecdaea9f..85810904fd 100644
+--- a/packages/coding-agent/src/session/settings-stream-fn.ts
++++ b/packages/coding-agent/src/session/settings-stream-fn.ts
+@@ -12,6 +12,7 @@
+  */
+ import { fitOutputTokensToContextWindow, type StreamFn, Tokenizer } from "@oh-my-pi/pi-agent-core";
+ import { type Model, type SimpleStreamOptions, streamSimple } from "@oh-my-pi/pi-ai";
++import { modelInFlightKey } from "@oh-my-pi/pi-ai/stream";
+ import { openAIResponsesReplaysNativeHistory } from "@oh-my-pi/pi-ai/providers/openai-responses-state";
+ import { serverSideFallbackModels } from "@oh-my-pi/pi-catalog/compat/server-side-fallback";
+ import { cfgOffline } from "../config/auxiliary-model-policy";
+@@ -27,6 +28,7 @@ import {
+ 	cfgProvidersAntigravityEndpoint,
+ 	cfgProvidersCacheRetention,
+ 	cfgProvidersMaxInFlightRequests,
++	cfgProvidersModelMaxInFlightRequests,
+ 	cfgProvidersMuseCodeStoreResponses,
+ 	cfgProvidersOpenaiCodexDaybreak,
+ 	cfgProvidersOpenaiLiveSteering,
+@@ -38,6 +40,7 @@ import {
+ 	cfgRetryMaxDelayMs,
+ 	cfgTextVerbosity,
+ 	validateProviderMaxInFlightRequests,
++	validateProviderModelMaxInFlightRequests,
+ } from "./settings";
+ 
+ /** Apply each API's setting once; standard Responses preferences can only narrow it. */
+@@ -154,12 +157,16 @@ export function createSettingsAwareStreamFn(
+ 		const maxInFlightRequests = validateProviderMaxInFlightRequests(
+ 			streamOptions?.maxInFlightRequests ?? cfgProvidersMaxInFlightRequests.get(settings),
+ 		);
++		const modelMaxInFlightRequests = validateProviderModelMaxInFlightRequests(
++			streamOptions?.modelMaxInFlightRequests ?? cfgProvidersModelMaxInFlightRequests.get(settings),
++		);
+ 		// A cold Responses session rebuilds turns without their encrypted reasoning.
+-		// A request that may wait for a provider slot is built when it gets one,
+-		// after a concurrent response may have warmed the session, so it is
++		// A request that may wait for a provider or model slot is built when it gets
++		// one, after a concurrent response may have warmed the session, so it is
+ 		// fitted as replaying.
+ 		const nativeHistoryReplay =
+ 			Object.hasOwn(maxInFlightRequests, model.provider) ||
++			Object.hasOwn(modelMaxInFlightRequests, modelInFlightKey(model.provider, model.id)) ||
+ 			openAIResponsesReplaysNativeHistory(model, streamOptions?.providerSessionState);
+ 		const tokenizerKey = `${model.provider}\0${model.api}\0${model.id}\0${nativeHistoryReplay}`;
+ 		let tokenizer = tokenizers.get(tokenizerKey);
+@@ -180,6 +187,7 @@ export function createSettingsAwareStreamFn(
+ 			streamIdleTimeoutMs: streamOptions?.streamIdleTimeoutMs ?? streamIdleTimeoutMs,
+ 			maxRetryDelayMs: streamOptions?.maxRetryDelayMs ?? cfgRetryMaxDelayMs.get(settings),
+ 			maxInFlightRequests,
++			modelMaxInFlightRequests,
+ 			loopGuard: {
+ 				enabled: cfgModelLoopGuardEnabled.get(settings),
+ 				checkAssistantContent: cfgModelLoopGuardCheckAssistantContent.get(settings),
+diff --git a/packages/coding-agent/src/session/settings.ts b/packages/coding-agent/src/session/settings.ts
+index 50797b86c6..5108525f33 100644
+--- a/packages/coding-agent/src/session/settings.ts
++++ b/packages/coding-agent/src/session/settings.ts
+@@ -26,7 +26,7 @@ import { compileModelPatterns } from "../utils/model-patterns";
+ import { DEFAULT_USAGE_RESERVE_PCT } from "@oh-my-pi/pi-ai/auth-storage";
+ import { configureProviderStoreResponses } from "@oh-my-pi/pi-ai/providers/openai-responses-state";
+ import { configureCodexAccessPrograms } from "@oh-my-pi/pi-ai/providers/openai-codex/access-programs";
+-import { configureProviderMaxInFlightRequests } from "@oh-my-pi/pi-ai/stream";
++import { configureModelMaxInFlightRequests, configureProviderMaxInFlightRequests } from "@oh-my-pi/pi-ai/stream";
+ import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
+ import { formatKeyHint } from "@oh-my-pi/pi-tui/app-keybindings";
+ import { AUTO_THINKING, getConfiguredThinkingLevelMetadata, getThinkingLevelMetadata } from "@oh-my-pi/pi-tui/thinking";
+@@ -202,6 +202,44 @@ export function validateProviderMaxInFlightRequests(value: unknown): Record<stri
+ 	return normalizeProviderMaxInFlightRequests(value);
+ }
+ 
++/** Model request limit keys are `provider/modelId`: non-empty provider with no "/", non-empty model id. */
++function isModelLimitKey(key: string): boolean {
++	const separator = key.indexOf("/");
++	if (separator <= 0) return false;
++	const provider = key.slice(0, separator);
++	return !provider.includes("/") && key.slice(separator + 1).length > 0;
++}
++
++/** Per-model request limits floored to whole numbers ≥ 1; malformed keys or non-positive entries are dropped. */
++export function normalizeProviderModelMaxInFlightRequests(value: unknown): Record<string, number> {
++	const normalized: Record<string, number> = {};
++	if (!isRecord(value)) return normalized;
++	for (const key in value) {
++		if (!isModelLimitKey(key)) continue;
++		const limit = value[key];
++		if (isPositiveLimit(limit)) normalized[key] = Math.max(1, Math.floor(limit));
++	}
++	return normalized;
++}
++
++/**
++ * Per-model request limits floored to whole numbers ≥ 1.
++ *
++ * @throws Error naming every key that is not `provider/modelId` form or whose limit is not a positive number.
++ */
++export function validateProviderModelMaxInFlightRequests(value: unknown): Record<string, number> {
++	if (isRecord(value)) {
++		const invalidKeys: string[] = [];
++		for (const key in value) if (!isModelLimitKey(key) || !isPositiveLimit(value[key])) invalidKeys.push(key);
++		if (invalidKeys.length > 0) {
++			throw new Error(
++				`Model request limits must be positive numbers keyed "provider/modelId": ${invalidKeys.join(", ")}`,
++			);
++		}
++	}
++	return normalizeProviderModelMaxInFlightRequests(value);
++}
++
+ export const cfgProvidersMaxInFlightRequests = register({
+ 	id: "providers.maxInFlightRequests",
+ 	type: "record",
+@@ -220,6 +258,24 @@ effect(cfgProvidersMaxInFlightRequests, limits =>
+ 	configureProviderMaxInFlightRequests(normalizeProviderMaxInFlightRequests(limits)),
+ );
+ 
++export const cfgProvidersModelMaxInFlightRequests = register({
++	id: "providers.modelMaxInFlightRequests",
++	type: "record",
++	default: EMPTY_NUMBER_RECORD,
++	validate: validateProviderModelMaxInFlightRequests,
++	normalize: validateProviderModelMaxInFlightRequests,
++	ui: {
++		tab: "providers",
++		group: "Services",
++		label: "Max In-Flight Requests per Model",
++		description:
++			'Maximum concurrent LLM requests per provider/model (keyed "provider/modelId", for example "anthropic/claude-opus-4"), shared across local OMP processes that share the same config root. In addition to the provider-level cap, a request must hold a slot in both dimensions when both are configured. Omitted models are unlimited.',
++	},
++});
++effect(cfgProvidersModelMaxInFlightRequests, limits =>
++	configureModelMaxInFlightRequests(normalizeProviderModelMaxInFlightRequests(limits)),
++);
++
+ export const cfgImagesDescribeForTextModels = register({
+ 	id: "images.describeForTextModels",
+ 	type: "boolean",
 diff --git a/packages/coding-agent/src/session/turn-recovery.ts b/packages/coding-agent/src/session/turn-recovery.ts
-index 48db427869..4f7c856734 100644
+index 48db427869..27eb16183d 100644
 --- a/packages/coding-agent/src/session/turn-recovery.ts
 +++ b/packages/coding-agent/src/session/turn-recovery.ts
-@@ -405,6 +405,8 @@ export class TurnRecovery {
+@@ -31,7 +31,7 @@ import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
+ import { isUnexpectedSocketCloseMessage, logger, prompt, sleepLong, sleepUntil } from "@oh-my-pi/pi-utils";
+ import { cfgOffline } from "../config/auxiliary-model-policy";
+ import type { ModelRegistry } from "../config/model-registry";
+-import { formatModelStringWithRouting, resolveModelOverride } from "../config/model-resolver";
++import { formatModelStringWithRouting, isModelInFlightSaturated, resolveModelOverride } from "../config/model-resolver";
+ 
+ import type { Settings } from "../config/settings";
+ import type { RetryErrorUpdate } from "../extensibility/shared-events";
+@@ -93,6 +93,8 @@ import { classifyUnexpectedStop, isUnexpectedStopCandidate } from "./unexpected-
+ import {
+ 	cfgFeaturesUnexpectedStopDetection,
+ 	cfgModelLoopGuardEnabled,
++	cfgProvidersMaxInFlightRequests,
++	cfgProvidersModelMaxInFlightRequests,
+ 	cfgRetry,
+ 	cfgRetryEnabled,
+ 	cfgRetryModelFallback,
+@@ -405,6 +407,8 @@ export class TurnRecovery {
  	readonly #host: TurnRecoveryHost;
  	readonly #unexpectedStopJudgeTimeoutMs: number;
  	#retryAbortController: AbortController | undefined;
@@ -2456,7 +2674,7 @@ index 48db427869..4f7c856734 100644
  	#retryAttempt = 0;
  	#genericAbortStreak = 0;
  	/**
-@@ -584,6 +586,7 @@ export class TurnRecovery {
+@@ -584,6 +588,7 @@ export class TurnRecovery {
  		this.#streamStallContinueCount = 0;
  		this.#acceptTerminalEmptyStopForPrompt = false;
  		this.#activeFallbackCreditRedemption = undefined;
@@ -2464,7 +2682,7 @@ index 48db427869..4f7c856734 100644
  	}
  
  	/** Sets whether one terminal empty stop is accepted for the current prompt. */
-@@ -1315,6 +1318,17 @@ export class TurnRecovery {
+@@ -1315,6 +1320,17 @@ export class TurnRecovery {
  			attribution: "agent",
  			timestamp: Date.now(),
  		});
@@ -2482,7 +2700,27 @@ index 48db427869..4f7c856734 100644
  		this.#host.scheduleAgentContinue({
  			source: "unexpected-stop-retry",
  			generation: this.#host.promptGeneration(),
-@@ -2791,6 +2805,7 @@ export class TurnRecovery {
+@@ -2511,6 +2527,19 @@ export class TurnRecovery {
+ 					if (!(error instanceof AIError.MissingApiKeyError)) throw error;
+ 				}
+ 				if (!apiKey) continue;
++				// The retry walk honors the same in-flight caps as dispatch: a
++				// candidate whose slot is already held by a running sibling (a
++				// live request lease or a dispatch reservation) is skipped
++				// rather than stacked onto, so a retry does not land on the
++				// same model another subagent is already running at its cap.
++				if (
++					await isModelInFlightSaturated(candidate, {
++						providerInFlightLimits: cfgProvidersMaxInFlightRequests.get(this.#host.settings),
++						modelInFlightLimits: cfgProvidersModelMaxInFlightRequests.get(this.#host.settings),
++					})
++				) {
++					continue;
++				}
+ 				const previousEditMode = this.#host.resolveActiveEditMode();
+ 				const previousSystemPrompt = [...this.#host.agent.state.systemPrompt];
+ 				const previousTools = [...this.#host.agent.state.tools];
+@@ -2791,6 +2820,7 @@ export class TurnRecovery {
  		// not a retry loop, so it runs even when the user disabled retries: it switches
  		// the model once and lets the base turn proceed.
  		if (!retrySettings.enabled && !options?.fireworksFastFallback) return false;
@@ -2490,7 +2728,7 @@ index 48db427869..4f7c856734 100644
  		const classifierRefusal = this.isClassifierRefusal(message);
  
  		const generation = this.#host.promptGeneration();
-@@ -3341,6 +3356,10 @@ export class TurnRecovery {
+@@ -3341,6 +3371,10 @@ export class TurnRecovery {
  		// Quota resets elapse while the machine sleeps; capture the deadline before event delivery.
  		const usageResetDeadline = AIError.is(id, AIError.Flag.UsageLimit) ? Date.now() + delayMs : undefined;
  
@@ -2501,7 +2739,7 @@ index 48db427869..4f7c856734 100644
  		await this.#host.emitSessionEvent({
  			type: "auto_retry_start",
  			attempt: this.#retryAttempt,
-@@ -3366,6 +3385,10 @@ export class TurnRecovery {
+@@ -3366,6 +3400,10 @@ export class TurnRecovery {
  		this.#maybeInjectThinkingLoopRedirect(id);
  		this.#maybeInjectMalformedFunctionCallRedirect(id, maxRetries, preserveFailedTurn, switchedModel);
  
@@ -2512,7 +2750,7 @@ index 48db427869..4f7c856734 100644
  		// Quota waits follow the wall clock; ordinary backoff stays monotonic.
  		const retryAbortController = new AbortController();
  		this.#retryAbortController?.abort();
-@@ -3380,13 +3403,16 @@ export class TurnRecovery {
+@@ -3380,13 +3418,16 @@ export class TurnRecovery {
  			if (this.#retryAbortController !== retryAbortController) {
  				return false;
  			}
@@ -2531,7 +2769,7 @@ index 48db427869..4f7c856734 100644
  		// The identity-keyed removal above can miss when a context rebuild
  		// recreated the failed turn's message object between settle and retry
  		// (fresh identity, same failed tail — issue #5382). Agent.continue()
-@@ -3400,6 +3426,10 @@ export class TurnRecovery {
+@@ -3400,6 +3441,10 @@ export class TurnRecovery {
  			this.#stripFailedAssistantTail();
  		}
  
@@ -2542,7 +2780,7 @@ index 48db427869..4f7c856734 100644
  		// Retry via continue() outside the agent_end event callback chain. A
  		// continuation that still fails locally must close the retry saga —
  		// otherwise auto_retry_end never fires, retryPromise stays pending, and
-@@ -3530,11 +3560,37 @@ export class TurnRecovery {
+@@ -3530,11 +3575,37 @@ export class TurnRecovery {
  	 * Cancel in-progress retry.
  	 */
  	abortRetry(): void {
@@ -2581,7 +2819,7 @@ index 48db427869..4f7c856734 100644
  	async #promptAgentWithIdleRetry(
  		messages: AgentMessage[],
  		options?: { toolChoice?: ToolChoice },
-@@ -3676,6 +3732,7 @@ export class TurnRecovery {
+@@ -3676,6 +3747,7 @@ export class TurnRecovery {
  		}
  
  		// Reset retry budget for a fresh attempt
@@ -2590,7 +2828,7 @@ index 48db427869..4f7c856734 100644
  
  		// Re-attempt the turn
 diff --git a/packages/coding-agent/src/task/executor.ts b/packages/coding-agent/src/task/executor.ts
-index 47944dd2c3..b07c49c778 100644
+index 47944dd2c3..87a24f7a6f 100644
 --- a/packages/coding-agent/src/task/executor.ts
 +++ b/packages/coding-agent/src/task/executor.ts
 @@ -100,6 +100,7 @@ import { INTERRUPTED_TURN_ERROR } from "../session/exit-diagnostics";
@@ -2621,7 +2859,16 @@ index 47944dd2c3..b07c49c778 100644
  	type YieldItem,
  } from "@oh-my-pi/pi-tui/tools/task";
  import { yieldSectionShapes } from "./yield-assembly";
-@@ -197,6 +201,36 @@ export type { YieldItem } from "@oh-my-pi/pi-tui/tools/task";
+@@ -181,6 +185,8 @@ import {
+ 	cfgRetryFallbackChains,
+ 	cfgDefaultThinkingLevel,
+ 	cfgPrewalkAutoTarget,
++	cfgProvidersMaxInFlightRequests,
++	cfgProvidersModelMaxInFlightRequests,
+ } from "../session/settings";
+ import { type AutoPrewalkDecision, classifyAutoPrewalk } from "../auto-prewalk/classifier";
+ import { type JudgmentUsage, journalJudgmentUsage, type NativeJudgmentDeps } from "../judgment";
+@@ -197,6 +203,36 @@ export type { YieldItem } from "@oh-my-pi/pi-tui/tools/task";
  
  const TASK_ABORT_CLEANUP_GRACE_MS = 10_000;
  
@@ -2658,7 +2905,7 @@ index 47944dd2c3..b07c49c778 100644
  /**
   * Soft per-agent request budgets (assistant requests per run). Crossing the
   * budget injects a wrap-up steering notice (`task.softRequestBudgetNotice`,
-@@ -1382,6 +1416,10 @@ interface SubagentRunMonitor {
+@@ -1382,6 +1418,10 @@ interface SubagentRunMonitor {
  	readonly accumulatedUsage: Usage;
  	hasUsage(): boolean;
  	yieldCalled(): boolean;
@@ -2669,7 +2916,7 @@ index 47944dd2c3..b07c49c778 100644
  	/**
  	 * Latch or clear the reminder ladder's forced final `yield`. While set, the
  	 * next accepted `yield` is terminal even when it carries incremental
-@@ -1545,6 +1583,9 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
+@@ -1545,6 +1585,9 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
  	const abortController = new AbortController();
  	const abortSignal = abortController.signal;
  	let activeSession: AgentSession | null = null;
@@ -2679,7 +2926,7 @@ index 47944dd2c3..b07c49c778 100644
  	let completionProbeStarted = false;
  	let yieldCalled = false;
  	let yieldCallPending = false;
-@@ -2115,6 +2156,13 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
+@@ -2115,6 +2158,13 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
  				if (event.toolName === "task") {
  					progress.inflightTaskDetails = undefined;
  				}
@@ -2693,7 +2940,7 @@ index 47944dd2c3..b07c49c778 100644
  
  				// Check for registered subagent tool handler
  				const handler = subprocessToolRegistry.getHandler(event.toolName);
-@@ -2218,6 +2266,19 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
+@@ -2218,6 +2268,19 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
  			}
  
  			case "tool_execution_update": {
@@ -2713,7 +2960,7 @@ index 47944dd2c3..b07c49c778 100644
  				// Surface nested-subagent progress mid-flight. The child task
  				// tool emits incremental `onUpdate` calls carrying its current
  				// `TaskToolDetails` (results + progress); we stash the latest
-@@ -2492,6 +2553,15 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
+@@ -2492,6 +2555,15 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
  		accumulatedUsage,
  		hasUsage: () => hasUsage,
  		yieldCalled: () => yieldCalled,
@@ -2729,7 +2976,7 @@ index 47944dd2c3..b07c49c778 100644
  		markFinalYieldForced: (forced: boolean) => {
  			finalYieldForced = forced;
  		},
-@@ -2683,6 +2753,8 @@ async function driveSessionToResult(
+@@ -2683,6 +2755,8 @@ async function driveSessionToResult(
  	} = {},
  ): Promise<DriveOutcome> {
  	const { solutionSpace, onPromptBusy, restore, steps, stepReports } = options;
@@ -2738,7 +2985,7 @@ index 47944dd2c3..b07c49c778 100644
  	const structured = options.structured !== false;
  	const abortSignal = monitor.abortSignal;
  	let exitCode = 0;
-@@ -2784,7 +2856,7 @@ async function driveSessionToResult(
+@@ -2784,7 +2858,7 @@ async function driveSessionToResult(
  	// Yields before this index belong to earlier steps (or an earlier turn).
  	let stepYieldStart = recordedYields(monitor.progress).length;
  	try {
@@ -2747,7 +2994,7 @@ index 47944dd2c3..b07c49c778 100644
  		monitor.holdForSteps(steps !== undefined && steps.sent < steps.prompts.length);
  		await runTurn(async () => {
  			// An IRC wake may own the session when this turn dispatches. Its prompt
-@@ -2980,7 +3052,9 @@ async function driveSessionToResult(
+@@ -2980,7 +3054,9 @@ async function driveSessionToResult(
  			monitor.holdForSteps(next + 1 < steps.prompts.length);
  			monitor.beginStep();
  			resetYieldTurnState(session.getToolByName("yield"));
@@ -2758,7 +3005,7 @@ index 47944dd2c3..b07c49c778 100644
  			const stepPrompt = steps.prompts[next];
  			await runTurn(() =>
  				dispatchPrompt(stepPrompt, { attribution: "agent", solutionSpace }, `step prompt ${next + 1}`),
-@@ -3070,6 +3144,39 @@ async function driveSessionToResult(
+@@ -3070,6 +3146,39 @@ async function driveSessionToResult(
  		}
  	}
  
@@ -2798,7 +3045,7 @@ index 47944dd2c3..b07c49c778 100644
  	return { exitCode, error, aborted, abortReasonText };
  }
  
-@@ -3269,6 +3376,19 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
+@@ -3269,6 +3378,19 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
  						: monitor.resolveAbortReasonText()
  		: undefined;
  	progress.status = wasAborted ? "aborted" : exitCode === 0 ? "completed" : "failed";
@@ -2818,7 +3065,7 @@ index 47944dd2c3..b07c49c778 100644
  	monitor.scheduleProgress(true);
  
  	// Emit lifecycle end event after finalization so yield status is reflected
-@@ -3280,6 +3400,7 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
+@@ -3280,6 +3402,7 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
  		agentSource: agent.source,
  		description: progress.description,
  		status: progress.status as "completed" | "failed" | "aborted",
@@ -2826,7 +3073,7 @@ index 47944dd2c3..b07c49c778 100644
  		sessionFile: args.sessionFile,
  		index,
  	};
-@@ -3298,6 +3419,8 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
+@@ -3298,6 +3421,8 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
  		output: truncatedOutput,
  		stderr,
  		truncated: Boolean(truncated),
@@ -2835,7 +3082,75 @@ index 47944dd2c3..b07c49c778 100644
  		...(finalized.structuredOutput ? { structuredOutput: finalized.structuredOutput } : {}),
  		durationMs: Date.now() - args.startTime,
  		tokens: progress.tokens,
-@@ -5463,6 +5586,10 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
+@@ -4842,6 +4967,9 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
+ 		outputSchemaSource: options.outputSchemaSource,
+ 		artifactsDir: options.artifactsDir,
+ 	};
++	// Dispatch reservations held for this run (provider + model slots);
++	// released when the run publishes its result.
++	let releaseDispatchReservations: Array<() => Promise<void>> = [];
+ 
+ 	const runSubagent = async (): Promise<{
+ 		exitCode: number;
+@@ -4932,7 +5060,9 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
+ 				thinkingLevel: resolvedThinkingLevel,
+ 				explicitThinkingLevel,
+ 				authFallbackUsed,
++				concurrencyFallbackUsed,
+ 				warning: modelResolutionWarning,
++				dispatchReservation,
+ 			} = await awaitAbortable(
+ 				resolveModelOverrideWithAuthFallback(
+ 					modelPatterns,
+@@ -4940,7 +5070,17 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
+ 					modelRegistry,
+ 					settings,
+ 					id,
+-					{ exactOnly: !!options.perCallModelGrants, allowedProvider },
++					{
++						exactOnly: !!options.perCallModelGrants,
++						allowedProvider,
++						providerInFlightLimits: cfgProvidersMaxInFlightRequests.get(settings),
++						modelInFlightLimits: cfgProvidersModelMaxInFlightRequests.get(settings),
++						// Expanded patterns discard the role alias; the role
++						// identity carries its fallback chain into the
++						// dispatch priority so a saturated primary yields to
++						// the role's fallbacks before the parent's model.
++						role: options.modelRole,
++					},
+ 				),
+ 			);
+ 			if (cfgOffline.get(settings) && !model) {
+@@ -4951,6 +5091,14 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
+ 					`Requested exact model ${JSON.stringify(modelPatterns)} is unavailable. Use an exact provider/model[:level] selector; do not substitute another model.`,
+ 				);
+ 			}
++			// The resolver already claimed the resolved model's in-flight
++			// slot (provider and/or model cap) while walking the dispatch
++			// priority, so a burst of sibling spawns dispatched before this
++			// run's LLM leases materialize sees the slot as taken and yields
++			// to the role's fallback chain instead of queueing behind the
++			// primary. Held until the run finishes; a crashed run is
++			// reclaimed by the slot's staleness path.
++			releaseDispatchReservations = dispatchReservation ? [dispatchReservation] : [];
+ 			if (modelResolutionWarning) {
+ 				logger.warn("Subagent model resolution warning", {
+ 					warning: modelResolutionWarning,
+@@ -4965,6 +5113,13 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
+ 					resolvedModel: model.id,
+ 				});
+ 			}
++			if (concurrencyFallbackUsed && model) {
++				logger.debug("Subagent dispatch adjusted for in-flight limits", {
++					requested: modelPatterns,
++					resolvedProvider: model.provider,
++					resolvedModel: model.id,
++				});
++			}
+ 			// Preflight skips these checks while the registry is cold, so hold the model
+ 			// a per-call child actually starts on to them before its session exists.
+ 			if (options.perCallModelGrants && model) {
+@@ -5463,6 +5618,10 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
  				// even when the workspace was retained for recovery.
  				isolated: worktree !== undefined || undefined,
  			});
@@ -2846,6 +3161,14 @@ index 47944dd2c3..b07c49c778 100644
  
  			abortSignal.addEventListener(
  				"abort",
+@@ -5726,6 +5885,7 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
+ 			startTime,
+ 		});
+ 		AgentRegistry.global().setHistory(id, { outputPath: result.outputPath });
++		for (const release of releaseDispatchReservations) await release();
+ 		return result;
+ 	} finally {
+ 		// The result is published: messages held during the run get their own
 diff --git a/packages/coding-agent/src/task/isolation-runner.ts b/packages/coding-agent/src/task/isolation-runner.ts
 index 16aa9fc00e..ec08d5b881 100644
 --- a/packages/coding-agent/src/task/isolation-runner.ts
@@ -3058,6 +3381,485 @@ index 8071984834..721ef27dca 100644
  	prompt: async (publisher, text, options) => settle(publisher, publisher.session.prompt(text, options)),
  	steer: async (publisher, text, images, options) => settle(publisher, publisher.session.steer(text, images, options)),
  	abort: async (publisher, options) => settle(publisher, publisher.session.abort(options)),
+diff --git a/packages/coding-agent/test/agent-session-retry-fallback.test.ts b/packages/coding-agent/test/agent-session-retry-fallback.test.ts
+index a098555af3..cbc62a3eac 100644
+--- a/packages/coding-agent/test/agent-session-retry-fallback.test.ts
++++ b/packages/coding-agent/test/agent-session-retry-fallback.test.ts
+@@ -18,6 +18,9 @@ import {
+ } from "@oh-my-pi/pi-ai";
+ import * as AIError from "@oh-my-pi/pi-ai/error";
+ import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
++import { __providerInFlightForTesting, dispatchReservationKey } from "@oh-my-pi/pi-ai/stream";
++import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
+ import { CodexApiError } from "@oh-my-pi/pi-ai/providers/openai-codex/response-handler";
+ import { buildParams } from "@oh-my-pi/pi-ai/providers/openai-responses";
+ import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
+@@ -459,6 +462,91 @@ describe("AgentSession retry fallback", () => {
+ 		]);
+ 	});
+ 
++	it("skips a retry fallback candidate whose in-flight slot is held by a running sibling", async () => {
++		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
++		const firstFallback = getBundledModel("openai", "gpt-4o-mini");
++		const secondFallback = getBundledModel("openai", "gpt-4o");
++		if (!primaryModel || !firstFallback || !secondFallback) {
++			throw new Error("Expected bundled test models to exist");
++		}
++
++		const requestedModels: string[] = [];
++		const mock = createMockModel();
++		const agent = new Agent({
++			getApiKey: model => `${model.provider}-test-key`,
++			initialState: {
++				model: primaryModel,
++				systemPrompt: ["Test"],
++				tools: [],
++				messages: [],
++			},
++			streamFn: (model, context, options) => {
++				requestedModels.push(`${model.provider}/${model.id}`);
++				if (model.provider === primaryModel.provider && model.id === primaryModel.id) {
++					mock.push({ throw: "overloaded_error: provider returned error 503" });
++				} else {
++					mock.push({ content: [`Recovered on ${model.id}`] });
++				}
++				return mock.stream(model, context, options);
++			},
++		});
++
++		const inFlightRoot = mkdtempSync(path.join(tmpdir(), "omp-retry-inflight-"));
++		__providerInFlightForTesting.setRoot(inFlightRoot);
++		try {
++			// A sibling subagent run holds the first fallback's only model
++			// slot (the dispatch reservation its own model resolution took),
++			// so the retry walk must skip it instead of stacking onto it.
++			const segment = Bun.SHA256.hash(
++				dispatchReservationKey(`${firstFallback.provider}/${firstFallback.id}`),
++				"base64url",
++			);
++			const slotDir = path.join(inFlightRoot, segment, "slot-0");
++			mkdirSync(slotDir, { recursive: true });
++			writeFileSync(
++				path.join(slotDir, "info.json"),
++				JSON.stringify({ pid: process.pid, timestamp: Date.now(), token: "test" }),
++			);
++
++			const settings = Settings.isolated({
++				"compaction.enabled": false,
++				"retry.baseDelayMs": 5,
++				"providers.modelMaxInFlightRequests": {
++					[`${firstFallback.provider}/${firstFallback.id}`]: 1,
++				},
++				"retry.fallbackChains": {
++					default: [
++						`${firstFallback.provider}/${firstFallback.id}`,
++						`${secondFallback.provider}/${secondFallback.id}`,
++					],
++				},
++			});
++			settings.setModelRole("default", `${primaryModel.provider}/${primaryModel.id}`);
++
++			session = new AgentSession({
++				agent,
++				sessionManager: SessionManager.inMemory(),
++				settings,
++				modelRegistry,
++			});
++
++			await session.prompt("Recover from rate limits");
++			await session.waitForIdle();
++
++			// The saturated first fallback was never requested: the walk
++			// lands on the second fallback directly.
++			expect(requestedModels).toEqual([
++				`${primaryModel.provider}/${primaryModel.id}`,
++				`${secondFallback.provider}/${secondFallback.id}`,
++			]);
++			expect(session.model?.provider).toBe(secondFallback.provider);
++			expect(session.model?.id).toBe(secondFallback.id);
++		} finally {
++			__providerInFlightForTesting.setRoot(undefined);
++			rmSync(inFlightRoot, { recursive: true, force: true });
++		}
++	});
++
+ 	it("walks the fallback chain when the primary provider has no credential, then restores it once one returns", async () => {
+ 		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
+ 		const fallbackModel = getBundledModel("openai", "gpt-4o");
+diff --git a/packages/coding-agent/test/subagent-inflight-concurrency.test.ts b/packages/coding-agent/test/subagent-inflight-concurrency.test.ts
+new file mode 100644
+index 0000000000..38b6569946
+--- /dev/null
++++ b/packages/coding-agent/test/subagent-inflight-concurrency.test.ts
+@@ -0,0 +1,367 @@
++import { afterEach, beforeEach, describe, expect, test } from "bun:test";
++import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import type { Api, Model } from "@oh-my-pi/pi-ai";
++import { __providerInFlightForTesting, dispatchReservationKey } from "@oh-my-pi/pi-ai/stream";
++import { buildModel } from "@oh-my-pi/pi-catalog/build";
++import {
++	type ModelLookupRegistry,
++	resolveModelOverrideWithAuthFallback,
++} from "@oh-my-pi/pi-coding-agent/config/model-resolver";
++import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
++
++/**
++ * Dispatch-time concurrency fallback for subagent model selection.
++ *
++ * The ordered subagent model list is the caller's dispatch priority. When the
++ * top priority is authenticated but at its in-flight cap (provider-level
++ * `providers.maxInFlightRequests` or model-level
++ * `providers.modelMaxInFlightRequests`), dispatch moves to the next pattern
++ * that is authenticated and has room. Only when every candidate is saturated
++ * does the top priority keep the dispatch — the request then blocks in the
++ * stream layer until a slot frees instead of being dropped.
++ *
++ * Saturation is simulated with real lease files under an isolated limiter
++ * root, the same mechanism the stream layer counts.
++ */
++
++function makeModel(provider: string, id: string): Model<Api> {
++	return buildModel({
++		id,
++		name: id,
++		api: "openai-completions",
++		provider,
++		baseUrl: `https://api.${provider}.test`,
++		reasoning: false,
++		input: ["text"],
++		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
++		contextWindow: 128000,
++		maxTokens: 8192,
++	});
++}
++
++const alphaModel = makeModel("prov-a", "alpha");
++const betaModel = makeModel("prov-a", "beta");
++const gammaModel = makeModel("prov-b", "gamma");
++
++function createAuthedRegistry(models: Model<Api>[]): ModelLookupRegistry & {
++	getApiKey(model: Model<Api>): Promise<string | undefined>;
++} {
++	return {
++		getAvailable: () => models,
++		getApiKey: async () => "sk-test",
++	} as unknown as ModelLookupRegistry & { getApiKey(model: Model<Api>): Promise<string | undefined> };
++}
++
++let root: string;
++
++function writeLease(key: string, entry = `${process.pid}-test-lease`): void {
++	// Mirrors the stream-layer lease layout: <root>/<sha256(key)>/<lease>/info.json
++	const segment = Bun.SHA256.hash(key, "base64url");
++	const leaseDir = join(root, segment, entry);
++	mkdirSync(leaseDir, { recursive: true });
++	writeFileSync(
++		join(leaseDir, "info.json"),
++		JSON.stringify({ pid: process.pid, timestamp: Date.now(), token: "test" }),
++	);
++}
++
++beforeEach(() => {
++	root = mkdtempSync(join(tmpdir(), "omp-subagent-inflight-"));
++	__providerInFlightForTesting.setRoot(root);
++});
++
++afterEach(() => {
++	__providerInFlightForTesting.setRoot(undefined);
++	rmSync(root, { recursive: true, force: true });
++});
++
++describe("subagent dispatch in-flight concurrency fallback", () => {
++	test("yields to the next priority when the top priority model is at its model-level cap", async () => {
++		writeLease("prov-a/alpha"); // one active lease on prov-a/alpha
++		const registry = createAuthedRegistry([alphaModel, betaModel, gammaModel]);
++
++		const result = await resolveModelOverrideWithAuthFallback(
++			["prov-a/alpha", "prov-a/beta"],
++			"prov-b/gamma",
++			registry,
++			undefined,
++			undefined,
++			{ modelInFlightLimits: { "prov-a/alpha": 1 } },
++		);
++
++		expect(result.model?.id).toBe("beta");
++		expect(result.model?.provider).toBe("prov-a");
++		expect(result.authFallbackUsed).toBe(false);
++		expect(result.concurrencyFallbackUsed).toBe(true);
++		expect(result.warning).toBe("Model prov-a/alpha is at its in-flight limit; dispatching prov-a/beta instead.");
++	});
++
++	test("yields to another provider when the top priority provider is at its provider-level cap", async () => {
++		writeLease("prov-a"); // one active lease on the prov-a pool
++		const registry = createAuthedRegistry([alphaModel, betaModel, gammaModel]);
++
++		const result = await resolveModelOverrideWithAuthFallback(
++			["prov-a/alpha", "prov-b/gamma"],
++			"prov-b/gamma",
++			registry,
++			undefined,
++			undefined,
++			{ providerInFlightLimits: { "prov-a": 1 } },
++		);
++
++		expect(result.model?.id).toBe("gamma");
++		expect(result.model?.provider).toBe("prov-b");
++		expect(result.concurrencyFallbackUsed).toBe(true);
++		expect(result.warning).toBe("Model prov-a/alpha is at its in-flight limit; dispatching prov-b/gamma instead.");
++	});
++
++	test("holds the top priority with a waiting warning when every candidate is saturated", async () => {
++		writeLease("prov-a/alpha");
++		writeLease("prov-a/beta");
++		writeLease("prov-b"); // parent's provider pool is saturated too
++		const registry = createAuthedRegistry([alphaModel, betaModel, gammaModel]);
++
++		const result = await resolveModelOverrideWithAuthFallback(
++			["prov-a/alpha", "prov-a/beta"],
++			"prov-b/gamma",
++			registry,
++			undefined,
++			undefined,
++			{ modelInFlightLimits: { "prov-a/alpha": 1, "prov-a/beta": 1 }, providerInFlightLimits: { "prov-b": 1 } },
++		);
++
++		expect(result.model?.id).toBe("alpha");
++		expect(result.authFallbackUsed).toBe(false);
++		expect(result.concurrencyFallbackUsed).toBe(true);
++		expect(result.warning).toBe("Model prov-a/alpha is at its in-flight limit; waiting for a slot to free.");
++	});
++
++	test("falls back to the parent model when the next priority is saturated but the parent has room", async () => {
++		writeLease("prov-a/alpha");
++		writeLease("prov-a/beta");
++		const registry = createAuthedRegistry([alphaModel, betaModel, gammaModel]);
++
++		const result = await resolveModelOverrideWithAuthFallback(
++			["prov-a/alpha", "prov-a/beta"],
++			"prov-b/gamma",
++			registry,
++			undefined,
++			undefined,
++			{ modelInFlightLimits: { "prov-a/alpha": 1, "prov-a/beta": 1 } },
++		);
++
++		expect(result.model?.id).toBe("gamma");
++		expect(result.concurrencyFallbackUsed).toBe(true);
++		expect(result.warning).toBe("Model prov-a/alpha is at its in-flight limit; dispatching prov-b/gamma instead.");
++	});
++
++	test("keeps the primary untouched when no in-flight limits are configured", async () => {
++		writeLease("prov-a/alpha"); // a lease exists, but with no limit it is irrelevant
++		const registry = createAuthedRegistry([alphaModel, betaModel, gammaModel]);
++
++		const result = await resolveModelOverrideWithAuthFallback(["prov-a/alpha"], "prov-b/gamma", registry);
++
++		expect(result.model?.id).toBe("alpha");
++		expect(result.authFallbackUsed).toBe(false);
++		expect(result.concurrencyFallbackUsed).toBe(false);
++		expect(result.warning).toBeUndefined();
++	});
++
++	test("does not yield when the top priority still has room under its caps", async () => {
++		writeLease("prov-a/alpha"); // one lease, cap is two
++		const registry = createAuthedRegistry([alphaModel, betaModel, gammaModel]);
++
++		const result = await resolveModelOverrideWithAuthFallback(
++			["prov-a/alpha", "prov-a/beta"],
++			"prov-b/gamma",
++			registry,
++			undefined,
++			undefined,
++			{ modelInFlightLimits: { "prov-a/alpha": 2 } },
++		);
++
++		expect(result.model?.id).toBe("alpha");
++		expect(result.concurrencyFallbackUsed).toBe(false);
++		expect(result.warning).toBeUndefined();
++	});
++
++	test("yields to the role's configured fallback chain when the role primary is at its model-level cap", async () => {
++		writeLease("prov-a/alpha"); // one active lease on prov-a/alpha (cap is one)
++		const registry = createAuthedRegistry([alphaModel, betaModel, gammaModel]);
++		// The subagent is bound to a role whose value is the primary only; the
++		// fallbacks live in retry.fallbackChains, where the GUI stores them.
++		const settings = Settings.isolated({
++			modelRoles: { worker: "prov-a/alpha" },
++			"retry.fallbackChains": { worker: ["prov-a/beta", "prov-b/gamma"] },
++		});
++
++		const result = await resolveModelOverrideWithAuthFallback(
++			["@worker"],
++			"prov-b/gamma",
++			registry,
++			settings,
++			undefined,
++			{ modelInFlightLimits: { "prov-a/alpha": 1 } },
++		);
++
++		expect(result.model?.id).toBe("beta");
++		expect(result.model?.provider).toBe("prov-a");
++		expect(result.authFallbackUsed).toBe(false);
++		expect(result.concurrencyFallbackUsed).toBe(true);
++		expect(result.warning).toBe("Model prov-a/alpha is at its in-flight limit; dispatching prov-a/beta instead.");
++	});
++
++	test("appends the role chain to already-expanded patterns when the role identity is passed separately", async () => {
++		writeLease("prov-a/alpha");
++		const registry = createAuthedRegistry([alphaModel, betaModel, gammaModel]);
++		const settings = Settings.isolated({
++			modelRoles: { worker: "prov-a/alpha" },
++			"retry.fallbackChains": { worker: ["prov-a/beta", "prov-b/gamma"] },
++		});
++
++		// Structured subagents discard the role alias before the resolver: the
++		// patterns arrive expanded and the role identity travels separately.
++		const result = await resolveModelOverrideWithAuthFallback(
++			["prov-a/alpha"],
++			"prov-b/gamma",
++			registry,
++			settings,
++			undefined,
++			{ modelInFlightLimits: { "prov-a/alpha": 1 }, role: "worker" },
++		);
++
++		expect(result.model?.id).toBe("beta");
++		expect(result.concurrencyFallbackUsed).toBe(true);
++		expect(result.warning).toBe("Model prov-a/alpha is at its in-flight limit; dispatching prov-a/beta instead.");
++	});
++
++	test("walks the whole role fallback chain when the earlier fallbacks are saturated too", async () => {
++		writeLease("prov-a/alpha");
++		writeLease("prov-a/beta");
++		const registry = createAuthedRegistry([alphaModel, betaModel, gammaModel]);
++		const settings = Settings.isolated({
++			modelRoles: { worker: "prov-a/alpha" },
++			"retry.fallbackChains": { worker: ["prov-a/beta", "prov-b/gamma"] },
++		});
++
++		const result = await resolveModelOverrideWithAuthFallback(
++			["@worker"],
++			"prov-b/gamma",
++			registry,
++			settings,
++			undefined,
++			{ modelInFlightLimits: { "prov-a/alpha": 1, "prov-a/beta": 1 } },
++		);
++
++		expect(result.model?.id).toBe("gamma");
++		expect(result.model?.provider).toBe("prov-b");
++		expect(result.concurrencyFallbackUsed).toBe(true);
++		expect(result.warning).toBe("Model prov-a/alpha is at its in-flight limit; dispatching prov-b/gamma instead.");
++	});
++
++	test("treats a sibling run's model-slot reservation as saturation so a burst yields to the same-provider fallback", async () => {
++		// Burst spawn: the sibling run resolved the primary moments ago and
++		// holds the model's only reservation slot, but its own LLM lease is
++		// not visible yet (leases materialize when the first stream starts).
++		// Without the slot, every simultaneous spawn would pile onto the
++		// primary and queue in the stream layer.
++		writeLease(dispatchReservationKey("prov-a/alpha"), "slot-0");
++		const registry = createAuthedRegistry([alphaModel, betaModel, gammaModel]);
++		const settings = Settings.isolated({
++			modelRoles: { worker: "prov-a/alpha" },
++			"retry.fallbackChains": { worker: ["prov-a/beta", "prov-b/gamma"] },
++		});
++
++		const result = await resolveModelOverrideWithAuthFallback(
++			["@worker"],
++			"prov-b/gamma",
++			registry,
++			settings,
++			undefined,
++			{ modelInFlightLimits: { "prov-a/alpha": 1 } },
++		);
++
++		expect(result.model?.id).toBe("beta");
++		expect(result.model?.provider).toBe("prov-a");
++		expect(result.concurrencyFallbackUsed).toBe(true);
++		expect(result.warning).toBe("Model prov-a/alpha is at its in-flight limit; dispatching prov-a/beta instead.");
++	});
++
++	test("a resolved dispatch holds its slot so the next burst sibling yields to the fallback chain", async () => {
++		// Deterministic form of the burst contract: no request leases exist
++		// yet (they materialize with each run's first stream), so without the
++		// held slot every sibling would take the primary. The first dispatch
++		// reserves the provider slot while walking; the sibling dispatched
++		// while it is still running walks to the next provider.
++		const registry = createAuthedRegistry([alphaModel, betaModel, gammaModel]);
++		const settings = Settings.isolated({
++			modelRoles: { worker: "prov-a/alpha" },
++			"retry.fallbackChains": { worker: ["prov-a/beta", "prov-b/gamma"] },
++		});
++		const options = { providerInFlightLimits: { "prov-a": 1 } };
++
++		const first = await resolveModelOverrideWithAuthFallback(
++			["@worker"],
++			"prov-b/gamma",
++			registry,
++			settings,
++			undefined,
++			options,
++		);
++		expect(first.model?.id).toBe("alpha");
++		expect(first.dispatchReservation).toBeTruthy();
++
++		const second = await resolveModelOverrideWithAuthFallback(
++			["@worker"],
++			"prov-b/gamma",
++			registry,
++			settings,
++			undefined,
++			options,
++		);
++		expect(second.model?.id).toBe("gamma");
++		expect(second.model?.provider).toBe("prov-b");
++		expect(second.concurrencyFallbackUsed).toBe(true);
++		expect(second.warning).toBe("Model prov-a/alpha is at its in-flight limit; dispatching prov-b/gamma instead.");
++
++		await first.dispatchReservation!();
++
++		const third = await resolveModelOverrideWithAuthFallback(
++			["@worker"],
++			"prov-b/gamma",
++			registry,
++			settings,
++			undefined,
++			options,
++		);
++		expect(third.model?.id).toBe("alpha");
++	});
++
++	test("treats a sibling run's provider-slot reservation as saturation so a burst yields to another provider", async () => {
++		// Provider-level caps cover every model on the provider, so the
++		// provider's held reservation slot saturates all of its models; the
++		// fallback chain's first other-provider entry takes the dispatch.
++		writeLease(dispatchReservationKey("prov-a"), "slot-0");
++		const registry = createAuthedRegistry([alphaModel, betaModel, gammaModel]);
++		const settings = Settings.isolated({
++			modelRoles: { worker: "prov-a/alpha" },
++			"retry.fallbackChains": { worker: ["prov-a/beta", "prov-b/gamma"] },
++		});
++
++		const result = await resolveModelOverrideWithAuthFallback(
++			["@worker"],
++			"prov-b/gamma",
++			registry,
++			settings,
++			undefined,
++			{ providerInFlightLimits: { "prov-a": 1 } },
++		);
++
++		expect(result.model?.id).toBe("gamma");
++		expect(result.model?.provider).toBe("prov-b");
++		expect(result.concurrencyFallbackUsed).toBe(true);
++		expect(result.warning).toBe("Model prov-a/alpha is at its in-flight limit; dispatching prov-b/gamma instead.");
++	});
++});
 diff --git a/packages/coding-agent/test/task/executor-steps.test.ts b/packages/coding-agent/test/task/executor-steps.test.ts
 index 8350048f9d..9582075f5d 100644
 --- a/packages/coding-agent/test/task/executor-steps.test.ts

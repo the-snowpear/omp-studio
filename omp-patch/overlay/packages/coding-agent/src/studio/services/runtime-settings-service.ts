@@ -7,7 +7,11 @@ import {
 import { cfgModelRoles } from "../../config/model-settings";
 import { cfgProvidersCacheWarming } from "../../session/settings";
 import { cfgTaskSpeculativeLaunch } from "../../task/settings";
-import { cfgProvidersOpenaiLiveSteering } from "../../session/settings";
+import {
+	cfgProvidersMaxInFlightRequests,
+	cfgProvidersModelMaxInFlightRequests,
+	cfgProvidersOpenaiLiveSteering,
+} from "../../session/settings";
 import { cfgTelemetryOtlpExportEnabled } from "../../telemetry-settings";
 import { cfgAdvisorEvictStaleResults } from "../../advisor/settings";
 import { cfgTaskAgentCompactionThresholdOverrides } from "../../task/settings";
@@ -189,6 +193,8 @@ const GUI_SETTING_HANDLES = {
 	"providers.cacheWarming": cfgProvidersCacheWarming,
 	"task.speculativeLaunch": cfgTaskSpeculativeLaunch,
 	"providers.openaiLiveSteering": cfgProvidersOpenaiLiveSteering,
+	"providers.maxInFlightRequests": cfgProvidersMaxInFlightRequests,
+	"providers.modelMaxInFlightRequests": cfgProvidersModelMaxInFlightRequests,
 	"telemetry.otlpExportEnabled": cfgTelemetryOtlpExportEnabled,
 	"advisor.evictStaleResults": cfgAdvisorEvictStaleResults,
 	"task.agentCompactionThresholdOverrides": cfgTaskAgentCompactionThresholdOverrides,

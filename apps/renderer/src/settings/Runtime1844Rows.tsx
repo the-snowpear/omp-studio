@@ -7,6 +7,7 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import type { RuntimeSettingsCtl } from "./tabs";
 import { SettingRow, SettingSection, Switch } from "./SettingRow";
 import { useHasSettingsScope, useSettingsScope } from "./SettingsScope";
+import { NumberRecordEditor } from "./NumberRecordEditor";
 
 export function Runtime1844Rows({ runtime, names = GUI_SETTING_KEYS, title, inspectBackend }: {
   runtime?: RuntimeSettingsCtl | undefined;
@@ -85,7 +86,8 @@ function RuntimeSetting({ name, runtime, persist }: { name: GuiSettingKey; runti
         definition.type === "enum" ? <AppSelect className="select" aria-label={label} disabled={disabled} value={String(value ?? "")} onChange={e => save(e.target.value)}>
           {!enabled ? <option value="">—</option> : null}
           {definition.values.map(option => <option key={option} value={option} disabled={name === "spelling.autocomplete" && option === "apple" && !/Mac/i.test(navigator.platform)}>{optionLabel(option)}</option>)}
-        </AppSelect> : <>
+        </AppSelect> :
+        definition.type === "numberRecord" ? <NumberRecordEditor label={label} value={value as Record<string, number> | undefined} disabled={disabled} onSave={next => { try { setError(""); runtime?.set?.(name, next as StudioRuntimeSettingValue, persist); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); } }} /> : <>
           {definition.type === "thresholds" || definition.type === "strings" ? <textarea className="input" aria-label={label} disabled={disabled} rows={3} value={draft} onChange={e => setDraft(e.target.value)} /> :
             <input className="input" aria-label={label} disabled={disabled} type={definition.type === "number" ? "number" : "text"} min={definition.type === "number" ? ("min" in definition ? definition.min : 0) : undefined} max={definition.type === "number" && "max" in definition ? definition.max : undefined} step={definition.type === "number" && "step" in definition ? definition.step : undefined} value={draft} onChange={e => setDraft(e.target.value)} />}
           <button className="btn small" disabled={disabled || (definition.type !== "string" && definition.type !== "strings" && draft.trim() === "")} onClick={() => { try { save(definition.type === "thresholds" ? JSON.parse(draft) : definition.type === "strings" ? draft.split(/\r?\n/u).map(line => line.trim()).filter(Boolean) : definition.type === "number" ? Number(draft) : draft); } catch (cause) { setError(String(cause)); } }}>{zh ? "应用" : "Apply"}</button>

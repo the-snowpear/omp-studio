@@ -473,6 +473,53 @@ describe("ModelConfigPage 自动获取模型", () => {
     })));
   });
 
+  it("re-reads the model catalog when the session or Runtime readiness arrives after mount", async () => {
+    // Cold start: the page can mount before the session selection or the
+    // Runtime snapshot exist; the Host then answers models.get with the
+    // unverified read (empty model list) and the page must re-read on its
+    // own instead of staying empty until it is reopened.
+    window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
+    // No endpointUrl: the card shows statusDetail only when there is no URL to display.
+    const gatewayNoUrl = (): ModelProviderRecord => {
+      const provider = gateway();
+      const { endpointUrl: _ignored, ...rest } = provider;
+      void _ignored;
+      return rest;
+    };
+    const cold: ModelConfigReadModel = {
+      ...readModel(),
+      availableModels: [],
+      providers: [{ ...gatewayNoUrl(), statusDetail: "已读取配置；当前 Runtime 可用性未验证", models: [] }],
+    };
+    const hot: ModelConfigReadModel = {
+      ...readModel(),
+      providers: [{ ...gatewayNoUrl(), statusDetail: "已从 models.yml 读取" }],
+    };
+    let current: ModelConfigReadModel = cold;
+    const client = fakeClient(PROBE_OK, undefined);
+    const delegate = client.query.getMockImplementation() as (name: string, input: unknown) => Promise<unknown>;
+    const modelsGetCalls = () => client.query.mock.calls.filter(call => call[0] === "models.get").length;
+    client.query.mockImplementation(async (name, input) => name === "models.get" ? current : delegate(name, input));
+    const page = (props: { ready: boolean; sessionId?: string }) => (
+      <PreviewModeProvider switchEnabled>
+        <ModelConfigPage client={client} runtimeAvailable={props.ready} sessionId={props.sessionId} />
+      </PreviewModeProvider>
+    );
+    const view = render(page({ ready: false }));
+    try {
+      await screen.findAllByRole("button", { name: "编辑供应商" });
+      expect(screen.getByText("已读取配置；当前 Runtime 可用性未验证")).toBeTruthy();
+      expect(modelsGetCalls()).toBe(1);
+      current = hot;
+      view.rerender(page({ ready: true, sessionId: "owner" }));
+      await waitFor(() => expect(modelsGetCalls()).toBe(2));
+      await screen.findByText("已从 models.yml 读取");
+      expect(screen.queryByText("已读取配置；当前 Runtime 可用性未验证")).toBeNull();
+    } finally {
+      window.localStorage.removeItem(PREVIEW_MODE_STORAGE_KEY);
+    }
+  });
+
   it("probes the wire API without a discovery type and imports picked models into the draft", async () => {
     const { client } = await openEditor();
 

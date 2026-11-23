@@ -34,7 +34,7 @@ export const GUI_GROUPS = {
 } as const satisfies Record<string, readonly GuiSettingKey[]>;
 
 // These keys are represented by more complete native/prediction controls.
-export const GUI_DEDUPLICATED_KEYS = ["spelling.autocomplete", "telemetry.otlpExportEnabled", "advisor.evictStaleResults", "codexResets.autoRedeem5h", "codexResets.autoRedeemWeekly"] as const;
+export const GUI_DEDUPLICATED_KEYS = ["spelling.autocomplete", "telemetry.otlpExportEnabled", "advisor.evictStaleResults", "codexResets.autoRedeem5h", "codexResets.autoRedeemWeekly", "providers.maxInFlightRequests", "providers.modelMaxInFlightRequests"] as const;
 export const SETTINGS_GUI_COVERAGE = [...Object.values(GUI_GROUPS).flat(), ...GUI_DEDUPLICATED_KEYS] satisfies readonly GuiSettingKey[];
 
 export interface SettingSearchItem {
