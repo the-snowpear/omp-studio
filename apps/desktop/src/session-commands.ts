@@ -249,6 +249,28 @@ export function createDesktopSemanticCommands(options: {
     return new StudioHostError("CAPABILITY_UNAVAILABLE", message === "Runtime is not available" ? fallback : message);
   };
   type DeleteResult = ConfigWriteResult & { readonly cleanup: "complete" | "partial" };
+  async function deleteSessionFiles(
+    service: StudioSessionDeleteService, sessionId: string, deleteManagedArtifacts: boolean, archivedOnly: boolean,
+  ) {
+    if (!archivedOnly) await releaseResidentSession(options, sessionId);
+    const removed = await service.delete(sessionId, { archivedOnly }).catch((error: unknown) => {
+      if (error instanceof SessionDeleteServiceError && error.code === "SESSION_NOT_ARCHIVED") {
+        throw new StudioHostError("INVALID_ARGUMENT", desktopText("此会话已取消归档，已跳过。", "Skipped because the session was unarchived."));
+      }
+      throw error;
+    });
+    let artifactsWarning = false;
+    await options.finishManagedArtifacts?.(sessionId, deleteManagedArtifacts).catch(() => { artifactsWarning = true; });
+    // Best-effort residue cleanup: the transcript/artifacts are the primary
+    // object; a failing related-record removal must not fail the delete.
+    await Promise.resolve(options.telemetryStore?.().remove?.(sessionId)).catch(() => undefined);
+    await Promise.resolve(options.bindings?.unbind(threadIdFor(sessionId))).catch(() => undefined);
+    await Promise.resolve(options.leaseStore?.removeForSession(sessionId)).catch(() => undefined);
+    if (options.agentDir !== undefined) {
+      await Promise.resolve(removeSessionPin(sessionId, options.agentDir())).catch(() => undefined);
+    }
+    return { removed, artifactsWarning };
+  }
   const removeSession = async (threadId: ThreadId, deleteManagedArtifacts: boolean, archivedOnly: boolean): Promise<DeleteResult> => {
     if (options.deleteService === undefined) {
       throw new StudioHostError("CAPABILITY_UNAVAILABLE", desktopText("此 Host 无法删除会话。", "Session deletion is not available on this Host."));
@@ -256,23 +278,7 @@ export function createDesktopSemanticCommands(options: {
     const service = options.deleteService();
     return await withSessionFileOperation(threadId, async () => {
       const sessionId = await resolveCatalogSessionId(options, threadId);
-      if (!archivedOnly) await releaseResidentSession(options, sessionId);
-      const removed = await service.delete(sessionId, { archivedOnly }).catch((error: unknown) => {
-        if (error instanceof SessionDeleteServiceError && error.code === "SESSION_NOT_ARCHIVED") {
-          throw new StudioHostError("INVALID_ARGUMENT", desktopText("此会话已取消归档，已跳过。", "Skipped because the session was unarchived."));
-        }
-        throw error;
-      });
-      let artifactsWarning = false;
-      await options.finishManagedArtifacts?.(sessionId, deleteManagedArtifacts).catch(() => { artifactsWarning = true; });
-      // Best-effort residue cleanup: the transcript/artifacts are the primary
-      // object; a failing related-record removal must not fail the delete.
-      await Promise.resolve(options.telemetryStore?.().remove?.(sessionId)).catch(() => undefined);
-      await Promise.resolve(options.bindings?.unbind(threadId)).catch(() => undefined);
-      await Promise.resolve(options.leaseStore?.removeForSession(sessionId)).catch(() => undefined);
-      if (options.agentDir !== undefined) {
-        await Promise.resolve(removeSessionPin(sessionId, options.agentDir())).catch(() => undefined);
-      }
+      const { removed, artifactsWarning } = await deleteSessionFiles(service, sessionId, deleteManagedArtifacts, archivedOnly);
       const messages = [deleteManagedArtifacts
         ? desktopText("会话及托管产物已删除。", "Session and managed artifacts deleted.")
         : desktopText("会话已删除；托管产物已保留。", "Session deleted; managed artifacts retained.")];
@@ -288,42 +294,21 @@ export function createDesktopSemanticCommands(options: {
       return { applied: true, runtimeEffect: "immediate", message: messages.join(" "), cleanup };
     });
   };
-  /**
-   * Sweep every session recorded under `cwd` (active tree plus cold archive),
-   * applying the same evacuation + cleanup `removeSession` uses. A per-session
-   * failure never fails the sweep — it is counted as a warning, so the
-   * workspace removal still completes.
-   */
   const deleteWorkspaceSessions = async (cwd: string): Promise<{ readonly deleted: number; readonly warnings: number }> => {
     if (options.makeDeleteService === undefined) {
       throw new StudioHostError("CAPABILITY_UNAVAILABLE", desktopText("此 Host 无法清理项目会话记录。", "Session cleanup is not available on this Host."));
     }
     const service = options.makeDeleteService(cwd);
-    const catalog = await scanSessionCatalog({ allowedCwd: cwd, includeCliSessions: true });
+    const catalog = await scanSessionCatalog({ allowedCwd: cwd, includeCliSessions: true, includeEmptySessions: true });
     let deleted = 0;
     let warnings = 0;
     for (const entry of catalog.sessions) {
-      const threadId = threadIdFor(entry.sessionId);
       try {
-        await withSessionFileOperation(threadId, async () => {
-          if (!entry.archived) await releaseResidentSession(options, entry.sessionId);
-          const removed = await service.delete(entry.sessionId, { archivedOnly: entry.archived }).catch((error: unknown) => {
-            if (error instanceof SessionDeleteServiceError && error.code === "SESSION_NOT_ARCHIVED") {
-              throw new StudioHostError("INVALID_ARGUMENT", desktopText("此会话已取消归档，已跳过。", "Skipped because the session was unarchived."));
-            }
-            throw error;
-          });
-          let artifactsWarning = false;
-          await options.finishManagedArtifacts?.(entry.sessionId, true).catch(() => { artifactsWarning = true; });
-          await Promise.resolve(options.telemetryStore?.().remove?.(entry.sessionId)).catch(() => undefined);
-          await Promise.resolve(options.bindings?.unbind(threadId)).catch(() => undefined);
-          await Promise.resolve(options.leaseStore?.removeForSession(entry.sessionId)).catch(() => undefined);
-          if (options.agentDir !== undefined) {
-            await Promise.resolve(removeSessionPin(entry.sessionId, options.agentDir())).catch(() => undefined);
-          }
-          if (removed.nativeCleanup.status === "partial" || removed.artifactsCleanupFailed || artifactsWarning) warnings += 1;
-        });
+        const { removed, artifactsWarning } = await withSessionFileOperation(threadIdFor(entry.sessionId), () =>
+          deleteSessionFiles(service, entry.sessionId, true, entry.archived),
+        );
         deleted += 1;
+        if (removed.nativeCleanup.status === "partial" || removed.artifactsCleanupFailed || artifactsWarning) warnings += 1;
       } catch {
         warnings += 1;
       }

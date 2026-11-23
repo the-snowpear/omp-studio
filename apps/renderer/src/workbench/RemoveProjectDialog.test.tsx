@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
-import { RemoveProjectDialog } from "./AppShell";
+import { RemoveProjectDialog } from "./RemoveProjectDialog";
 
 afterEach(() => {
   cleanup();
@@ -26,36 +26,31 @@ function renderDialog(props: Partial<Parameters<typeof RemoveProjectDialog>[0]> 
   return { view, onConfirm, onCancel };
 }
 
-const checkbox = (): HTMLInputElement => screen.getByRole("checkbox") as HTMLInputElement;
-// The confirm control is the dialog's danger button; its label flips to the
-// in-flight "Removing…" copy while busy, so select by role + class, not text.
-const confirmButton = (): HTMLButtonElement =>
-  document.querySelector("section[aria-labelledby='projectRemoveTitle'] .btn.danger") as HTMLButtonElement;
+const keep = () => screen.getByRole<HTMLInputElement>("radio", { name: "Keep sessions" });
+const remove = () => screen.getByRole<HTMLInputElement>("radio", { name: "Permanently delete sessions" });
 
-describe("RemoveProjectDialog session-records checkbox", () => {
-  it("defaults to keeping session records (unchecked)", () => {
+describe("RemoveProjectDialog", () => {
+  it("defaults to keeping session records", () => {
     const { onConfirm } = renderDialog();
-    expect(checkbox().checked).toBe(false);
-    fireEvent.click(confirmButton());
+    expect(keep().checked).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Remove project" }));
     expect(onConfirm).toHaveBeenCalledWith(false);
   });
 
-  it("passes the checkbox state through on confirm", () => {
+  it("makes the permanent deletion choice and its confirm action explicit", () => {
     const { onConfirm } = renderDialog();
-    fireEvent.click(checkbox());
-    expect(checkbox().checked).toBe(true);
-    fireEvent.click(confirmButton());
-    expect(onConfirm).toHaveBeenCalledTimes(1);
-    expect(onConfirm).toHaveBeenLastCalledWith(true);
+    fireEvent.click(remove());
+    expect(remove().checked).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Remove project and delete sessions" }));
+    expect(onConfirm).toHaveBeenCalledExactlyOnceWith(true);
   });
 
-  it("disables the checkbox and confirm while the removal is in flight", () => {
+  it("blocks closing while the removal is in flight", () => {
     const { onConfirm, onCancel } = renderDialog({ busy: true });
-    expect(checkbox().disabled).toBe(true);
-    expect(confirmButton().disabled).toBe(true);
-    fireEvent.click(checkbox());
-    expect(onConfirm).not.toHaveBeenCalled();
-    fireEvent.click(confirmButton());
+    const confirm = screen.getByRole<HTMLButtonElement>("button", { name: "Removing…" });
+    expect(confirm.disabled).toBe(true);
+    fireEvent.click(confirm);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(onConfirm).not.toHaveBeenCalled();
     expect(onCancel).not.toHaveBeenCalled();
   });

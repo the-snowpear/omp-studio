@@ -271,14 +271,8 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
     setOpenRowMenuId(null);
     action?.();
   };
-  /** 侧栏项目行 ⋯ 菜单（顶栏项目菜单同款，作用于所在行的项目）：
-      AppShell 收到显式 project 后先切到该项目（等待 workspace.open 回执）再执行；
-      终端项只切项目 + 开面板，不依赖桌面 shell 函数；「移除项目」只删注册表记录
-      （文件与会话保留），走 bridge 命令。预览态演示行没有真实项目，写表面各项禁用。 */
   const projectMenu = (project: SelectedProject, open: boolean, previewProject: boolean) => {
     const projectMenuId = `project:${project.id}`;
-    // 按行禁用只看桌面 shell 函数是否存在与是否忙碌（与活动项目无关，目标行
-    // 非活动时由 AppShell 先 workspace.open 再执行）。
     const previewReason = marks ? t("common.unavailableInPreview") : t("common.unavailable");
     const busyReason = chrome.projectShellAction !== null ? t("common.opening") : undefined;
     const shellReason = previewProject ? previewReason : (busyReason ?? chrome.projectShellFunctionsUnavailable);
@@ -292,7 +286,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
         <MenuItem icon="plus" onClick={() => runRowAction(() => chrome.onStartChatInProject(project))}>{t("shell.newChatInProject")}</MenuItem>
         <div className="menu-sep" />
         <MenuItem icon="external" disabled={shellReason !== undefined} title={shellReason} onClick={() => runRowAction(() => chrome.onOpenProjectInEditor(project))}>{t("shell.openInEditor")}</MenuItem>
-        <MenuItem icon="terminal" disabled={previewProject} title={previewProject ? previewReason : undefined} onClick={() => runRowAction(() => { chrome.onSelectProject(project); chrome.onOpenTerminalPanel(); })}>{t("shell.openInTerminal")}</MenuItem>
+        <MenuItem icon="terminal" disabled={previewProject} title={previewProject ? previewReason : undefined} onClick={() => runRowAction(() => chrome.onOpenProjectTerminal(project))}>{t("shell.openInTerminal")}</MenuItem>
         <MenuItem icon="folder-open" disabled={shellReason !== undefined} title={shellReason} onClick={() => runRowAction(() => chrome.onOpenProjectDirectory(project))}>{t("shell.openInExplorer", { fileManager: fileManagerName(t) })}</MenuItem>
         <div className="menu-sep" />
         <MenuItem icon={open ? "chevron-u" : "chevron-d"} onClick={() => runRowAction(() => chrome.onToggleProject(project))}>{open ? t("common.collapse") : t("common.expand")}</MenuItem>

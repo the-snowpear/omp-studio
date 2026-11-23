@@ -143,6 +143,7 @@ export type ShellChrome = {
   onOpenDialog: (dialog: ShellDialog) => void;
   /** 左上应用菜单「打开终端」：切到终端页签并展开底部面板（Ctrl J 同款语义）。 */
   onOpenTerminalPanel: () => void;
+  onOpenProjectTerminal: (project: SelectedProject) => void;
   /** 项目 shell 动作（AppShell 统一实现，顶栏面包屑菜单、侧栏应用菜单与侧栏项目行 ⋯ 菜单共用）。
       显式 project 指向所在行的项目；缺省回落到当前活动项目。 */
   onOpenProjectInEditor: (project?: SelectedProject) => void;

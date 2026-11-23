@@ -5,7 +5,7 @@ import { artifactLibraryForProfile } from "./artifact-library.js";
 import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
 import { timeTravelService } from "./time-travel-service.js";
 import { randomUUID } from "node:crypto";
-import type { WorkspaceId, SessionId } from "@omp-studio/client-contract";
+import type { WorkspaceId, WorkspaceListReadModel, SessionId } from "@omp-studio/client-contract";
 import type { ThreadId } from "@omp-studio/studio-protocol";
 import { desktopText } from "./desktop-language-shared.js";
 
@@ -223,7 +223,7 @@ export type DesktopSessionSwitchIntent =
   | { kind: "fresh"; noContextFiles?: boolean; model?: string };
 
 export interface DesktopRuntimeSessionPort {
-  sessionFor?(sessionId: string): DesktopRuntimeSession | undefined;
+  sessionFor?(sessionId: string, workspaceId?: string): DesktopRuntimeSession | undefined;
   /** Await native in-process fork/branch identity adoption and transfer the writer lease. */
   synchronizeSessionIdentity?(session: DesktopRuntimeSession): Promise<void>;
   openContextSession?(workspace: { workspaceId: string; cwd: string }, intent: DesktopSessionSwitchIntent): Promise<DesktopRuntimeSession | undefined>;
@@ -258,7 +258,7 @@ export interface DesktopRuntimeSessionPort {
    * Never changes the `start` contract: startup still happens at most once.
    */
   rebind?(
-    workspace: { workspaceId: string; cwd: string },
+    workspace: { workspaceId: string; cwd: string } | undefined,
     options?: { readonly launchIfMissing?: boolean },
   ): Promise<DesktopRuntimeSession | undefined>;
   /**
@@ -287,7 +287,7 @@ export interface DesktopRuntimeSessionPort {
    * per-session statistics; failures surface as `syncStatus: "partial"`
    * and are re-applied on the next activate/rebind.
    */
-  applyApprovalMode?(mode: ApprovalMode): Promise<{
+  applyApprovalMode?(mode: ApprovalMode, source?: DesktopRuntimeSession): Promise<{
     mode: ApprovalMode;
     syncStatus: "complete" | "partial";
     appliedSessions: number;
@@ -765,26 +765,6 @@ function buildFacade(context: FacadeContext): { readonly facade: StudioHostClien
     }
     return archiveService;
   };
-  let deleteServiceCwd: string | undefined;
-  let deleteService: StudioSessionDeleteService | undefined;
-  const currentDeleteService = (): StudioSessionDeleteService => {
-    const cwd = context.workspaceCwd.current;
-    if (cwd === undefined) throw new Error("Session deletion requires an active workspace");
-    if (deleteService === undefined || deleteServiceCwd !== cwd) {
-      deleteServiceCwd = cwd;
-      deleteService = new StudioSessionDeleteService({
-        allowedCwd: cwd,
-        purgeRows: input => context.sessionPurge.run(input),
-        timeTravel: timeTravelService(context.profileDirectory),
-        isResident: (sessionId) =>
-          context.runtimeSession?.isResident?.(sessionId) === true
-          || sessionRef.current?.controller.publication()?.snapshot?.sessionId === sessionId,
-      });
-    }
-    return deleteService;
-  };
-  // A delete service scoped to an explicit cwd (not the live one), so a workspace
-  // being removed can have its sessions swept after it is no longer active.
   const makeDeleteService = (cwd: string): StudioSessionDeleteService => {
     return new StudioSessionDeleteService({
       allowedCwd: cwd,
@@ -794,6 +774,17 @@ function buildFacade(context: FacadeContext): { readonly facade: StudioHostClien
         context.runtimeSession?.isResident?.(sessionId) === true
         || sessionRef.current?.controller.publication()?.snapshot?.sessionId === sessionId,
     });
+  };
+  let deleteServiceCwd: string | undefined;
+  let deleteService: StudioSessionDeleteService | undefined;
+  const currentDeleteService = (): StudioSessionDeleteService => {
+    const cwd = context.workspaceCwd.current;
+    if (cwd === undefined) throw new Error("Session deletion requires an active workspace");
+    if (deleteService === undefined || deleteServiceCwd !== cwd) {
+      deleteServiceCwd = cwd;
+      deleteService = makeDeleteService(cwd);
+    }
+    return deleteService;
   };
   // Durable single-writer lease store mirrors the one created in runtime-session.ts.
   const sessionLeaseCleanup = new FileSessionLeaseStore({
@@ -871,7 +862,9 @@ function buildFacade(context: FacadeContext): { readonly facade: StudioHostClien
       resolveResidentSessionId: (threadId) => {
         const residents = context.runtimeSession?.listResidents?.().residents;
         if (residents !== undefined) {
-          const match = residents.find((r) => threadIdFor(r.sessionId) === threadId);
+          const match = residents.find((r) =>
+            r.workspaceId === context.selectedWorkspace.current?.workspaceId && threadIdFor(r.sessionId) === threadId,
+          );
           if (match !== undefined) return match.sessionId;
         }
         return undefined;
@@ -908,7 +901,7 @@ function buildFacade(context: FacadeContext): { readonly facade: StudioHostClien
           } }),
       ...(context.runtimeSession?.applyApprovalMode === undefined
         ? {}
-        : { applyApprovalMode: (mode) => context.runtimeSession!.applyApprovalMode!(mode) }),
+        : { applyApprovalMode: (mode) => context.runtimeSession!.applyApprovalMode!(mode, sessionRef.current) }),
       ...(context.runtimeSession?.evacuateResident === undefined
         ? {}
         : { evacuateResident: (sessionId) => {
@@ -1098,7 +1091,7 @@ async function openSessionContext(root: FacadeContext, scope: import("@omp-studi
     if (!cwd) throw new Error("Unknown workspace id");
     return { workspaceId, cwd };
   };
-  const workspace = { current: await resolveWorkspace(scope.workspaceId) };
+  const workspace: FacadeContext["selectedWorkspace"] = { current: await resolveWorkspace(scope.workspaceId) };
   const sessionRef: FacadeContext["sessionRef"] = { current: undefined };
   const connectionChanges = new IsolatedForwarder<void>();
   const startup = new DesktopRuntimeStartup(() => connectionChanges.publish(undefined));
@@ -1130,9 +1123,13 @@ async function openSessionContext(root: FacadeContext, scope: import("@omp-studi
     connectionChanges.publish(undefined);
   };
   const open = async (intent: Parameters<NonNullable<DesktopRuntimeSessionPort["openContextSession"]>>[1]) => {
+    const target = workspace.current;
+    if (!target) throw new Error(desktopText("请先选择项目", "Choose a project first"));
+    const generation = startup.generation;
     root.runtimeTouched.current = true;
     try {
-      const session = await pool.openContextSession!(workspace.current, intent);
+      const session = await pool.openContextSession!(target, intent);
+      if (generation !== startup.generation) throw new Error(desktopText("会话启动期间切换了项目", "Project changed while opening the session"));
       if (!session) throw new Error(pool.lastUnavailable?.()?.reason ?? "Runtime did not become ready");
       if (intent.kind === "resume" && intent.resumeWorkspace) {
         workspace.current = intent.resumeWorkspace;
@@ -1148,14 +1145,24 @@ async function openSessionContext(root: FacadeContext, scope: import("@omp-studi
       throw error;
     }
   };
-  const list = async () => {
-    const model = await root.seams.workspaces!.list();
-    return { ...model, activeWorkspaceId: workspace.current.workspaceId as WorkspaceId,
-      workspaces: model.workspaces.map(row => ({ ...row, active: row.workspaceId === workspace.current.workspaceId })) };
+  const projectModel = (model: WorkspaceListReadModel): WorkspaceListReadModel => {
+    const id = workspace.current?.workspaceId as WorkspaceId | undefined;
+    if (id === undefined || !model.workspaces.some(row => row.workspaceId === id)) return model;
+    return { ...model, activeWorkspaceId: id,
+      workspaces: model.workspaces.map(row => ({ ...row, active: row.workspaceId === id })) };
+  };
+  const list = async () => projectModel(await root.seams.workspaces!.list());
+  const selectWorkspace = async (id: WorkspaceId | undefined) => {
+    const next = id === undefined ? undefined : await resolveWorkspace(id);
+    startup.changeWorkspace();
+    workspace.current = next;
+    context.workspaceCwd.current = workspace.current?.cwd;
+    wanted = undefined;
+    bind(undefined);
   };
   const context: FacadeContext = {
     ...root, sessionRef, startup, connectionChanges, interaction,
-    selectedWorkspace: workspace, workspaceCwd: { current: workspace.current.cwd },
+    selectedWorkspace: workspace, workspaceCwd: { current: workspace.current?.cwd },
     lastUnavailable: { current: undefined }, lastDisconnect: { current: undefined },
     publications: new IsolatedForwarder<RuntimePublication>(),
     conversationEvents: new IsolatedForwarder<StudioConversationForward>(),
@@ -1170,61 +1177,47 @@ async function openSessionContext(root: FacadeContext, scope: import("@omp-studi
     },
     seams: { ...root.seams,
       getActiveWorkspace: () => workspace.current,
-      getWorkspaceCwd: () => workspace.current.cwd,
+      getWorkspaceCwd: () => workspace.current?.cwd,
       catalog: {
-        ...createWorkspaceSessionCatalog(() => workspace.current.cwd, async id => (await resolveWorkspace(id)).cwd),
+        ...createWorkspaceSessionCatalog(() => workspace.current?.cwd, async id => (await resolveWorkspace(id)).cwd),
         ...(root.seams.catalog?.locate ? { locate: root.seams.catalog.locate.bind(root.seams.catalog) } : {}),
       },
       ...(root.seams.workspaces ? { workspaces: {
         list,
         ...(root.seams.workspaces.forgetUnavailable ? { forgetUnavailable: () => root.seams.workspaces!.forgetUnavailable!() } : {}),
-        ...(root.seams.workspaces.remove ? { remove: async (input: { readonly workspaceId: WorkspaceId }) => {
+        ...(root.seams.workspaces.remove ? { remove: async (input: Parameters<NonNullable<HostWorkspaceService["remove"]>>[0]) => {
           const model = await root.seams.workspaces!.remove!(input);
-          if (model.activeWorkspaceId) {
-            workspace.current = await resolveWorkspace(model.activeWorkspaceId);
-            context.workspaceCwd.current = workspace.current.cwd;
-            wanted = undefined; bind(undefined);
-          }
-          return list();
+          if (input.workspaceId === workspace.current?.workspaceId) await selectWorkspace(model.activeWorkspaceId);
+          return projectModel(model);
         } } : {}),
         open: async ({ workspaceId }) => {
-          if (workspaceId !== workspace.current.workspaceId) {
-            workspace.current = await resolveWorkspace(workspaceId);
-            context.workspaceCwd.current = workspace.current.cwd;
-            wanted = undefined;
-            bind(undefined);
-          }
+          if (workspaceId !== workspace.current?.workspaceId) await selectWorkspace(workspaceId);
           return list();
         },
         pick: async input => {
           const model = await root.seams.workspaces!.pick(input);
-          if (model.activeWorkspaceId) {
-            workspace.current = await resolveWorkspace(model.activeWorkspaceId);
-            context.workspaceCwd.current = workspace.current.cwd;
-            wanted = undefined; bind(undefined);
-          }
-          return list();
+          await selectWorkspace(model.activeWorkspaceId);
+          return projectModel(model);
         },
         ...(root.seams.workspaces.openPath ? { openPath: async (input: { readonly path: string }) => {
           const model = await root.seams.workspaces!.openPath!(input);
-          if (model.activeWorkspaceId) {
-            workspace.current = await resolveWorkspace(model.activeWorkspaceId);
-            context.workspaceCwd.current = workspace.current.cwd;
-            wanted = undefined; bind(undefined);
-          }
-          return list();
+          await selectWorkspace(model.activeWorkspaceId);
+          return projectModel(model);
         } } : {}),
       } } : {}),
     },
   };
   const { facade } = buildFacade(context);
-  if (wanted) bind(pool.sessionFor(wanted));
-  const offResidents = pool.attachResidentsSink?.(() => { if (wanted && !startup.closing) bind(pool.sessionFor!(wanted)); });
+  const bindResident = () => {
+    if (wanted && workspace.current && !startup.closing) bind(pool.sessionFor!(wanted, workspace.current.workspaceId));
+  };
+  bindResident();
+  const offResidents = pool.attachResidentsSink?.(bindResident);
   return {
     async bootstrap() {
       if (root.seams.workspaces) await facade.query({ queryName: "projects.list", input: {} });
       const snapshot = await facade.bootstrap();
-      return { ...snapshot, selected: { ...snapshot.selected, workspaceId: workspace.current.workspaceId as WorkspaceId,
+      return { ...snapshot, selected: { ...snapshot.selected, ...(workspace.current ? { workspaceId: workspace.current.workspaceId as WorkspaceId } : {}),
         ...(wanted ? { sessionId: wanted as SessionId, threadId: threadIdFor(wanted) } : {}) } };
     },
     query: request => facade.query(request), command: request => facade.command(request),
@@ -1601,7 +1594,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
    * rebind-capable port this is a no-op.
    */
   async rebindWorkspace(
-    workspace: { workspaceId: string; cwd: string },
+    workspace: { workspaceId: string; cwd: string } | undefined,
     options?: { readonly launchIfMissing?: boolean },
   ): Promise<void> {
     if (this.#closed || this.#shutdownStarted) {
@@ -1610,7 +1603,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     const context = this.#facadeContext;
     const generation = context.startup.changeWorkspace();
     context.selectedWorkspace.current = workspace;
-    context.workspaceCwd.current = workspace.cwd;
+    context.workspaceCwd.current = workspace?.cwd;
     const port = this.#runtimeSession;
     if (port?.rebind === undefined) return;
     // Fence the old controller immediately, even while bootstrap is probing/launching.
@@ -1619,6 +1612,11 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     this.#attachSession(undefined);
     await context.startup.run(async () => {
       if (generation !== context.startup.generation) return;
+      if (workspace === undefined) {
+        await port.rebind!(undefined, { launchIfMissing: false });
+        if (context.startup.canPublish) context.bindSession.current(undefined);
+        return;
+      }
       const launchIfMissing = options?.launchIfMissing !== false;
       const hadResident = port.hasResidentForWorkspace?.(workspace.workspaceId) === true;
       context.runtimeTouched.current = true;

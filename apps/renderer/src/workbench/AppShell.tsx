@@ -18,7 +18,7 @@ import { setCapIntent, setModelConfigIntent, setSettingsIntent, setDiagnosticsIn
 import { modelConfigHasUnsavedChanges } from "../models/modelConfigState";
 import { WorkbenchHealth } from "../WorkbenchHealth";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { createPortal } from "react-dom";
+import { RemoveProjectDialog } from "./RemoveProjectDialog";
 import { applyTypography } from "../settings/typography";
 import { useWorkbenchLayout } from "../layout/useWorkbenchLayout";
 import { beforeConversationLayoutChange } from "../conversation/conversationReflow";
@@ -137,74 +137,6 @@ type SidebarDelete =
 const EMPTY_IDS: ReadonlySet<string> = new Set();
 const emptyIds = () => EMPTY_IDS;
 const noSubscription = () => () => {};
-
-/** 侧栏项目行「移除项目」确认框（与 HistoryPage 会话删除确认同一样式家族）。
-    移除只删注册表记录：项目文件与会话历史保留在磁盘。 */
-export function RemoveProjectDialog({
-  name,
-  busy,
-  onConfirm,
-  onCancel,
-}: {
-  name: string;
-  busy: boolean;
-  onConfirm: (deleteSessions: boolean) => void;
-  onCancel: () => void;
-}) {
-  const { t } = useI18n();
-  const [deleteSessions, setDeleteSessions] = useState(false);
-  useEffect(() => {
-    if (busy) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      onCancel();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [busy, onCancel]);
-  return createPortal(
-    <div className="modal-backdrop create-project-backdrop" role="presentation" onMouseDown={busy ? undefined : onCancel}>
-      <section
-        className="modal create-project-modal create-branch-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="projectRemoveTitle"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="create-project-head">
-          <div>
-            <span className="create-project-kicker">PROJECT</span>
-            <h2 id="projectRemoveTitle">{t("shell.removeProjectConfirmTitle")}</h2>
-            <p className="create-branch-sub">{t("shell.removeProjectConfirmDesc", { name })}</p>
-          </div>
-          <button type="button" className="icon-btn" aria-label={t("common.close")} disabled={busy} onClick={onCancel}><Icon name="x" /></button>
-        </div>
-        <div className="create-project-body">
-          <p className="create-branch-hint">{t("shell.removeProjectKeep")}</p>
-          <label className="remove-project-sessions">
-            <input
-              type="checkbox"
-              checked={deleteSessions}
-              disabled={busy}
-              onChange={(event) => setDeleteSessions(event.target.checked)}
-            />
-            <span>{t("shell.removeSessions")}</span>
-          </label>
-        </div>
-        <div className="create-project-foot">
-          <button type="button" className="btn outline" autoFocus disabled={busy} onClick={onCancel}>{t("common.cancel")}</button>
-          <button type="button" className="btn danger" disabled={busy} onClick={() => onConfirm(deleteSessions)}>
-            {busy
-              ? <><span className="spinner" aria-hidden="true" />{t("shell.removingProject")}</>
-              : <><Icon name="trash" extra="sm" /><span>{t("shell.removeProject")}</span></>}
-          </button>
-        </div>
-      </section>
-    </div>,
-    document.body,
-  );
-}
 
 export function AppShell({ state, client, healthReady, onRoute, selectedHistoryId, onSelectThread, onNewThread, projectsLoading, onWorkspacesChange, onHistoryChange }: {
   state: ViewState;
@@ -331,6 +263,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     applySessionTitle: applyProjectSessionTitle,
     deletedSessions,
     removeSessions: removeHistorySessions,
+    clear: clearProjectHistory,
   } = projectHistories;
   const expandProject = useCallback((workspaceId: string) => {
     setExpandedProjects((current) => {
@@ -863,8 +796,8 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       setExplorerOpen(true);
       if (expandedProjectsMemory.restored) {
         /* 有本地记忆：按恢复的展开集加载各项目会话历史，不再强制展开活动项目。 */
-        for (const workspaceId of expandedProjects) {
-          void loadProjectHistory(workspaceId as WorkspaceId);
+        for (const workspace of state.model.workspaces?.workspaces ?? []) {
+          if (expandedProjects.has(workspace.workspaceId)) void loadProjectHistory(workspace.workspaceId);
         }
       } else {
         expandProject(active.workspaceId);
@@ -1003,7 +936,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     if (active) commitDockSelection({ target: executionTarget.id ?? "local", project, session: active.sessionId });
     else beginDockDraft(project);
   };
-  const selectProject = (project: SelectedProject) => {
+  const selectProject = async (project: SelectedProject): Promise<boolean> => {
     if (!previewMode.preview && state.model.workspaces?.activeWorkspaceId === project.id) {
       // Already active: skip workspace.open, but still expand. The sidebar's
       // toggle routes a collapsed project here, so returning before
@@ -1013,7 +946,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       expandProject(project.id);
       setProjectListExpanded(true);
       void loadProjectHistory(project.id as WorkspaceId);
-      return;
+      return true;
     }
     const generation = navigationGate.next();
     setSelectedProject(project);
@@ -1021,18 +954,20 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     expandProject(project.id);
     setProjectListExpanded(true);
     void loadProjectHistory(project.id as WorkspaceId);
-    if (previewMode.preview) return;
-    void workspaceActionQueue.enqueue(async () => {
+    if (previewMode.preview) return true;
+    return workspaceActionQueue.enqueue(async () => {
       const handle = await client.command("workspace.open", { workspaceId: project.id as WorkspaceId });
       const workspaces = await waitReceipt<WorkspaceListReadModel>(client, handle.requestId);
-      if (!navigationGate.isCurrent(generation)) return;
+      if (!navigationGate.isCurrent(generation)) return false;
       onWorkspacesChange(workspaces);
       await commitActivatedWorkspace(project.id, generation);
+      return navigationGate.isCurrent(generation);
     }).catch((error) => {
-      if (!navigationGate.isCurrent(generation)) return;
+      if (!navigationGate.isCurrent(generation)) return false;
       setShellNotice({ text: hostErrorMessage(error, zhRef.current ? "切换项目失败" : "Failed to switch project"), icon: "alert" });
       const active = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
       setSelectedProject(active === undefined ? null : { id: active.workspaceId, name: active.name });
+      return false;
     });
   };
 
@@ -2412,19 +2347,22 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   /** 侧栏项目行 ⋯「移除项目」确认对话框目标；null = 未打开。 */
   const [removeProjectFor, setRemoveProjectFor] = useState<{ id: WorkspaceId; name: string } | null>(null);
   const [removeProjectBusy, setRemoveProjectBusy] = useState(false);
+  const [removeProjectError, setRemoveProjectError] = useState<string>();
   const { openRenameDialog, renameOpen, renameBusy, setRenameOpen, renameValue, setRenameValue, submitRename, renameError } = useSessionRename({ renameTargetSessionId, selected, renameTargetWorkspaceId, threadTitle, workspaceActionQueue, snapshot, can, client, refreshHistoryAfterTitle, setProvisionalThreadsBySession, setShellNotice, ensureWorkspaceActive });
   const realActiveWorkspace = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
   // 桌面 shell 函数是否存在与是否有活动项目无关（侧栏项目行 ⋯ 菜单按行禁用只看它）；
   // 顶栏 / 应用菜单额外要求有活动项目，见 projectShellUnavailable。
-  const projectShellFunctionsUnavailable = globalThis.ompStudioChrome?.openProjectInEditor === undefined || globalThis.ompStudioChrome?.openProjectDirectory === undefined
+  const projectShellFunctionsUnavailable = executionTarget.kind === "ssh"
+    ? (zh ? "SSH 工作区不支持在本机打开" : "Not available for SSH workspaces")
+    : globalThis.ompStudioChrome?.openProjectInEditor === undefined || globalThis.ompStudioChrome?.openProjectDirectory === undefined
     ? (zh ? "仅桌面端可用" : "Desktop only")
     : undefined;
   // 预览模式只是显示层：桌面 shell 操作仍走真实 API。若已注册过真实
   // workspace，就允许在预览态下对当前真实项目执行；没有真实 workspace
   // 时保持禁用并给出原因，绝不使用 preview fixture 里的演示路径。
-  const projectShellUnavailable = executionTarget.kind === "ssh" ? (zh ? "SSH 工作区不支持在本机打开" : "Not available for SSH workspaces") : realActiveWorkspace === undefined
+  const projectShellUnavailable = projectShellFunctionsUnavailable ?? (realActiveWorkspace === undefined
     ? (zh ? "请先打开本地项目" : "Open a local project first")
-    : projectShellFunctionsUnavailable;
+    : undefined);
 
   const runProjectShellAction = async (kind: "editor" | "directory", action: () => Promise<ProjectShellActionResult>) => {
     if (shellAction !== null) return;
@@ -2446,26 +2384,15 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     }
   };
 
-  /** Shell 动作的目标项目：显式 project（侧栏项目行 ⋯ 菜单）指向所在行的项目，
-      缺省回落到当前活动项目。activate = 目标还不是活动项目：先 workspace.open
-      并等待回执（与项目行「＋」同序），桌面端按 id 解析 cwd，UI 跟随回执切换。
-      激活别的行时不带 executionTarget.id（那是当前对话的远端连接，与目标行无关）。 */
-  const projectShellTarget = (project?: SelectedProject) => {
-    if (project !== undefined) {
-      const row = state.model.workspaces?.workspaces.find((candidate) => candidate.workspaceId === project.id);
-      return row === undefined ? undefined : { workspace: row, activate: project.id !== currentActiveWorkspaceId };
-    }
-    return realActiveWorkspace === undefined ? undefined : { workspace: realActiveWorkspace, activate: false };
-  };
+  const projectShellTarget = (project?: SelectedProject) => project === undefined
+    ? realActiveWorkspace
+    : state.model.workspaces?.workspaces.find(row => row.workspaceId === project.id);
 
   const openProjectInEditor = (project?: SelectedProject) => {
     const target = projectShellTarget(project);
     const openInEditor = globalThis.ompStudioChrome?.openProjectInEditor;
     if (target === undefined || openInEditor === undefined) return;
-    void runProjectShellAction("editor", async () => {
-      if (target.activate) await ensureWorkspaceActive(target.workspace.workspaceId);
-      return openInEditor(target.workspace.workspaceId, target.activate ? undefined : executionTarget.id ?? undefined);
-    });
+    void runProjectShellAction("editor", () => openInEditor(target.workspaceId, executionTarget.id ?? undefined));
   };
 
   const openProjectDirectory = (project?: SelectedProject) => {
@@ -2473,21 +2400,16 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     const openDirectory = globalThis.ompStudioChrome?.openProjectDirectory;
     if (target === undefined || openDirectory === undefined) return;
     void runProjectShellAction("directory", async () => {
-      if (target.activate) await ensureWorkspaceActive(target.workspace.workspaceId);
-      await openDirectory(target.workspace.workspaceId, target.activate ? undefined : executionTarget.id ?? undefined);
+      await openDirectory(target.workspaceId, executionTarget.id ?? undefined);
       return { status: "opened" };
     });
   };
 
-  /** 侧栏项目行 ⋯「移除项目」：workspace.remove 只删注册表记录，
-      项目文件保留（与 workspace.forgetUnavailable 同一语义的单项目版）；勾选
-      「同时删除会话记录」时 Host 会一并清掉该项目的活动+归档会话。
-      活动项目被移除时注册表把活动权移到最近的可用记录，AppShell 的
-      workspaces 同步 effect 随后把 selectedProject / 顶栏 crumb 带过去。 */
   const requestRemoveProject = (workspaceId: WorkspaceId) => {
     if (previewMode.preview) return;
     const row = state.model.workspaces?.workspaces.find((candidate) => candidate.workspaceId === workspaceId);
     if (row === undefined) return;
+    setRemoveProjectError(undefined);
     setRemoveProjectFor({ id: workspaceId, name: row.name });
   };
 
@@ -2495,15 +2417,28 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     const target = removeProjectFor;
     if (target === null || removeProjectBusy) return;
     setRemoveProjectBusy(true);
+    setRemoveProjectError(undefined);
     void workspaceActionQueue.enqueue(async () => {
       try {
         const handle = await client.command("workspace.remove", { workspaceId: target.id, ...(deleteSessions ? { deleteSessions: true } : {}) });
         const workspaces = await waitReceipt<WorkspaceListReadModel>(client, handle.requestId);
         onWorkspacesChange(workspaces);
+        clearProjectHistory(target.id);
+        collapseProject(target.id);
+        setProvisionalThreadsBySession(current => Object.fromEntries(
+          Object.entries(current).filter(([, row]) => row.workspaceId !== target.id),
+        ));
+        if (dockSelectionRef.current.project === target.id) {
+          onNewThread();
+          setSelectedProvisionalSessionId(undefined);
+          if (!mdi) beginDockDraft(workspaces.activeWorkspaceId ?? null);
+        }
+        mdi?.store.removeProjectViews(executionTarget.id, target.id, workspaces.activeWorkspaceId);
         setRemoveProjectFor(null);
         setShellNotice({ text: t("shell.removedProject", { name: target.name }), icon: "trash" });
       } catch (error) {
-        setShellNotice({ text: hostErrorMessage(error, t("shell.removeProjectFailed")), icon: "alert" });
+        setRemoveProjectError(hostErrorMessage(error, t("shell.removeProjectFailed")));
+        if (deleteSessions) void refreshProjectHistory(target.id);
       } finally {
         setRemoveProjectBusy(false);
       }
@@ -2715,6 +2650,9 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     ompMenuOpen,
     onOpenDialog: openDialog,
     onOpenTerminalPanel: () => setBottomTab("terminal"),
+    onOpenProjectTerminal: project => {
+      void selectProject(project).then(opened => { if (opened) setBottomTab("terminal"); });
+    },
     onOpenProjectInEditor: openProjectInEditor,
     onOpenProjectDirectory: openProjectDirectory,
     onRemoveProject: requestRemoveProject,
@@ -3325,6 +3263,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         <RemoveProjectDialog
           name={removeProjectFor.name}
           busy={removeProjectBusy}
+          error={removeProjectError}
           onConfirm={confirmRemoveProject}
           onCancel={() => { if (!removeProjectBusy) setRemoveProjectFor(null); }}
         />

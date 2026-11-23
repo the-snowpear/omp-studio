@@ -623,6 +623,10 @@ export function createProductionHostFactory(options?: {
         cwd: stored.canonicalPath,
       }, { launchIfMissing: false });
     },
+    onDeactivated: async () => {
+      workspaceCwd.current = undefined;
+      await activeComposition?.rebindWorkspace(undefined);
+    },
     // Sweep a project's session records when `workspace.remove` asks for it.
     // Reads the live composition lazily; the sweep is mostly disk work, so it
     // does not require the Runtime to be ready (resident sessions, if any, are
@@ -640,7 +644,7 @@ export function createProductionHostFactory(options?: {
     pick: (input?: { readonly name?: string }) => innerWorkspaces.pick(input),
     openPath: (input: { readonly path: string }) => innerWorkspaces.openPath!(input),
     forgetUnavailable: () => innerWorkspaces.forgetUnavailable!(),
-    remove: (input: { readonly workspaceId: WorkspaceId }) => innerWorkspaces.remove!(input),
+    remove: innerWorkspaces.remove!,
     async open(input: { readonly workspaceId: WorkspaceId }) {
       const alreadyActive = registry.activeWorkspaceId === input.workspaceId;
       const runtimeBound = activeComposition?.status === "ready";

@@ -62,10 +62,19 @@ export async function createRemoteHost(options: RemoteHostOptions): Promise<Remo
   let cwd = registry.activeWorkspaceId ? registry.get(registry.activeWorkspaceId)?.canonicalPath : undefined;
   let composition: DesktopHostComposition | undefined;
   const offWorkspace = runtimes.attachWorkspaceSink?.(workspace => { cwd = workspace.cwd; });
-  const workspaces = createOmpWorkspaceService({ registry, pickDirectory, onActivated: async stored => {
-    cwd = stored.canonicalPath;
-    await composition?.rebindWorkspace({ workspaceId: stored.workspaceId, cwd }, { launchIfMissing: false });
-  } });
+  const workspaces = createOmpWorkspaceService({
+    registry,
+    pickDirectory,
+    onActivated: async stored => {
+      cwd = stored.canonicalPath;
+      await composition?.rebindWorkspace({ workspaceId: stored.workspaceId, cwd }, { launchIfMissing: false });
+    },
+    onDeactivated: async () => {
+      cwd = undefined;
+      await composition?.rebindWorkspace(undefined);
+    },
+    deleteWorkspaceSessions: path => composition!.deleteWorkspaceSessions!(path),
+  });
   const { key: authorityKey, liveness } = remoteAuthority(stateDirectory);
   const unavailable = async (): Promise<never> => { throw new Error("Desktop system actions are unavailable on this remote Host"); };
   const port: PlatformPort = {

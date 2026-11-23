@@ -199,10 +199,10 @@ interface ResidentRuntime {
   sessionId: string;
   /**
    * The workspace this Worker was spawned under. A Runtime process binds its
-   * cwd at spawn time (`--cwd`), so this never changes for a resident: opening
-   * another project selects (or launches) a different Worker instead.
+   * cwd at spawn time (`--cwd`). Re-registering that directory can assign a
+   * new registry ID to the same Worker without changing its cwd.
    */
-  readonly workspace: { workspaceId: string; cwd: string };
+  workspace: { workspaceId: string; cwd: string };
   port: DesktopRuntimeSessionPort;
   session: DesktopRuntimeSession;
   stopping: boolean;
@@ -800,14 +800,16 @@ export function createDesktopRuntimeSessionPort(
     }
   }
 
-  async function synchronizeApprovalMode(mode: ApprovalMode): Promise<{
+  async function synchronizeApprovalMode(mode: ApprovalMode, source?: DesktopRuntimeSession): Promise<{
     mode: ApprovalMode;
     syncStatus: "complete" | "partial";
     appliedSessions: number;
     failedSessions: number;
   }> {
-    const current = activeSessionId === undefined ? undefined : residents.get(activeSessionId);
-    if (current === undefined && residents.size === 0) {
+    const current = (source && [...residents.values()].find(resident => resident.session === source))
+      ?? (activeSessionId === undefined ? undefined : residents.get(activeSessionId))
+      ?? residents.values().next().value;
+    if (current === undefined) {
       throw new Error("No Runtime session is available for an approval mode change");
     }
     let appliedSessions = 0;
@@ -860,7 +862,10 @@ export function createDesktopRuntimeSessionPort(
 
   return {
     supportsConcurrentSessions: true,
-    sessionFor(sessionId) { return residents.get(sessionId)?.session; },
+    sessionFor(sessionId, workspaceId) {
+      const resident = residents.get(sessionId);
+      return workspaceId === undefined || resident?.workspace.workspaceId === workspaceId ? resident?.session : undefined;
+    },
     synchronizeSessionIdentity(session) {
       return serialized(async () => {
         const resident = [...residents.values()].find(row => row.session === session && !row.stopping);
@@ -1107,6 +1112,17 @@ export function createDesktopRuntimeSessionPort(
         // being left: they keep their Bridge, their lease and any running
         // turn. Switching back later re-selects a live Worker instead of
         // paying a cold start.
+        if (next === undefined) {
+          workspace = undefined;
+          activeSessionId = undefined;
+          rememberUnavailable(undefined);
+          rememberDisconnect(undefined);
+          emitResidents();
+          return undefined;
+        }
+        for (const resident of residents.values()) {
+          if (resident.workspace.cwd === next.cwd) resident.workspace = next;
+        }
         adoptWorkspace(next);
         const resident = residentsOfWorkspace(next.workspaceId).find(
           (candidate) => candidate.session.hello() !== undefined,
@@ -1161,13 +1177,13 @@ export function createDesktopRuntimeSessionPort(
         return await launchWorker(undefined, undefined, intent.model, intent.noContextFiles);
       });
     },
-    async applyApprovalMode(mode: ApprovalMode): Promise<{
+    async applyApprovalMode(mode: ApprovalMode, source?: DesktopRuntimeSession): Promise<{
       mode: ApprovalMode;
       syncStatus: "complete" | "partial";
       appliedSessions: number;
       failedSessions: number;
     }> {
-      return await serialized(() => synchronizeApprovalMode(mode));
+      return await serialized(() => synchronizeApprovalMode(mode, source));
     },
     isResident(sessionId: string): boolean {
       return residents.has(sessionId);
@@ -1785,7 +1801,7 @@ function createSingleDesktopRuntimeSessionPort(
       return serialized(() => stopCurrent("host-stop"));
     },
 
-    rebind(next: { workspaceId: string; cwd: string }): Promise<DesktopRuntimeSession | undefined> {
+    rebind(next: { workspaceId: string; cwd: string } | undefined): Promise<DesktopRuntimeSession | undefined> {
       return serialized(async () => {
         log?.write("info", "runtime.rebind", `generation=${generation}`);
         stopping = false;
@@ -1793,7 +1809,7 @@ function createSingleDesktopRuntimeSessionPort(
         await stopCurrent("replace");
         resumeSessionId = undefined;
         workspace = next;
-        return await launch();
+        return next === undefined ? undefined : await launch();
       });
     },
 

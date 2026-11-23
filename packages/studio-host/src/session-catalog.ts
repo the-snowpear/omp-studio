@@ -63,6 +63,7 @@ export interface SessionCatalogOptions {
    */
   allowedCwd?: string;
   /** Find this exact id across registered workspaces in one catalog scan. */
+  includeEmptySessions?: boolean;
   locate?: { readonly sessionId: string; readonly workspaces: readonly { workspaceId: string; canonicalPath: string }[] };
   /** Includes ordinary/unmarked OMP CLI sessions and unknown future origins. */
   includeCliSessions?: boolean;
@@ -138,7 +139,7 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
     if (metadata.size > maxSessionBytes) return { note: "OVERSIZE_SKIPPED" };
     const header = await cachedSessionHeader(file, metadata, archived ? prefixBytes : Math.min(prefixBytes, metadata.size), maxSessionBytes);
     if (header === undefined) return { note: "CORRUPT_SKIPPED" };
-    if (!header.hasConversationMessage) return {};
+    if (!header.hasConversationMessage && options.includeEmptySessions !== true) return {};
     if (lookup && header.id !== lookup.sessionId) return {};
     const workspaceId = header.cwd === undefined ? undefined : workspaceIds?.get(workspacePathKey(header.cwd));
     if (lookup && workspaceId === undefined) return {};

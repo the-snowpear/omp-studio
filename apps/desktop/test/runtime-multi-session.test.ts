@@ -192,7 +192,8 @@ test("opening background conversation contexts preserves foreground and each wor
     const second = await port.openContextSession!(WORKSPACE_B, { kind: "resume", sessionId: "context-b" });
     assert.equal(port.listResidents!().activeSessionId, active);
     assert.equal(port.sessionFor!("context-a"), first);
-    assert.equal(port.sessionFor!("context-b"), second);
+    assert.equal(port.sessionFor!("context-b", WORKSPACE_B.workspaceId), second);
+    assert.equal(port.sessionFor!("context-b", WORKSPACE_A.workspaceId), undefined);
     assert.equal(await port.openContextSession!(WORKSPACE_A, { kind: "resume", sessionId: "context-a" }), first);
     assert.equal(state.launchedIn.find(row => row.sessionId === "context-b")?.cwd, WORKSPACE_B.cwd);
     assert.equal(state.stopped.length, 0);
@@ -942,6 +943,19 @@ test("applyApprovalMode persists on the active Runtime and overrides siblings", 
   assert.deepEqual(bySession["session-b"], { kind: "permissions.mode.set", mode: "write", persist: true });
   assert.deepEqual(bySession["fresh-1"], { kind: "permissions.mode.set", mode: "write", persist: false });
   await port.stop();
+});
+
+test("an approval setting from a scoped conversation persists without a foreground Runtime", async () => {
+  const { port, state } = createHarness();
+  try {
+    await port.start(context);
+    await port.rebind!(undefined, { launchIfMissing: false });
+    const source = await port.openContextSession!(WORKSPACE_B, { kind: "fresh" });
+    assert.equal(port.listResidents!().activeSessionId, undefined);
+    await port.applyApprovalMode!("write", source);
+    assert.deepEqual(state.invokes.find(entry => entry.sessionId === "fresh-2")?.operation,
+      { kind: "permissions.mode.set", mode: "write", persist: true });
+  } finally { await port.stop(); }
 });
 
 test("applyApprovalMode reports partial when a sibling fails and stops that Worker", async () => {

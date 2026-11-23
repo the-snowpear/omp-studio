@@ -97,7 +97,10 @@ export function createConversationClient(open: () => Promise<{ client: StudioCli
       }
       const epoch = project?.owner.epoch;
       const result = await measureSessionOperation(`query.${name}.request`, async () => {
-        if (project && isProjectRead(name) && !(allowRootProject && !owned && name === "projects.list")) return project.read(name, input);
+        // Active-project flags and unscoped history follow the requesting conversation.
+        const useProjectCache = name !== "projects.list"
+          && (name !== "history.list" || (input as { workspaceId?: string }).workspaceId !== undefined);
+        if (project && useProjectCache && isProjectRead(name)) return project.read(name, input);
         const foreground = project && (name === "session.transcript.readPage" || name === "conversation.open") ? project.owner : undefined;
         if (foreground) foreground.foreground++;
         try { return await target.query(name, input); }

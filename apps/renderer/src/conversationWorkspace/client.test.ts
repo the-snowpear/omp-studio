@@ -40,6 +40,26 @@ describe("conversation resource lifetime", () => {
       await vi.runAllTimersAsync(); vi.useRealTimers();
     }
   });
+  it("reads the current project selection and unscoped history from a retargeted conversation", async () => {
+    const root = target(), original = target(), conversation = target();
+    const first = "first-project" as never, second = "second-project" as never;
+    Object.assign(root, { openContext: vi.fn(async () => original) });
+    const shared = acquireProjectReads(root, first);
+    vi.mocked(original.query).mockImplementation(async name =>
+      (name === "projects.list" ? { workspaces: [], activeWorkspaceId: first } : { entries: [], total: 0 }) as never);
+    const currentHistory = { entries: [contractFixtures.queryResponses["history.list"]], total: 1 };
+    vi.mocked(conversation.query).mockImplementation(async name =>
+      (name === "projects.list" ? { workspaces: [], activeWorkspaceId: second } : currentHistory) as never);
+    const client = createConversationClient(async () => ({ client: conversation, owned: true, project: shared.reads, releaseProject: shared.release }));
+    try {
+      expect((await client.query("projects.list", {})).activeWorkspaceId).toBe(second);
+      expect(await client.query("history.list", { limit: 10 })).toEqual(currentHistory);
+      expect(await client.query("history.list", { limit: 10, workspaceId: first })).toEqual({ entries: [], total: 0 });
+    } finally {
+      await client.close();
+    }
+  });
+
   it("warms the startup project without creating a conversation or closing the root client", async () => {
     vi.useFakeTimers();
     const root = target(), project = target();

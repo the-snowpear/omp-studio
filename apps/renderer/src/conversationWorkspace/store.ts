@@ -249,6 +249,23 @@ export class ConversationWorkspaceStore {
       this.publish();
     });
   }
+  removeProjectViews(targetId: string | null, workspaceId: string, nextWorkspaceId: string | undefined) {
+    const ids = new Set(this.metadata.documents
+      .filter(({ ref }) => ref.targetId === targetId && ref.workspaceId === workspaceId)
+      .map(document => document.id));
+    if (ids.size === 0) return;
+    this.batch(() => {
+      if (this.metadata.activeDocumentId && ids.has(this.metadata.activeDocumentId)) {
+        const survivor = this.state.views.find(view => !ids.has(view.documentId) && !view.minimized);
+        if (survivor) this.focus(survivor.id);
+        else this.open({ targetId, workspaceId: nextWorkspaceId, draftId: nextWorkspaceId ? crypto.randomUUID() : "initial" });
+      }
+      for (const view of this.state.views) if (ids.has(view.documentId)) this.close(view.id);
+      for (const id of ids) this.closedDocuments.add(id);
+      this.pruneClosedDocuments();
+      this.publish();
+    });
+  }
   recordPreviewDeletion(ids: readonly string[]) {
     this.deletedPreviewSessions = new Set([...this.deletedPreviewSessions, ...ids]);
     this.publish(false);

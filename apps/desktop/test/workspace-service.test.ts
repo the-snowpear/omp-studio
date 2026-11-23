@@ -145,10 +145,12 @@ test("remove drops one record and re-activates the surviving workspace", async (
     const a = await registry.upsertByPath(dirA, "2026-08-14T00:00:00.000Z");
     const b = await registry.upsertByPath(dirB, "2026-08-14T01:00:00.000Z");
     const activated: StoredWorkspace[] = [];
+    let deactivated = false;
     const service = createOmpWorkspaceService({
       registry,
       pickDirectory: async () => undefined,
       onActivated: async (stored) => { activated.push(stored); },
+      onDeactivated: async () => { deactivated = true; },
     });
 
     const model = await service.remove!({ workspaceId: b.workspaceId as WorkspaceId });
@@ -161,7 +163,10 @@ test("remove drops one record and re-activates the surviving workspace", async (
     assert.equal(activated[0]!.canonicalPath, await canonicalWorkspacePath(dirA));
     // The directory itself is untouched.
     assert.ok(existsSync(dirB));
-    await assert.rejects(() => service.remove!({ workspaceId: "nope" as WorkspaceId }), /unknown workspace id/u);
+    await assert.rejects(() => service.remove!({ workspaceId: "nope" as WorkspaceId }), /Project record no longer exists/u);
+    const empty = await service.remove!({ workspaceId: a.workspaceId as WorkspaceId });
+    assert.deepEqual(empty, { workspaces: [] });
+    assert.equal(deactivated, true);
   } finally {
     await rm(profile, { recursive: true, force: true });
   }
@@ -216,14 +221,13 @@ test("remove keeps the record when the session sweep fails (no half-removed proj
       registry,
       pickDirectory: async () => undefined,
       onActivated: async () => undefined,
-      deleteWorkspaceSessions: async () => { throw new Error("Session cleanup is not available on this Host"); },
+      deleteWorkspaceSessions: async () => ({ deleted: 1, warnings: 1 }),
     });
 
-    // The sweep throws before the record is removed, so the command fails and
-    // the project stays in the list (retryable).
+    // Partial deletion leaves the project available to inspect and retry.
     await assert.rejects(
       () => service.remove!({ workspaceId: b.workspaceId as WorkspaceId, deleteSessions: true }),
-      /Session cleanup is not available/u,
+      /Deleted 1 sessions.*incomplete for 1/u,
     );
     assert.equal(registry.list().length, 2);
     assert.ok(registry.get(b.workspaceId) !== undefined);

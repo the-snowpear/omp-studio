@@ -4894,21 +4894,57 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   letter-spacing: 0.12em;
 }
 .create-project-body { padding: 0 var(--sp-24) var(--sp-8); }
-.remove-project-sessions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: var(--sp-12);
-  color: var(--text-muted);
-  font-size: var(--fs-13);
-  cursor: pointer;
-  user-select: none;
+.create-project-modal.project-removal-dialog {
+  width: min(540px, calc(100vw - var(--sp-32)));
 }
-.remove-project-sessions input[type="checkbox"] {
+.project-removal-options {
+  display: grid;
+  gap: var(--sp-8);
+  min-inline-size: 0;
   margin: 0;
-  accent-color: var(--accent);
+  padding: 0;
+  border: 0;
 }
-.remove-project-sessions input[type="checkbox"]:disabled { cursor: default; }
+.project-removal-options legend {
+  margin-bottom: var(--sp-8);
+  color: var(--text);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+}
+.project-removal-option {
+  --choice-color: var(--accent);
+  display: grid;
+  grid-template-columns: auto 32px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-12);
+  padding: var(--sp-12);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  cursor: pointer;
+}
+.project-removal-option.danger { --choice-color: var(--red); }
+.project-removal-option:has(input:checked),
+.project-removal-option:focus-within {
+  border-color: color-mix(in srgb, var(--choice-color) 52%, var(--border));
+  background: color-mix(in srgb, var(--choice-color) 7%, var(--surface));
+}
+.project-removal-option:has(input:disabled) { cursor: default; }
+.project-removal-option input { margin: 0; accent-color: var(--choice-color); }
+.project-removal-option-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-8);
+  color: var(--choice-color);
+  background: color-mix(in srgb, var(--choice-color) 12%, var(--surface));
+}
+.project-removal-option strong,
+.project-removal-option small { display: block; line-height: 1.4; }
+.project-removal-option strong { color: var(--text); font-size: var(--fs-13); }
+.project-removal-option small { margin-top: 2px; color: var(--text-muted); font-size: var(--fs-12); }
+.project-removal-dialog .create-project-error { margin-top: var(--sp-12); }
+.project-removal-dialog .create-project-foot { flex-wrap: wrap; }
 .create-project-name {
   display: flex;
   align-items: stretch;

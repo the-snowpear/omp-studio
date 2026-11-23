@@ -48,7 +48,7 @@ export interface DesktopHostComposition {
    * port has no `rebind` seam.
    */
   rebindWorkspace(
-    workspace: { workspaceId: string; cwd: string },
+    workspace: { workspaceId: string; cwd: string } | undefined,
     options?: { readonly launchIfMissing?: boolean },
   ): Promise<void>;
   /** Main-only reversible native extension gate; never used by forced teardown. */

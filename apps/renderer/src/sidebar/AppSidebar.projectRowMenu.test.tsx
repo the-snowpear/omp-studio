@@ -68,6 +68,7 @@ function baseChrome(extra: Record<string, unknown> = {}) {
     onRemoveProject: vi.fn(),
     onSelectProject: vi.fn(),
     onOpenTerminalPanel: vi.fn(),
+    onOpenProjectTerminal: vi.fn(),
     ...extra,
   } as unknown as ComponentProps<typeof AppSidebar>["chrome"];
 }
@@ -182,8 +183,7 @@ describe("AppSidebar project row more menu", () => {
 
     // 终端项 = 先切到该项目再开终端页签（终端面板跟随当前项目）。
     fireEvent.click(terminal);
-    expect(chrome.onSelectProject).toHaveBeenCalledWith({ id: workspaceId, name: "omp-studio" });
-    expect(chrome.onOpenTerminalPanel).toHaveBeenCalled();
+    expect(chrome.onOpenProjectTerminal).toHaveBeenCalledWith({ id: workspaceId, name: "omp-studio" });
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
@@ -205,7 +205,7 @@ describe("AppSidebar project row more menu", () => {
     // 演示行点击不触达真实 shell 动作。
     expect(chrome.onOpenProjectInEditor).not.toHaveBeenCalled();
     expect(chrome.onOpenProjectDirectory).not.toHaveBeenCalled();
-    expect(chrome.onOpenTerminalPanel).not.toHaveBeenCalled();
+    expect(chrome.onOpenProjectTerminal).not.toHaveBeenCalled();
     expect(chrome.onRemoveProject).not.toHaveBeenCalled();
   });
 

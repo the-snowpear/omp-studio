@@ -39,10 +39,10 @@ export interface OmpWorkspaceAdapterOptions {
   readonly pickDirectory: () => Promise<string | undefined>;
   /** Desktop uses this to restart the Runtime under the new workspace cwd. */
   readonly onActivated?: (workspace: StoredWorkspace) => Promise<void>;
+  readonly onDeactivated?: () => Promise<void>;
   /**
    * Bulk-delete every session recorded under a working directory, used when a
-   * workspace is removed with `deleteSessions`. Absent = the Host cannot sweep
-   * sessions (the workspace record is still removed).
+   * workspace is removed with `deleteSessions`.
    */
   readonly deleteWorkspaceSessions?: (cwd: string) => Promise<{ readonly deleted: number; readonly warnings: number }>;
   readonly now?: () => string;
@@ -78,6 +78,7 @@ export function createOmpWorkspaceService(options: OmpWorkspaceAdapterOptions): 
     await options.onActivated(stored);
   };
 
+  let removal: Promise<unknown> = Promise.resolve();
   return {
     async list(): Promise<WorkspaceListReadModel> {
       const previous = options.registry.activeWorkspaceId;
@@ -95,20 +96,33 @@ export function createOmpWorkspaceService(options: OmpWorkspaceAdapterOptions): 
       return toModel(options.registry);
     },
 
-    async remove(input: { readonly workspaceId: WorkspaceId; readonly deleteSessions?: boolean }): Promise<WorkspaceListReadModel> {
-      const stored = options.registry.get(input.workspaceId);
-      // Sweep sessions before the record is removed: if the sweep fails (the
-      // Host cannot clean sessions), the record stays intact so the command
-      // fails cleanly instead of leaving a removed project with stranded
-      // sessions. `stored` is read first for its canonical cwd.
-      if (input.deleteSessions === true && options.deleteWorkspaceSessions !== undefined && stored !== undefined) {
-        await options.deleteWorkspaceSessions(stored.canonicalPath);
-      }
-      const previous = options.registry.activeWorkspaceId;
-      await options.registry.remove(input.workspaceId);
-      const active = options.registry.activeWorkspaceId;
-      if (active !== undefined && active !== previous) await activate(options.registry.get(active)!);
-      return toModel(options.registry);
+    remove(input): Promise<WorkspaceListReadModel> {
+      const pending = removal.then(async () => {
+        const stored = options.registry.get(input.workspaceId);
+        if (stored === undefined) throw new Error(hostText("项目记录已不存在", "Project record no longer exists"));
+        if (input.deleteSessions === true) {
+          if (!options.deleteWorkspaceSessions) {
+            throw new Error(hostText("此 Host 无法删除项目会话", "Session cleanup is not available on this Host"));
+          }
+          const { deleted, warnings } = await options.deleteWorkspaceSessions(stored.canonicalPath);
+          if (warnings > 0) {
+            throw new Error(hostText(
+              `已删除 ${deleted} 条会话，${warnings} 条未能完成删除或清理。项目仍在列表中。`,
+              `Deleted ${deleted} sessions. Deletion or cleanup was incomplete for ${warnings}. The project is still in the list.`,
+            ));
+          }
+        }
+        const previous = options.registry.activeWorkspaceId;
+        await options.registry.remove(input.workspaceId);
+        const active = options.registry.activeWorkspaceId;
+        if (active !== previous) {
+          if (active === undefined) await options.onDeactivated?.();
+          else await activate(options.registry.get(active)!);
+        }
+        return toModel(options.registry);
+      });
+      removal = pending.catch(() => undefined);
+      return pending;
     },
 
     async open(input: { readonly workspaceId: WorkspaceId }): Promise<WorkspaceListReadModel> {
