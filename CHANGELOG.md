@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 模型选择器显示完整模型名称和标识。 [#69](https://github.com/the-snowpear/omp-studio/issues/69)
 - Bash 工具卡片在收到结果后结束加载状态。 [#70](https://github.com/the-snowpear/omp-studio/issues/70)
 - 修复切换项目后会话归属、SSH 连接状态及中断下载的处理。
+- 修复 Windows 安装向导偶尔读不到已完成安装的目录。
 
 ## [0.2.9] - 2026-11-22
 

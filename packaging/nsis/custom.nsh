@@ -352,10 +352,12 @@ FunctionEnd
 
   Function ompWriteDone
     Push $R9
-    FileOpen $R9 "$PLUGINSDIR\done.ini" w
+    ; The wizard polls for done.ini, so make it visible after writing the path.
+    FileOpen $R9 "$PLUGINSDIR\done.ini.tmp" w
     FileWriteUTF16LE /BOM $R9 "[Install]$\r$\n"
     FileClose $R9
-    WriteINIStr "$PLUGINSDIR\done.ini" "Install" "InstDir" "$INSTDIR"
+    WriteINIStr "$PLUGINSDIR\done.ini.tmp" "Install" "InstDir" "$INSTDIR"
+    Rename "$PLUGINSDIR\done.ini.tmp" "$PLUGINSDIR\done.ini"
     Pop $R9
   FunctionEnd
 
