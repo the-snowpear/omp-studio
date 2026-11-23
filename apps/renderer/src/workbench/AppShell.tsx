@@ -1,4 +1,5 @@
 import { revealWorkspaceFile } from "../fileBrowser/fileBrowserLinks";
+import { pickProject as chooseHostProject } from "../web/chooseProject";
 import { useWorkspaceFileActions } from "../files/useWorkspaceFileActions";
 import { ConversationTitleSurface, SharedSurface, useConversationView, useConversationDom } from "../conversationWorkspace/Context";
 import { invalidateProjectHistoryReads } from "../conversationWorkspace/projectReads";
@@ -978,10 +979,11 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     const generation = navigationGate.next();
     try {
       const result = await workspaceActionQueue.enqueue(async () => {
-        const handle = await client.command("workspace.pick", {});
+        const handle = await chooseHostProject(client);
+        if (!handle) return undefined;
         return await waitReceipt<WorkspaceListReadModel>(client, handle.requestId, null);
       });
-      if (!navigationGate.isCurrent(generation)) return;
+      if (!navigationGate.isCurrent(generation) || !result) return;
       onWorkspacesChange(result);
       const active = result.workspaces.find((workspace) => workspace.active);
       if (active) {

@@ -4,11 +4,19 @@ OMP Studio is a desktop console in front of a **patched OMP Runtime**. The
 GUI does not parse TUI text, ANSI, or key macros. Control goes through a
 typed Studio Bridge.
 
+The shared Host runs in a separate Node process. Desktop attaches through an
+authenticated current-user pipe or Unix socket, while the Web workbench uses
+paired HTTP/WebSocket sessions. Both paths use the same facade, Runtime pool,
+workspace registry, artifact writer and terminals. Each view owns its selection
+and subscriptions. Host control versions fence writes when the user transfers
+control between devices. Closing a client releases its views while Host-owned
+work continues. See [Web workbench](web-ui.md) for operation and deployment.
+
 ```
 Renderer (apps/renderer)
   → @omp-studio/client          StudioClient + conversation reducer
   → transport-desktop           preload `window.ompStudio`
-  → apps/desktop                ipc.ts
+  → apps/desktop                ipc.ts → shared Host private channel
   → @omp-studio/host-client-api product facade
         ├─ Host-owned: session catalog, archive, models.yml,
         │              skills scan, git, workspace registry, system files

@@ -10,6 +10,7 @@ Public documentation for OMP Studio.
 | [linux.md](linux.md) | Linux AppImage / deb 安装、更新、沙箱、源码开发与原生包验收 |
 | [settings.md](settings.md) | 设置分类、搜索与 Runtime 保存范围 |
 | [mobile-access.md](mobile-access.md) | 手机访问的证书信任、扫码配对、会话与审批 / Mobile setup and pairing |
+| [web-ui.md](web-ui.md) | 独立 Web 工作台、局域网 HTTPS、共享 Host 与设备控制 / Standalone Web workbench and shared Host |
 | [time-travel.md](time-travel.md) | Time Travel 开启、检查点、代码/对话恢复、存储与限制 |
 | [ssh-workspaces.md](ssh-workspaces.md) | SSH 工作区连接、签名运行环境、远端文件与终端、断线恢复 |
 | [wsl-workspaces.md](wsl-workspaces.md) | Windows WSL 2 工作区、项目文件、本机编辑器和连接恢复 |

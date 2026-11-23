@@ -54,6 +54,39 @@ test('health contains no sensitive details', async () => {
   const r = await fetch(`http://127.0.0.1:${server.address().port}/health`); assert.deepEqual(await r.json(), { ok: true, protocolVersion: 1 }); server.close();
 });
 
+test('a dropped browser stream reconnects its context without replaying a command', async () => {
+  const sockets = [];
+  const calls = [];
+  const connection = [];
+  const transport = new BrowserWebClientTransport({
+    baseUrl: 'http://localhost', contextId: 'existing',
+    mobile: { onDisconnect() {} }, onRecovered() {},
+    fetcher: async (url, init) => {
+      calls.push([url, init?.method]);
+      if (url.endsWith('/api/v1/session')) return Response.json({ csrf: 'restored', expiresAt: Date.now() + 10000 });
+      return Response.json({ contractVersion: 2, selected: {} });
+    },
+    webSocketFactory: () => {
+      const socket = { send() {}, close() { this.onclose?.(); } };
+      sockets.push(socket);
+      queueMicrotask(() => socket.onmessage?.({ data: JSON.stringify({ kind: 'mobile.ready' }) }));
+      return socket;
+    },
+  });
+  transport.onConnectionChange(connected => connection.push(connected));
+  const off = transport.subscribe({ scope: 'all' }, () => {});
+  await transport.bootstrap();
+  sockets[0].onclose();
+  await assert.rejects(transport.command({ commandName: 'core.prompt', input: { text: 'pending' } }), /connection_lost/);
+  transport.reconnect();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(connection, [false, true]);
+  assert.equal(sockets.length, 2);
+  assert.equal(calls.filter(([url]) => url.endsWith('/api/v1/command')).length, 0);
+  off();
+  await transport.close();
+});
+
 test('a paired browser can bootstrap with a normal same-origin GET without an Origin header', async t => {
   const origins = ['http://localhost'];
   const adapter = new LoopbackWebAdapter({ host: host(), origins, pairingCode: '1234' });

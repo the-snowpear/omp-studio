@@ -331,6 +331,7 @@ if (suites.length && !buildFailed) await pool(suites, failures);
 if (plan.production && !buildFailed) {
   const steps = [
     { name: "bundle:renderer", command: process.execPath, args: [viteBin, "build"], cwd: join(root, "apps", "renderer") },
+    { name: "bundle:web-host", command: process.execPath, args: [join(root, "scripts", "bundle-web-host.mjs")] },
     {
       name: "bundle:remote-host",
       command: process.execPath,

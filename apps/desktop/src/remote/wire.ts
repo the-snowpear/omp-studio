@@ -8,8 +8,8 @@ export const REMOTE_PROTOCOL_VERSION = 3;
 const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 const MAX_BUFFERED_BYTES = 32 * 1024 * 1024;
 const WIRE_EPOCH = 1 as RuntimeEpoch;
-export type RemoteMethod = "context.open" | "context.close" | "hello" | "ping" | "bootstrap" | "query" | "command" | "subscribe" | "workspace.register" | "workspace.path" | "directories" | "shutdown" | "network.open" | "network.configure" | "network.reset" | "provisioning.apply" | "memory.credentials.replace" | "timeTravel.settings.sync" | "desktop.language.set";
-const METHODS = new Set<RemoteMethod>(["context.open", "context.close", "hello", "ping", "bootstrap", "query", "command", "subscribe", "workspace.register", "workspace.path", "directories", "shutdown", "network.open", "network.configure", "network.reset", "provisioning.apply", "memory.credentials.replace", "timeTravel.settings.sync", "desktop.language.set"]);
+export type RemoteMethod = "host.call" | "context.open" | "context.close" | "hello" | "ping" | "bootstrap" | "query" | "command" | "subscribe" | "workspace.register" | "workspace.path" | "directories" | "shutdown" | "network.open" | "network.configure" | "network.reset" | "provisioning.apply" | "memory.credentials.replace" | "timeTravel.settings.sync" | "desktop.language.set";
+const METHODS = new Set<RemoteMethod>(["host.call", "context.open", "context.close", "hello", "ping", "bootstrap", "query", "command", "subscribe", "workspace.register", "workspace.path", "directories", "shutdown", "network.open", "network.configure", "network.reset", "provisioning.apply", "memory.credentials.replace", "timeTravel.settings.sync", "desktop.language.set"]);
 export interface RemoteAttachment { key: string; sequence: number; }
 export class RemoteOperationError extends Error {}
 export class RemoteRequestTimeout extends Error {

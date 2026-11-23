@@ -118,6 +118,7 @@ export interface CommandOptions {
  * interface in P1/P2. Envelopes are the semantic request/response shapes.
  */
 export interface ClientTransport {
+  onConnectionChange?(listener: (connected: boolean) => void): Unsubscribe;
   readonly supportsContexts?: boolean;
   /** An independent projection over the same Host and resident Runtime pool. */
   openContext?(scope: ClientContextScope): Promise<ClientTransport>;

@@ -6,6 +6,29 @@ import { createDesktopApplication } from "../src/composition.js";
 import type { DesktopHostComposition } from "../src/types.js";
 import { startAppNapGuard } from "../src/platform/app-nap.js";
 
+test("final desktop exit waits for confirmation, output flush and Host detachment", async () => {
+  const events: string[] = [];
+  let detach!: () => void;
+  const detached = new Promise<void>(resolve => { detach = resolve; });
+  const app = createDesktopApplication({
+    hostFactory: { create: async () => ({ status: "ready", isBusy: () => false,
+      shutdown: async () => { events.push("detach"); await detached; },
+    }) as DesktopHostComposition },
+    createWindow: async () => ({ show() {}, focus() {}, close() {}, dispose() { events.push("dispose"); } }),
+    requestSingleInstanceLock: () => true, onSecondInstance() {}, onBeforeQuit() {}, onAllWindowsClosed() {},
+    confirmBeforeQuit: async () => { events.push("confirm"); return true; },
+    beforeShutdown: async () => { events.push("flush"); },
+    quit: () => { events.push("exit"); },
+  });
+  await app.start();
+  const quitting = app.quit();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(events, ["confirm", "dispose", "flush", "detach"]);
+  detach();
+  await quitting;
+  assert.deepEqual(events, ["confirm", "dispose", "flush", "detach", "exit"]);
+});
+
 for (const platform of ["win32", "linux"] as const) test(`${platform}: closing asks to save before destroying the window and stopping Host`, async () => {
   const events: string[] = [];
   let allow = false;

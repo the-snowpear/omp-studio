@@ -16,6 +16,7 @@ const SOURCE_PATHS = [
 const REQUIRED_OUTPUTS = [
   "apps/renderer/dist/index.html", "apps/desktop/dist/src/main.js",
   "apps/desktop/dist/preload.cjs", "apps/desktop/dist/remote-host/host.json",
+  "apps/desktop/dist/web-host/host.mjs", "apps/renderer/dist/web.html",
   "apps/desktop/dist/ssh-askpass/omp-ssh-askpass.exe",
 ];
 

@@ -1080,7 +1080,7 @@ function assertCompositionOptions(options: DesktopCompositionOptions): void {
 }
 
 /** A view owns a projection and workspace, never the shared worker pool. */
-async function openSessionContext(root: FacadeContext, scope: import("@omp-studio/client-contract").ClientContextScope): Promise<ClientTransport> {
+async function openSessionContext(root: FacadeContext, scope?: import("@omp-studio/client-contract").ClientContextScope): Promise<ClientTransport & { readonly hasPendingCommands: boolean }> {
   await root.startup.ready();
   root.startup.assertOpen();
   const pool = root.runtimeSession;
@@ -1091,12 +1091,12 @@ async function openSessionContext(root: FacadeContext, scope: import("@omp-studi
     if (!cwd) throw new Error("Unknown workspace id");
     return { workspaceId, cwd };
   };
-  const workspace: FacadeContext["selectedWorkspace"] = { current: await resolveWorkspace(scope.workspaceId) };
+  const workspace: FacadeContext["selectedWorkspace"] = { current: scope ? await resolveWorkspace(scope.workspaceId) : root.selectedWorkspace.current };
   const sessionRef: FacadeContext["sessionRef"] = { current: undefined };
   const connectionChanges = new IsolatedForwarder<void>();
   const startup = new DesktopRuntimeStartup(() => connectionChanges.publish(undefined));
   const interaction = new DesktopInteractionHost(sessionRef);
-  let wanted = scope.sessionId as string | undefined;
+  let wanted = scope?.sessionId as string | undefined;
   let subscriptions: Array<() => void> = [];
   const bind = (session: DesktopRuntimeSession | undefined) => {
     if (session === sessionRef.current) return;
@@ -1214,6 +1214,7 @@ async function openSessionContext(root: FacadeContext, scope: import("@omp-studi
   bindResident();
   const offResidents = pool.attachResidentsSink?.(bindResident);
   return {
+    get hasPendingCommands() { return facade.hasPendingCommands; },
     async bootstrap() {
       if (root.seams.workspaces) await facade.query({ queryName: "projects.list", input: {} });
       const snapshot = await facade.bootstrap();
@@ -1227,7 +1228,14 @@ async function openSessionContext(root: FacadeContext, scope: import("@omp-studi
 }
 
 class DesktopHostCompositionImpl implements DesktopHostComposition {
-  readonly #contexts = new Set<ClientTransport>();
+  readonly #contexts = new Set<ClientTransport & { readonly hasPendingCommands: boolean }>();
+  async openView(): Promise<ClientTransport> {
+    const transport = await openSessionContext(this.#facadeContext);
+    this.#contexts.add(transport);
+    const close = transport.close.bind(transport);
+    transport.close = async () => { this.#contexts.delete(transport); await close(); };
+    return transport;
+  }
   #enableContexts(): void {
     Object.assign(this.#facade, { openContext: async (scope: import("@omp-studio/client-contract").ClientContextScope) => {
       const transport = await openSessionContext(this.#facadeContext, scope);
@@ -1453,6 +1461,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     if (this.#facadeContext.startup.pending) return desktopText("Runtime 正在准备，请完成后重启更新", "Runtime is starting up; wait until it finishes before restarting to update");
     if (this.#facade.runtimeInstallInProgress) return desktopText("Runtime 更新尚未完成，请完成后重启更新", "Runtime update is still in progress; wait until it finishes before restarting to update");
     if (this.#facade.hasPendingCommands) return desktopText("仍有命令未完成，请完成后重启更新", "Commands are still running; wait until they finish before restarting to update");
+    if ([...this.#contexts].some(context => context.hasPendingCommands)) return desktopText("仍有客户端操作未完成", "Client operations are still running");
     if (this.#runtimeSession?.updateRestartBlocker) return this.#runtimeSession.updateRestartBlocker();
     const residents = this.#runtimeSession?.listResidents?.().residents;
     if (residents?.some(row => row.phase === "running" || row.phase === "compacting")) return desktopText("任务仍在运行，请完成后重启更新", "Tasks are still running; wait until they finish before restarting to update");

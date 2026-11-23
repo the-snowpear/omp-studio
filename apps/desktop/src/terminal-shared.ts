@@ -30,6 +30,7 @@ export const TERMINAL_MAX_ROWS = 200;
 export const TERMINAL_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
 
 export interface TerminalCreateInput {
+  readonly sessionId?: string;
   readonly command?: TerminalCommand;
   readonly targetId?: string;
   readonly workspaceId?: string;
@@ -89,6 +90,7 @@ export function parseRecordingInput(value: unknown): TerminalRecordingInput {
 }
 
 export interface TerminalDataEvent {
+  readonly sequence?: number;
   readonly id: string;
   /** One batched payload: several PTY chunks joined in one IPC message. */
   readonly data: string;
@@ -140,20 +142,21 @@ export function parseSessionId(value: unknown, field: string): string {
   return value;
 }
 
-export function parseCreateInput(value: unknown): TerminalSize & { targetId?: string; workspaceId?: string; flowControl: boolean; command?: TerminalCommand } {
+export function parseCreateInput(value: unknown): TerminalSize & { targetId?: string; workspaceId?: string; sessionId?: string; flowControl: boolean; command?: TerminalCommand } {
   const input = value === undefined ? {} : value;
   assertPlainObject(input, "terminal create");
   for (const key of Object.keys(input)) {
-    if (key !== "cols" && key !== "rows" && key !== "targetId" && key !== "workspaceId" && key !== "flowControl" && key !== "command") {
+    if (key !== "cols" && key !== "rows" && key !== "targetId" && key !== "workspaceId" && key !== "sessionId" && key !== "flowControl" && key !== "command") {
       throw new TerminalIpcError(`terminal create: unexpected field ${key}`);
     }
   }
-  for (const key of ["targetId", "workspaceId"]) if (input[key] !== undefined && (typeof input[key] !== "string" || !input[key])) throw new TerminalIpcError(`Invalid ${key}`);
+  for (const key of ["targetId", "workspaceId", "sessionId"]) if (input[key] !== undefined && (typeof input[key] !== "string" || !input[key])) throw new TerminalIpcError(`Invalid ${key}`);
   if (input.flowControl !== undefined && typeof input.flowControl !== "boolean") throw new TerminalIpcError("Invalid flowControl");
   return {
     ...(input.command === undefined ? {} : { command: input.command as TerminalCommand }),
     ...(typeof input.targetId === "string" ? { targetId: input.targetId } : {}),
     ...(typeof input.workspaceId === "string" ? { workspaceId: input.workspaceId } : {}),
+    ...(typeof input.sessionId === "string" ? { sessionId: input.sessionId } : {}),
     flowControl: input.flowControl === true,
     cols: parseDimension(input.cols, "terminal create: cols", TERMINAL_MIN_COLS, TERMINAL_MAX_COLS, 80),
     rows: parseDimension(input.rows, "terminal create: rows", TERMINAL_MIN_ROWS, TERMINAL_MAX_ROWS, 24),
@@ -215,6 +218,9 @@ export function parseAckInput(value: unknown): TerminalAckInput {
 }
 
 export interface OmpStudioTerminalApi {
+  readonly persistent?: boolean;
+  list?(): Promise<import("./web/terminals.js").SharedTerminal[]>;
+  onSessions?(listener: (sessions: import("./web/terminals.js").SharedTerminal[]) => void): () => void;
   tmuxSessions?(input: TmuxSessionsInput): Promise<TmuxSessionsResult>;
   tmuxAttach?(input: TmuxAttachInput): Promise<TmuxAttachResult>;
   tmuxCommand?(input: TmuxCommandInput): Promise<void>;

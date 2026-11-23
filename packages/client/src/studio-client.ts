@@ -55,11 +55,16 @@ export class StudioClientImpl implements StudioClient {
   private readonly bufferedEvents: ClientEvent[] = [];
   private readonly listeners: RendererSubscription[] = [];
   private readonly stateListeners: Array<(state: ClientState) => void> = [];
+  private readonly offConnection: Unsubscribe | undefined;
 
   constructor(transport: ClientTransport, ids: ClientClockAndIds = createBrowserClockAndIds()) {
     this.transport = transport;
     this.ids = ids;
     this.state = createInitialClientState();
+    this.offConnection = transport.onConnectionChange?.(connected => {
+      if (connected) void this.bootstrap().catch(() => {});
+      else this.transportLost("Connection interrupted");
+    });
   }
 
   /** Current reducer state (client-side convenience; not in StudioClient). */
@@ -231,6 +236,7 @@ export class StudioClientImpl implements StudioClient {
       return;
     }
     this.closed = true;
+    this.offConnection?.();
     this.applyAction({ type: "close" });
     this.transportUnsubscribe?.();
     this.transportUnsubscribe = null;

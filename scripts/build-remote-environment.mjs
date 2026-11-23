@@ -11,6 +11,7 @@ import { REMOTE_PROTOCOL_VERSION } from "../apps/desktop/dist/src/remote/wire.js
 import { assertExecutableTarget, assertNativeTargetBuild, resolveTargetPlatform } from "./target-platform.mjs";
 import { readRuntimeSigningKeys } from "./runtime-signing-keys.mjs";
 import { defaultArtifactDirectory, deriveRuntimeVersion, readPatchSeries, readUpstreamVersion } from "./runtime-artifact.mjs";
+import { stageWebEnvironment } from "./stage-web-environment.mjs";
 
 export const PRIVATE_NODE_VERSION = "24.17.0";
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -66,6 +67,7 @@ export async function buildRemoteEnvironment(options = {}) {
     await mkdir(join(payload, "runtime"));
     for (const name of ["runtime-manifest.json", "runtime-signature.json", "checksums.json", verified.manifest.entrypoint]) await cp(join(runtime, name), join(payload, "runtime", name));
     if (os !== "win32") await chmod(join(payload, "runtime", verified.manifest.entrypoint), 0o755);
+    await stageWebEnvironment(payload, nodePath, platform);
     const asset = `omp-studio-remote-${appVersion}-${platform}.${os === "win32" ? "zip" : "tar.gz"}`;
     const file = join(output, asset);
     if (os === "win32") {

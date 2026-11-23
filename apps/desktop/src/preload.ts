@@ -124,6 +124,9 @@ contextBridge.exposeInMainWorld(
 import { TMUX_IPC_CHANNELS, type TmuxTopology } from "./tmux/tmux-shared.js";
 
 const terminalApi: OmpStudioTerminalApi = {
+  persistent: true,
+  list: () => ipcRenderer.invoke("omp-studio:shared-terminals:list"),
+  onSessions: listener => subscribeChannel(ipcRenderer, "omp-studio:shared-terminals", listener),
   tmuxSessions(input) { return ipcRenderer.invoke(TMUX_IPC_CHANNELS.sessions, input); },
   tmuxAttach(input) { return ipcRenderer.invoke(TMUX_IPC_CHANNELS.attach, input); },
   tmuxCommand(input) { return ipcRenderer.invoke(TMUX_IPC_CHANNELS.command, input); },
@@ -160,3 +163,14 @@ const terminalApi: OmpStudioTerminalApi = {
 };
 
 contextBridge.exposeInMainWorld("ompStudioTerminal", Object.freeze(terminalApi));
+
+contextBridge.exposeInMainWorld("ompStudioWebAccess", Object.freeze({
+  status: () => ipcRenderer.invoke("omp-studio:web-access", "status"),
+  takeControl: () => ipcRenderer.invoke("omp-studio:web-access", "take"),
+  pair: () => ipcRenderer.invoke("omp-studio:web-access", "pair"),
+  revoke: (id: string) => ipcRenderer.invoke("omp-studio:web-access", "revoke", { id }),
+  rename: (id: string, name: string) => ipcRenderer.invoke("omp-studio:web-access", "rename", { id, name }),
+  listen: (ip?: string) => ipcRenderer.invoke("omp-studio:web-access", "listen", { ip }),
+  exportCertificate: () => ipcRenderer.invoke("omp-studio:web-access", "certificate"),
+  onControl: (listener: (state: unknown) => void) => subscribeChannel(ipcRenderer, "omp-studio:web-control", listener),
+}));
