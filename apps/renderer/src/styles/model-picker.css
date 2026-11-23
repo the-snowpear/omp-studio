@@ -156,34 +156,16 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
+  overflow-wrap: anywhere;
 }
 .rms-option-copy b {
   font-size: var(--fs-12);
   font-weight: var(--fw-medium);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .rms-option-copy > span {
   font-family: var(--font-mono);
   font-size: var(--fs-11);
   color: var(--text-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.rms-option-copy > .rms-option-line,
-.cmp-role-copy > .rms-option-line {
-  container-type: inline-size;
-  text-overflow: clip;
-  mask-image: linear-gradient(to right, #000 calc(100% - var(--sp-12)), transparent);
-}
-.rms-option-scroll {
-  display: inline-block;
-}
-:is(.rms-option, .cmp-role):is(:hover, :focus-visible) .rms-option-scroll {
-  transform: translateX(min(100cqw - 100% - var(--sp-12), 0px));
-  transition: transform var(--dur-marquee) linear calc(var(--tip-delay) + var(--dur-slower));
 }
 .rms-option-caps {
   display: inline-flex;

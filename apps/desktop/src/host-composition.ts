@@ -297,10 +297,10 @@ export interface DesktopRuntimeSessionPort {
   isResident?(sessionId: string): boolean;
   /**
    * Abort a streaming turn if needed, stop that Worker, and launch a
-   * replacement when it was the active view. Background residents are
-   * stopped without changing the active binding.
+   * replacement when it was the active view, unless the workspace is being
+   * removed. Background residents leave the active binding alone.
    */
-  evacuateResident?(sessionId: string): Promise<{
+  evacuateResident?(sessionId: string, options?: { readonly replaceActive?: boolean }): Promise<{
     readonly found: boolean;
     readonly active?: DesktopRuntimeSession;
   }>;
@@ -904,11 +904,11 @@ function buildFacade(context: FacadeContext): { readonly facade: StudioHostClien
         : { applyApprovalMode: (mode) => context.runtimeSession!.applyApprovalMode!(mode, sessionRef.current) }),
       ...(context.runtimeSession?.evacuateResident === undefined
         ? {}
-        : { evacuateResident: (sessionId) => {
+        : { evacuateResident: (sessionId, options) => {
             // Evacuation talks to a live resident; it can be the only runtime
             // touch in a workspace that is about to be replaced.
             context.runtimeTouched.current = true;
-            return context.runtimeSession!.evacuateResident!(sessionId);
+            return context.runtimeSession!.evacuateResident!(sessionId, options);
           } }),
       supportsConcurrentSessions: context.runtimeSession?.supportsConcurrentSessions === true,
       bindSession: (session) => context.bindSession.current(session),

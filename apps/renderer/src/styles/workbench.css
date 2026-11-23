@@ -4566,7 +4566,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .cmp-role-alias { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-faint); }
 .cmp-role-copy > span {
   font-size: var(--fs-11); color: var(--text-3);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 .cmp-menu-sep { height: 1px; background: var(--border); margin: 4px 2px; flex: none; }
 /* Task 子代理模式切换行（对齐上游 alt+p 红色 Task 模式） */

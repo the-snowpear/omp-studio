@@ -780,6 +780,18 @@ test("evacuating the active Session publishes one atomic replacement handoff", a
   await port.stop();
 });
 
+test("deleting a project's active Session leaves its workspace without a replacement worker", async () => {
+  const { port, state } = createHarness();
+  await port.start(context);
+  await port.rebind?.(WORKSPACE_B);
+
+  assert.deepEqual(await port.evacuateResident?.("fresh-2", { replaceActive: false }), { found: true });
+  assert.equal(port.listResidents?.().activeSessionId, undefined);
+  assert.deepEqual(state.launchedIn.map(worker => worker.sessionId), ["fresh-1", "fresh-2"]);
+  assert.equal(port.isResident?.("fresh-1"), true);
+  await port.stop();
+});
+
 test("a failed active Session replacement still publishes the real empty state", async () => {
   const { port, state } = createHarness();
   await port.start(context); // fresh-1, epoch 1

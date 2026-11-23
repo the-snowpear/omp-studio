@@ -54,7 +54,7 @@
 </p>
 
 > [!NOTE]
-> **0.2.9** adds drag-and-drop references for chats and files, unifies subagent avatars, and fixes the project menu, Agent Deck, Worktree startup, and typing in Composer. It bundles Runtime `19.0.1-studio.1`. [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.9) · [Release notes](docs/releases/v0.2.9.md)
+> **0.2.10** adds project removal with a choice to keep or delete sessions, makes model names readable, and fixes Bash tool card completion and SSH recovery. It bundles Runtime `19.0.1-studio.1`. [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.10) · [Release notes](docs/releases/v0.2.10.md)
 
 <table>
 <tr>

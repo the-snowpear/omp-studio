@@ -62,8 +62,9 @@ export interface SessionCatalogOptions {
    * returned. The comparison is internal — `cwd` is never copied onto entries.
    */
   allowedCwd?: string;
-  /** Find this exact id across registered workspaces in one catalog scan. */
+  /** Include sessions with no conversation messages when sweeping a workspace. */
   includeEmptySessions?: boolean;
+  /** Find this exact id across registered workspaces in one catalog scan. */
   locate?: { readonly sessionId: string; readonly workspaces: readonly { workspaceId: string; canonicalPath: string }[] };
   /** Includes ordinary/unmarked OMP CLI sessions and unknown future origins. */
   includeCliSessions?: boolean;

@@ -254,6 +254,7 @@ test("deleteWorkspaceSessions sweeps active and archived sessions under a cwd, c
   const projectCwd = join(profile, "project");
   const previousAgentDir = process.env.OMP_AGENT_DIR;
   const attempted: string[] = [];
+  const evacuated: string[] = [];
   const artifacts: string[] = [];
   const telemetry: string[] = [];
   const unbound: ThreadId[] = [];
@@ -269,6 +270,11 @@ test("deleteWorkspaceSessions sweeps active and archived sessions under a cwd, c
     const commands = createDesktopSemanticCommands({
       ...baseOptions,
       sessionRef: { current: undefined },
+      evacuateResident: async (sessionId, evacuation) => {
+        assert.equal(evacuation?.replaceActive, false);
+        evacuated.push(sessionId);
+        return { found: true };
+      },
       makeDeleteService: (cwd) => {
         assert.equal(cwd, projectCwd);
         return {
@@ -291,6 +297,7 @@ test("deleteWorkspaceSessions sweeps active and archived sessions under a cwd, c
     const result = await commands.deleteWorkspaceSessions!(projectCwd);
     // Both sessions were enumerated (active + archived) and attempted.
     assert.deepEqual([...attempted].sort(), ["session-a", "session-b"]);
+    assert.deepEqual(evacuated, ["session-a"]);
     assert.equal(result.deleted, 1);
     assert.equal(result.warnings, 1);
     // Residue cleanup ran only for the session that actually deleted.

@@ -1188,7 +1188,7 @@ export function createDesktopRuntimeSessionPort(
     isResident(sessionId: string): boolean {
       return residents.has(sessionId);
     },
-    evacuateResident(sessionId: string): Promise<{ found: boolean; active?: DesktopRuntimeSession }> {
+    evacuateResident(sessionId, evacuation): Promise<{ found: boolean; active?: DesktopRuntimeSession }> {
       return serialized(async () => {
         const resident = residents.get(sessionId);
         if (resident === undefined) return { found: false };
@@ -1227,6 +1227,7 @@ export function createDesktopRuntimeSessionPort(
         sessionSink?.(undefined);
         try {
           await stopResident(resident);
+          if (evacuation?.replaceActive === false) return { found: true };
           adoptWorkspace(evacuatedWorkspace);
           const active = await launchWorker(undefined, evacuatedWorkspace);
           sessionSink?.(active);
@@ -1882,7 +1883,7 @@ function createSingleDesktopRuntimeSessionPort(
     isResident(sessionId: string): boolean {
       return bundle?.controller.publication()?.snapshot?.sessionId === sessionId;
     },
-    evacuateResident(sessionId: string): Promise<{ found: boolean; active?: DesktopRuntimeSession }> {
+    evacuateResident(sessionId, evacuation): Promise<{ found: boolean; active?: DesktopRuntimeSession }> {
       return serialized(async () => {
         const snapshot = bundle?.controller.publication()?.snapshot;
         if (snapshot === undefined || snapshot.sessionId !== sessionId || bundle === undefined) {
@@ -1907,7 +1908,7 @@ function createSingleDesktopRuntimeSessionPort(
         stopping = false;
         autoRespawns = 0;
         await stopCurrent("replace");
-        const active = await launch();
+        const active = evacuation?.replaceActive === false ? undefined : await launch();
         sessionSink?.(active);
         return active === undefined ? { found: true } : { found: true, active };
       });

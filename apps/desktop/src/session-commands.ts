@@ -251,8 +251,9 @@ export function createDesktopSemanticCommands(options: {
   type DeleteResult = ConfigWriteResult & { readonly cleanup: "complete" | "partial" };
   async function deleteSessionFiles(
     service: StudioSessionDeleteService, sessionId: string, deleteManagedArtifacts: boolean, archivedOnly: boolean,
+    evacuation?: { readonly replaceActive?: boolean },
   ) {
-    if (!archivedOnly) await releaseResidentSession(options, sessionId);
+    if (!archivedOnly) await releaseResidentSession(options, sessionId, evacuation);
     const removed = await service.delete(sessionId, { archivedOnly }).catch((error: unknown) => {
       if (error instanceof SessionDeleteServiceError && error.code === "SESSION_NOT_ARCHIVED") {
         throw new StudioHostError("INVALID_ARGUMENT", desktopText("此会话已取消归档，已跳过。", "Skipped because the session was unarchived."));
@@ -305,7 +306,7 @@ export function createDesktopSemanticCommands(options: {
     for (const entry of catalog.sessions) {
       try {
         const { removed, artifactsWarning } = await withSessionFileOperation(threadIdFor(entry.sessionId), () =>
-          deleteSessionFiles(service, entry.sessionId, true, entry.archived),
+          deleteSessionFiles(service, entry.sessionId, true, entry.archived, { replaceActive: false }),
         );
         deleted += 1;
         if (removed.nativeCleanup.status === "partial" || removed.artifactsCleanupFailed || artifactsWarning) warnings += 1;
@@ -719,9 +720,10 @@ async function releaseResidentSession(
     readonly bindSession: (session: DesktopRuntimeSession | undefined) => void;
   },
   sessionId: string,
+  evacuation?: { readonly replaceActive?: boolean },
 ): Promise<boolean> {
   if (options.evacuateResident !== undefined) {
-    const result = await options.evacuateResident(sessionId);
+    const result = await options.evacuateResident(sessionId, evacuation);
     if (!result.found) return false;
     if (result.active !== undefined) options.bindSession(result.active);
     return true;

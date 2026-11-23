@@ -2421,7 +2421,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     void workspaceActionQueue.enqueue(async () => {
       try {
         const handle = await client.command("workspace.remove", { workspaceId: target.id, ...(deleteSessions ? { deleteSessions: true } : {}) });
-        const workspaces = await waitReceipt<WorkspaceListReadModel>(client, handle.requestId);
+        const workspaces = await waitReceipt<WorkspaceListReadModel>(client, handle.requestId, null);
         onWorkspacesChange(workspaces);
         clearProjectHistory(target.id);
         collapseProject(target.id);

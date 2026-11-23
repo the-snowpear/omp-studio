@@ -87,31 +87,41 @@ export function groupModelsByProvider(
 export function ThinkingProbe({ config }: { config: AvailableModelRecord["thinkingConfig"] }) {
   const zh = useI18n().resolvedLanguage === "zh";
   if (!config) return null;
-  const levels = [...(config.requiresEffort ? [] : [zh ? "关闭" : "Off"]), ...config.efforts].join(" · ");
+  const levels = thinkingLevels(config, zh);
   const pending = config.unverified === true;
   return <span className={`chip xs ${pending ? "gray" : "purple"}`} data-tip={pending ? (zh ? "运行时将在首次使用时探测思考档位" : "The runtime will probe thinking levels on first use") : levels}>
     <Icon name="brain" extra="xs" />{pending ? (zh ? "待探测" : "Awaiting probe") : levels}
   </span>;
 }
 
+function thinkingLevels(config: NonNullable<AvailableModelRecord["thinkingConfig"]>, zh: boolean): string {
+  return [...(config.requiresEffort ? [] : [zh ? "关闭" : "Off"]), ...config.efforts].join(" · ");
+}
+
 export function ModelPickCopy({ model, unavailableReason }: { model: ModelPickItem; unavailableReason?: string }) {
-  const detail = unavailableReason || (model.id !== model.name ? model.selector : undefined);
   return (
-    <span className="rms-option-copy" data-tip={`${model.name}\n${model.selector}`}>
-      <b className="rms-option-line"><span className="rms-option-scroll">{model.name}</span></b>
-      {detail ? <span className="rms-option-line"><span className="rms-option-scroll">{detail}</span></span> : null}
+    <span className="rms-option-copy">
+      <b>{model.name}</b>
+      {model.selector !== model.name ? <span>{model.selector}</span> : null}
+      {unavailableReason ? <span>{unavailableReason}</span> : null}
     </span>
   );
 }
 
 export function ModelThinkingBadge({ model }: { model: Pick<ModelPickItem, "reasoning" | "thinkingConfig"> | undefined }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
   if (!model?.reasoning && !model?.thinkingConfig) return null;
   const label = t("modelConfig.tipThinking");
+  const config = model.thinkingConfig;
+  const zh = resolvedLanguage === "zh";
+  const detail = config?.unverified
+    ? (zh ? "运行时将在首次使用时探测思考档位" : "The runtime will probe thinking levels on first use")
+    : config ? thinkingLevels(config, zh) : "";
+  const tip = detail ? `${label}\n${detail}` : label;
   return (
-    <span className="chip purple xs chip-icon" data-tip={label}>
+    <span className={`chip ${config?.unverified ? "gray" : "purple"} xs chip-icon`} data-tip={tip}>
       <Icon name="brain" extra="sm" />
-      <span className="sr-only">{label}</span>
+      <span className="sr-only">{tip}</span>
     </span>
   );
 }

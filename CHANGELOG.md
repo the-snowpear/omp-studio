@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-11-23
+
+### Added
+
+- 项目菜单支持在该项目打开终端和移除项目。默认保留会话，可选择永久删除活动与归档会话。
+
+### Fixed
+
+- 模型选择器显示完整模型名称和标识。 [#69](https://github.com/the-snowpear/omp-studio/issues/69)
+- Bash 工具卡片在收到结果后结束加载状态。 [#70](https://github.com/the-snowpear/omp-studio/issues/70)
+- 修复切换项目后会话归属、SSH 连接状态及中断下载的处理。
+
 ## [0.2.9] - 2026-11-22
 
 ### Added
@@ -682,7 +694,8 @@ Agent 改代码改嗨了、或者聊到第五轮发现方向歪了，以前想�
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.2.9...HEAD
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.2.10...HEAD
+[0.2.10]: https://github.com/the-snowpear/omp-studio/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/the-snowpear/omp-studio/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/the-snowpear/omp-studio/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/the-snowpear/omp-studio/compare/v0.2.6...v0.2.7

@@ -742,8 +742,8 @@ export interface HostSemanticCommandService {
    * Permanently delete every session that recorded this working directory as
    * its `cwd` (active tree plus cold archive): the same evacuation and
    * cleanup `delete` performs, applied in bulk. Returns how many sessions
-   * were removed and how many could not be (each counts as a warning, never
-   * an error, so a partial sweep still completes the workspace removal).
+   * were removed and how many had incomplete deletion or cleanup. The
+   * workspace adapter keeps the registry entry when there are warnings.
    */
   deleteWorkspaceSessions?(cwd: string): Promise<{ readonly deleted: number; readonly warnings: number }>;
 }

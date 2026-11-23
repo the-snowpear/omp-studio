@@ -237,9 +237,7 @@ export function ComposerModelMenu({
                       {role.name}
                       <span className="cmp-role-alias">{role.alias}</span>
                     </b>
-                    <span className="rms-option-line" data-tip={`${modelName}\n${role.primary}`}>
-                      <span className="rms-option-scroll">{modelName}</span>
-                    </span>
+                    <span data-tip={role.primary}>{modelName}</span>
                   </span>
                   <ModelThinkingBadge model={model} />
                   {on ? <Icon name="check" extra="sm" /> : null}
