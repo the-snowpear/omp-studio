@@ -331,6 +331,16 @@ export class ConversationStore {
         if (clipped.truncated) block.truncated = true; break;
       }
       case "conversation.message.completed": {
+        if (update.item.role === "assistant") {
+          // Dispatch can replace IDs reported during streaming. Drop provisional
+          // cards missing from the final message, which can never receive a result.
+          const callIds = new Set(update.item.content.flatMap(block => block.type === "toolCall" ? [block.toolCallId] : []));
+          for (const [id, tool] of this.liveTools) {
+            if (tool.messageId === update.messageId && tool.turnId === update.turnId && tool.result === undefined && !callIds.has(id)) {
+              this.deleteLiveTool(id);
+            }
+          }
+        }
         if (!hydratedIds?.has(update.item.itemId)) this.upsertItem(update.item);
         this.liveMessages.delete(update.messageId);
         this.liveOrder = this.liveOrder.filter((id) => id !== update.messageId);
@@ -340,12 +350,14 @@ export class ConversationStore {
         this.markStructureChanged(); break;
       }
       case "conversation.tool.started": {
+        const existing = this.liveTools.get(update.toolCallId);
+        // A streamed call can reuse another message's ID until dispatch assigns its own.
+        if (existing && existing.messageId !== update.messageId && this.liveMessages.has(update.messageId)) break;
         while (this.liveTools.size >= LIVE_TOOL_LIMIT) {
           const oldest = this.liveTools.keys().next().value as string | undefined;
           if (oldest === undefined) break;
           this.deleteLiveTool(oldest);
         }
-        const existing = this.liveTools.get(update.toolCallId);
         this.setLiveTool(update.toolCallId, { ...(existing?.messageId === update.messageId && existing.turnId === update.turnId ? existing : {}), ...(update.presentation ? { presentation: update.presentation } : {}), toolCallId: update.toolCallId, messageId: update.messageId, turnId: update.turnId, toolName: update.toolName, ...(update.arguments === undefined ? {} : { arguments: update.arguments }), status: "running" }); this.openTurnItems.set(update.messageId, update.turnId);
         this.markRowChanged(update.messageId); break;
       }

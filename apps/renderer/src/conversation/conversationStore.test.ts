@@ -139,6 +139,52 @@ describe("ConversationStore", () => {
     expect(store.getSnapshot().state.liveTools).toEqual({});
   });
 
+  it("keeps each Bash result visible when a later model response reuses its call ID", () => {
+    const { store, sessionId, frames } = create();
+    store.hydrate({ items: [], headCursor: "head" as never, hasMoreBefore: false });
+    const turn = { sessionId, turnId: "turn" };
+    const toolName = "bash";
+    const args = { command: "cd" };
+    const completeMessage = (messageId: string, toolCallId: string) => store.applyEvent({
+      ...turn, kind: "conversation.message.completed", messageId,
+      item: { ...item(messageId, "assistant", ""), content: [{ type: "toolCall", toolCallId, toolName, arguments: args }] },
+    });
+    const startTool = (messageId: string, toolCallId: string) => store.applyEvent({
+      ...turn, kind: "conversation.tool.started", messageId, toolCallId, toolName, arguments: args, startedAt: "now",
+    });
+    const completeTool = (toolCallId: string, output: string) => store.applyEvent({
+      ...turn, kind: "conversation.tool.completed", toolCallId, completedAt: "now",
+      result: { type: "toolResult", toolCallId, toolName, output, isError: false },
+    });
+    store.applyEvent(started(sessionId, "first"));
+    completeMessage("first", "call");
+    startTool("first", "call");
+    completeTool("call", "first result");
+    frames.flush();
+
+    store.applyEvent(started(sessionId, "second"));
+    startTool("second", "call"); // Provisional ID reported while the model streams.
+    startTool("second", "discarded"); // A streamed call omitted from the final message.
+    completeMessage("second", "call_dup1");
+    startTool("second", "call_dup1");
+    frames.flush();
+
+    const tools = () => store.getSnapshot().rows.flatMap(row => row.type === "assistant"
+      ? row.segments.flatMap(segment => segment.type === "batch" ? segment.tools : []) : []);
+    expect(tools()).toMatchObject([
+      { toolCallId: "call", status: "succeeded", result: { output: "first result" } },
+      { toolCallId: "call_dup1", status: "running" },
+    ]);
+    completeTool("call_dup1", "second result");
+    frames.flush();
+    expect(tools()).toMatchObject([
+      { toolCallId: "call", status: "succeeded", result: { output: "first result" } },
+      { toolCallId: "call_dup1", status: "succeeded", result: { output: "second result" } },
+    ]);
+    expect(store.getSnapshot().rows.at(-1)).toMatchObject({ turnOpen: true });
+    store.dispose();
+  });
+
   it("latches an aborted turn even when message.completed already settled its row", () => {
     // The order the Runtime delivers: `message.completed` folds the live row
     // into a persisted item whose status degrades to `completed` (only an error
