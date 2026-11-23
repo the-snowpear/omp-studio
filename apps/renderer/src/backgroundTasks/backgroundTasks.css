@@ -2,10 +2,12 @@
 .bt-toolbar { display: flex; align-items: center; gap: var(--sp-8); min-height: 36px; padding: var(--sp-4) var(--sp-12); flex: 0 0 auto; border-bottom: 1px solid var(--border); }
 .bt-activity { display: inline-flex; align-items: center; gap: var(--sp-6); font-size: var(--fs-11); color: var(--text-3); }
 .bt-activity b { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
-.bt-activity > i { width: 5px; height: 5px; border-radius: 50%; background: var(--glyph-faint); }
-.bt-activity > i[data-active] { background: var(--green); }
+.bt-activity > i { width: 5px; height: 5px; border-radius: 50%; background: var(--green); }
 .bt-toolbar-action, .bt-back, .bt-stop { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-4); background: transparent; color: var(--text-3); cursor: pointer; transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease); }
-.bt-toolbar > .bt-toolbar-action { margin-left: auto; }
+.bt-toolbar-actions { display: flex; align-items: center; gap: var(--sp-4); margin-left: auto; }
+.bt-stop-all { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-6); min-height: 28px; padding: var(--sp-4) var(--sp-6); border: 0; border-radius: var(--r-4); background: transparent; color: var(--text-3); font-size: var(--fs-11); white-space: nowrap; cursor: pointer; transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease); }
+.bt-stop-all:not([aria-busy="true"]) .icon { width: 10px; height: 10px; fill: currentColor; stroke-width: 1; }
+.bt-stop-all:hover:not(:disabled) { color: var(--red); background: var(--red-soft); }
 .bt-toolbar-action:hover, .bt-back:hover { background: var(--surface-hover); color: var(--text); }
 .bt-content { display: flex; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
 .bt-list { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: var(--sp-6); overscroll-behavior: contain; }
@@ -32,19 +34,25 @@
 .background-tasks button:disabled { cursor: default; opacity: .45; }
 .background-tasks button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .bt-recent { margin-top: var(--sp-6); border-top: 1px solid var(--border); padding-top: var(--sp-4); }
+.bt-recent:first-child { margin-top: 0; border-top: 0; padding-top: 0; }
 .bt-recent-toggle { display: flex; align-items: center; gap: var(--sp-6); min-height: 34px; width: 100%; padding: var(--sp-4) var(--sp-6); background: transparent; border: 0; color: var(--text-2); font-size: var(--fs-11); text-align: left; cursor: pointer; border-radius: var(--r-4); }
 .bt-recent-toggle:hover { background: var(--surface-hover); }
-.bt-recent-toggle > b { font-weight: 500; font-variant-numeric: tabular-nums; }
+.bt-recent-toggle > .icon { transition: rotate var(--dur) var(--ease-out); }
+.bt-recent-toggle[aria-expanded="true"] > .icon { rotate: 90deg; }
+.bt-recent-toggle > b { font-weight: 500; font-variant-numeric: tabular-nums; color: var(--text-3); }
 .bt-failures { display: inline-flex; align-items: center; gap: 3px; color: var(--red); margin-left: auto; }
 .bt-row-error { flex-basis: 100%; color: var(--red); font-size: var(--fs-11); overflow-wrap: anywhere; padding: var(--sp-4) var(--sp-8); }
 .bt-source-note { display: flex; align-items: flex-start; gap: var(--sp-6); padding: var(--sp-8) var(--sp-12); font-size: var(--fs-11); line-height: 1.55; color: var(--text-3); overflow-wrap: anywhere; flex-shrink: 0; }
 .bt-source-note .icon { flex-shrink: 0; margin-top: 2px; }
 .bt-source-note.is-error { color: var(--red); }
-.bt-empty, .bt-detail-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-8); text-align: center; color: var(--text-2); padding: var(--sp-24) var(--sp-12); }
-.bt-empty > .icon, .bt-detail-placeholder > .icon { width: 24px; height: 24px; color: var(--glyph-faint); margin-bottom: var(--sp-4); }
-.bt-empty small, .bt-detail-placeholder small { color: var(--text-3); font-size: var(--fs-11); line-height: 1.6; }
+.bt-empty { display: flex; align-items: center; justify-content: center; gap: var(--sp-8); min-height: 72px; padding: var(--sp-16) var(--sp-12); color: var(--text-3); font-size: var(--fs-11); line-height: 1.6; text-align: center; }
+.bt-empty > .icon { flex-shrink: 0; color: var(--glyph-faint); }
+.bt-detail-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-8); text-align: center; color: var(--text-2); padding: var(--sp-24) var(--sp-12); }
+.bt-detail-placeholder > .icon { width: 24px; height: 24px; color: var(--glyph-faint); margin-bottom: var(--sp-4); }
+.bt-detail-placeholder small { color: var(--text-3); font-size: var(--fs-11); line-height: 1.6; }
 .bt-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 .is-wide > .bt-content > .bt-list { width: 280px; flex: 0 0 280px; border-right: 1px solid var(--border); }
+.is-wide > .bt-content > .bt-list:only-child { width: auto; flex: 1; border-right: 0; }
 .bt-detail-head { display: flex; align-items: center; gap: var(--sp-6); padding: var(--sp-8) var(--sp-10); border-bottom: 1px solid var(--border); flex-shrink: 0; min-width: 0; }
 .bt-detail-head h3 { font-size: var(--fs-12); font-weight: 600; line-height: 1.5; margin: 0; flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .bt-detail-body { min-height: 0; min-width: 0; overflow: auto; padding: var(--sp-12); flex: 1; overscroll-behavior: contain; }
@@ -61,10 +69,10 @@
 .background-tasks .ji-kv dd { overflow-wrap: anywhere; min-width: 0; }
 .background-tasks .ji-output { white-space: pre-wrap; overflow-wrap: anywhere; }
 .is-card.background-tasks { height: auto; max-height: 100%; }
-.is-card .bt-toolbar { border-bottom: 0; min-height: 28px; padding: 0 var(--sp-12) var(--sp-4); }
+.is-card .bt-toolbar { border-bottom: 0; min-height: 28px; padding: 0 var(--sp-8) var(--sp-4) var(--sp-12); }
+.is-card .bt-empty { min-height: 60px; }
 .is-card .bt-content { flex: 0 1 auto; max-height: 256px; }
 .is-card .bt-list { padding-top: 0; }
-.is-card .bt-task-main { min-height: 46px; }
 .bt-confirm { padding: var(--sp-16); }
 .bt-confirm p { margin: 0 0 var(--sp-20); line-height: 1.7; overflow-wrap: anywhere; }
 .bt-confirm .actions { justify-content: flex-end; }

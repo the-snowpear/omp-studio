@@ -95,6 +95,8 @@ export function BackgroundTasksPanel(props: BackgroundTasksPanelProps) {
   const counts = backgroundTaskCounts(source.rows);
   const activeRows = source.rows.filter(row => row.active);
   const recentRows = source.rows.filter(row => !row.active);
+  const stoppableRows = activeRows.filter(row => source.canStop(row) && !source.pending.has(row.key));
+  const stoppingAll = stoppableRows.length === 0 && activeRows.some(row => source.pending.has(row.key) || row.state === "stopping");
   const listHidden = !card && !wide && selected !== null;
   const logs = useServiceLogs(selected, props, doc, preview, !gone);
   const showProcess = (row: BackgroundTask) => {
@@ -158,34 +160,50 @@ export function BackgroundTasksPanel(props: BackgroundTasksPanelProps) {
   const refresh = async () => { if (refreshing) return; setRefreshing(true); try { await source.refresh(); } finally { setRefreshing(false); } };
   const confirmed = confirm ? source.rows.find(row => row.key === confirm.key) : undefined;
   const missingSource = !available && !preview;
+  const empty = source.rows.length === 0;
+  const sourceNote = missingSource ? zh ? "当前会话未连接，已读状态可能过期" : "No live session. Shown states may be out of date."
+    : source.servicesState === "error" ? `${zh ? "服务暂不可读：" : "Services unavailable: "}${source.servicesError}`
+    : source.servicesState === "unavailable" ? zh ? "服务功能未启用；仍显示可用的后台任务" : "Services are unavailable. Background jobs are still shown." : "";
+  const emptyText = missingSource ? zh ? "当前会话未连接" : "Session disconnected"
+    : source.servicesState === "error" ? zh ? "暂时无法读取后台任务" : "Unable to load background tasks"
+    : !source.jobsReady || source.servicesState === "loading" ? zh ? "正在读取后台任务…" : "Loading background tasks…"
+    : zh ? "暂无后台任务" : "No background tasks";
+  const showToolbar = counts.active > 0 || !card;
+  const previewMark = preview && marks ? <span className="chip gray xs">{zh ? "演示" : "Demo"}</span> : null;
   const menuTarget = source.rows.find(row => row.key === menu?.key);
 
   return <div ref={container} className={`background-tasks${card ? " is-card" : ""}${wide && !card ? " is-wide" : ""}`} data-testid="background-tasks" data-view={card ? "card" : wide ? "wide" : "narrow"}>
-    <div className="bt-toolbar">
-      <span className="bt-activity"><i aria-hidden="true" data-active={counts.active > 0 || undefined} />{zh ? "活动" : "Active"}<b>{counts.active}</b></span>
-      {preview && marks ? <span className="chip gray xs">{zh ? "演示" : "Demo"}</span> : null}
-      {!card ? <button className="bt-toolbar-action" type="button" onClick={() => void refresh()} disabled={refreshing || missingSource} data-tip={zh ? "刷新列表" : "Refresh list"} aria-label={zh ? "刷新列表" : "Refresh list"}><Icon name="refresh" extra="sm" /></button> : null}
-    </div>
-    {missingSource ? <div className="bt-source-note"><Icon name="info" extra="sm" />{zh ? "当前会话未连接，已读状态可能过期" : "No live session. Shown states may be out of date."}</div> : null}
-    {source.servicesState === "error" ? <div className="bt-source-note is-error" role="alert">{zh ? "服务暂不可读：" : "Services unavailable: "}{source.servicesError}</div> : null}
-    {source.servicesState === "unavailable" && !missingSource ? <div className="bt-source-note">{zh ? "服务功能未启用；仍显示可用的后台任务" : "Services are unavailable. Background jobs are still shown."}</div> : null}
+    {showToolbar ? <div className="bt-toolbar">
+      {counts.active > 0 ? <span className="bt-activity"><i aria-hidden="true" />{zh ? "活动" : "Active"}<b>{counts.active}</b></span> : null}
+      {previewMark}
+      <div className="bt-toolbar-actions">
+        {!card ? <button className="bt-toolbar-action" type="button" onClick={() => void refresh()} disabled={refreshing || missingSource} data-tip={zh ? "刷新列表" : "Refresh list"} aria-label={zh ? "刷新列表" : "Refresh list"}><Icon name="refresh" extra="sm" /></button> : null}
+        {counts.active > 0 ? <button className="bt-stop-all" type="button" disabled={stoppableRows.length === 0} aria-busy={stoppingAll}
+          data-tip={stoppingAll ? zh ? "正在停止后台任务" : "Stopping background tasks" : stoppableRows.length === 0 ? zh ? "当前连接无法停止任务" : "Tasks cannot be stopped on this connection" : zh ? "停止所有后台任务和服务" : "Stop all background jobs and services"}
+          onClick={() => { for (const row of stoppableRows) void source.stop(row); }}>
+          <Icon name={stoppingAll ? "clock" : "stop"} extra="sm" /><span>{stoppingAll ? zh ? "正在停止" : "Stopping" : zh ? "全部停止" : "Stop all"}</span>
+        </button> : null}
+      </div>
+    </div> : null}
+    {!empty && sourceNote ? <div className={`bt-source-note${source.servicesState === "error" && !missingSource ? " is-error" : ""}`} role={source.servicesState === "error" && !missingSource ? "alert" : "status"}><Icon name="info" extra="sm" />{sourceNote}</div> : null}
     {openError ? <div className="bt-source-note" role="status">{openError}</div> : null}
     <div className="bt-content">
       <div className="bt-list" ref={list} hidden={listHidden} aria-label={zh ? "后台活动列表" : "Background activity list"}>
         {activeRows.map(renderRow)}
-        {!activeRows.length ? <div className="bt-empty"><Icon name="terminal" />
-          <span>{missingSource ? zh ? "暂无可用的后台活动" : "No background activity available" : !source.jobsReady || source.servicesState === "loading" ? zh ? "正在读取后台活动…" : "Loading background activity…" : zh ? "暂无正在运行的任务" : "No active background tasks"}</span>
-          {source.jobsReady && source.servicesState !== "loading" ? <small>{zh ? "托管服务和后台任务会统一显示在这里" : "Managed services and background jobs appear here."}</small> : null}
+        {empty ? <div className="bt-empty" role={source.servicesState === "error" && !missingSource ? "alert" : "status"} data-tip={sourceNote || undefined}>
+          <Icon name={missingSource || source.servicesState === "error" ? "info" : "terminal"} extra="sm" /><span>{emptyText}</span>
+          {!showToolbar ? previewMark : null}
         </div> : null}
-        {card || recentRows.length > 0 ? <section className="bt-recent">
-          <button className="bt-recent-toggle" type="button" aria-expanded={recentOpen && recentRows.length > 0} disabled={recentRows.length === 0} onClick={() => setRecentOpen(!recentOpen)}>
-            <Icon name={recentOpen ? "chevron-d" : "chevron-r"} extra="sm" /><span>{zh ? "最近已结束" : "Recently finished"}</span><b>{recentRows.length}</b>
+        {recentRows.length > 0 ? <section className="bt-recent">
+          <button className="bt-recent-toggle" type="button" aria-expanded={recentOpen} onClick={() => setRecentOpen(!recentOpen)}>
+            <Icon name="chevron-r" extra="sm" /><span>{zh ? "最近已结束" : "Recently finished"}</span><b>{recentRows.length}</b>
+            {!showToolbar ? previewMark : null}
             {counts.failed > 0 ? <span className="bt-failures"><Icon name="alert-c" extra="sm" />{zh ? `失败 ${counts.failed}` : `${counts.failed} failed`}</span> : null}
           </button>
           {recentOpen ? <div>{recentRows.map(renderRow)}</div> : null}
         </section> : null}
       </div>
-      {!card ? <section className="bt-detail" hidden={!wide && !selected} aria-label={zh ? "活动详情" : "Activity details"}>
+      {!card && (!empty || selected) ? <section className="bt-detail" hidden={!wide && !selected} aria-label={zh ? "活动详情" : "Activity details"}>
         {selected ? <>
           <div className="bt-detail-head">
             <button type="button" className="bt-back" onClick={() => { restoreFocus.current = selected.key; setSelectedKey(null); }} aria-label={zh ? "返回任务列表" : "Back to tasks"} data-tip={zh ? "返回任务列表" : "Back to tasks"}><Icon name="chevron-l" extra="sm" /></button>

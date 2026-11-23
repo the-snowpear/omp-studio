@@ -147,6 +147,23 @@ it("opens selected details beside the retained card and shares service stop stat
   expect(client.command).not.toHaveBeenCalled();
 });
 
+it("bulk stop updates every surface and leaves only the recent group in the card", async () => {
+  const { client } = setup();
+  const card = document.querySelector<HTMLElement>(".background-tasks.is-card")!;
+  fireEvent.click(card.querySelector<HTMLButtonElement>(".bt-row[data-kind='job'] .bt-task-main")!);
+  flush(); flush();
+  const full = document.querySelector<HTMLElement>(".background-tasks:not(.is-card)")!;
+  await act(async () => { fireEvent.click(within(card).getByRole("button", { name: "全部停止" })); });
+  expect(card.querySelector(".bt-toolbar")).toBeNull();
+  expect(card.querySelector(".bt-empty")).toBeNull();
+  expect(full.querySelector(".bt-activity")).toBeNull();
+  expect(full.querySelector(".bt-detail-summary")!.textContent).toContain("已取消");
+  fireEvent.click(within(card).getByRole("button", { name: /最近已结束/ }));
+  expect(card.querySelectorAll(".bt-row").length).toBeGreaterThan(0);
+  expect(card.querySelector(".bt-stop")).toBeNull();
+  expect(client.command).not.toHaveBeenCalled();
+});
+
 const rightJobs = (store: DockStore) => store.getSnapshot().layout.right.groups.flatMap(group => group.panels).filter(id => panelBaseId(id) === "jobs");
 const cardJob = (index = 0) => document.querySelectorAll<HTMLButtonElement>(".background-tasks.is-card .bt-row[data-kind='job'] .bt-task-main")[index]!;
 const panelBody = (id: string) => document.querySelector<HTMLElement>(`[data-panel="${id}"] .background-tasks`)!;

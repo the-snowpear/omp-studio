@@ -16,8 +16,8 @@ function source(): BackgroundTasksSource {
   return { rows: buildBackgroundTasks([job, failed], [service]), servicesState: "ready", servicesError: "", jobsReady: true,
     pending: new Set<string>(), actionErrors: new Map<string, string>(), refresh: vi.fn(async () => {}), stop: vi.fn(async () => {}), canStop: row => row.active };
 }
-function wrapper(props: BackgroundTasksPanelProps) {
-  return <I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled><BackgroundTasksPanel {...props} /></PreviewModeProvider></I18nProvider>;
+function wrapper(props: BackgroundTasksPanelProps, language: "zh" | "en" = "zh") {
+  return <I18nProvider forcedLanguage={language}><PreviewModeProvider switchEnabled><BackgroundTasksPanel {...props} /></PreviewModeProvider></I18nProvider>;
 }
 function setup(extra: Partial<BackgroundTasksPanelProps> = {}) {
   const value = source();
@@ -47,6 +47,27 @@ it("stopping does not open details and service stop still requires confirmation"
   expect(value.stop).toHaveBeenCalledTimes(1);
   fireEvent.click(within(dialog).getByRole("button", { name: "停止服务" }));
   expect(value.stop).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "service", service: expect.objectContaining({ instanceId: "service-one" }) }));
+});
+it("stops all active jobs and services from the card without opening details or individual confirmations", () => {
+  const { props, value, rerender } = setup({ card: true });
+  fireEvent.click(screen.getByRole("button", { name: "全部停止" }));
+  expect(vi.mocked(value.stop).mock.calls.map(([row]) => row.key)).toEqual(value.rows.filter(row => row.active).map(row => row.key));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(props.onOpenWindow).not.toHaveBeenCalled();
+
+  rerender(wrapper({ ...props, source: { ...value, pending: new Set(value.rows.filter(row => row.active).map(row => row.key)) } }));
+  expect(screen.getByRole("button", { name: "正在停止" }).hasAttribute("disabled")).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "正在停止" }));
+  expect(value.stop).toHaveBeenCalledTimes(2);
+});
+it("keeps bulk stop within the same available controls as individual tasks", () => {
+  const value = source();
+  const onlyJobs = { ...value, canStop: (row: (typeof value.rows)[number]) => row.active && row.kind === "job" };
+  const { props, rerender } = setup({ card: true, source: onlyJobs });
+  fireEvent.click(screen.getByRole("button", { name: "全部停止" }));
+  expect(value.stop).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: "job", active: true }));
+  rerender(wrapper({ ...props, source: { ...value, canStop: () => false } }));
+  expect(screen.getByRole("button", { name: "全部停止" }).hasAttribute("disabled")).toBe(true);
 });
 it("a card opens the full window with the selected native identity and reads no details", () => {
   const client = { command: vi.fn() } as unknown as StudioClient;
@@ -121,17 +142,45 @@ it("a card intent reveals a finished row and returns keyboard focus to it", () =
 
 it("an unavailable real source shows an offline empty state instead of perpetual loading", () => {
   localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
-  setup({ available: false, source: { ...source(), rows: [], jobsReady: false, servicesState: "unavailable" } });
-  expect(screen.getByText("暂无可用的后台活动")).toBeTruthy();
-  expect(screen.queryByText("正在读取后台活动…")).toBeNull();
+  setup({ card: true, available: false, source: { ...source(), rows: [], jobsReady: false, servicesState: "unavailable" } });
+  expect(screen.getByText("当前会话未连接")).toBeTruthy();
+  expect(screen.queryByText("正在读取后台任务…")).toBeNull();
+  expect(document.querySelector(".bt-source-note")).toBeNull();
+  expect(document.querySelector(".bt-toolbar")).toBeNull();
 });
 
 it("a real empty source does not fill in demo rows", () => {
   localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
   const empty = { ...source(), rows: [] };
-  setup({ source: empty });
-  expect(screen.getByText("暂无正在运行的任务")).toBeTruthy();
+  setup({ card: true, source: empty });
+  expect(screen.getByRole("status").textContent).toBe("暂无后台任务");
   expect(document.querySelectorAll(".bt-row").length).toBe(0);
+  expect(document.querySelector(".bt-toolbar")).toBeNull();
+  expect(screen.queryByRole("button", { name: /最近已结束/ })).toBeNull();
+});
+
+it("shows only the recent group when every task has finished", () => {
+  setup({ card: true, source: { ...source(), rows: buildBackgroundTasks([failed], []) } });
+  expect(document.querySelector(".bt-toolbar")).toBeNull();
+  expect(document.querySelector(".bt-empty")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /最近已结束/ }));
+  expect(screen.getByText("Failed check")).toBeTruthy();
+});
+
+it.each([true, false])("updates card controls and preserves the open recent group across zh → en → zh (preview=%s)", preview => {
+  localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, preview ? "1" : "0");
+  const { props, rerender } = setup({ card: true });
+  fireEvent.click(screen.getByRole("button", { name: /最近已结束/ }));
+  const panel = screen.getByTestId("background-tasks");
+  rerender(wrapper(props, "en"));
+  expect(screen.getByTestId("background-tasks")).toBe(panel);
+  expect(screen.getByRole("button", { name: "Stop all" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /Recently finished/ }).getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByText("Failed check")).toBeTruthy();
+  rerender(wrapper(props));
+  expect(screen.getByRole("button", { name: "全部停止" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /最近已结束/ }).getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByText("Failed check")).toBeTruthy();
 });
 
 it("opens the Agent-reported preview directly without any address form or footer", () => {
@@ -147,7 +196,7 @@ it("opens the Agent-reported preview directly without any address form or footer
   expect(document.querySelector("input")).toBeNull();
   expect(screen.queryByRole("button", { name: "打开窗口" })).toBeNull();
   expect(document.querySelector(".bt-card-footer")).toBeNull();
-  expect(document.querySelector(".bt-list")!.lastElementChild?.classList.contains("bt-recent")).toBe(true);
+  expect(screen.queryByRole("button", { name: /最近已结束/ })).toBeNull();
   expect(document.querySelectorAll(".bt-task-icon .icon.sm")).toHaveLength(2);
 });
 

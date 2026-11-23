@@ -70,6 +70,7 @@ type TaskScope = {
   actionErrors: ReadonlyMap<string, string>;
   mounted: boolean;
   readEpoch: number;
+  servicesRevision: number;
   flight: Promise<void> | undefined;
 };
 
@@ -85,6 +86,7 @@ function createScope(preview: boolean): TaskScope {
     actionErrors: new Map(),
     mounted: true,
     readEpoch: 0,
+    servicesRevision: 0,
     flight: undefined,
   };
 }
@@ -128,12 +130,13 @@ export function useBackgroundTasks(options: BackgroundTasksOptions) {
     }
     if (scope.flight) return scope.flight;
     const epoch = scope.readEpoch;
+    const servicesRevision = scope.servicesRevision;
     // Never flip an already settled view back to "loading" on background polls
     // (doing so flashes "Loading" <-> "No tasks" every poll tick).
     const flight = (async () => {
       try {
         const result = await invokeServiceCommand(client, "services.list", {});
-        if (!scope.mounted || epoch !== scope.readEpoch || document?.hidden) return;
+        if (!scope.mounted || epoch !== scope.readEpoch || servicesRevision !== scope.servicesRevision || document?.hidden) return;
         const nextState: ServicesState = result.enabled ? "ready" : "unavailable";
         const changed =
           scope.servicesState !== nextState
@@ -146,7 +149,7 @@ export function useBackgroundTasks(options: BackgroundTasksOptions) {
         scope.servicesError = "";
         if (changed) redraw();
       } catch (cause) {
-        if (!scope.mounted || epoch !== scope.readEpoch || document?.hidden) return;
+        if (!scope.mounted || epoch !== scope.readEpoch || servicesRevision !== scope.servicesRevision || document?.hidden) return;
         // Preserve last-known services and all snapshot jobs on a source failure.
         const nextError = hostErrorMessage(cause, "Services unavailable");
         const changed = scope.servicesState !== "error" || scope.servicesError !== nextError;
@@ -277,8 +280,10 @@ export function useBackgroundTasks(options: BackgroundTasksOptions) {
           instanceId: current.service.instanceId,
         });
         if (!scope.mounted || epoch !== scope.readEpoch || document?.hidden) return;
-        // A list started before this receipt must not resurrect the stopped row.
-        invalidateReads(scope);
+        // Discard older list reads without invalidating sibling stop receipts or
+        // the poller's visibility epoch. Every service in a batch must settle.
+        scope.servicesRevision += 1;
+        scope.flight = undefined;
         scope.services = scope.services.map((service) =>
           service.name === current.service.name && service.instanceId === current.service.instanceId
             ? result.service : service);
