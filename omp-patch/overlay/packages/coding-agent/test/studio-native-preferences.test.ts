@@ -86,13 +86,15 @@ test("OMP 18.12 native preferences are listed in their groups and round-trip thr
 });
 test("think.language resolves to exactly one thinking-language instruction", () => {
 	const settings = Settings.isolated();
-	expect(thinkingLanguageInstruction(settings)).toBeUndefined();
+	// "auto" is an explicit same-language-as-input instruction: models do not
+	// reliably mirror the input language in their reasoning on their own.
+	expect(thinkingLanguageInstruction(settings)).toContain("same language as the user's input");
 	cfgThinkLanguage.override(settings, "zh");
 	expect(thinkingLanguageInstruction(settings)).toContain("Simplified Chinese");
 	cfgThinkLanguage.override(settings, "en");
 	expect(thinkingLanguageInstruction(settings)).toContain("English");
 	cfgThinkLanguage.override(settings, "auto");
-	expect(thinkingLanguageInstruction(settings)).toBeUndefined();
+	expect(thinkingLanguageInstruction(settings)).toContain("same language as the user's input");
 });
 test("title.language always appends exactly one language line to generated-title prompts", () => {
 	const settings = Settings.isolated();

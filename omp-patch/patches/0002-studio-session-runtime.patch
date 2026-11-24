@@ -2633,7 +2633,7 @@ index cdecdaea9f..85810904fd 100644
  				enabled: cfgModelLoopGuardEnabled.get(settings),
  				checkAssistantContent: cfgModelLoopGuardCheckAssistantContent.get(settings),
 diff --git a/packages/coding-agent/src/session/settings.ts b/packages/coding-agent/src/session/settings.ts
-index 50797b86c6..d9ae6bdb57 100644
+index 50797b86c6..1674b5a8c1 100644
 --- a/packages/coding-agent/src/session/settings.ts
 +++ b/packages/coding-agent/src/session/settings.ts
 @@ -26,7 +26,7 @@ import { compileModelPatterns } from "../utils/model-patterns";
@@ -2715,7 +2715,7 @@ index 50797b86c6..d9ae6bdb57 100644
  export const cfgImagesDescribeForTextModels = register({
  	id: "images.describeForTextModels",
  	type: "boolean",
-@@ -1743,6 +1799,53 @@ export const cfgThinkingBudgetsXhigh = register({ id: "thinkingBudgets.xhigh", t
+@@ -1743,6 +1799,52 @@ export const cfgThinkingBudgetsXhigh = register({ id: "thinkingBudgets.xhigh", t
  
  export const cfgThinkingBudgetsMax = register({ id: "thinkingBudgets.max", type: "number", default: 32768 });
  
@@ -2743,26 +2743,25 @@ index 50797b86c6..d9ae6bdb57 100644
 +});
 +
 +/**
-+ * One-line system-prompt instruction that pins the thinking language;
-+ * `undefined` for "auto" (the prompt is unchanged and the model follows the
-+ * input).
++ * One-line system-prompt instruction that pins the thinking language. Always
++ * returns a line: "auto" is an explicit same-language-as-input instruction
++ * because models do not reliably mirror the input language in their reasoning
++ * on their own.
 + */
-+export function thinkingLanguageInstruction(scope: ScopeLike): string | undefined {
++export function thinkingLanguageInstruction(scope: ScopeLike): string {
 +	const value = cfgThinkLanguage.get(scope);
 +	if (value === "zh") return "Always write your internal thinking (reasoning) in Simplified Chinese (简体中文).";
 +	if (value === "en") return "Always write your internal thinking (reasoning) in English.";
-+	return undefined;
++	return "Write your internal thinking (reasoning) in the same language as the user's input.";
 +}
 +
 +/**
 + * Merge the live thinking-language line into the append system prompt at
 + * build time, so a preference change reaches the next prompt rebuild of the
-+ * same session (the session options object is frozen at creation). "auto"
-+ * returns the append prompt unchanged.
++ * same session (the session options object is frozen at creation).
 + */
-+export function composeThinkingAppend(appendSystemPrompt: string | undefined, scope: ScopeLike): string | undefined {
++export function composeThinkingAppend(appendSystemPrompt: string | undefined, scope: ScopeLike): string {
 +	const line = thinkingLanguageInstruction(scope);
-+	if (line === undefined) return appendSystemPrompt;
 +	return appendSystemPrompt ? `${appendSystemPrompt}\n\n${line}` : line;
 +}
 +

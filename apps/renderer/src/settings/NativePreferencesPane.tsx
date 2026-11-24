@@ -79,7 +79,7 @@ export const nativePreferenceDescriptions: Record<NativePreferenceKey, [string, 
   ],
   "think.language": [
     "思考过程语言",
-    "模型内部思考（Think 过程）使用哪种语言；更改后从下一轮回复生效（会话范围只影响当前会话）。",
+    "模型内部思考（Think 过程）使用哪种语言；跟随输入 = 与你的输入语言保持一致。更改后从下一轮回复生效（会话范围只影响当前会话）。",
   ],
   "telemetry.otlpExportEnabled": [
     "OTLP 导出",
@@ -142,7 +142,7 @@ export const nativePreferenceEnglishDescriptions: Record<NativePreferenceKey, [s
   ],
   "think.language": [
     "Thinking language",
-    "Language of the model's internal thinking; applies from the next reply (session scope affects only this session).",
+    "Language of the model's internal thinking; follow input keeps it in your input language. Applies from the next reply (session scope affects only this session).",
   ],
   "telemetry.otlpExportEnabled": [
     "OTLP export",
@@ -344,9 +344,13 @@ export function NativePreferencesPane({
               ? zh
                 ? "已保存，下次启动生效。"
                 : "Saved for the next launch."
-              : zh
-                ? "已处理，当前生效值与来源已更新。"
-                : "Updated. Effective value and source are shown below.",
+              : pending.row.key === "title.language"
+                ? zh
+                  ? "已保存，正在按新语言重新生成当前会话的自动标题（手动命名的标题不变）。"
+                  : "Saved; re-generating this session's automatic title in the new language (manual titles are kept)."
+                : zh
+                  ? "已处理，当前生效值与来源已更新。"
+                  : "Updated. Effective value and source are shown below.",
         );
       }
     } catch (cause) {
