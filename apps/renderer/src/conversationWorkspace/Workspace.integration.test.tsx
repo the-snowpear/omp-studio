@@ -943,6 +943,34 @@ describe("conversation windows", () => {
     // The draft document is presented again as a single conversation (no duplicate window).
     expect(document.querySelectorAll("[data-conversation-document]")).toHaveLength(1);
   });
+  it("keeps project expansion shared with background documents (no stale per-document collapse)", async () => {
+    // Each document is a full app shell whose AppShell renders the shared
+    // sidebar. A document left open in the background (a floating window)
+    // keeps its own mounted state; project expansion must be shared per
+    // target so focusing such a document does not re-show the stale set it
+    // had when it was mounted (the project appearing to "auto-collapse").
+    localStorage.setItem("omp.sidebar.expandedProjects", JSON.stringify({ expandedProjects: ["ws-second"] }));
+    await mount(false);
+    const projectHeader = (name: string) => [...document.querySelectorAll<HTMLElement>("#projectList .project-head")].find(node => node.textContent?.includes(name))!;
+    const rowsIn = (project: string) => [...document.querySelectorAll<HTMLElement>("#projectList .project")].find(row => row.textContent?.includes(project))!
+      .querySelectorAll<HTMLElement>(".thread");
+    const rowIn = (project: string, title: string) => [...rowsIn(project)].find(row => row.textContent?.includes(title))!;
+    // Startup restored memory: the second project is expanded, the first collapsed.
+    await waitFor(() => expect(projectHeader("Second project").getAttribute("aria-expanded")).toBe("true"));
+    expect(projectHeader("First project").getAttribute("aria-expanded")).toBe("false");
+    // Drag a conversation into a floating window: its document stays mounted
+    // in the background while the main document keeps working.
+    drag(rowIn("Second project", "Second conversation"));
+    await waitFor(() => expect(document.querySelector(".dock-conversation-window")).not.toBeNull());
+    // Refocus the main document and expand the first project there.
+    fireEvent.pointerDown(document.querySelector(".cw-main-conversation")!);
+    fireEvent.click(projectHeader("First project"));
+    await waitFor(() => expect(projectHeader("First project").getAttribute("aria-expanded")).toBe("true"));
+    // Focus the floating document: its sidebar chrome shows the shared
+    // expansion state, not the stale set from its mount time.
+    fireEvent.pointerDown(document.querySelector(".dock-conversation-window")!);
+    await waitFor(() => expect(projectHeader("First project").getAttribute("aria-expanded")).toBe("true"));
+  });
   it("drags main A while the shared title represents B, cancels to B and disables dragging when main is empty", async () => {
     await mount(true);
     const main = document.querySelector<HTMLElement>(".cw-main-conversation")!;

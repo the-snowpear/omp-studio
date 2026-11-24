@@ -190,9 +190,30 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   /** Real projects may be expanded together; preview keeps its fixture selection below.
       启动时按本地记忆恢复各项目展开状态；从未写过记忆时保持旧行为（首启展开活动项目）。 */
   const [expandedProjectsMemory] = useState(readExpandedProjects);
-  const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(
-    () => (expandedProjectsMemory.restored ? expandedProjectsMemory.ids : new Set<string>()),
-  );
+  /* 项目展开集按目标共享（同一目标的所有文档共用一份）。registry.scope 的
+     记忆 Map 按「目标 + 文档」隔离（useTargetMemory 只跨同一文档的重新挂载
+     持久化），这里用固定的 "app-shell" 键取同一目标下所有文档共用的 Map。
+     侧栏由当前活动文档的 AppShell 绘制，各文档各持一份时，点会话切到仍挂载
+     的文档（如浮动窗口）会显示那份挂载时的陈旧集合，项目看起来「自动收缩」
+     了。localStorage 持久化行为不变。 */
+  const shellRegistry = useExecutionTargets();
+  const sharedExpansion = shellRegistry.scope(executionTarget.id, "app-shell").memory;
+  const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(() => {
+    const shared = sharedExpansion.get("sidebar-expanded-projects");
+    return shared !== undefined ? shared as ReadonlySet<string> : (expandedProjectsMemory.restored ? expandedProjectsMemory.ids : new Set<string>());
+  });
+  /* 本档的集合变化写回目标共享 Map（首个文档同时播种）。 */
+  useEffect(() => {
+    if (previewMode.preview) return;
+    sharedExpansion.set("sidebar-expanded-projects", expandedProjects);
+  }, [expandedProjects, previewMode.preview, sharedExpansion]);
+  /* 后台文档（浮动窗口）持有挂载时的集合；它激活成为侧栏归属时对齐最新
+     共享值。只有活动文档能通过侧栏改这个集合，激活时同步即可保持一致。 */
+  useEffect(() => {
+    if (!mdi?.active || previewMode.preview) return;
+    const shared = sharedExpansion.get("sidebar-expanded-projects");
+    if (shared !== undefined) setExpandedProjects(shared as ReadonlySet<string>);
+  }, [mdi?.active, previewMode.preview, sharedExpansion]);
   const [projectListExpanded, setProjectListExpanded] = useState(true);
   const [selectedProject, setSelectedProject] = useState<SelectedProject | null>(() => previewOn() ? CURRENT_PROJECT : null);
   const composerRef = useRef<ChipComposerHandle | null>(null);
