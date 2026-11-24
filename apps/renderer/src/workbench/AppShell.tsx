@@ -748,11 +748,24 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     // now would remove the live session's row and the transition already
     // happened, so defer it until the snapshot actually moves on.
     if (change.final === true) {
-      if (String(change.sessionId) === String(snapshot?.sessionId ?? "")) {
-        pendingFinalHidesRef.current.add(String(change.sessionId));
+      const key = String(change.sessionId);
+      // A never-sent draft with text stays in the sidebar instead of being
+      // hidden: clicking the row back restores the per-session composer draft
+      // (the session itself resolves through the single-session query), and
+      // the row menu lets the user delete it. Only empty drafts are dropped,
+      // so abandoned fresh chats without any text still do not accumulate.
+      const draftText = composerDraftBook.get(key)?.text ?? "";
+      if (draftText.trim() !== "") {
+        pendingFinalHidesRef.current.delete(key);
+        // Keep the row exactly as stored: it stays selectable (the composer
+        // draft comes back on click) and deletable from the row menu.
         return;
       }
-      pendingFinalHidesRef.current.delete(String(change.sessionId));
+      if (key === String(snapshot?.sessionId ?? "")) {
+        pendingFinalHidesRef.current.add(key);
+        return;
+      }
+      pendingFinalHidesRef.current.delete(key);
     }
     // The Runtime's resident binding is the authority for which project a
     // live session belongs to; the surface report only says which project is
@@ -772,7 +785,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         excludedSessionIds: provisionalStore.excludedSessionIds,
       }),
     );
-  }, [creatingSession, previewMode.preview, provisionalStore, residentModel, selectedHistoryId, selectedTitleIsPlaceholder, setProvisionalThreadsBySession, snapshot?.sessionId, t]);
+  }, [composerDraftBook, creatingSession, previewMode.preview, provisionalStore, residentModel, selectedHistoryId, selectedTitleIsPlaceholder, setProvisionalThreadsBySession, snapshot?.sessionId, t]);
   useEffect(() => {
     if (pendingFinalHidesRef.current.size === 0) return;
     for (const id of [...pendingFinalHidesRef.current]) {
