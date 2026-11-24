@@ -579,6 +579,14 @@ export function createDesktopRuntimeSessionPort(
    * bound to (lease loss, evacuation) — a Runtime cwd is fixed at spawn, so
    * reusing the active pointer there would silently migrate a Session.
    */
+  // A cold-start handshake failure (the Runtime's first event frame racing
+  // the hello result, or a slow cold start) kills an otherwise healthy
+  // Worker. One fresh launch recovers it, mirroring the startup path's
+  // single retry for cold Defender/Bun races.
+  const isBridgeHandshakeFailure = (error: unknown): boolean =>
+    error instanceof StudioBridgeHandshakeError &&
+    (error.code === "MALFORMED_RESPONSE" || error.code === "HANDSHAKE_TIMEOUT");
+
   const launchWorker = async (
     resumeSessionId?: string,
     launchWorkspace?: { workspaceId: string; cwd: string },
@@ -587,6 +595,7 @@ export function createDesktopRuntimeSessionPort(
     evaluation = false,
     background = false,
     allowRelocation?: boolean,
+    attempt = 1,
   ): Promise<DesktopRuntimeSession | undefined> => {
     const launchContext = context;
     const selected = launchWorkspace ?? workspace;
@@ -693,6 +702,24 @@ export function createDesktopRuntimeSessionPort(
       }
       return session;
     } catch (error) {
+      if (attempt === 1 && isBridgeHandshakeFailure(error)) {
+        options.log?.write(
+          "warn",
+          "runtime.launch.retry",
+          `session=${resumeSessionId ?? "fresh"} attempt=1 ${errorDetail(error)}`,
+        );
+        try {
+          await port.stop();
+        } catch {
+          // The retried launch owns its own Worker; containment stays fail-closed.
+        }
+        try {
+          await lease?.release();
+        } catch {
+          // Release again on the fresh launch; a held lease blocks unsafe takeover.
+        }
+        return launchWorker(resumeSessionId, launchWorkspace, model, noContextFiles, evaluation, background, allowRelocation, 2);
+      }
       rememberUnavailable(port.lastUnavailable?.() ?? launchFailedFacts(error));
       try {
         await port.stop();

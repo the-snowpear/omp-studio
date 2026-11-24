@@ -131,6 +131,7 @@ function snapshotResponse(
 async function listenForHello(
   responder: HelloResponder,
   hooks: {
+    afterHello?: (response: StudioHelloResponse) => Buffer[];
     afterSnapshot?: (response: StudioSnapshotResponse) => Buffer[];
     snapshot?: (requestId: string, hello: StudioHelloResponse) => StudioSnapshotResponse;
     onRequest?: (request: StudioRequest, socket: Socket, hello: StudioHelloResponse) => void;
@@ -160,12 +161,17 @@ async function listenForHello(
           if ((frame.body as { type?: unknown }).type === "studio.hello") {
             const hello = parseStudioHelloRequest(frame.body);
             const response = responder(hello, currentConnection);
-            if (!Buffer.isBuffer(response)) negotiated = response;
-            socket.write(
-              Buffer.isBuffer(response)
-                ? response
-                : encodeFrame(`hello-result:${hello.requestId}`, response.runtimeEpoch, response),
-            );
+            if (!Buffer.isBuffer(response)) {
+              negotiated = response;
+              socket.write(
+                Buffer.concat([
+                  encodeFrame(`hello-result:${hello.requestId}`, response.runtimeEpoch, response),
+                  ...(hooks.afterHello?.(response) ?? []),
+                ]),
+              );
+              continue;
+            }
+            socket.write(response);
             continue;
           }
           if ((frame.body as { type?: unknown }).type === "computer.query" && negotiated && hooks.onComputerQuery) {
@@ -273,6 +279,42 @@ test("WP-012 applies an event coalesced after the initial snapshot before READY 
     assert.equal(client.state, "ready");
     assert.equal(observedEvents.length, 1);
     assert.equal(observedEvents[0]?.eventSeq, 1);
+  } finally {
+    client.close();
+    await bridge.close();
+  }
+});
+
+test("handshake tolerates an event frame coalesced with the hello result (cold-start race)", async () => {
+  const token = "bridge-token-hello-event-race";
+  // The Runtime queues its first event frames right after authenticating;
+  // one socket.write here delivers both frames in a single client read.
+  const bridge = await listenForHello(
+    (hello) => helloResponse(hello, token),
+    {
+      afterHello: (response) => [
+        encodeFrame("event:1", response.runtimeEpoch, {
+          type: "studio.event",
+          runtimeEpoch: response.runtimeEpoch,
+          eventSeq: 1,
+          stateVersion: 1,
+          occurredAt: "2026-08-11T00:00:01.000Z",
+          event: {
+            kind: "state.changed",
+            snapshot: { ...snapshotResponse("hello-race", response).snapshot, stateVersion: 1 as StateVersion },
+          },
+        }),
+      ],
+    },
+  );
+  const client = new StudioBridgeClient({ endpoint: bridge.endpoint, token });
+  try {
+    await client.connect();
+    assert.equal(client.state, "negotiated");
+    // The coalesced event precedes the snapshot baseline; the snapshot
+    // request must complete without a gap resync or a protocol error.
+    await client.requestSnapshot();
+    assert.equal(client.state, "ready");
   } finally {
     client.close();
     await bridge.close();
