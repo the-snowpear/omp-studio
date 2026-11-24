@@ -29,6 +29,13 @@ export interface SessionCatalogEntry {
   pinned: boolean;
   title?: string;
   createdAt?: string;
+  /**
+   * Last conversation activity (timestamp of the newest recorded
+   * message/displayed-custom-message entry), falling back to the file mtime
+   * when the tail carries no readable conversation entry. Opening or
+   * disposing a session appends Runtime markers (`session_exit`, …) that bump
+   * the mtime but must not reorder the list or reset its displayed time.
+   */
   modifiedAt: string;
   sizeBytes: number;
 }
@@ -155,6 +162,10 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
     if (origin !== "studio" && !includeCliSessions) return {};
     const title = sanitizeTitle(header.title);
     const createdAt = normalizeTimestamp(header.timestamp);
+    // Archived members are cold; their tail is only reachable through a full
+    // gzip pass, so they keep the mtime. Live files fall back to it as well
+    // when the tail window holds no readable conversation entry.
+    const lastActivityAt = archived ? undefined : await cachedTailActivity(file, metadata);
     return {
       entry: {
         sessionId: header.id,
@@ -162,7 +173,7 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
         origin,
         archived,
         pinned: pinnedSessionIds.has(header.id),
-        modifiedAt: metadata.mtime.toISOString(),
+        modifiedAt: lastActivityAt ?? metadata.mtime.toISOString(),
         sizeBytes: metadata.size,
         ...(title === undefined ? {} : { title }),
         ...(createdAt === undefined ? {} : { createdAt }),
@@ -206,6 +217,9 @@ interface ConsideredFile {
 /** Sidebar projects each scan the same global tree; a bounded pool keeps one scan fast without flooding the FS. */
 const SCAN_CONCURRENCY = 24;
 const HEADER_CACHE_MAX = 8_192;
+/** Trailing window scanned for the newest conversation-entry timestamp. */
+const TAIL_SCAN_BYTES = 256 * 1024;
+const TAIL_CACHE_MAX = HEADER_CACHE_MAX;
 
 interface CachedHeader {
   readonly mtimeMs: number;
@@ -251,6 +265,77 @@ async function cachedSessionHeader(
   if (headerCache.size >= HEADER_CACHE_MAX) headerCache.clear();
   headerCache.set(key, { mtimeMs: metadata.mtimeMs, size: metadata.size, header });
   return header;
+}
+
+interface CachedTailActivity {
+  readonly mtimeMs: number;
+  readonly size: number;
+  readonly lastActivityMs: number | undefined;
+}
+
+/**
+ * Tail activity survives across scans with the same mtime/size invalidation as
+ * the header cache, so the extra trailing read happens only for files that
+ * changed since the previous scan.
+ */
+const tailActivityCache = new Map<string, CachedTailActivity>();
+
+async function cachedTailActivity(
+  file: string,
+  metadata: { readonly mtimeMs: number; readonly size: number },
+): Promise<string | undefined> {
+  const hit = tailActivityCache.get(file);
+  if (hit !== undefined && hit.mtimeMs === metadata.mtimeMs && hit.size === metadata.size) {
+    return hit.lastActivityMs === undefined ? undefined : new Date(hit.lastActivityMs).toISOString();
+  }
+  let lastActivityMs: number | undefined;
+  try {
+    lastActivityMs = await readTailActivityTime(file, metadata.size);
+  } catch {
+    // The file vanished or became unreadable between lstat and open.
+  }
+  if (tailActivityCache.size >= TAIL_CACHE_MAX) tailActivityCache.clear();
+  tailActivityCache.set(file, { mtimeMs: metadata.mtimeMs, size: metadata.size, lastActivityMs });
+  return lastActivityMs === undefined ? undefined : new Date(lastActivityMs).toISOString();
+}
+
+/**
+ * Newest timestamp among conversation entries (`message` and displayed
+ * `custom_message`) in the file's trailing window. Runtime markers appended
+ * when a session is opened or disposed (`session_exit`, …) never count, so
+ * opening a session cannot move it to the top of the history list or reset
+ * its displayed time. Unparseable lines (a line truncated by the window
+ * start, a partially appended entry) are skipped.
+ */
+async function readTailActivityTime(file: string, size: number): Promise<number | undefined> {
+  const handle = await open(file, "r");
+  try {
+    const length = Math.min(TAIL_SCAN_BYTES, size);
+    const buffer = Buffer.alloc(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, size - length);
+    if (bytesRead <= 0) return undefined;
+    const lines = buffer.subarray(0, bytesRead).toString("utf8").split(/\r?\n/u);
+    let best: number | undefined;
+    for (let index = lines.length - 1; index >= 0; index--) {
+      const line = lines[index]?.trim();
+      if (line === undefined || line.length === 0) continue;
+      let value: unknown;
+      try {
+        value = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (!isRecord(value)) continue;
+      const conversation = value.type === "message" || (value.type === "custom_message" && value.display === true);
+      if (!conversation) continue;
+      const parsed = typeof value.timestamp === "string" ? Date.parse(value.timestamp) : Number.NaN;
+      if (!Number.isFinite(parsed)) continue;
+      if (best === undefined || parsed > best) best = parsed;
+    }
+    return best;
+  } finally {
+    await handle.close();
+  }
 }
 
 async function mapConcurrent<T, R>(items: readonly T[], limit: number, run: (item: T) => Promise<R>): Promise<R[]> {

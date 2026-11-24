@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 打开历史会话不再刷新会话列表顺序和右侧时间：Host 目录改按会话文件尾部最近一条对话消息的时间排序与展示，打开/关闭会话追加的 Runtime 标记（如 `session_exit`）不再把该会话顶到列表最前、也不再让「1 小时前」变成「刚刚」。
+
 ## [0.2.10] - 2026-11-23
 
 ### Added
