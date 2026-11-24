@@ -739,8 +739,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                         <div
                           className={`thread-row${thread.running ? " running" : ""}`}
                           key={`provisional:${thread.sessionId}`}
-                          // 草稿行（未发送）没有菜单，保留原生右键。
-                          {...(thread.submitted ? { onContextMenu: (event: ReactMouseEvent) => openRowMenuAtCursor(event, `provisional:${String(thread.sessionId)}`) } : {})}
+                          onContextMenu={(event: ReactMouseEvent) => openRowMenuAtCursor(event, `provisional:${String(thread.sessionId)}`)}
                         >
                           <button
                             type="button"
@@ -802,7 +801,26 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                                 }}
                               ><Icon name="archive" extra="sm" /></button>
                             </span>
-                          ) : null}
+                          ) : (
+                            <span className="t-actions">
+                              {/* 草稿行（未发送）没有 live 会话动作；只给归档与删除，
+                                  否则空会话会一直留在项目列表里。 */}
+                              <ThreadRowMenu
+                                id={`provisional:${String(thread.sessionId)}`}
+                                openId={openRowMenuId}
+                                onToggle={setOpenRowMenuId}
+                                contextPoint={openRowMenuId === `provisional:${String(thread.sessionId)}` ? rowMenuPoint : null}
+                                menu={
+                                  <>
+                                    <MenuItem icon="archive" onClick={() => runRowAction(() => chrome.onArchiveProvisionalThread(thread))}>{t("history.archiveSession")}</MenuItem>
+                                    <button type="button" role="menuitem" className="menu-item danger" onClick={() => runRowAction(() => chrome.onDeleteProvisionalThread(thread))}>
+                                      <Icon name="trash" extra="sm" /><span>{t("history.deleteSession")}</span>
+                                    </button>
+                                  </>
+                                }
+                              />
+                            </span>
+                          )}
                         </div>
                         );
                       })}

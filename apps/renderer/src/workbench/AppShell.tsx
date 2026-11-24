@@ -36,7 +36,7 @@ import { bindSlashTypedCommand, isDestructiveMemoryClear, resolveSlashExecute, t
 import { composerOwnerSessionId } from "../composer/dispatch";
 import { createWorkspaceFileIndex, followWorkspaceFileIndex, loadMentions, previewMentions, workspaceDirectoryLister } from "../composer/mentions";
 import { createComposerDraftBook } from "../composer/draftStore";
-import { type ComposerSnapshot } from "../composer/types";
+import { emptySnapshot, type ComposerSnapshot } from "../composer/types";
 import type { FileViewerActions } from "../files/fileActions";
 import { mergeUsedSkills } from "../skills/skillUsage";
 import { RuntimeLossBanner } from "../RuntimeLossBanner";
@@ -247,6 +247,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     setUsedSkills((prev) => mergeUsedSkills(prev, names));
   }, []);
   const onComposerDraftChange = useCallback((sessionId: string, draft: ComposerSnapshot) => {
+    console.warn(`[omp-studio:draft] save owner=${sessionId} chars=${draft.text.length}`); // 临时诊断
     composerDraftBook.set(sessionId, draft);
   }, [composerDraftBook]);
   useEffect(() => {
@@ -698,6 +699,13 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   });
   /** Restore boundary only: read, never subscribe (see `composer/draftStore.ts`). */
   const activeComposerDraft = composerDraftBook.get(activeComposerOwner);
+  const draftRestoreLogRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const key = `${activeComposerOwner}|${activeComposerDraft === undefined ? 0 : activeComposerDraft.text.length}`;
+    if (draftRestoreLogRef.current === key) return;
+    draftRestoreLogRef.current = key;
+    console.warn(`[omp-studio:draft] restore-read owner=${activeComposerOwner} have=${activeComposerDraft !== undefined} chars=${activeComposerDraft?.text.length ?? 0}`); // 临时诊断
+  }, [activeComposerOwner, activeComposerDraft]);
   useEffect(() => {
     if (composerInsertion && composerInsertion.owner !== activeComposerOwner) setComposerInsertion(undefined);
   }, [composerInsertion, activeComposerOwner]);
@@ -1605,6 +1613,8 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       if (!entry) throw new Error(t("history.deleteHistoryPending"));
       const workspaceId = sidebarDelete.kind === "real" ? sidebarDelete.workspaceId : sidebarDelete.thread.workspaceId;
       await deleteSessionThread(entry, deleteManagedArtifacts, workspaceId, false);
+      // 草稿簿按会话 id 记账：会话没了，它的未发送草稿也别再占着。
+      if (entry.sessionId !== undefined) composerDraftBook.set(entry.sessionId, emptySnapshot());
       setSidebarDelete(null);
     } catch (error) {
       setSidebarDeleteError(error);
@@ -2109,11 +2119,26 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       return;
     }
     if (!thread.submitted) {
-      commitDockSelection({ target: executionTarget.id ?? "local", project: thread.workspaceId, session: thread.sessionId });
-      setSelectedProvisionalSessionId(thread.sessionId);
-      onNewThread();
-      setSessionActionError(undefined);
-      onRoute("workbench");
+      // 未发送的行可能已经是真实会话：worker 启动即创建会话文件，目录里
+      // 有它时直接恢复该会话 —— composer 草稿按会话 id 存储，会随选中
+      // 一起回到输入框；只有从未落盘的会话才开全新对话。
+      void (async () => {
+        const entry = await resolveProvisionalHistoryEntry(thread);
+        if (entry !== undefined) {
+          try {
+            await openHistoryEntry(entry, thread.workspaceId, { resumeForAction: true });
+          } catch (error) {
+            if (error instanceof SessionSwitchCancelledError) return;
+            setSessionActionError(hostErrorMessage(error, zhRef.current ? "打开会话失败" : "Failed to open conversation"));
+          }
+          return;
+        }
+        commitDockSelection({ target: executionTarget.id ?? "local", project: thread.workspaceId, session: thread.sessionId });
+        setSelectedProvisionalSessionId(thread.sessionId);
+        onNewThread();
+        setSessionActionError(undefined);
+        onRoute("workbench");
+      })();
       return;
     }
     void (async () => {

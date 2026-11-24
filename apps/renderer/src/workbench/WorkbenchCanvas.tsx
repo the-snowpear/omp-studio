@@ -458,7 +458,9 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       onComposerDraftChange?.(selectedSessionId, composerRef.current?.getSnapshot() ?? draftLive.current);
       return;
     }
-    replaceDraft(composerDraftRef.current ?? emptySnapshot());
+    const restoredSnapshot = composerDraftRef.current ?? emptySnapshot();
+    console.warn(`[omp-studio:draft] canvas-restore ${previous.sessionId ?? "∅"} -> ${selectedSessionId ?? "∅"} have=${composerDraftRef.current !== undefined} chars=${restoredSnapshot.text.length}`); // 临时诊断
+    replaceDraft(restoredSnapshot);
     setSubmittedPrompt((current) => current !== undefined && selectedSessionId !== undefined && current.sessionId === selectedSessionId ? current : undefined);
     setComposerError(undefined);
     setQueueEdit(undefined);
