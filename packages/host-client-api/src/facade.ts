@@ -2344,7 +2344,26 @@ export class StudioHostClientFacade implements ClientTransport {
     const catalog = await this.#options.catalog.list(
       input.workspaceId === undefined ? undefined : { workspaceId: input.workspaceId },
     );
-    const visible = catalog.filter(entry =>
+    // The list view hides sessions without a conversation message yet (freshly
+    // created, never sent), but an explicit single-session query may target
+    // exactly such a session — the renderer resolves provisional (unsent) rows
+    // through it for resume, archive and delete. Merge the Host's
+    // single-session lookup so the query can reach it; list views are
+    // unaffected (they never pass sessionId).
+    let entries = catalog;
+    if (input.sessionId !== undefined) {
+      const locate = this.#options.catalog.locate;
+      if (locate !== undefined) {
+        const located = await locate.call(this.#options.catalog, input.sessionId);
+        const listed = new Set(catalog.map(entry => entry.sessionId));
+        const extras = located
+          .filter(row => input.workspaceId === undefined || row.workspaceId === input.workspaceId)
+          .map(row => row.entry)
+          .filter(entry => !listed.has(entry.sessionId));
+        if (extras.length > 0) entries = [...catalog, ...extras];
+      }
+    }
+    const visible = entries.filter(entry =>
       (input.sessionId === undefined || input.sessionId === entry.sessionId) &&
       !this.#options.evaluations?.sessionIds().has(entry.sessionId),
     );

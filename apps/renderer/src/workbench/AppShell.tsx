@@ -2119,25 +2119,34 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       return;
     }
     if (!thread.submitted) {
-      // 未发送的行可能已经是真实会话：worker 启动即创建会话文件，目录里
-      // 有它时直接恢复该会话 —— composer 草稿按会话 id 存储，会随选中
-      // 一起回到输入框；只有从未落盘的会话才开全新对话。
+      // 未发送的行已经是真实会话：worker 启动即创建会话文件，但还没有
+      // 对话消息，历史列表不显示它（模型里也没有，走历史条目选中会失去
+      // canvas 的 selectedSessionId）。选择就留在本会话 —— composer 草稿
+      // 按会话 id 存储，会随选中一起回到输入框；单会话查询（可命中无消息
+      // 的会话）解析 threadId，再显式 resume 让 Runtime 活动会话与视图一致。
+      const generation = navigationGate.next();
+      commitDockSelection({ target: executionTarget.id ?? "local", project: thread.workspaceId, session: thread.sessionId });
+      setSelectedProvisionalSessionId(thread.sessionId);
+      onNewThread();
+      setSessionActionError(undefined);
       void (async () => {
         const entry = await resolveProvisionalHistoryEntry(thread);
-        if (entry !== undefined) {
-          try {
-            await openHistoryEntry(entry, thread.workspaceId, { resumeForAction: true });
-          } catch (error) {
-            if (error instanceof SessionSwitchCancelledError) return;
-            setSessionActionError(hostErrorMessage(error, zhRef.current ? "打开会话失败" : "Failed to open conversation"));
+        if (entry === undefined || !navigationGate.isCurrent(generation)) return;
+        try {
+          const handle = await client.command("session.resume", { threadId: entry.threadId });
+          const resumed = await waitReceipt<OperatorStateSnapshot>(client, handle.requestId);
+          if (!navigationGate.isCurrent(generation)) return;
+          if (resumed.sessionId !== thread.sessionId) {
+            throw new Error(zhRef.current ? "恢复的会话与目标会话不一致" : "Resumed session does not match the target session");
           }
-          return;
+        } catch (error) {
+          // 用户已切走，或 Runtime 已不认识这个会话（worker 已回收、会话
+          // 尚未可列出）：保留当前视图与草稿，不打扰用户；发送路径会再次
+          // 解析会话。
+          if (navigationGate.isCurrent(generation)) {
+            console.warn("[omp-studio:session] provisional resume failed:", hostErrorMessage(error, zhRef.current ? "恢复会话失败" : "Failed to resume session"));
+          }
         }
-        commitDockSelection({ target: executionTarget.id ?? "local", project: thread.workspaceId, session: thread.sessionId });
-        setSelectedProvisionalSessionId(thread.sessionId);
-        onNewThread();
-        setSessionActionError(undefined);
-        onRoute("workbench");
       })();
       return;
     }

@@ -140,7 +140,11 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
     if (metadata.size > maxSessionBytes) return { note: "OVERSIZE_SKIPPED" };
     const header = await cachedSessionHeader(file, metadata, archived ? prefixBytes : Math.min(prefixBytes, metadata.size), maxSessionBytes);
     if (header === undefined) return { note: "CORRUPT_SKIPPED" };
-    if (!header.hasConversationMessage && options.includeEmptySessions !== true) return {};
+    // List views hide sessions without a conversation message yet (freshly
+    // created, never sent). An explicit single-session lookup may legitimately
+    // target exactly such a session — the renderer resolves provisional
+    // (unsent) rows through it for resume, archive and delete.
+    if (!header.hasConversationMessage && options.includeEmptySessions !== true && !(lookup && header.id === lookup.sessionId)) return {};
     if (lookup && header.id !== lookup.sessionId) return {};
     const workspaceId = header.cwd === undefined ? undefined : workspaceIds?.get(workspacePathKey(header.cwd));
     if (lookup && workspaceId === undefined) return {};

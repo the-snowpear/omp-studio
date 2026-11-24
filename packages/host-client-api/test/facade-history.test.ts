@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { PublicAuthorityIdentity, RuntimeInstallState } from "@omp-studio/client-contract";
+import type { PublicAuthorityIdentity, RuntimeInstallState, SessionId, WorkspaceId } from "@omp-studio/client-contract";
 import { StudioHostClientFacade, createDefaultHostDiagnosticsFactory } from "../src/index.js";
 import type { HostBackend } from "@omp-studio/studio-host";
 
@@ -50,6 +50,56 @@ test("history.list stably puts pinned sessions first before applying the limit",
     assert.ok(selected.ok);
     assert.deepEqual(selected.result.entries.map(entry => entry.sessionId), [sessionId]);
     assert.equal(selected.result.total, 1);
+  } finally {
+    await facade.close();
+  }
+});
+
+test("history.list single-session query reaches a never-sent session through the catalog locate", async () => {
+  // The list view only returns sessions with a conversation message; the Host's
+  // single-session lookup can additionally reach a fresh session that the
+  // renderer resolves for resume, archive and delete of an unsent row.
+  const facade = new StudioHostClientFacade({
+    authority: {
+      authorityId: "authority-1" as PublicAuthorityIdentity["authorityId"],
+      authorityEpoch: 1 as PublicAuthorityIdentity["authorityEpoch"],
+    },
+    platform: "win32",
+    arch: "x64",
+    backend: {} as HostBackend,
+    capabilityManifest: () => undefined,
+    commandManifest: () => undefined,
+    catalog: {
+      list: async () => [
+        { sessionId: "with-message", modifiedAt: "2026-08-23T03:00:00.000Z", messageCount: 1, status: "active" as const },
+      ],
+      locate: async (sessionId: string) =>
+        sessionId === "never-sent"
+          ? [{
+              workspaceId: "ws-1" as WorkspaceId,
+              workspaceName: "Project",
+              entry: { sessionId: "never-sent", modifiedAt: "2026-08-23T04:00:00.000Z", messageCount: 0, status: "active" as const },
+            }]
+          : [],
+    },
+    diagnostics: createDefaultHostDiagnosticsFactory(),
+    install: async (): Promise<RuntimeInstallState> => ({ status: "installed", signature: "unknown" }),
+  });
+
+  try {
+    const listed = await facade.query({ queryName: "history.list", input: { limit: 10 } });
+    assert.ok(listed.ok);
+    assert.deepEqual(listed.result.entries.map(entry => entry.sessionId), ["with-message"]);
+
+    const hidden = await facade.query({ queryName: "history.list", input: { limit: 1, sessionId: "never-sent" as SessionId } });
+    assert.ok(hidden.ok);
+    assert.deepEqual(hidden.result.entries.map(entry => entry.sessionId), ["never-sent"]);
+    assert.ok(hidden.result.entries[0]?.threadId?.startsWith("thread-"));
+    assert.equal(hidden.result.total, 1);
+
+    const scoped = await facade.query({ queryName: "history.list", input: { limit: 1, sessionId: "never-sent" as SessionId, workspaceId: "ws-other" as WorkspaceId } });
+    assert.ok(scoped.ok);
+    assert.deepEqual(scoped.result.entries, []);
   } finally {
     await facade.close();
   }
