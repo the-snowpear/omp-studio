@@ -76,11 +76,6 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
   const executionTarget = useExecutionTarget();
   const zh = resolvedLanguage === "zh";
   const { preview, marks } = usePreviewMode();
-  // 临时诊断：provisional 行集合变化时打一行，确认侧栏到底渲染了哪些草稿行。
-  const provisionalDebugKey = chrome.provisionalThreads.map(thread => `${String(thread.workspaceId)}|${String(thread.sessionId)}|submitted=${thread.submitted}`).join(" ; ");
-  useEffect(() => {
-    console.warn(`[omp-studio:sidebar] provisional rows: ${provisionalDebugKey || "none"}`);
-  }, [provisionalDebugKey]);
   const appUpdate = useAppUpdate();
   const effectiveUpdate = preview ? getPreviewAppUpdate(zh) : (appUpdate.state.updateInfo?.available ? appUpdate.state.updateInfo : null);
   const hasUpdate = effectiveUpdate?.available === true;
@@ -757,6 +752,12 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                           >
                             <ThreadSpin running={thread.running} />
                             <span className="t-title"><SessionTitleMark row={titleMetadata.rows.get(String(thread.sessionId))} title={transientTitle}/><span className="t-scroll">{transientTitle}</span></span>
+                            {/* 未发送的草稿行挂一个中性 tag，和进入历史目录后的真实会话区分。 */}
+                            {!thread.submitted ? (
+                              <span className="t-wait chip gray xs" role="status" aria-label={t("sidebar.draftTag")}>
+                                {t("sidebar.draftTag")}
+                              </span>
+                            ) : null}
                           </button>
                           {thread.submitted ? (
                             <span className="t-actions">

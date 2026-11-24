@@ -451,18 +451,14 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   });
   useEffect(() => {
     const previous = composerViewRef.current;
-    const viewChanged = !(previous.sessionId === selectedSessionId && previous.threadId === selectedThreadId && previous.viewIdentity === viewIdentity);
-    // 临时诊断：effect 每次运行都记录（mount 时 prev 与当前相同 => changed=false）。
-    console.warn(`[omp-studio:canvas] view-effect sel=${selectedSessionId ?? "∅"} view=${viewIdentity} changed=${viewChanged}`);
     composerViewRef.current = { sessionId: selectedSessionId, threadId: selectedThreadId, viewIdentity };
-    if (!viewChanged) return;
+    if (previous.sessionId === selectedSessionId && previous.threadId === selectedThreadId && previous.viewIdentity === viewIdentity) return;
     if (previous.sessionId === undefined && selectedSessionId !== undefined
       && previous.viewIdentity === viewIdentity && snapshotFrom(state)?.sessionId === selectedSessionId) {
       onComposerDraftChange?.(selectedSessionId, composerRef.current?.getSnapshot() ?? draftLive.current);
       return;
     }
     const restoredSnapshot = composerDraftRef.current ?? emptySnapshot();
-    console.warn(`[omp-studio:draft] canvas-restore ${previous.sessionId ?? "∅"} -> ${selectedSessionId ?? "∅"} have=${composerDraftRef.current !== undefined} chars=${restoredSnapshot.text.length}`); // 临时诊断
     replaceDraft(restoredSnapshot);
     setSubmittedPrompt((current) => current !== undefined && selectedSessionId !== undefined && current.sessionId === selectedSessionId ? current : undefined);
     setComposerError(undefined);
@@ -1200,8 +1196,6 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     // keep their row; the reconciler decides that.
     const previousOwner = lastComposerOwnerRef.current;
     lastComposerOwnerRef.current = composerOwner;
-    // 临时诊断：每次 effect 运行都记录 prev/cur 与 final 是否触发。
-    console.warn(`[omp-studio:draft] final-check prev=${previousOwner ?? "∅"} cur=${composerOwner ?? "∅"} fire=${!preview && previousOwner !== undefined && previousOwner !== composerOwner}`);
     if (!preview && previousOwner !== undefined && previousOwner !== composerOwner) {
       onProvisionalSessionChange?.({ sessionId: previousOwner, visible: false, running: false, submitted: false, final: true });
     }

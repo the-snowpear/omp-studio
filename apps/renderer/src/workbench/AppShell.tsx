@@ -247,7 +247,6 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     setUsedSkills((prev) => mergeUsedSkills(prev, names));
   }, []);
   const onComposerDraftChange = useCallback((sessionId: string, draft: ComposerSnapshot) => {
-    console.warn(`[omp-studio:draft] save owner=${sessionId} chars=${draft.text.length}`); // 临时诊断
     composerDraftBook.set(sessionId, draft);
   }, [composerDraftBook]);
   useEffect(() => {
@@ -699,13 +698,6 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   });
   /** Restore boundary only: read, never subscribe (see `composer/draftStore.ts`). */
   const activeComposerDraft = composerDraftBook.get(activeComposerOwner);
-  const draftRestoreLogRef = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    const key = `${activeComposerOwner}|${activeComposerDraft === undefined ? 0 : activeComposerDraft.text.length}`;
-    if (draftRestoreLogRef.current === key) return;
-    draftRestoreLogRef.current = key;
-    console.warn(`[omp-studio:draft] restore-read owner=${activeComposerOwner} have=${activeComposerDraft !== undefined} chars=${activeComposerDraft?.text.length ?? 0}`); // 临时诊断
-  }, [activeComposerOwner, activeComposerDraft]);
   useEffect(() => {
     if (composerInsertion && composerInsertion.owner !== activeComposerOwner) setComposerInsertion(undefined);
   }, [composerInsertion, activeComposerOwner]);
@@ -755,8 +747,6 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       // the row menu lets the user delete it. Only empty drafts are dropped,
       // so abandoned fresh chats without any text still do not accumulate.
       const draftText = composerDraftBook.get(key)?.text ?? "";
-      // 临时诊断：确认 final 时草稿行是保留（有文本）还是移除（无文本）。
-      console.warn(`[omp-studio:sidebar] final ${key} draftChars=${draftText.length} kept=${draftText.trim() !== ""}`);
       if (draftText.trim() !== "") {
         pendingFinalHidesRef.current.delete(key);
         // Keep the row exactly as stored: it stays selectable (the composer
@@ -1977,7 +1967,6 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
    * 否则会话会建到旧项目的 cwd 里。 */
   const startNewChatInProject = useCallback((project: SelectedProject) => {
     if (mdi) { mdi.store.openFromDirectory({ targetId: executionTarget.id, workspaceId: project.id, draftId: crypto.randomUUID() }); return; }
-    if (!previewMode.preview) console.warn(`[omp-studio:session] startNewChatInProject ${project.id}`); // 临时诊断
     if (previewMode.preview) {
       // 预览模式：只切换本地演示状态，不调 Host。
       setPreviewProjectId(project.id);
@@ -2026,8 +2015,6 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   /** opts.resumeForAction：行级「打开并执行」——即使无驻留也 resume，让目标会话
       真正成为 Runtime 活动会话；失败时向上抛出，由调用方统一报告并中止后续动作。 */
   const openHistoryEntry = (entry: SessionHistoryEntry, workspaceId?: WorkspaceId, opts?: { resumeForAction?: boolean; skipQueue?: boolean }): Promise<void> => {
-    // 临时诊断：历史行点击（区分于草稿行点击）。
-    if (!mdi) console.warn(`[omp-studio:session] openHistoryEntry ${entry.sessionId ?? "∅"} (resumeForAction=${opts?.resumeForAction === true})`);
     if (mdi && !opts?.resumeForAction) {
       const provisional = provisionalThreadForHistoryEntry(Object.values(provisionalThreadsBySession), entry);
       const liveTitle = entry.sessionId !== undefined && entry.sessionId === snapshot?.sessionId
@@ -2120,12 +2107,8 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
 
   const openProvisionalThread = (thread: ProvisionalProjectThread) => {
     if (!onRoute("workbench")) return;
-    // 临时诊断：草稿行点击（任何分支都记录）。
-    console.warn(`[omp-studio:session] openProvisionalThread ${thread.sessionId} submitted=${thread.submitted} live=${thread.sessionId === snapshot?.sessionId}`);
     if (mdi) {
       const existing = mdi.store.getSnapshot().documents.find(document => document.ref.targetId === executionTarget.id && document.ref.workspaceId === thread.workspaceId && (document.ref.sessionId === thread.sessionId || document.ref.draftId === thread.sessionId));
-      // 临时诊断：MDI 分支是否命中原文档（未命中 = 另开新空文档）。
-      console.warn(`[omp-studio:session] mdi-row found=${!!existing} docs=${mdi.store.getSnapshot().documents.map(d => JSON.stringify(d.ref)).join(" | ")}`);
       mdi.store.openFromDirectory(existing?.ref ?? { targetId: executionTarget.id, workspaceId: thread.workspaceId, ...(thread.submitted ? { sessionId: thread.sessionId } : { draftId: thread.sessionId }) }, thread.title);
       return;
     }
@@ -2146,8 +2129,6 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       // canvas 的 selectedSessionId）。选择就留在本会话 —— composer 草稿
       // 按会话 id 存储，会随选中一起回到输入框；单会话查询（可命中无消息
       // 的会话）解析 threadId，再显式 resume 让 Runtime 活动会话与视图一致。
-      // 临时诊断：确认草稿行点击真的走到了这个分支。
-      console.warn(`[omp-studio:session] open unsent row ${thread.sessionId} draftChars=${composerDraftBook.get(String(thread.sessionId))?.text.length ?? 0}`);
       const generation = navigationGate.next();
       commitDockSelection({ target: executionTarget.id ?? "local", project: thread.workspaceId, session: thread.sessionId });
       setSelectedProvisionalSessionId(thread.sessionId);

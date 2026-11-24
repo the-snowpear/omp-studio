@@ -3150,7 +3150,8 @@ export const en: LocaleDictionary = {
   "sidebar": {
     "waitingApproval": "Pending Approval",
     "waitingPlan": "Pending Review",
-    "waitingAsk": "Pending Answer"
+    "waitingAsk": "Pending Answer",
+    "draftTag": "Draft"
   },
   "tests": {
     "notice": "Test commands run by the agent in this session. Click a row to correlate with the Bash card in chat. Failures display runner output verbatim without suite tree parsing.",
