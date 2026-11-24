@@ -11,7 +11,7 @@ import {
 } from "../../advisor/settings";
 import { cfgLspRequestTimeout } from "../../lsp/settings";
 import { cfgSharpshooterMinPromptLength } from "../../sharpshooter/settings";
-import { cfgTitleIcons, cfgTitleGenerator, cfgTitleRefreshOnReplan } from "../../utils/title-settings";
+import { cfgTitleIcons, cfgTitleGenerator, cfgTitleLanguage, cfgTitleRefreshOnReplan } from "../../utils/title-settings";
 import { cfgTelemetryOtlpExportEnabled } from "../../telemetry-settings";
 import type { AgentSession } from "../../session/agent-session";
 import {
@@ -36,6 +36,7 @@ const HANDLES: Record<NativePreferenceKey, AnySetting> = {
 	"title.icons": cfgTitleIcons,
 	"title.generator": cfgTitleGenerator,
 	"title.refreshOnReplan": cfgTitleRefreshOnReplan,
+	"title.language": cfgTitleLanguage,
 	"telemetry.otlpExportEnabled": cfgTelemetryOtlpExportEnabled,
 };
 function scalar(value: unknown): NativePreferenceValue {

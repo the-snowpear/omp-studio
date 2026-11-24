@@ -12,6 +12,7 @@ export const NATIVE_PREFERENCE_KEYS = [
 	"title.icons",
 	"title.generator",
 	"title.refreshOnReplan",
+	"title.language",
 	"telemetry.otlpExportEnabled",
 ] as const;
 export type NativePreferenceKey = (typeof NATIVE_PREFERENCE_KEYS)[number];
