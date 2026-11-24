@@ -48,7 +48,10 @@ class PathResolutionQueue {
   refresh(key: string, immediate = false) {
     const probe = this.watched.get(key);
     if (!probe || !immediate && this.pending.has(key)) return;
-    const readyAt = Date.now() + FLUSH_DELAY_MS;
+    // Quantize to the flush grid: links enqueued within the same debounce
+    // window (typically the same render commit) share one readyAt, so slow
+    // machines cannot split one group's batch across two resolve calls.
+    const readyAt = (Math.floor(Date.now() / FLUSH_DELAY_MS) + 1) * FLUSH_DELAY_MS;
     this.pending.set(key, { ...probe, readyAt, retried: false });
     this.schedule(readyAt);
   }
