@@ -1197,6 +1197,8 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     // keep their row; the reconciler decides that.
     const previousOwner = lastComposerOwnerRef.current;
     lastComposerOwnerRef.current = composerOwner;
+    // 临时诊断：每次 effect 运行都记录 prev/cur 与 final 是否触发。
+    console.warn(`[omp-studio:draft] final-check prev=${previousOwner ?? "∅"} cur=${composerOwner ?? "∅"} fire=${!preview && previousOwner !== undefined && previousOwner !== composerOwner}`);
     if (!preview && previousOwner !== undefined && previousOwner !== composerOwner) {
       onProvisionalSessionChange?.({ sessionId: previousOwner, visible: false, running: false, submitted: false, final: true });
     }
