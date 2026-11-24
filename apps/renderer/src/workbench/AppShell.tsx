@@ -208,12 +208,25 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     sharedExpansion.set("sidebar-expanded-projects", expandedProjects);
   }, [expandedProjects, previewMode.preview, sharedExpansion]);
   /* 后台文档（浮动窗口）持有挂载时的集合；它激活成为侧栏归属时对齐最新
-     共享值。只有活动文档能通过侧栏改这个集合，激活时同步即可保持一致。 */
+     共享值。只有活动文档能通过侧栏改这些集合，激活时同步即可保持一致。 */
   useEffect(() => {
     if (!mdi?.active || previewMode.preview) return;
-    const shared = sharedExpansion.get("sidebar-expanded-projects");
-    if (shared !== undefined) setExpandedProjects(shared as ReadonlySet<string>);
+    const sharedSet = sharedExpansion.get("sidebar-expanded-projects");
+    if (sharedSet !== undefined) setExpandedProjects(sharedSet as ReadonlySet<string>);
+    const sharedLimits = sharedExpansion.get("project-thread-limits");
+    if (sharedLimits !== undefined) setProjectThreadLimits(sharedLimits as Record<string, number>);
   }, [mdi?.active, previewMode.preview, sharedExpansion]);
+  /** 各项目当前展开的会话条数；折叠会话列表时清掉对应键回到默认 6 条。
+      与展开集同按目标共享：「展开 +N」是每文档状态时，点会话切到新文档
+      会丢回默认条数，列表看起来「自动收缩」。 */
+  const [projectThreadLimits, setProjectThreadLimits] = useState<Record<string, number>>(() => {
+    const shared = sharedExpansion.get("project-thread-limits");
+    return shared !== undefined ? shared as Record<string, number> : {};
+  });
+  useEffect(() => {
+    if (previewMode.preview) return;
+    sharedExpansion.set("project-thread-limits", projectThreadLimits);
+  }, [projectThreadLimits, previewMode.preview, sharedExpansion]);
   const [projectListExpanded, setProjectListExpanded] = useState(true);
   const [selectedProject, setSelectedProject] = useState<SelectedProject | null>(() => previewOn() ? CURRENT_PROJECT : null);
   const composerRef = useRef<ChipComposerHandle | null>(null);
@@ -273,8 +286,6 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   useEffect(() => {
     if (selectedHistoryId !== null) setSelectedProvisionalSessionId(undefined);
   }, [selectedHistoryId]);
-  /** 各项目当前展开的会话条数；折叠会话列表时清掉对应键回到默认 6 条。 */
-  const [projectThreadLimits, setProjectThreadLimits] = useState<Record<string, number>>({});
   const projectHistories = useProjectHistories({ client, preview: previewMode.preview, shared: mdi?.store.history(executionTarget.id) });
   const {
     cache: projectHistoryCache,

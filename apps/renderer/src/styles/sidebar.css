@@ -427,7 +427,8 @@
   color: var(--text-3);
 }
 .thread .t-badges { display: flex; gap: 3px; align-items: center; flex: none; }
-/* 状态胶囊参与行布局，点击仍落在包含它的会话按钮上。 */
+/* 状态胶囊参与行布局，点击仍落在包含它的会话按钮上。悬停行时淡出
+   （与时间戳同模式），给浮出的「归档 / ⋯」操作让位，避免草稿 tag 与 ⋯ 重叠。 */
 .t-wait {
   position: static;
   flex: 0 0 auto;
@@ -437,7 +438,9 @@
   white-space: nowrap;
   pointer-events: none;
   border-radius: var(--r-full);
+  transition: opacity var(--dur-fast) var(--ease-out);
 }
+.thread-row:hover .thread .t-wait { opacity: 0; }
 /* 比 chip.xs 更高更宽，字号仍是 10.5px。 */
 .t-wait.chip.xs {
   height: 20px;

@@ -24,7 +24,7 @@ vi.mock("../TerminalPane", () => ({ TerminalPane: () => null }));
 vi.setConfig({ testTimeout: 15_000 });
 
 afterEach(() => { cleanup(); localStorage.clear(); window.history.replaceState(null, "", "/"); __resetAppSettingsForTests(null); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
-function client(options: { delayContext?: Promise<void>; bootstrap?: () => void; openContext?: (scope: ClientContextScope) => void; openProjectContext?: () => void; reportActiveProject?: boolean; reportContextSession?: boolean } = {}) {
+function client(options: { delayContext?: Promise<void>; bootstrap?: () => void; openContext?: (scope: ClientContextScope) => void; openProjectContext?: () => void; reportActiveProject?: boolean; reportContextSession?: boolean; historyCount?: number } = {}) {
   const workspaceId = contractFixtures.bootstrap.residents!.residents[0]!.workspaceId;
   const transport: ClientTransport = {
     openContext: async scope => { if (scope.sessionId) options.openContext?.(scope); else options.openProjectContext?.(); return { ...transport, bootstrap: async () => {
@@ -44,7 +44,17 @@ function client(options: { delayContext?: Promise<void>; bootstrap?: () => void;
       if (request.queryName === "projects.list") response.result.workspaces = [{ workspaceId, name: "First project", active: true, lastOpenedAt: "2026-11-04T00:00:00.000Z" }, { workspaceId: "ws-second", name: "Second project", active: false, lastOpenedAt: "2026-11-04T00:00:00.000Z" }];
       // The desktop Host also names the active project; the shared fixture omits it.
       if (request.queryName === "projects.list" && options.reportActiveProject) response.result.activeWorkspaceId = workspaceId;
-      if (request.queryName === "history.list") response.result.entries = response.result.entries.slice(0, 1).flatMap((entry: object) => [{ ...entry, sessionId: "second-session", historyId: "second-history", title: "Second conversation" }, { ...entry, sessionId: "third-session", historyId: "third-history", title: "Third conversation" }]);
+      if (request.queryName === "history.list") {
+        const base = response.result.entries.slice(0, 1)[0] as object;
+        if (options.historyCount === undefined) {
+          response.result.entries = [base].flatMap((entry: object) => [{ ...entry, sessionId: "second-session", historyId: "second-history", title: "Second conversation" }, { ...entry, sessionId: "third-session", historyId: "third-history", title: "Third conversation" }]);
+        } else {
+          // N entries so the sidebar list hits its default limit and renders the
+          // 「展开」(load more) button; total matches so the button hides at N.
+          response.result.entries = Array.from({ length: options.historyCount }, (_, i) => ({ ...base, sessionId: i === 0 ? "second-session" : i === 1 ? "third-session" : `bulk-${i}-session`, historyId: i === 0 ? "second-history" : i === 1 ? "third-history" : `bulk-${i}-history`, title: i === 0 ? "Second conversation" : i === 1 ? "Third conversation" : `Conversation ${i + 1}` }));
+          response.result.total = options.historyCount;
+        }
+      }
       return response;
     },
     command: async request => ({ commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: new Date().toISOString() }),
@@ -970,6 +980,27 @@ describe("conversation windows", () => {
     // expansion state, not the stale set from its mount time.
     fireEvent.pointerDown(document.querySelector(".dock-conversation-window")!);
     await waitFor(() => expect(projectHeader("First project").getAttribute("aria-expanded")).toBe("true"));
+  });
+  it("keeps the loaded thread count when switching conversations (the 「展开」count survives the document switch)", async () => {
+    // 「展开 +N」loads more sessions for the project; the count is shared per
+    // target. Clicking a conversation opens a new document whose sidebar must
+    // keep the loaded count instead of snapping back to the default 6 (the
+    // list appearing to "auto-collapse").
+    localStorage.setItem("omp.sidebar.expandedProjects", JSON.stringify({ expandedProjects: ["ws-second"] }));
+    await mount(false, client({ historyCount: 8 }));
+    const projectRows = () => [...document.querySelectorAll<HTMLElement>("#projectList .project")].find(row => row.textContent?.includes("Second project"))!;
+    const rowsInProject = () => projectRows().querySelectorAll<HTMLElement>(".thread");
+    const loadMore = () => projectRows().querySelector<HTMLElement>(".load-more");
+    // Default limit (6) of the 8 sessions: the 「展开」button offers the rest.
+    await waitFor(() => expect(rowsInProject().length).toBe(6));
+    expect(loadMore()).not.toBeNull();
+    fireEvent.click(loadMore()!);
+    await waitFor(() => expect(rowsInProject().length).toBe(8));
+    expect(loadMore()).toBeNull();
+    // Switch to another conversation: the new document keeps the loaded count.
+    fireEvent.click([...rowsInProject()].find(row => row.textContent?.includes("Third conversation"))!);
+    await waitFor(() => expect(rowsInProject().length).toBe(8));
+    expect(loadMore()).toBeNull();
   });
   it("drags main A while the shared title represents B, cancels to B and disables dragging when main is empty", async () => {
     await mount(true);
