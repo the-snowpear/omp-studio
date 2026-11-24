@@ -499,6 +499,12 @@ export interface RuntimeCommandInputMap extends EvaluationCommandInputMap, Upgra
   /** Set the session thinking level without changing the active model. */
   "session.thinking.set": { readonly level: SessionThinkingSelector };
   /**
+   * Regenerate the live session's automatic title right now, e.g. after the
+   * title-language preference changes. User-named sessions keep their name
+   * (`retitled: false`).
+   */
+  "session.retitle": EmptyInput;
+  /**
    * Pin the session-scoped Task subagent model (runtime-only override, same as
    * the TUI picker's alt+p Task mode; never persisted). `null` clears the
    * override so the subagent inherits the session model again.
@@ -946,6 +952,7 @@ export type CommandResultMap = CoreCommandResultMap & ModelServicesCommandResult
     | "runtime.settings.set"
     | "mode.plan.review.saveAndQuit"
     | "core.continue"
+    | "session.retitle"
   >]: OperatorStateSnapshot;
 } & {
   [K in EvaluationOperation["kind"]]: EvaluationCommandOutcome;
@@ -964,7 +971,14 @@ export type CommandResultMap = CoreCommandResultMap & ModelServicesCommandResult
   "runtime.settings.set": StudioRuntimeSettingsSetResult;
   "mode.plan.review.saveAndQuit": StudioPlanSaveAndQuitResult;
   "core.continue": ContinueTurnOutcome;
+  /** `retitled: false` covers user-named sessions and sessions with no context to retitle from. */
+  "session.retitle": SessionRetitleResult;
 };
+
+export interface SessionRetitleResult {
+  readonly retitled: boolean;
+  readonly title?: string;
+}
 
 export type EvaluationCommandOutcome = { readonly snapshot: OperatorStateSnapshot; readonly result: unknown };
 

@@ -23,6 +23,7 @@ export function partialSessionDeletionNotice(title: string, details: string, zh:
 const LIVE_SESSION_PREFERENCE_COMMANDS = new Set<CommandName>([
   "session.model.set",
   "session.thinking.set",
+  "session.retitle",
   "session.taskModel.set",
   "mode.plan.enter",
   "mode.plan.exit",

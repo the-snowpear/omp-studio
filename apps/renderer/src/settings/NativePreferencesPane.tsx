@@ -75,11 +75,11 @@ export const nativePreferenceDescriptions: Record<NativePreferenceKey, [string, 
   ],
   "title.language": [
     "会话标题语言",
-    "自动生成的会话标题使用哪种语言；只影响新标题，已有标题不变。",
+    "自动生成的会话标题使用哪种语言；更改后会重新生成当前会话的自动标题，手动命名的标题不变。",
   ],
   "think.language": [
     "思考过程语言",
-    "模型内部思考（Think 过程）使用哪种语言；对新会话生效。",
+    "模型内部思考（Think 过程）使用哪种语言；更改后从下一轮回复生效（会话范围只影响当前会话）。",
   ],
   "telemetry.otlpExportEnabled": [
     "OTLP 导出",
@@ -138,11 +138,11 @@ export const nativePreferenceEnglishDescriptions: Record<NativePreferenceKey, [s
   ],
   "title.language": [
     "Title language",
-    "Language for generated session titles; only new titles are affected.",
+    "Language for generated session titles; changing it re-generates this session's automatic title. Manual titles are kept.",
   ],
   "think.language": [
     "Thinking language",
-    "Language of the model's internal thinking; applies to new sessions.",
+    "Language of the model's internal thinking; applies from the next reply (session scope affects only this session).",
   ],
   "telemetry.otlpExportEnabled": [
     "OTLP export",
@@ -330,6 +330,11 @@ export function NativePreferencesPane({
           values.map((value) => (value.key === row.key ? row : value)),
         );
         setDrafts((values) => ({ ...values, [row.key]: row.value }));
+        // A title-language change (or clearing its override) re-generates the
+        // current session's automatic title in the new language.
+        if (pending.row.key === "title.language" && !preview && client) {
+          void client.command("session.retitle", {}).catch(() => undefined);
+        }
         if (!preview || marks) setNotice(
           preview && marks
             ? zh

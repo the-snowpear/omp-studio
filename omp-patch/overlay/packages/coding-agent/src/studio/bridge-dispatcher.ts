@@ -114,6 +114,7 @@ const SESSION_CONTROL_OPERATION_KINDS = new Set<string>([
 	"session.fork",
 	"session.handoff",
 	"session.fast.set",
+	"session.retitle",
 	"session.prewalk.arm",
 	"session.prewalk.disarm",
 	"session.prewalk.restart",
@@ -812,6 +813,10 @@ export class StudioBridgeDispatcher {
 				return await this.runtime.services.models.setTaskModel(operation.selector);
 			case "session.fast.set":
 				return this.runtime.services.fastPrewalk.setFast(operation.enabled);
+			case "session.retitle": {
+				const retitled = await this.runtime.session.retitleNow();
+				return retitled === undefined ? { retitled: false } : { retitled: true, title: retitled };
+			}
 			case "session.prewalk.arm":
 				return this.runtime.services.fastPrewalk.arm(operation.target);
 			case "session.prewalk.disarm":

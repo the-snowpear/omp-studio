@@ -459,6 +459,7 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "session.handoff": true,
   "session.model.set": true,
   "session.thinking.set": true,
+  "session.retitle": true,
   "session.taskModel.set": true,
   "session.tree.get": true,
   "session.tree.navigate": true,

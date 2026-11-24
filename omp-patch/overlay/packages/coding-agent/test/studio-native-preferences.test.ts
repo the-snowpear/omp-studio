@@ -30,7 +30,15 @@ test("native preferences preserve overlay precedence and distinguish next-launch
 });
 test("OMP 18.12 native preferences are listed in their groups and round-trip through the Runtime settings", async () => {
 	const settings = Settings.isolated();
-	const service = new StudioNativePreferencesService({ sessionId: "s", settings } as AgentSession);
+	let promptRefreshes = 0;
+	const service = new StudioNativePreferencesService({
+		sessionId: "s",
+		settings,
+		// `think.language` changes rebuild the session's base system prompt.
+		refreshBaseSystemPrompt: async () => {
+			promptRefreshes++;
+		},
+	} as AgentSession);
 	const listed = (await service.execute({ kind: "preferences.native.get", sessionId: "s" })) as {
 		preferences: Array<{ key: string; group: string; choices?: unknown[] }>;
 	};
@@ -74,6 +82,7 @@ test("OMP 18.12 native preferences are listed in their groups and round-trip thr
 		scope: "session",
 	});
 	expect(thinking).toMatchObject({ value: "en", source: "runtime", group: "thinking" });
+	expect(promptRefreshes).toBe(1);
 });
 test("think.language resolves to exactly one thinking-language instruction", () => {
 	const settings = Settings.isolated();
@@ -85,13 +94,13 @@ test("think.language resolves to exactly one thinking-language instruction", () 
 	cfgThinkLanguage.override(settings, "auto");
 	expect(thinkingLanguageInstruction(settings)).toBeUndefined();
 });
-test("title.language appends exactly one language line to generated-title prompts", () => {
+test("title.language always appends exactly one language line to generated-title prompts", () => {
 	const settings = Settings.isolated();
-	expect(titleLanguageInstruction(settings)).toBeUndefined();
+	// "auto" asks for the user's input language explicitly: the English-heavy
+	// session system prompt otherwise wins and titles come out English.
+	expect(titleLanguageInstruction(settings)).toContain("same language as the user's input");
 	cfgTitleLanguage.override(settings, "zh");
 	expect(titleLanguageInstruction(settings)).toContain("Simplified Chinese");
 	cfgTitleLanguage.override(settings, "en");
 	expect(titleLanguageInstruction(settings)).toContain("English");
-	cfgTitleLanguage.override(settings, "auto");
-	expect(titleLanguageInstruction(settings)).toBeUndefined();
 });

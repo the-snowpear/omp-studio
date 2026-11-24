@@ -55,6 +55,7 @@ const LIVE_TURN_OPERATION_KINDS = new Set<StudioOperation["kind"]>([
   "runtime.resume",
   "session.model.set",
   "session.thinking.set",
+  "session.retitle",
   "session.taskModel.set",
   "mode.plan.enter",
   "mode.plan.exit",

@@ -89,6 +89,7 @@ export class StudioNativePreferencesService {
 		const setting = HANDLES[operation.key];
 		if (operation.kind === "preferences.native.clearOverride") {
 			setting.clearOverride(this.session.settings);
+			if (operation.key === "think.language") this.#applyThinkingLanguageChange();
 			return this.#row(operation.key);
 		}
 		setting.assertWritable(operation.value);
@@ -102,6 +103,17 @@ export class StudioNativePreferencesService {
 			setting.set(this.session.settings, operation.value);
 			await this.session.settings.flush();
 		}
+		if (operation.key === "think.language") this.#applyThinkingLanguageChange();
 		return this.#row(operation.key);
+	}
+
+	/**
+	 * `think.language` is read when the system prompt is built, and the session
+	 * options are frozen at creation — rebuild the current session's base
+	 * prompt so the change applies from the next turn instead of the next
+	 * session.
+	 */
+	#applyThinkingLanguageChange(): void {
+		void this.session.refreshBaseSystemPrompt().catch(() => undefined);
 	}
 }

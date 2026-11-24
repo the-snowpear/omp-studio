@@ -111,6 +111,7 @@ export type StudioOperation =
 	| { kind: "session.fork" }
 	| { kind: "session.handoff"; customInstructions?: string }
 	| { kind: "session.fast.set"; enabled: boolean }
+	| { kind: "session.retitle" }
 	| { kind: "session.prewalk.arm"; target?: string }
 	| { kind: "session.prewalk.disarm" }
 	| { kind: "session.prewalk.restart" }
@@ -784,6 +785,9 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 			exactKeys(operation, ["kind", "enabled"]);
 			if (typeof operation.enabled !== "boolean") throw new StudioFrameError("Invalid fast mode flag");
 			break;
+		case "session.retitle":
+			exactKeys(operation, ["kind"]);
+			break;
 		case "session.prewalk.arm":
 			exactKeys(operation, ["kind", "target"]);
 			if (operation.target !== undefined && !nonEmptyString(operation.target)) {
@@ -1233,6 +1237,7 @@ export const STUDIO_IMPLEMENTED_CAPABILITIES = [
 	"loop.pause",
 	"loop.disable",
 	"session.fast.set",
+	"session.retitle",
 	"session.prewalk.arm",
 	"session.prewalk.disarm",
 	"session.prewalk.restart",

@@ -668,7 +668,7 @@ index 56fe7892e6..ee93cc3054 100644
  	attribution?: MessageAttribution;
  	/** Called synchronously with the messages pushed onto the steering queue. See {@link PromptOptions.onPromptQueued}. */
 diff --git a/packages/coding-agent/src/session/agent-session.ts b/packages/coding-agent/src/session/agent-session.ts
-index e4cfb6ab48..b0be8ccef7 100644
+index e4cfb6ab48..947d7ee8c3 100644
 --- a/packages/coding-agent/src/session/agent-session.ts
 +++ b/packages/coding-agent/src/session/agent-session.ts
 @@ -152,6 +152,7 @@ import { RawSseDebugBuffer } from "@oh-my-pi/pi-tui/apps/debug/raw-sse-buffer";
@@ -1617,12 +1617,42 @@ index e4cfb6ab48..b0be8ccef7 100644
  			promptText: prompt.render(titleForkPrompt, {
  				card: icons !== "boring",
  				nerdFonts: icons === "nf+emoji",
-+				// "auto" renders nothing; zh/en append one language line.
-+				language: titleLanguageInstruction(this.settings) ?? "",
++				// "auto" asks for the input's language; zh/en pin an absolute one.
++				language: titleLanguageInstruction(this.settings),
  			}),
  			// Journaled where the billed message exists, so a fork that ends in a
  			// provider error still records its spend before rejecting.
-@@ -12721,7 +13132,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -12652,6 +13063,29 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+ 		await setSessionName.call(this.sessionManager, title, "auto", trigger);
+ 	}
+ 
++	/**
++	 * Studio: regenerate this session's automatic title right now, e.g. after
++	 * the operator changes the title-language preference. The operator-named
++	 * title is never replaced and a session still earning its first title
++	 * (which already reads the new preference) is left alone.
++	 * @returns the new title, or undefined when the title stays as it was.
++	 */
++	async retitleNow(): Promise<string | undefined> {
++		if (this.sessionManager.titleSource === "user") return undefined;
++		const sessionId = this.sessionManager.getSessionId();
++		if (this.#titleGenerationInFlightFor === sessionId) return undefined;
++		const context = this.#buildReplanTitleContext();
++		if (!context) return undefined;
++		const retitled = await this.#retitle(context);
++		if (!retitled) return undefined;
++		const title = this.#cardsAutoTitles() ? await this.#cardTitle(retitled) : retitled;
++		// A user rename that landed while the title model ran keeps the user's name.
++		if ((this.sessionManager.titleSource as string) === "user" || title === this.sessionName) return undefined;
++		const setSessionName = this.sessionManager.setSessionName as SetSessionNameWithTrigger;
++		await setSessionName.call(this.sessionManager, title, "auto", "replan");
++		return title;
++	}
++
+ 	/**
+ 	 * Whether the session title no longer fits the latest conversation, per the
+ 	 * `judge` role; undefined when no judge answered. Interruption and disposal
+@@ -12721,7 +13155,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		deliverQueuedMessages?: boolean;
  		/** Internal `/compact` startup keeps the manual-compaction marker alive while aborting the active turn. */
  		preserveCompaction?: boolean;
@@ -1634,7 +1664,7 @@ index e4cfb6ab48..b0be8ccef7 100644
  		const userInterrupt = options?.reason === USER_INTERRUPT_LABEL;
  		this.#pendingAbortErrorId = userInterrupt ? AIError.create(AIError.Flag.UserInterrupt) : undefined;
  		// Latch only when the interrupt stops something; an idle Esc would otherwise fold
-@@ -12832,6 +13247,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -12832,6 +13270,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  				} else this.#recordWithoutTurn([message]);
  			}
  		} finally {
@@ -1642,7 +1672,7 @@ index e4cfb6ab48..b0be8ccef7 100644
  			this.#abortInProgress = false;
  			this.#drainStrandedQueuedMessages();
  			if (forceQueuedDelivery) this.#forcedQueuedMessageDeliveryCount--;
-@@ -13978,6 +14394,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -13978,6 +14417,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  
  	/** Retry the last failed assistant turn when the session is idle. */
  	async retry(): Promise<boolean> {
@@ -1652,7 +1682,7 @@ index e4cfb6ab48..b0be8ccef7 100644
  		const didRetry = await this.#recovery.retry(this.#prunedTerminalFailure);
  		// A manual retry is the user resuming the run they interrupted, so it lifts the
  		// interrupt's auto-resume suppression the same way a typed prompt does.
-@@ -15339,6 +15758,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -15339,6 +15781,8 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		options: {
  			summarize?: boolean;
  			customInstructions?: string;
@@ -1661,7 +1691,7 @@ index e4cfb6ab48..b0be8ccef7 100644
  			/**
  			 * Opts into the two-phase `ask` toolResult re-answer protocol
  			 * (issue #5642): set only by the interactive `/tree` selector, which
-@@ -15393,7 +15814,12 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -15393,7 +15837,12 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		// navigated straight onto the ask result), and must still return
  		// `reopenAsk` / branch the new answer instead of silently reporting a
  		// no-op (chatgpt-codex review on #5895).
@@ -1675,7 +1705,7 @@ index e4cfb6ab48..b0be8ccef7 100644
  			return { cancelled: false };
  		}
  
-@@ -15540,7 +15966,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -15540,7 +15989,11 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		// model consumes it, mirroring a live `ask` completion (issue #6483).
  		let isAskReanswerCompletion = false;
  
@@ -1688,7 +1718,7 @@ index e4cfb6ab48..b0be8ccef7 100644
  			// User request (plain prompt, or a user-invoked skill/collab prompt): leaf = parent
  			// (null if root), the draft the user typed goes back to the editor with its images.
  			newLeafId = targetEntry.parentId;
-@@ -15966,7 +16396,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -15966,7 +16419,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  		];
  		const keyList = keys.map(key => key.id).join(", ");
  		const runner = this.#extensionRunner;
@@ -1697,7 +1727,7 @@ index e4cfb6ab48..b0be8ccef7 100644
  			if (!coordinator.notifiedKeys.has(actions[0].attemptKey)) {
  				coordinator.notifiedKeys.add(actions[0].attemptKey);
  				this.emitNotice(
-@@ -15999,10 +16429,12 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -15999,10 +16452,12 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  				? `Spend a saved ${providerLabel} rate-limit reset?\n${lines[0]}`
  				: `Spend ${actions.length} saved ${providerLabel} rate-limit resets?\n${lines.join("\n")}`;
  		try {
@@ -1714,7 +1744,7 @@ index e4cfb6ab48..b0be8ccef7 100644
  			if (choice === "Yes" || choice === "No") {
  				for (const key of keys) {
  					if (key.get(this.settings) === "unset") key.set(this.settings, choice === "Yes" ? "yes" : "no");
-@@ -16561,7 +16993,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -16561,7 +17016,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  	 * @returns the archive path and member names, or `undefined` when the main
  	 * session has no messages.
  	 */
@@ -1723,7 +1753,7 @@ index e4cfb6ab48..b0be8ccef7 100644
  		const messages = this.messages;
  		if (messages.length === 0) return undefined;
  		const entries: Array<readonly [string, string]> = [["session.md", `${this.formatSessionAsText()}\n`]];
-@@ -16604,7 +17036,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
+@@ -16604,7 +17059,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
  			entries.push([`subagents/${key}.md`, `${text}\n`]);
  			subagentCount++;
  		}
@@ -2603,7 +2633,7 @@ index cdecdaea9f..85810904fd 100644
  				enabled: cfgModelLoopGuardEnabled.get(settings),
  				checkAssistantContent: cfgModelLoopGuardCheckAssistantContent.get(settings),
 diff --git a/packages/coding-agent/src/session/settings.ts b/packages/coding-agent/src/session/settings.ts
-index 50797b86c6..76ff3eeeb6 100644
+index 50797b86c6..d9ae6bdb57 100644
 --- a/packages/coding-agent/src/session/settings.ts
 +++ b/packages/coding-agent/src/session/settings.ts
 @@ -26,7 +26,7 @@ import { compileModelPatterns } from "../utils/model-patterns";
@@ -2685,7 +2715,7 @@ index 50797b86c6..76ff3eeeb6 100644
  export const cfgImagesDescribeForTextModels = register({
  	id: "images.describeForTextModels",
  	type: "boolean",
-@@ -1743,6 +1799,41 @@ export const cfgThinkingBudgetsXhigh = register({ id: "thinkingBudgets.xhigh", t
+@@ -1743,6 +1799,53 @@ export const cfgThinkingBudgetsXhigh = register({ id: "thinkingBudgets.xhigh", t
  
  export const cfgThinkingBudgetsMax = register({ id: "thinkingBudgets.max", type: "number", default: 32768 });
  
@@ -2722,6 +2752,18 @@ index 50797b86c6..76ff3eeeb6 100644
 +	if (value === "zh") return "Always write your internal thinking (reasoning) in Simplified Chinese (简体中文).";
 +	if (value === "en") return "Always write your internal thinking (reasoning) in English.";
 +	return undefined;
++}
++
++/**
++ * Merge the live thinking-language line into the append system prompt at
++ * build time, so a preference change reaches the next prompt rebuild of the
++ * same session (the session options object is frozen at creation). "auto"
++ * returns the append prompt unchanged.
++ */
++export function composeThinkingAppend(appendSystemPrompt: string | undefined, scope: ScopeLike): string | undefined {
++	const line = thinkingLanguageInstruction(scope);
++	if (line === undefined) return appendSystemPrompt;
++	return appendSystemPrompt ? `${appendSystemPrompt}\n\n${line}` : line;
 +}
 +
  /** Token budget per thinking level (`thinkingBudgets.*`) on transports that accept reasoning token budgets. */
@@ -3562,7 +3604,7 @@ index 401205174c..27f940cb9e 100644
  
  	for (const model of models) {
 diff --git a/packages/coding-agent/src/utils/title-settings.ts b/packages/coding-agent/src/utils/title-settings.ts
-index 5a3b679ecd..5fd10d3cd2 100644
+index 5a3b679ecd..348799664c 100644
 --- a/packages/coding-agent/src/utils/title-settings.ts
 +++ b/packages/coding-agent/src/utils/title-settings.ts
 @@ -3,7 +3,7 @@
@@ -3574,7 +3616,7 @@ index 5a3b679ecd..5fd10d3cd2 100644
  
  /** The `title.icons` styles. */
  export const TITLE_ICONS = ["nf+emoji", "emoji", "boring"] as const;
-@@ -66,6 +66,41 @@ export const cfgTitleRefreshOnReplan = register({
+@@ -66,6 +66,42 @@ export const cfgTitleRefreshOnReplan = register({
  	},
  });
  
@@ -3603,14 +3645,15 @@ index 5a3b679ecd..5fd10d3cd2 100644
 +
 +/**
 + * One-line instruction appended to generated-title prompts so the model
-+ * titles in the configured language; `undefined` for "auto" (the prompt is
-+ * unchanged and the model follows the input).
++ * titles in the configured language. "auto" gets an explicit
++ * same-language-as-input line: the session system prompt is English-heavy,
++ * so without it the model titles in English even for Chinese input.
 + */
-+export function titleLanguageInstruction(scope: ScopeLike): string | undefined {
++export function titleLanguageInstruction(scope: ScopeLike): string {
 +	const value = cfgTitleLanguage.get(scope);
 +	if (value === "zh") return "Write the session title in Simplified Chinese (简体中文).";
 +	if (value === "en") return "Write the session title in English.";
-+	return undefined;
++	return "Write the session title in the same language as the user's input.";
 +}
 +
  export const cfgTitleRefreshAfterPrompts = register({

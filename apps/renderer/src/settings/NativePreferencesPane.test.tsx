@@ -47,6 +47,67 @@ it("preview applies and clears a title override without writing Runtime configur
   expect(client.command).not.toHaveBeenCalled();
   expect(client.query).not.toHaveBeenCalled();
 });
+it("re-generates the current session title when the title language changes", async () => {
+  const titleRow = {
+    key: "title.language",
+    group: "titles",
+    label: "Title language",
+    description: "Language for generated session titles",
+    value: "auto",
+    effective: "auto",
+    source: "default",
+    type: "enum",
+    choices: ["auto", "zh", "en"],
+    restartRequired: false,
+  } as const;
+  let sequence = 0;
+  const receipts: Record<string, unknown> = {};
+  const client = {
+    command: vi.fn(async (name: string) => {
+      const requestId = `req-${sequence++}`;
+      receipts[requestId] = {
+        status: "completed",
+        result:
+          name === "preferences.native.get"
+            ? { result: { preferences: [titleRow] } }
+            : { result: { ...titleRow, value: "zh", effective: "zh", source: "runtime" } },
+      };
+      return { requestId };
+    }),
+    getState: () => ({ commands: receipts }),
+    subscribe: vi.fn(() => () => {}),
+    query: vi.fn(),
+  } as unknown as StudioClient;
+  render(
+    <I18nProvider forcedLanguage="zh">
+      <PreviewModeProvider switchEnabled>
+        <NativePreferencesPane
+          client={client}
+          visible
+          context={{
+            sessionId: "s",
+            available: true,
+            capabilities: {
+              profile: "full-parity-v1",
+              generatedAt: "2026-01-01T00:00:00Z",
+              hash: "test",
+              capabilities: [
+                { id: "preferences.native.get", grade: "stable", version: 1, evidence: "test" },
+                { id: "preferences.native.set", grade: "stable", version: 1, evidence: "test" },
+                { id: "preferences.native.clearOverride", grade: "stable", version: 1, evidence: "test" },
+              ],
+            },
+          }}
+        />
+      </PreviewModeProvider>
+    </I18nProvider>,
+  );
+  const field = await screen.findByRole("combobox", { name: "会话标题语言" });
+  selectOption(field, "中文");
+  await waitFor(() =>
+    expect(client.command).toHaveBeenCalledWith("session.retitle", {}),
+  );
+});
 it("does not probe an old Runtime for unknown preferences", () => {
   const client = {
     command: vi.fn(),
