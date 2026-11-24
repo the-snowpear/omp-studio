@@ -755,6 +755,8 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       // the row menu lets the user delete it. Only empty drafts are dropped,
       // so abandoned fresh chats without any text still do not accumulate.
       const draftText = composerDraftBook.get(key)?.text ?? "";
+      // 临时诊断：确认 final 时草稿行是保留（有文本）还是移除（无文本）。
+      console.warn(`[omp-studio:sidebar] final ${key} draftChars=${draftText.length} kept=${draftText.trim() !== ""}`);
       if (draftText.trim() !== "") {
         pendingFinalHidesRef.current.delete(key);
         // Keep the row exactly as stored: it stays selectable (the composer
@@ -2137,6 +2139,8 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       // canvas 的 selectedSessionId）。选择就留在本会话 —— composer 草稿
       // 按会话 id 存储，会随选中一起回到输入框；单会话查询（可命中无消息
       // 的会话）解析 threadId，再显式 resume 让 Runtime 活动会话与视图一致。
+      // 临时诊断：确认草稿行点击真的走到了这个分支。
+      console.warn(`[omp-studio:session] open unsent row ${thread.sessionId} draftChars=${composerDraftBook.get(String(thread.sessionId))?.text.length ?? 0}`);
       const generation = navigationGate.next();
       commitDockSelection({ target: executionTarget.id ?? "local", project: thread.workspaceId, session: thread.sessionId });
       setSelectedProvisionalSessionId(thread.sessionId);

@@ -76,6 +76,11 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
   const executionTarget = useExecutionTarget();
   const zh = resolvedLanguage === "zh";
   const { preview, marks } = usePreviewMode();
+  // 临时诊断：provisional 行集合变化时打一行，确认侧栏到底渲染了哪些草稿行。
+  const provisionalDebugKey = chrome.provisionalThreads.map(thread => `${String(thread.workspaceId)}|${String(thread.sessionId)}|submitted=${thread.submitted}`).join(" ; ");
+  useEffect(() => {
+    console.warn(`[omp-studio:sidebar] provisional rows: ${provisionalDebugKey || "none"}`);
+  }, [provisionalDebugKey]);
   const appUpdate = useAppUpdate();
   const effectiveUpdate = preview ? getPreviewAppUpdate(zh) : (appUpdate.state.updateInfo?.available ? appUpdate.state.updateInfo : null);
   const hasUpdate = effectiveUpdate?.available === true;
