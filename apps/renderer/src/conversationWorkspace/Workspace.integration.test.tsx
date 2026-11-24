@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { isInaccessible } from "@testing-library/dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ClientContextScope, ClientTransport } from "@omp-studio/client-contract";
+import type { ClientContextScope, ClientTransport, SessionId } from "@omp-studio/client-contract";
 import { StudioClientImpl } from "@omp-studio/client";
 import { contractFixtures } from "@omp-studio/testkit";
 import { App } from "../App";
@@ -24,14 +24,19 @@ vi.mock("../TerminalPane", () => ({ TerminalPane: () => null }));
 vi.setConfig({ testTimeout: 15_000 });
 
 afterEach(() => { cleanup(); localStorage.clear(); window.history.replaceState(null, "", "/"); __resetAppSettingsForTests(null); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
-function client(options: { delayContext?: Promise<void>; bootstrap?: () => void; openContext?: (scope: ClientContextScope) => void; openProjectContext?: () => void; reportActiveProject?: boolean } = {}) {
+function client(options: { delayContext?: Promise<void>; bootstrap?: () => void; openContext?: (scope: ClientContextScope) => void; openProjectContext?: () => void; reportActiveProject?: boolean; reportContextSession?: boolean } = {}) {
   const workspaceId = contractFixtures.bootstrap.residents!.residents[0]!.workspaceId;
   const transport: ClientTransport = {
     openContext: async scope => { if (scope.sessionId) options.openContext?.(scope); else options.openProjectContext?.(); return { ...transport, bootstrap: async () => {
       options.bootstrap?.();
       await options.delayContext;
       const { snapshot, stateVersion, selected, ...value } = structuredClone(contractFixtures.bootstrap);
-      return { ...value, selected: { workspaceId: scope.workspaceId } };
+      // A fresh context gets its own Runtime session; the real Host reports it in the
+      // bootstrap (selected) and the snapshot. reportContextSession mimics that.
+      const contextSession = options.reportContextSession ? (scope.sessionId ?? "fresh-session") : undefined;
+      return { ...value,
+        ...(contextSession && snapshot ? { snapshot: { ...snapshot, sessionId: contextSession as SessionId } } : {}),
+        selected: { workspaceId: scope.workspaceId, ...(contextSession ? { sessionId: contextSession as SessionId, threadId: selected.threadId } : {}) } };
     } }; },
     bootstrap: async () => { options.bootstrap?.(); const value = structuredClone(contractFixtures.bootstrap); return { ...value, selected: { ...value.selected, workspaceId } }; },
     query: async request => {
@@ -911,6 +916,32 @@ describe("conversation windows", () => {
     expect(document.querySelectorAll("[data-conversation-document]")).toHaveLength(1);
     expect(document.querySelector(".dock-conversation-window .cw-document")).toBe(body);
     expect(body.querySelector("[contenteditable=true]")).toBe(editor);
+  });
+  it("clicking the unsent draft row reopens the draft document with its composer text", async () => {
+    // A fresh context gets its own Runtime session, which the Host reports in the
+    // context bootstrap; the document ref must be re-keyed to that session, or the
+    // sidebar draft row (keyed by session id) opens a new empty document and the
+    // per-document composer book no longer shares the draft.
+    await mount(false, client({ reportContextSession: true }));
+    const project = [...document.querySelectorAll<HTMLElement>("#projectList .project")].find(row => row.textContent?.includes("First project"))!;
+    fireEvent.click(project.querySelector("button[aria-label='New chat in this project']")!);
+    const editor = () => document.querySelector(".cw-main-conversation [contenteditable=true]")!;
+    await waitFor(() => expect(editor()).not.toBeNull());
+    editor().textContent = "unsent draft row";
+    fireEvent.input(editor());
+    await waitFor(() => {
+      expect([...document.querySelectorAll<HTMLElement>("#projectList .thread")].some(row => row.textContent?.includes("unsent draft row"))).toBe(true);
+    });
+    // Switch to another conversation; the draft row stays in the sidebar.
+    fireEvent.click([...document.querySelectorAll<HTMLElement>("#projectList .thread")].find(row => row.textContent?.includes("Second conversation"))!);
+    await waitFor(() => expect(editor().textContent).not.toBe("unsent draft row"));
+    expect([...document.querySelectorAll<HTMLElement>("#projectList .thread")].some(row => row.textContent?.includes("unsent draft row"))).toBe(true);
+    // Clicking the draft row must reuse the draft document and restore its text;
+    // without the ref promotion a new document is opened and its book is empty.
+    fireEvent.click([...document.querySelectorAll<HTMLElement>("#projectList .thread")].find(row => row.textContent?.includes("unsent draft row"))!);
+    await waitFor(() => expect(editor().textContent).toBe("unsent draft row"));
+    // The draft document is presented again as a single conversation (no duplicate window).
+    expect(document.querySelectorAll("[data-conversation-document]")).toHaveLength(1);
   });
   it("drags main A while the shared title represents B, cancels to B and disables dragging when main is empty", async () => {
     await mount(true);
