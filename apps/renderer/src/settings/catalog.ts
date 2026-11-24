@@ -110,7 +110,7 @@ export const SETTINGS_CATALOG: readonly SettingSearchItem[] = [
     zh:def.zh, en:def.en, targetZh:def.zh, targetEn:def.en, keywords:`${def.key} ${def.hint} ${def.hintEn}`,
   })),
   ...Object.entries(nativePreferenceDescriptions).map(([key, value]) => ({
-    id:key, group:(key.startsWith("advisor.") ? "tasks" : key.startsWith("title.") ? "interaction" : key.startsWith("telemetry.") ? "maintenance" : "files") as ActiveSettingsGroup,
+    id:key, group:(key.startsWith("advisor.") ? "tasks" : key.startsWith("title.") || key.startsWith("think.") ? "interaction" : key.startsWith("telemetry.") ? "maintenance" : "files") as ActiveSettingsGroup,
     zh:value[0], en:nativePreferenceEnglishDescriptions[key as keyof typeof nativePreferenceEnglishDescriptions][0],
     targetZh:value[0], targetEn:nativePreferenceEnglishDescriptions[key as keyof typeof nativePreferenceEnglishDescriptions][0], keywords:`${key} ${value[1]} ${nativePreferenceEnglishDescriptions[key as keyof typeof nativePreferenceEnglishDescriptions][1]}`,
   })),

@@ -2603,7 +2603,7 @@ index cdecdaea9f..85810904fd 100644
  				enabled: cfgModelLoopGuardEnabled.get(settings),
  				checkAssistantContent: cfgModelLoopGuardCheckAssistantContent.get(settings),
 diff --git a/packages/coding-agent/src/session/settings.ts b/packages/coding-agent/src/session/settings.ts
-index 50797b86c6..5108525f33 100644
+index 50797b86c6..76ff3eeeb6 100644
 --- a/packages/coding-agent/src/session/settings.ts
 +++ b/packages/coding-agent/src/session/settings.ts
 @@ -26,7 +26,7 @@ import { compileModelPatterns } from "../utils/model-patterns";
@@ -2685,6 +2685,48 @@ index 50797b86c6..5108525f33 100644
  export const cfgImagesDescribeForTextModels = register({
  	id: "images.describeForTextModels",
  	type: "boolean",
+@@ -1743,6 +1799,41 @@ export const cfgThinkingBudgetsXhigh = register({ id: "thinkingBudgets.xhigh", t
+ 
+ export const cfgThinkingBudgetsMax = register({ id: "thinkingBudgets.max", type: "number", default: 32768 });
+ 
++/** The `think.language` choices; "auto" follows the user's input language. */
++export const THINK_LANGUAGES = ["auto", "zh", "en"] as const;
++/** What language the model's thinking (internal reasoning) is written in. */
++export type ThinkLanguage = (typeof THINK_LANGUAGES)[number];
++
++export const cfgThinkLanguage = register({
++	id: "think.language",
++	type: "enum",
++	values: THINK_LANGUAGES,
++	default: "auto",
++	ui: {
++		tab: "interaction",
++		group: "Thinking",
++		label: "Thinking Language",
++		description: "Language of the model's internal thinking (reasoning) output",
++		options: [
++			{ value: "auto", label: "Follow input", description: "Match the user's input language (default)" },
++			{ value: "zh", label: "Chinese", description: "Always Simplified Chinese" },
++			{ value: "en", label: "English", description: "Always English" },
++		],
++	},
++});
++
++/**
++ * One-line system-prompt instruction that pins the thinking language;
++ * `undefined` for "auto" (the prompt is unchanged and the model follows the
++ * input).
++ */
++export function thinkingLanguageInstruction(scope: ScopeLike): string | undefined {
++	const value = cfgThinkLanguage.get(scope);
++	if (value === "zh") return "Always write your internal thinking (reasoning) in Simplified Chinese (简体中文).";
++	if (value === "en") return "Always write your internal thinking (reasoning) in English.";
++	return undefined;
++}
++
+ /** Token budget per thinking level (`thinkingBudgets.*`) on transports that accept reasoning token budgets. */
+ export const cfgThinkingBudgets = combine({
+ 	minimal: cfgThinkingBudgetsMinimal,
 diff --git a/packages/coding-agent/src/session/turn-recovery.ts b/packages/coding-agent/src/session/turn-recovery.ts
 index 48db427869..27eb16183d 100644
 --- a/packages/coding-agent/src/session/turn-recovery.ts

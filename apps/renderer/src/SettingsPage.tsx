@@ -353,7 +353,7 @@ function SettingsPageContent({
           ? <PredictionSettingsPane client={client} context={nativeContext} visible={visible} />
           : <><Runtime1844Rows runtime={runtime} names={["spelling.autocomplete"]} title={zh ? "预测输入" : "Predictive input"} />{predictionAvailable ? <PredictionSettings client={client} sessionId={predictionSessionId} available={predictionAvailable} /> : null}</>}
         <FeatureSettingsPane group="interaction" client={client} context={nativeContext} visible={visible} />
-        <NativePreferencesPane client={client} context={nativeContext} visible={visible} groups={["titles"]} />
+        <NativePreferencesPane client={client} context={nativeContext} visible={visible} groups={["titles", "thinking"]} />
       </>;
       case "voice": return <><DictationSettingsPane client={client} context={nativeContext} visible={visible} {...(onDictationModels ? { onModels: onDictationModels } : {})} /><FeatureSettingsPane group="voice" client={client} context={nativeContext} visible={visible} /></>;
       case "context": return <><ContextTab demo={demoRuntime} runtime={runtime} /><Runtime1844Rows runtime={runtime} names={GUI_GROUPS.context} inspectBackend={inspectBackend} title={zh ? "压缩与记忆" : "Compaction and memory"} /><MemoryCredentialPane runtime={runtime} targetId={memoryTargetId} client={client} inspect={inspectBackend === "hindsight"} /><p className="settings-link-row"><button className="btn small outline" disabled={!onOpenModels} onClick={() => onOpenModels?.("roles")}>{zh ? "管理模型专属压缩阈值" : "Manage per-model compaction thresholds"}</button></p><FeatureSettingsPane group="context" excludeKeys={["retry.fallbackOn"]} client={client} context={nativeContext} visible={visible} /></>;

@@ -12,6 +12,7 @@ import {
 import { cfgLspRequestTimeout } from "../../lsp/settings";
 import { cfgSharpshooterMinPromptLength } from "../../sharpshooter/settings";
 import { cfgTitleIcons, cfgTitleGenerator, cfgTitleLanguage, cfgTitleRefreshOnReplan } from "../../utils/title-settings";
+import { cfgThinkLanguage } from "../../session/settings";
 import { cfgTelemetryOtlpExportEnabled } from "../../telemetry-settings";
 import type { AgentSession } from "../../session/agent-session";
 import {
@@ -37,6 +38,7 @@ const HANDLES: Record<NativePreferenceKey, AnySetting> = {
 	"title.generator": cfgTitleGenerator,
 	"title.refreshOnReplan": cfgTitleRefreshOnReplan,
 	"title.language": cfgTitleLanguage,
+	"think.language": cfgThinkLanguage,
 	"telemetry.otlpExportEnabled": cfgTelemetryOtlpExportEnabled,
 };
 function scalar(value: unknown): NativePreferenceValue {
@@ -64,9 +66,11 @@ export class StudioNativePreferencesService {
 				? "advisor"
 				: key.startsWith("title.")
 					? "titles"
-					: key.startsWith("telemetry.")
-						? "diagnostics"
-						: "tools",
+					: key.startsWith("think.")
+						? "thinking"
+						: key.startsWith("telemetry.")
+							? "diagnostics"
+							: "tools",
 			label: definition.ui?.label ?? key,
 			description: definition.ui?.description ?? "",
 			value,

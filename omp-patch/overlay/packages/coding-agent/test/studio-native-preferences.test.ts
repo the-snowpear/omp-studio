@@ -3,6 +3,7 @@ import { Settings } from "../src/config/settings";
 import type { AgentSession } from "../src/session/agent-session";
 import { StudioNativePreferencesService } from "../src/studio/services/native-preferences-service";
 import { cfgTitleLanguage, titleLanguageInstruction } from "../src/utils/title-settings";
+import { cfgThinkLanguage, thinkingLanguageInstruction } from "../src/session/settings";
 test("native preferences preserve overlay precedence and distinguish next-launch OTLP configuration from effective state", async () => {
 	const settings = Settings.isolated();
 	const service = new StudioNativePreferencesService({ sessionId: "s", settings } as AgentSession);
@@ -44,6 +45,11 @@ test("OMP 18.12 native preferences are listed in their groups and round-trip thr
 		choices: ["auto", "zh", "en"],
 		value: "auto",
 	});
+	expect(byKey.get("think.language")).toMatchObject({
+		group: "thinking",
+		choices: ["auto", "zh", "en"],
+		value: "auto",
+	});
 	const saved = await service.execute({
 		kind: "preferences.native.set",
 		sessionId: "s",
@@ -60,6 +66,24 @@ test("OMP 18.12 native preferences are listed in their groups and round-trip thr
 		scope: "session",
 	});
 	expect(language).toMatchObject({ value: "zh", source: "runtime" });
+	const thinking = await service.execute({
+		kind: "preferences.native.set",
+		sessionId: "s",
+		key: "think.language",
+		value: "en",
+		scope: "session",
+	});
+	expect(thinking).toMatchObject({ value: "en", source: "runtime", group: "thinking" });
+});
+test("think.language resolves to exactly one thinking-language instruction", () => {
+	const settings = Settings.isolated();
+	expect(thinkingLanguageInstruction(settings)).toBeUndefined();
+	cfgThinkLanguage.override(settings, "zh");
+	expect(thinkingLanguageInstruction(settings)).toContain("Simplified Chinese");
+	cfgThinkLanguage.override(settings, "en");
+	expect(thinkingLanguageInstruction(settings)).toContain("English");
+	cfgThinkLanguage.override(settings, "auto");
+	expect(thinkingLanguageInstruction(settings)).toBeUndefined();
 });
 test("title.language appends exactly one language line to generated-title prompts", () => {
 	const settings = Settings.isolated();

@@ -77,6 +77,10 @@ export const nativePreferenceDescriptions: Record<NativePreferenceKey, [string, 
     "会话标题语言",
     "自动生成的会话标题使用哪种语言；只影响新标题，已有标题不变。",
   ],
+  "think.language": [
+    "思考过程语言",
+    "模型内部思考（Think 过程）使用哪种语言；对新会话生效。",
+  ],
   "telemetry.otlpExportEnabled": [
     "OTLP 导出",
     "控制是否向已配置的 OTEL 目标导出追踪、日志和指标；保存后下次启动生效。",
@@ -136,6 +140,10 @@ export const nativePreferenceEnglishDescriptions: Record<NativePreferenceKey, [s
     "Title language",
     "Language for generated session titles; only new titles are affected.",
   ],
+  "think.language": [
+    "Thinking language",
+    "Language of the model's internal thinking; applies to new sessions.",
+  ],
   "telemetry.otlpExportEnabled": [
     "OTLP export",
     "Export to configured OTEL destinations. Takes effect on the next launch.",
@@ -157,6 +165,7 @@ const demo = (): NativePreference[] =>
     ["title.generator", "fork", ["fork", "tiny"]],
     ["title.refreshOnReplan", true, undefined],
     ["title.language", "auto", ["auto", "zh", "en"]],
+    ["think.language", "auto", ["auto", "zh", "en"]],
     ["telemetry.otlpExportEnabled", true, undefined],
   ].map(([key, value, choices]) => ({
     key: key as NativePreferenceKey,
@@ -164,9 +173,11 @@ const demo = (): NativePreference[] =>
       ? "advisor"
       : String(key).startsWith("title.")
         ? "titles"
-        : String(key).startsWith("telemetry.")
-          ? "diagnostics"
-          : "tools",
+        : String(key).startsWith("think.")
+          ? "thinking"
+          : String(key).startsWith("telemetry.")
+            ? "diagnostics"
+            : "tools",
     label: nativePreferenceEnglishDescriptions[key as NativePreferenceKey][0],
     description: nativePreferenceEnglishDescriptions[key as NativePreferenceKey][1],
     value: value as NativePreferenceValue,
@@ -430,7 +441,7 @@ export function NativePreferencesPane({
         </p>
       ) : null}
       {notice ? <p role="status">{notice}</p> : null}
-      {(["advisor", "tools", "titles", "diagnostics"] as const).filter(group => !groups || groups.includes(group)).map((group) => (
+      {(["advisor", "tools", "titles", "thinking", "diagnostics"] as const).filter(group => !groups || groups.includes(group)).map((group) => (
         <SettingSection
           key={group}
           title={
@@ -444,6 +455,10 @@ export function NativePreferencesPane({
                 ? zh
                   ? "标题"
                   : "Titles"
+                : group === "thinking"
+                ? zh
+                  ? "思考过程"
+                  : "Thinking"
                 : zh
                   ? "诊断导出"
                   : "Diagnostic export"

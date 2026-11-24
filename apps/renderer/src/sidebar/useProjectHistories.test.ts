@@ -5,6 +5,7 @@ import type { SessionHistoryReadModel, StudioClient, WorkspaceId } from "@omp-st
 import {
   PROJECT_HISTORY_INITIAL_LIMIT,
   projectHistoryEntries,
+  stableHistoryOrder,
   streamingProjectHistoryRefreshKey,
   useProjectHistories,
 } from "./useProjectHistories";
@@ -160,5 +161,54 @@ describe("useProjectHistories", () => {
     });
     expect(projectHistoryEntries(result.current.cache, "workspace-new")[0]?.title).toBe("New session");
     expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  function entry(id: string, extra?: Partial<SessionHistoryReadModel["entries"][number]>): SessionHistoryReadModel["entries"][number] {
+    type Entry = SessionHistoryReadModel["entries"][number];
+    return {
+      historyId: id as Entry["historyId"],
+      threadId: id as Entry["threadId"],
+      environmentId: id as Entry["environmentId"],
+      sessionId: id as NonNullable<Entry["sessionId"]>,
+      title: id,
+      startedAt: "2026-08-23T00:00:00.000Z",
+      lastActiveAt: "2026-08-23T00:00:00.000Z",
+      messageCount: 1,
+      status: "active",
+      ...extra,
+    };
+  }
+
+  function listOf(...entries: SessionHistoryReadModel["entries"][number][]): SessionHistoryReadModel {
+    return { entries, total: entries.length };
+  }
+
+  describe("stableHistoryOrder", () => {
+    it("passes the first page through untouched", () => {
+      const first = listOf(entry("a"), entry("b"), entry("c"));
+      expect(stableHistoryOrder(undefined, first)).toBe(first);
+    });
+
+    it("keeps an opened session at its position when its modifiedAt jumps to the top", () => {
+      // The Host sorts by modifiedAt: opening "c" re-sorts the page to [c, a, b].
+      const previous = listOf(entry("a"), entry("b"), entry("c"));
+      const fresh = listOf(entry("c"), entry("a"), entry("b"));
+      const titles = stableHistoryOrder(previous, fresh).entries.map(e => e.title);
+      expect(titles).toEqual(["a", "b", "c"]);
+    });
+
+    it("lets a genuinely new session surface at the top", () => {
+      const previous = listOf(entry("a"), entry("b"));
+      const fresh = listOf(entry("d"), entry("b"), entry("a"));
+      const titles = stableHistoryOrder(previous, fresh).entries.map(e => e.title);
+      expect(titles).toEqual(["d", "a", "b"]);
+    });
+
+    it("honours the pinned block from the Host", () => {
+      const previous = listOf(entry("a"), entry("b"));
+      const fresh = listOf(entry("b", { pinned: true }), entry("a"), entry("c"));
+      const titles = stableHistoryOrder(previous, fresh).entries.map(e => e.title);
+      expect(titles).toEqual(["b", "a", "c"]);
+    });
   });
 });
