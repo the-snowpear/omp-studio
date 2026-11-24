@@ -205,6 +205,8 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
     if (!document || !store) return;
     if (document.ref.draftId === undefined || document.ref.sessionId !== undefined) return;
     if (draftSessionId === undefined) return;
+    // 临时诊断：草稿文档 ref 提升是否触发（未触发 = 点行时另开新空文档）。
+    console.warn(`[omp-studio:session] promote-doc ${document.id} draftId->session=${draftSessionId}`);
     store.updateDocument(document.id, { ref: { ...document.ref, draftId: undefined, sessionId: draftSessionId } });
   }, [draftSessionId, mdi?.store, mdi?.document, preview]);
 

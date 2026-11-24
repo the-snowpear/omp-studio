@@ -2124,6 +2124,8 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     console.warn(`[omp-studio:session] openProvisionalThread ${thread.sessionId} submitted=${thread.submitted} live=${thread.sessionId === snapshot?.sessionId}`);
     if (mdi) {
       const existing = mdi.store.getSnapshot().documents.find(document => document.ref.targetId === executionTarget.id && document.ref.workspaceId === thread.workspaceId && (document.ref.sessionId === thread.sessionId || document.ref.draftId === thread.sessionId));
+      // 临时诊断：MDI 分支是否命中原文档（未命中 = 另开新空文档）。
+      console.warn(`[omp-studio:session] mdi-row found=${!!existing} docs=${mdi.store.getSnapshot().documents.map(d => JSON.stringify(d.ref)).join(" | ")}`);
       mdi.store.openFromDirectory(existing?.ref ?? { targetId: executionTarget.id, workspaceId: thread.workspaceId, ...(thread.submitted ? { sessionId: thread.sessionId } : { draftId: thread.sessionId }) }, thread.title);
       return;
     }
