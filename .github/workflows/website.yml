@@ -36,6 +36,9 @@ jobs:
       - name: Install root dependencies for live embed
         run: npm ci
 
+      - name: Apply OMP runtime overlay and seam patches
+        run: npm run omp:overlay:apply
+
       - name: Build workspace packages for live embed
         run: npm run build:packages
 
