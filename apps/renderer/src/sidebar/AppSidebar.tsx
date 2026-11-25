@@ -724,6 +724,22 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                     const historyState = chrome.projectHistories?.[workspace.workspaceId];
                     const entries = (historyState?.model?.entries ?? []).slice(0, limit);
                     const total = historyState?.model?.total ?? 0;
+                    const entryRunning = (entry: (typeof entries)[number]) => threadRunningFromLive({
+                      ...(entry.sessionId === undefined ? {} : { sessionId: entry.sessionId }),
+                      ...(hasResidentModel
+                        ? { residents: residentRows }
+                        : {
+                          ...(liveSnapshot?.sessionId === undefined ? {} : { snapshotSessionId: liveSnapshot.sessionId }),
+                          ...(liveSnapshot?.isStreaming === undefined ? {} : { streaming: liveSnapshot.isStreaming }),
+                          ...(liveSnapshot?.isCompacting === undefined ? {} : { compacting: liveSnapshot.isCompacting }),
+                        }),
+                    });
+                    // 正在运行的会话始终置顶（含置顶条目之上）；跑完后随下一次全量排序回到原位。
+                    const runningEntries = entries.filter(entryRunning);
+                    const orderedEntries = runningEntries.length === 0 ? entries : [
+                      ...runningEntries,
+                      ...entries.filter(entry => !entryRunning(entry)),
+                    ];
                     const projectProvisionalThreads = chrome.provisionalThreads.filter(
                       (thread) => thread.workspaceId === workspace.workspaceId,
                     );
@@ -830,23 +846,14 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                         </div>
                         );
                       })}
-                      {entries.map((entry) => {
+                      {orderedEntries.map((entry) => {
                         const provisional = provisionalThreadForHistoryEntry(chrome.provisionalThreads, entry);
                         const entryLiveTitle = entry.sessionId !== undefined && entry.sessionId === liveSnapshot?.sessionId
                           ? liveSnapshotTitle
                           : undefined;
                         const resolvedEntryTitle = sidebarThreadTitle(entry, provisional, t("conversation.untitledSession"), entryLiveTitle);
                         const wait = threadWaitForSession(entry.sessionId);
-                        const running = threadRunningFromLive({
-                          ...(entry.sessionId === undefined ? {} : { sessionId: entry.sessionId }),
-                          ...(hasResidentModel
-                            ? { residents: residentRows }
-                            : {
-                              ...(liveSnapshot?.sessionId === undefined ? {} : { snapshotSessionId: liveSnapshot.sessionId }),
-                              ...(liveSnapshot?.isStreaming === undefined ? {} : { streaming: liveSnapshot.isStreaming }),
-                              ...(liveSnapshot?.isCompacting === undefined ? {} : { compacting: liveSnapshot.isCompacting }),
-                            }),
-                        });
+                        const running = entryRunning(entry);
                         return (
                         <div
                           className={`thread-row${wait ? " has-wait" : ""}`}
