@@ -8,6 +8,7 @@ import { DisassemblerDock } from "../capabilities/DisassemblerPane";
 import { useWorkbenchResizers } from "../layout/useWorkbenchResizers";
 import { useWorkbenchBranches } from "../git/useWorkbenchBranches";
 import { FileDockInstances } from "../files/FileDockInstances";
+import { DiagramDockInstances } from "../diagrams/DiagramDockInstances";
 import { useTerminalStore } from "../terminalSessions";
 import { SharedSurface, useConversationWorkspace, useConversationView, useConversationDom } from "../conversationWorkspace/Context";
 import { browserReferenceSnapshot } from "../composer/browserReference";
@@ -3278,6 +3279,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       <FileBrowserDock workspaceId={workspaceId ? String(workspaceId) : undefined} targetId={executionTarget.id} targetName={executionTarget.name} actions={fileViewerActions} />
       <BrowserDockInstances client={client} sessionId={browserChatId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} capabilities={capabilities} remote={!!executionTarget.id} onReferences={insertBrowserReferences} />
       <ToastHost message={statusToast} icon="info" onDismiss={() => setStatusToast(null)} />
+      <DiagramDockInstances />
       <ToastHost message={terminalBindingError ? hostErrorMessage(terminalBindingError, zh ? "无法更新终端所属会话，原进程仍保留" : "Could not update the terminal's conversation; its process is preserved") : null} icon="terminal" onDismiss={() => setTerminalBindingError(undefined)} />
       {treeConfirm.dialog}
     </SubagentHoverProvider>

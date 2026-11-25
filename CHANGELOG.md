@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- 大型 Mermaid 图表可从正文打开独立图表浮窗，按原尺寸阅读，支持滚轮缩放、拖动平移、适应窗口和查看源码；沿用工作台的停靠、最小化、最大化和 Pin 独立窗口操作。 [#72](https://github.com/the-snowpear/omp-studio/issues/72)
+- Large Mermaid diagrams open in a diagram window at actual size, with wheel zoom, drag to pan, fit-to-window and source view. Diagram windows use the workbench's docking, minimize, maximize and Pin controls for native windows. [#72](https://github.com/the-snowpear/omp-studio/issues/72)
 - 窗口化模式下 `/new`、新会话快捷键和菜单在当前窗口开始新会话，保留窗口布局、正在运行的终端和打开文件的未保存编辑。新窗口的布局继承默认开启，并支持无项目时沿用当前连接最近布局；已有保存的开关值保持。 [#73](https://github.com/the-snowpear/omp-studio/issues/73)
 - `/new`, the new-session shortcut and menu now start a conversation in the current window while preserving its layout, running terminals and unsaved file edits. New windows inherit layouts by default, including the connection's last layout when no project is selected; saved preferences are preserved. [#73](https://github.com/the-snowpear/omp-studio/issues/73)
 - 输入框命令菜单在确认、Tab 补全、ESC 或点击外部后保持关闭；输入空格、换行或移出命令 token 也会关闭，继续输入和重新聚焦不再反复弹出。 [#74](https://github.com/the-snowpear/omp-studio/issues/74)

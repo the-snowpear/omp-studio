@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { useI18n } from "../i18n";
 import { mermaidBudget, MermaidQueue } from "./mermaidQueue";
 import { afterPreviewScroll, usePreviewVisibility } from "../graphics/previewActivity";
+import { MermaidFigure } from "../diagrams/MermaidFigure";
 
 let renderId = 0;
 export const mermaidQueue = new MermaidQueue({
@@ -24,13 +25,11 @@ const dispose = () => { document.removeEventListener("visibilitychange", resume)
 if (typeof window !== "undefined") window.addEventListener("pagehide", dispose, { once: true });
 import.meta.hot?.dispose(() => { window.removeEventListener("pagehide", dispose); dispose(); });
 
-export function LazyMermaid({ code, onFailure }: { code: string; onFailure?: (message: string) => void }) {
+export function useMermaidSvg(code: string, visible: boolean, host: RefObject<HTMLElement | null>, initialSvg?: string) {
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
-  const host = useRef<HTMLDivElement>(null);
-  const visible = usePreviewVisibility(host, true);
-  const [result, setResult] = useState<{ code: string; svg: string | null }>();
-  const budget = mermaidBudget(code);
+  const [result, setResult] = useState<{ code: string; svg: string | null } | undefined>(() => initialSvg ? { code, svg: initialSvg } : undefined);
+  const budget = mermaidBudget(code, zh);
   useEffect(() => {
     if (!visible || !budget.allowed || result?.code === code) return;
     let alive = true;
@@ -51,8 +50,16 @@ export function LazyMermaid({ code, onFailure }: { code: string; onFailure?: (me
     return () => { alive = false; cancel?.(); cancelCommit(); offSlot(); };
   }, [code, visible, budget.allowed, result?.code]);
   const svg = result?.code === code ? result.svg : undefined;
+  return { svg, budget };
+}
+
+export function LazyMermaid({ code, onFailure }: { code: string; onFailure?: (message: string) => void }) {
+  const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
+  const host = useRef<HTMLDivElement>(null);
+  const visible = usePreviewVisibility(host, true);
+  const { svg, budget } = useMermaidSvg(code, visible, host);
   useEffect(() => { if (svg === null || !budget.allowed) onFailure?.(budget.reason ?? (zh ? "图表无法渲染" : "Diagram could not be rendered")); }, [svg, budget.allowed, budget.reason, onFailure, zh]);
-  if (svg) return <div ref={host} className="mermaid-box" dangerouslySetInnerHTML={{ __html: svg }} />;
+  if (svg) return <div ref={host}><MermaidFigure code={code} svg={svg} /></div>;
   return <div ref={host} className="mermaid-box">
     <span className="mermaid-pending" role={svg === null || !budget.allowed ? "alert" : "status"}>{budget.reason ?? (svg === null ? (zh ? "图表无法渲染，已保留源码" : "Diagram could not be rendered; source retained") : (zh ? "图表等待渲染…" : "Waiting to render diagram…"))}</span>
     <pre className="codeblock md-code-pre"><code>{code}</code></pre>

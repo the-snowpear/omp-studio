@@ -23,18 +23,21 @@ export type BrowserPagePanelId = `browser-page:${string}`;
 export type ConversationPanelId = `conversation:${string}`;
 export const conversationPanelId = (viewId: string): ConversationPanelId => `conversation:${viewId}`;
 export const isConversationPanelId = (id: string): id is ConversationPanelId => id.startsWith("conversation:");
+export type DiagramPanelId = `diagram-view:${string}`;
+export type DiagramPanelDescriptor = { code: string };
+export const isDiagramPanelId = (id: string): id is DiagramPanelId => id.startsWith("diagram-view:");
 export type FilePanelId = `file-view:${string}`;
 export const isFilePanelId = (id: string): id is FilePanelId => id.startsWith("file-view:");
 export type FilePanelDescriptor = { source?: "system"; targetId: string | null; workspaceId: string; path: string; fileId: string; title: string; scope: "conversation" | "workspace"; line?: number; column?: number; fragment?: string; jump?: number; page?: number; scroll?: number; mode?: FileViewMode; time?: number };
 /** `preview` renders Markdown or the CSV grid; `split` is Markdown source beside its preview; `diff` is the working-tree patch. */
 export type FileViewMode = "preview" | "source" | "split" | "diff";
-export type PanelId = FixedPanelId | ScopedPanelId | AgentPanelId | BrowserPagePanelId | ConversationPanelId | FilePanelId;
+export type PanelId = FixedPanelId | ScopedPanelId | AgentPanelId | BrowserPagePanelId | ConversationPanelId | FilePanelId | DiagramPanelId;
 export const isAgentPanelId = (id: string): id is AgentPanelId => id.startsWith("agent-detail:");
 export const isBrowserPagePanelId = (id: string): id is BrowserPagePanelId => id.startsWith("browser-page:");
 /** Panels created per Agent or per web page rather than registered once. */
-export const isInstancePanelId = (id: string): id is AgentPanelId | BrowserPagePanelId | ConversationPanelId | FilePanelId => isAgentPanelId(id) || isBrowserPagePanelId(id) || isConversationPanelId(id) || isFilePanelId(id);
+export const isInstancePanelId = (id: string): id is AgentPanelId | BrowserPagePanelId | ConversationPanelId | FilePanelId | DiagramPanelId => isAgentPanelId(id) || isBrowserPagePanelId(id) || isConversationPanelId(id) || isFilePanelId(id) || isDiagramPanelId(id);
 /** These windows keep the conversation whose content they display during /new. */
-export const isSessionWindowPanel = (id: PanelId): boolean => isFocusWindowPanel(id) || id === "agent-detail" || isAgentPanelId(id) || isBrowserPagePanelId(id) || isConversationPanelId(id);
+export const isSessionWindowPanel = (id: PanelId): boolean => isFocusWindowPanel(id) || id === "agent-detail" || isAgentPanelId(id) || isBrowserPagePanelId(id) || isConversationPanelId(id) || isDiagramPanelId(id);
 export type AgentPanelTarget = {
   agentId: string;
   displayName?: string;
@@ -59,7 +62,7 @@ export type RailMode = "hidden" | "expanded" | "compact";
 export type DockRect = { x: number; y: number; width: number; height: number };
 export type DockGroup = { id: DockGroupId; panels: PanelId[]; active: PanelId };
 export type DockPinMode = "none" | "workspace" | "application" | "window" | "topmost";
-export type DockPin = { mode: Exclude<DockPinMode, "none">; owner?: string; workspace?: string; windowRect?: DockRect; coordinateVersion?: 1; returnMode?: "none" | "workspace" | "application"; agentPanels?: DockLayout["agentPanels"]; browserPages?: DockLayout["browserPages"]; fileViews?: DockLayout["fileViews"] };
+export type DockPin = { mode: Exclude<DockPinMode, "none">; owner?: string; workspace?: string; windowRect?: DockRect; coordinateVersion?: 1; returnMode?: "none" | "workspace" | "application"; agentPanels?: DockLayout["agentPanels"]; browserPages?: DockLayout["browserPages"]; fileViews?: DockLayout["fileViews"]; diagramViews?: DockLayout["diagramViews"] };
 export type DockFloat = DockGroup & { rect: DockRect; minimized: boolean; maximized: boolean; pin?: DockPin; windowId?: string };
 export type DockLocation = { region: DockRegionId | "float"; groupId?: string; index?: number; rect?: DockRect };
 export type CardPreferences = { collapsed: boolean; height: number | null; leftShare?: number };
@@ -77,6 +80,7 @@ export type DockLayout = {
   lastAgentPanel?: AgentPanelId;
   browserPages: Record<string, BrowserPageDescriptor>;
   fileViews: Record<string, FilePanelDescriptor>;
+  diagramViews: Record<string, DiagramPanelDescriptor>;
   /** The page tab the user last focused; new pages land beside it. */
   lastBrowserPage?: BrowserPagePanelId;
   presetId: string;
@@ -92,6 +96,8 @@ export type DockPreset = { id: string; name: string; layout: DockLayout; builtin
 export type DockScope = { target: string; project: string | null; session: string; draft?: boolean };
 export type DockTarget = DockLocation & { split?: "before" | "after"; ownerId?: string | undefined };
 export type DockAction =
+  | { type: "diagram-open"; panel: DiagramPanelId; descriptor: DiagramPanelDescriptor; rect?: DockRect }
+  | { type: "diagram-close"; panels: DiagramPanelId[] }
   | { type: "file-open"; panel: FilePanelId; descriptor: FilePanelDescriptor; rect?: DockRect }
   | { type: "file-close"; panels: FilePanelId[] }
   | { type: "file-state"; panel: FilePanelId; patch: Partial<FilePanelDescriptor> }

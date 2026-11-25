@@ -1,6 +1,24 @@
 import type { LocaleDictionary } from "./zh";
 
 export const en: LocaleDictionary = {
+  diagrams: {
+    title: "Mermaid diagram",
+    open: "View diagram",
+    close: "Close diagram",
+    fit: "Fit",
+    actualSize: "Actual size",
+    zoomIn: "Zoom in",
+    zoomOut: "Zoom out",
+    zoomLevel: "Zoom level",
+    viewport: "Diagram viewport",
+    source: "View source",
+    showDiagram: "Back to diagram",
+    hint: "Scroll to zoom · Drag to pan",
+    pending: "Waiting to render diagram…",
+    failure: "Diagram could not be rendered; source retained",
+    sourceStatus: "Mermaid source",
+    demo: "Demo",
+  },
   sessionReference: {
     title: "Session reference",
     copy: "Copy session ID",

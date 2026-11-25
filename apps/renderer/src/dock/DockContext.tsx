@@ -24,7 +24,7 @@ function samePageDefinitions(a: BrowserPageDefinitions, b: BrowserPageDefinition
       && !left.close === !right.close && left.close?.pending === right.close?.pending && left.close?.label === right.close?.label && left.close?.tip === right.close?.tip;
   });
 }
-type DockEngine = { store: DockStore; hosts: PanelHosts; definitions: readonly PanelDefinition[]; conversationTitle?: string | undefined; railHiddenByDefault: boolean; newConversationRailOpened: boolean; setNewConversation: (active: boolean) => void; agentCatalog: AgentDockCatalog | null; setAgentCatalog: (catalog: AgentDockCatalog | null) => void; setFileViewDefinitions: (definitions: BrowserPageDefinitions) => void; setBrowserPageDefinitions: (definitions: BrowserPageDefinitions) => void };
+type DockEngine = { store: DockStore; hosts: PanelHosts; definitions: readonly PanelDefinition[]; conversationTitle?: string | undefined; railHiddenByDefault: boolean; newConversationRailOpened: boolean; setNewConversation: (active: boolean) => void; agentCatalog: AgentDockCatalog | null; setAgentCatalog: (catalog: AgentDockCatalog | null) => void; setFileViewDefinitions: (definitions: BrowserPageDefinitions) => void; setBrowserPageDefinitions: (definitions: BrowserPageDefinitions) => void; setDiagramViewDefinitions: (definitions: BrowserPageDefinitions) => void };
 /** Extra instances reuse the registered tool's chrome, never its content adapter. */
 function scopedDefinition(id: ScopedPanelId, base: PanelDefinition): PanelDefinition {
   return {
@@ -66,13 +66,15 @@ export function DockProvider({ children, definitions, store, ownerId, conversati
     previous?.open === next?.open && JSON.stringify([previous?.scope, previous?.entries]) === JSON.stringify([next?.scope, next?.entries]) ? previous : next), []);
   const [fileDefinitions, setFileDefinitions] = useState<BrowserPageDefinitions>([]);
   const setFileViewDefinitions = useCallback((next: BrowserPageDefinitions) => setFileDefinitions(previous => samePageDefinitions(previous, next) ? previous : next), []);
+  const [diagramDefinitions, setDiagramDefinitions] = useState<BrowserPageDefinitions>([]);
+  const setDiagramViewDefinitions = useCallback((next: BrowserPageDefinitions) => setDiagramDefinitions(previous => samePageDefinitions(previous, next) ? previous : next), []);
   const [pageDefinitions, setPages] = useState<BrowserPageDefinitions>([]);
   // Definitions carry close callbacks; only a visible change (title, icon, state, pending) replaces them.
   const setBrowserPageDefinitions = useCallback((next: BrowserPageDefinitions) => setPages(previous => samePageDefinitions(previous, next) ? previous : next), []);
   const scopedIds = scopedPanelIds(snapshot.layout);
   // Instance membership only; card geometry must not rebuild every definition.
   const scopedKey = scopedIds.join(",");
-  const dynamicKey = JSON.stringify([snapshot.layout.agentPanels, agentCatalog?.scope, agentCatalog?.entries, snapshot.layout.browserPages, snapshot.layout.fileViews, scopedKey]);
+  const dynamicKey = JSON.stringify([snapshot.layout.agentPanels, agentCatalog?.scope, agentCatalog?.entries, snapshot.layout.browserPages, snapshot.layout.fileViews, Object.keys(snapshot.layout.diagramViews), scopedKey]);
   const allDefinitions = useMemo(() => {
     const zh = resolvedLanguage === "zh";
     const bases = definitions.map(definition => localizePanelDefinition(definition, zh));
@@ -86,9 +88,10 @@ export function DockProvider({ children, definitions, store, ownerId, conversati
       return { id: id as PanelId, title, icon: "message" as const, agentId: descriptor.target.agentId, initialHeight: 480, ...(entry ? { status: entry.tone, stale: entry.stale } : {}),
         compactLabel: (entry?.name ?? descriptor.target.displayName ?? descriptor.target.agentId).slice(0, 2), detail: entry ? `${title}\n${entry.status}\n${entry.model}` : descriptor.target.resolvedModel ? `${title}\n${resolvedLanguage === "zh" ? "最近记录模型" : "Last recorded model"}: ${descriptor.target.resolvedModel}` : title };
     }), ...Object.entries(snapshot.layout.browserPages).map(([id, descriptor]): PanelDefinition => pageDefinitions.find(definition => definition.id === id)
-      ?? { id: id as PanelId, title: descriptor.title || "Browser", icon: "globe", initialHeight: 320, minHeight: 180, compactLabel: (descriptor.title || "Browser").slice(0, 2) }), ...Object.entries(snapshot.layout.fileViews ?? {}).map(([id, descriptor]): PanelDefinition => fileDefinitions.find(definition => definition.id === id) ?? { id: id as PanelId, title: descriptor.title, icon: "file" })];
-  }, [definitions, dynamicKey, scopedKey, resolvedLanguage, pageDefinitions, fileDefinitions]);
-  const value = useMemo(() => ({ ...engine, definitions: allDefinitions, conversationTitle, railHiddenByDefault, newConversationRailOpened, setNewConversation, agentCatalog, setAgentCatalog, setFileViewDefinitions, setBrowserPageDefinitions }), [engine, allDefinitions, conversationTitle, railHiddenByDefault, newConversationRailOpened, setNewConversation, agentCatalog, setAgentCatalog, setFileViewDefinitions, setBrowserPageDefinitions]);
+      ?? { id: id as PanelId, title: descriptor.title || "Browser", icon: "globe", initialHeight: 320, minHeight: 180, compactLabel: (descriptor.title || "Browser").slice(0, 2) }), ...Object.entries(snapshot.layout.fileViews ?? {}).map(([id, descriptor]): PanelDefinition => fileDefinitions.find(definition => definition.id === id) ?? { id: id as PanelId, title: descriptor.title, icon: "file" }),
+      ...Object.keys(snapshot.layout.diagramViews).map((id): PanelDefinition => diagramDefinitions.find(definition => definition.id === id) ?? { id: id as PanelId, title: zh ? "Mermaid 图表" : "Mermaid diagram", icon: "chart" })];
+  }, [definitions, dynamicKey, scopedKey, resolvedLanguage, pageDefinitions, fileDefinitions, diagramDefinitions]);
+  const value = useMemo(() => ({ ...engine, definitions: allDefinitions, conversationTitle, railHiddenByDefault, newConversationRailOpened, setNewConversation, agentCatalog, setAgentCatalog, setFileViewDefinitions, setBrowserPageDefinitions, setDiagramViewDefinitions }), [engine, allDefinitions, conversationTitle, railHiddenByDefault, newConversationRailOpened, setNewConversation, agentCatalog, setAgentCatalog, setFileViewDefinitions, setBrowserPageDefinitions, setDiagramViewDefinitions]);
   const layer = useRef<HTMLDivElement>(null);
   const localLayer = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => { const detach = engine.hosts.attach(layer.current!); return () => { engine.store.flush(); detach(); }; }, [engine]);
