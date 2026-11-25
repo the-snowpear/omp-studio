@@ -176,8 +176,10 @@ export async function startSharedHost(
         case "artifacts.findByRunId":
           return activeArtifactLibrary().findByRunId(input);
         case "artifacts.append":
+          control.assert(id, version);
           return uploads.append(input.id, input.data);
         case "artifacts.finish":
+          control.assert(id, version);
           return uploads.finish(input);
         case "artifacts.abort":
           return uploads.abort(input);
@@ -198,7 +200,7 @@ export async function startSharedHost(
         case "status":
           return {
             ...status(),
-            busy: composition.isBusy(),
+            busy: composition.isBusy() || terminals.busy,
             runtimeStatus: composition.status,
             cwd: factory.activeWorkspaceCwd(),
             restartBlocker: factory.updateRestartBlocker(),

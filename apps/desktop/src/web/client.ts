@@ -363,7 +363,7 @@ export function createSharedDesktopHostFactory(
           await client.close();
         },
         confirmClose: async () => true,
-        isBusy: () => false,
+        isBusy: () => snapshot.busy,
         rollbackRuntime: () => client.call("runtime.rollback"),
         pruneRuntimes: () => client.call("runtime.prune"),
         updateRestartBlocker: () => snapshot.restartBlocker,
