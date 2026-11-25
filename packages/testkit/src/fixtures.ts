@@ -477,6 +477,7 @@ const QUERY_RESPONSES = {
       projectScopeAvailable: false,
       modelProviderOrder: [],
       fallbackChains: {},
+      subagentFallbackChains: [],
       fallbackRevertPolicy: "cooldown-expiry",
       webSearch: {
         enabled: true,

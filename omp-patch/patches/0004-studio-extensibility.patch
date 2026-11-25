@@ -16,7 +16,7 @@ index 7208c5b8b0..503abf1129 100644
      "System/iOSSupport",
      "System/Library/Perl",
 diff --git a/crates/natives/src/desktop/ax.rs b/crates/natives/src/desktop/ax.rs
-index 6f668c89d2..6a0e86a97c 100644
+index 6f668c89d2..9b81e45e31 100644
 --- a/crates/natives/src/desktop/ax.rs
 +++ b/crates/natives/src/desktop/ax.rs
 @@ -11,7 +11,10 @@ use super::{
@@ -31,7 +31,7 @@ index 6f668c89d2..6a0e86a97c 100644
  };
  
  #[derive(Clone)]
-@@ -1199,18 +1202,47 @@ pub fn snapshot(
+@@ -1199,18 +1202,65 @@ pub fn snapshot(
  	window: &DesktopWindow,
  	options: &AxSnapshotOptions,
  ) -> CoreResult<AxSnapshot> {
@@ -54,7 +54,11 @@ index 6f668c89d2..6a0e86a97c 100644
  		options.max_nodes.unwrap_or(800).max(1),
  		options.max_depth.unwrap_or(24),
 -		WalkBounds::Skip,
-+		if collect_nodes { WalkBounds::Read } else { WalkBounds::Skip },
++		if collect_nodes {
++			WalkBounds::Read
++		} else {
++			WalkBounds::Skip
++		},
  	)
  	.line_states();
  	let tree = walk_raw(backend, root.clone(), 0, false, &mut state)?;
@@ -64,23 +68,37 @@ index 6f668c89d2..6a0e86a97c 100644
 +		fn observed(node: &WalkNode, next: &mut u32) -> DesktopObservationNode {
 +			*next += 1;
 +			DesktopObservationNode {
-+				id: format!("observer-{}", *next),
-+				role: node.props.role.clone(),
-+				name: node.props.title.clone().or_else(|| node.props.description.clone()).unwrap_or_default(),
-+				enabled: node.props.enabled,
-+				bounds: node.props.bounds.map(|b| CaptureRegion {
-+					x: b.x, y: b.y, width: b.width, height: b.height,
++				id:       format!("observer-{}", *next),
++				role:     node.props.role.clone(),
++				name:     node
++					.props
++					.title
++					.clone()
++					.or_else(|| node.props.description.clone())
++					.unwrap_or_default(),
++				enabled:  node.props.enabled,
++				bounds:   node.props.bounds.map(|b| CaptureRegion {
++					x:      b.x,
++					y:      b.y,
++					width:  b.width,
++					height: b.height,
 +				}),
-+				children: node.children.iter().map(|child| observed(child, next)).collect(),
++				children: node
++					.children
++					.iter()
++					.map(|child| observed(child, next))
++					.collect(),
 +			}
 +		}
 +		let mut next = 0;
-+		root.as_ref().map(|root| vec![observed(root, &mut next)]).unwrap_or_default()
++		root
++			.as_ref()
++			.map_or_default(|root| vec![observed(root, &mut next)])
 +	});
  	let mut text = String::new();
  	let mut node_count = 0;
  	if let Some(root) = root {
-@@ -1246,7 +1278,7 @@ pub fn snapshot(
+@@ -1246,7 +1296,7 @@ pub fn snapshot(
  		}
  		let _ = write!(text, "… skipped {} unreadable nodes", state.skipped);
  	}
@@ -166,19 +184,25 @@ index 48ca015705..dbd93f37f3 100644
  	fn moved_window_is_reanchored() {
  		let f = FrameGeometry::for_window(&window(10, 20), 800, 600);
 diff --git a/crates/natives/src/desktop/mod.rs b/crates/natives/src/desktop/mod.rs
-index a5af987d51..ae74a21cc1 100644
+index a5af987d51..6786d63596 100644
 --- a/crates/natives/src/desktop/mod.rs
 +++ b/crates/natives/src/desktop/mod.rs
-@@ -774,6 +774,7 @@ fn hold_duration(seconds: f64) -> CoreResult<Duration> {
+@@ -774,28 +774,29 @@ fn hold_duration(seconds: f64) -> CoreResult<Duration> {
  }
  
  struct Worker {
+-	backend:       CoreResult<Box<dyn Backend>>,
+-	registry:      AxRegistry,
 +	observation_only: bool,
- 	backend:       CoreResult<Box<dyn Backend>>,
- 	registry:      AxRegistry,
++	backend:          CoreResult<Box<dyn Backend>>,
++	registry:         AxRegistry,
  	/// The whole-window read of the request being served, from a row follow
-@@ -783,19 +784,19 @@ struct Worker {
- 	frames:        HashMap<String, FrameGeometry>,
+ 	/// that found no row: a `StaleRef` search runs on it instead of walking
+ 	/// the window again ([`ax::refind_in`]).
+-	row_read:      Option<ax::WindowRead>,
+-	frames:        HashMap<String, FrameGeometry>,
++	row_read:         Option<ax::WindowRead>,
++	frames:           HashMap<String, FrameGeometry>,
  	/// Latest capabilities the worker computed, shared with the session so the
  	/// getter can answer while an operation holds the worker.
 -	capabilities:  Arc<Mutex<Option<DesktopCapabilities>>>,
@@ -447,10 +471,10 @@ index a5af987d51..ae74a21cc1 100644
  	fn display_stays_awake_only_until_the_grace_after_the_last_activity() {
  		let backend = FakeWaylandBackend::new();
 diff --git a/crates/natives/src/desktop/types.rs b/crates/natives/src/desktop/types.rs
-index 9398b45d26..056e52cef7 100644
+index 9398b45d26..71a03f9d93 100644
 --- a/crates/natives/src/desktop/types.rs
 +++ b/crates/natives/src/desktop/types.rs
-@@ -162,7 +162,9 @@ impl ScreenState {
+@@ -162,13 +162,15 @@ impl ScreenState {
  #[napi(object)]
  #[derive(Debug, Clone, Default)]
  pub struct DesktopSessionOptions {
@@ -460,7 +484,15 @@ index 9398b45d26..056e52cef7 100644
 +	pub display:          Option<String>,
  	/// Sessions created with the same key share one physical-Escape stop
  	/// count, which `desktopEscapeStops` reads after they close.
- 	pub escape_stop_key: Option<String>,
+-	pub escape_stop_key: Option<String>,
++	pub escape_stop_key:  Option<String>,
+ 	/// The registry id of the agent this session acts for, named to other
+ 	/// sessions that wait for its input/focus control.
+-	pub agent_id:        Option<String>,
++	pub agent_id:         Option<String>,
+ }
+ 
+ #[napi(object)]
 @@ -310,8 +312,24 @@ pub struct DesktopControlState {
  
  #[napi(object)]
@@ -484,7 +516,7 @@ index 9398b45d26..056e52cef7 100644
 +	pub name:     String,
 +	pub enabled:  bool,
 +	pub bounds:   Option<CaptureRegion>,
-+	pub children: Vec<DesktopObservationNode>,
++	pub children: Vec<Self>,
  }
  
  #[napi(object)]
@@ -3070,7 +3102,7 @@ index cff9d0d861..0ca4b056be 100644
  {{#if autoBackgroundEnabled}}
  Non-`pty` calls still running after {{autoBackgroundSeconds}}s (or 1s before `timeout`, if sooner) usually move to background job `bg_N` and keep running to `timeout`.
 diff --git a/packages/coding-agent/src/sdk.ts b/packages/coding-agent/src/sdk.ts
-index 9b3f393f0f..110a9900c1 100644
+index 9b3f393f0f..398c8b5546 100644
 --- a/packages/coding-agent/src/sdk.ts
 +++ b/packages/coding-agent/src/sdk.ts
 @@ -1,4 +1,5 @@
@@ -3253,7 +3285,7 @@ index 9b3f393f0f..110a9900c1 100644
  				};
  			}
  
-@@ -4586,12 +4612,15 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4586,12 +4612,18 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  					appendParts.push(`### ${srvName}\n${truncated}`);
  				}
  			}
@@ -3261,7 +3293,10 @@ index 9b3f393f0f..110a9900c1 100644
 +			// `think.language` is read live from the session settings at every
 +			// build (the options object is frozen at creation), so a preference
 +			// change reaches this session's next rebuild.
-+			const appendPrompt = composeAppendPrompt(appendParts, composeThinkingAppend(options.appendSystemPrompt, settings));
++			const appendPrompt = composeAppendPrompt(
++				appendParts,
++				composeThinkingAppend(options.appendSystemPrompt, settings),
++			);
  			// Owned/in-band tool dialects (non-native) require the full functions-
  			// namespace catalog; native tool calling lets the compact name list suffice.
 -			const nativeTools = resolveDialect(cfgToolsFormat.get(settings), agent?.state.model ?? model) === undefined;
@@ -3272,7 +3307,7 @@ index 9b3f393f0f..110a9900c1 100644
  				const treeRoot = path.resolve(promptCwd);
  				const treeEpoch = hasSession ? session.transcriptEpoch : 0;
  				const conversation = sessionManager.getSessionId();
-@@ -4645,6 +4674,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4645,6 +4677,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  				modelSystemPromptTemplates: systemPromptTemplatePatterns.get(settings),
  				skills: cfgSkillful.get(settings) ? (session?.promptSkills ?? skills) : [],
  				skillDescriptions,
@@ -3280,7 +3315,7 @@ index 9b3f393f0f..110a9900c1 100644
  				contextFiles,
  				tools: promptTools,
  				toolNames,
-@@ -4662,7 +4692,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4662,7 +4695,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  				eagerTasksAlways: agentKind === "main" && cfgTaskEager.get(settings) === "always",
  				taskBatch: cfgTaskBatch.get(settings),
  				scoutAvailable: isScoutSpawnable(cfgTaskDisabledAgents.get(settings), options.spawns ?? "*"),
@@ -3289,7 +3324,7 @@ index 9b3f393f0f..110a9900c1 100644
  				taskIrcEnabled: !restrictToolNames && isIrcEnabled(settings, options.taskDepth ?? 0),
  				autoQaEnabled: !restrictToolNames && isAutoQaEnabled(settings),
  				ovnfs: ovnfsCommand(settings),
-@@ -4672,13 +4702,13 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4672,13 +4705,13 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  				resultShaping: spotlightExperiment ? SHAPE_RULE : undefined,
  				workspaceTree: workspaceTreePromise ?? emptyWorkspaceTree,
  				includeWorkspaceTree,
@@ -3306,7 +3341,7 @@ index 9b3f393f0f..110a9900c1 100644
  				includeModelInPrompt: cfgIncludeModelInPrompt.get(settings),
  				personality: agentKind === "sub" ? "none" : cfgPersonality.get(settings),
  				subagent: agentKind === "sub",
-@@ -4699,6 +4729,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4699,6 +4732,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  				systemPrompt: typeof customPrompt === "string" ? [customPrompt] : customPrompt,
  				// The viewer attributes only default blocks the callback left unchanged.
  				sources: defaultPrompt.sources,
@@ -3314,7 +3349,7 @@ index 9b3f393f0f..110a9900c1 100644
  			};
  		};
  
-@@ -4858,13 +4889,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4858,13 +4892,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  		}
  
  		setSessionActiveToolNames(initialToolNames);
@@ -3333,7 +3368,7 @@ index 9b3f393f0f..110a9900c1 100644
  
  		const promptTemplates = await promptTemplatesPromise;
  		toolSession.promptTemplates = promptTemplates;
-@@ -4980,7 +5009,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4980,7 +5012,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  			await extensionRunner.emitAfterProviderResponse(response, model, signal);
  		};
  
@@ -3342,7 +3377,7 @@ index 9b3f393f0f..110a9900c1 100644
  			toolContextStore.setUIContext(uiContext, hasUI);
  		};
  
-@@ -5584,6 +5613,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -5584,6 +5616,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  			convertToLlm: convertToLlmFinal,
  			rebuildSystemPrompt,
  			systemPromptSources,

@@ -672,6 +672,7 @@ function emptyModel(reason: string, ompAvailable: boolean): ModelConfigReadModel
     projectScopeAvailable: false,
     modelProviderOrder: [],
     fallbackChains: {},
+    subagentFallbackChains: [],
     fallbackRevertPolicy: "cooldown-expiry",
     webSearch: emptyWebSearch(),
   };
@@ -1940,11 +1941,11 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     };
   }
 
-  async function readFallback(configPath: string, parsedOverride?: ParsedConfig): Promise<{ chains: Record<string, string[]>; revertPolicy: ModelFallbackRevertPolicy }> {
+  async function readFallback(configPath: string, parsedOverride?: ParsedConfig): Promise<{ chains: Record<string, string[]>; subagentChains: string[]; revertPolicy: ModelFallbackRevertPolicy }> {
     try {
       const parsed = migrateModelRoleConfig(parsedOverride ?? parseYaml(await readConfigText(configPath)));
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-        return { chains: {}, revertPolicy: "cooldown-expiry" };
+        return { chains: {}, subagentChains: [], revertPolicy: "cooldown-expiry" };
       }
       const retry = (parsed as Record<string, unknown>).retry;
       const record = retry !== null && typeof retry === "object" && !Array.isArray(retry) ? (retry as Record<string, unknown>) : {};
@@ -1955,10 +1956,12 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           if (Array.isArray(value)) chains[key] = value.filter((item): item is string => typeof item === "string" && item.length > 0);
         }
       }
+      const rawSubagent = record.subagentFallbackChains;
+      const subagentChains = Array.isArray(rawSubagent) ? rawSubagent.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
       const revert = record.fallbackRevertPolicy === "never" ? "never" : "cooldown-expiry";
-      return { chains, revertPolicy: revert };
+      return { chains, subagentChains, revertPolicy: revert };
     } catch {
-      return { chains: {}, revertPolicy: "cooldown-expiry" };
+      return { chains: {}, subagentChains: [], revertPolicy: "cooldown-expiry" };
     }
   }
 
@@ -2270,6 +2273,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         projectScopeAvailable: Boolean(cwd),
         modelProviderOrder,
         fallbackChains: fallback.chains,
+        subagentFallbackChains: fallback.subagentChains,
         fallbackRevertPolicy: fallback.revertPolicy,
         webSearch,
       };
@@ -2869,6 +2873,9 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           ? { ...(root.retry as Record<string, unknown>) }
           : {};
         retry.fallbackChains = { ...input.chains };
+        // Omitted `subagentChains` keeps the stored list (older clients and
+        // the main-chain editor do not know about it).
+        if (input.subagentChains !== undefined) retry.subagentFallbackChains = [...input.subagentChains];
         if (input.revertPolicy) retry.fallbackRevertPolicy = input.revertPolicy;
         root.retry = retry;
       });

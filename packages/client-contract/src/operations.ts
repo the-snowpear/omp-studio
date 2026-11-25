@@ -393,6 +393,8 @@ export interface ModelRoleCreateInput {
 
 export interface ModelFallbackSetInput {
   readonly chains: Readonly<Record<string, ReadonlyArray<string>>>;
+  /** Subagent retry model-switch list (`retry.subagentFallbackChains`); omit keeps the stored value. */
+  readonly subagentChains?: ReadonlyArray<string>;
   readonly revertPolicy?: "cooldown-expiry" | "never";
 }
 

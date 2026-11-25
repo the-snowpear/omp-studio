@@ -835,6 +835,8 @@ export interface ModelConfigReadModel {
   readonly projectScopeAvailable: boolean;
   readonly modelProviderOrder: ReadonlyArray<string>;
   readonly fallbackChains: Readonly<Record<string, ReadonlyArray<string>>>;
+  /** Subagent retry model-switch list (`retry.subagentFallbackChains`); empty keeps inheriting the default chain. */
+  readonly subagentFallbackChains: ReadonlyArray<string>;
   readonly fallbackRevertPolicy: ModelFallbackRevertPolicy;
   readonly webSearch: WebSearchConfigReadModel;
 }

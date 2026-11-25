@@ -1889,6 +1889,64 @@ index d1e280a817..794eb07d30 100644
  	}
  
  	/** Arms a prewalk immediately for an explicit slash-command request; it takes over a matching auto arm. */
+diff --git a/packages/coding-agent/src/session/retry-fallback-chains.ts b/packages/coding-agent/src/session/retry-fallback-chains.ts
+index 1a3bf20d22..08fac2a61f 100644
+--- a/packages/coding-agent/src/session/retry-fallback-chains.ts
++++ b/packages/coding-agent/src/session/retry-fallback-chains.ts
+@@ -14,7 +14,12 @@ import {
+ import { resolveConfiguredModelPatterns, resolveModelRoleValue, revisionSpellingKey } from "../config/model-resolver";
+ import { getRoleInfo, isKindRole } from "../config/model-roles";
+ 
+-import { cfgRetryFallbackChains, cfgRetryFallbackRevertPolicy, type RetrySettings } from "./settings";
++import {
++	cfgRetryFallbackChains,
++	cfgRetryFallbackRevertPolicy,
++	cfgRetrySubagentFallbackChains,
++	type RetrySettings,
++} from "./settings";
+ 
+ /** Configured fallback chains keyed by role or model selector. */
+ export type RetryFallbackChains = Record<string, string[]>;
+@@ -356,6 +361,39 @@ export function validateRetryFallbackChains(
+ 			}
+ 		}
+ 	}
++
++	// The subagent retry chain is a plain selector list (no role keys);
++	// validate its entries the same way the model-keyed chains are validated.
++	const subagentChains = cfgRetrySubagentFallbackChains.get(settings);
++	if (subagentChains !== undefined && !Array.isArray(subagentChains)) {
++		report("retry.subagentFallbackChains must be an array of selector strings.");
++		return;
++	}
++	if (Array.isArray(subagentChains)) {
++		for (const selectorStr of subagentChains) {
++			if (typeof selectorStr !== "string") {
++				report("retry.subagentFallbackChains contains a non-string selector.");
++				continue;
++			}
++			if (isRetryFallbackWildcardKey(selectorStr)) {
++				const { provider } = parseRetryFallbackWildcard(selectorStr, candidate =>
++					isKnownProvider(modelRegistry, candidate),
++				);
++				if (!isKnownProvider(modelRegistry, provider)) {
++					report(`retry.subagentFallbackChains references unknown provider: ${selectorStr}`);
++				}
++				continue;
++			}
++			const parsed = parseRetryFallbackSelector(selectorStr, modelRegistry);
++			if (!parsed) {
++				report(`Invalid fallback selector format in retry.subagentFallbackChains: ${selectorStr}`);
++				continue;
++			}
++			if (!modelRegistry.find(parsed.provider, parsed.id) && !isDiscoveryPending(parsed.provider)) {
++				report(`retry.subagentFallbackChains references unknown model: ${selectorStr}`);
++			}
++		}
++	}
+ }
+ 
+ /** Returns the configured fallback-primary restoration policy. */
 diff --git a/packages/coding-agent/src/session/session-db-purge.ts b/packages/coding-agent/src/session/session-db-purge.ts
 index 22e9206a84..9f5aed489c 100644
 --- a/packages/coding-agent/src/session/session-db-purge.ts
@@ -2633,10 +2691,10 @@ index cdecdaea9f..85810904fd 100644
  				enabled: cfgModelLoopGuardEnabled.get(settings),
  				checkAssistantContent: cfgModelLoopGuardCheckAssistantContent.get(settings),
 diff --git a/packages/coding-agent/src/session/settings.ts b/packages/coding-agent/src/session/settings.ts
-index 50797b86c6..1674b5a8c1 100644
+index 50797b86c6..20eabb0150 100644
 --- a/packages/coding-agent/src/session/settings.ts
 +++ b/packages/coding-agent/src/session/settings.ts
-@@ -26,7 +26,7 @@ import { compileModelPatterns } from "../utils/model-patterns";
+@@ -26,12 +26,13 @@ import { compileModelPatterns } from "../utils/model-patterns";
  import { DEFAULT_USAGE_RESERVE_PCT } from "@oh-my-pi/pi-ai/auth-storage";
  import { configureProviderStoreResponses } from "@oh-my-pi/pi-ai/providers/openai-responses-state";
  import { configureCodexAccessPrograms } from "@oh-my-pi/pi-ai/providers/openai-codex/access-programs";
@@ -2645,7 +2703,13 @@ index 50797b86c6..1674b5a8c1 100644
  import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
  import { formatKeyHint } from "@oh-my-pi/pi-tui/app-keybindings";
  import { AUTO_THINKING, getConfiguredThinkingLevelMetadata, getThinkingLevelMetadata } from "@oh-my-pi/pi-tui/thinking";
-@@ -202,6 +202,44 @@ export function validateProviderMaxInFlightRequests(value: unknown): Record<stri
+ 
+ const EMPTY_NUMBER_RECORD: Record<string, number> = {};
++const EMPTY_STRING_ARRAY: string[] = [];
+ const EMPTY_STRING_ARRAYS_RECORD: Record<string, string[]> = {};
+ const EMPTY_STRING_RECORD: Record<string, string> = {};
+ const DEFAULT_TOOL_CALL_LOOP_EXEMPT_TOOLS: string[] = ["wait"];
+@@ -202,6 +203,44 @@ export function validateProviderMaxInFlightRequests(value: unknown): Record<stri
  	return normalizeProviderMaxInFlightRequests(value);
  }
  
@@ -2690,7 +2754,7 @@ index 50797b86c6..1674b5a8c1 100644
  export const cfgProvidersMaxInFlightRequests = register({
  	id: "providers.maxInFlightRequests",
  	type: "record",
-@@ -220,6 +258,24 @@ effect(cfgProvidersMaxInFlightRequests, limits =>
+@@ -220,6 +259,24 @@ effect(cfgProvidersMaxInFlightRequests, limits =>
  	configureProviderMaxInFlightRequests(normalizeProviderMaxInFlightRequests(limits)),
  );
  
@@ -2715,7 +2779,27 @@ index 50797b86c6..1674b5a8c1 100644
  export const cfgImagesDescribeForTextModels = register({
  	id: "images.describeForTextModels",
  	type: "boolean",
-@@ -1743,6 +1799,52 @@ export const cfgThinkingBudgetsXhigh = register({ id: "thinkingBudgets.xhigh", t
+@@ -986,6 +1043,19 @@ export const cfgRetryFallbackRevertPolicy = register({
+ 	},
+ });
+ 
++export const cfgRetrySubagentFallbackChains = register({
++	id: "retry.subagentFallbackChains",
++	type: "array",
++	default: EMPTY_STRING_ARRAY,
++	ui: {
++		tab: "model",
++		group: "Retry & Fallback",
++		label: "Subagent Retry Fallback Chains",
++		description:
++			"Ordered fallback selectors used when a subagent retry needs a different model and the subagent owns no chain of its own (no multi-model pattern, no role chain). When empty, subagents keep inheriting the default role's chain.",
++	},
++});
++
+ /** Retry/backoff and usage-aware fallback policy (`retry.*` except fallback chains/revert policy). */
+ export const cfgRetry = combine({
+ 	enabled: cfgRetryEnabled,
+@@ -1743,6 +1813,52 @@ export const cfgThinkingBudgetsXhigh = register({ id: "thinkingBudgets.xhigh", t
  
  export const cfgThinkingBudgetsMax = register({ id: "thinkingBudgets.max", type: "number", default: 32768 });
  
@@ -2953,7 +3037,7 @@ index 48db427869..27eb16183d 100644
  
  		// Re-attempt the turn
 diff --git a/packages/coding-agent/src/task/executor.ts b/packages/coding-agent/src/task/executor.ts
-index 47944dd2c3..87a24f7a6f 100644
+index 47944dd2c3..5c0f4e4420 100644
 --- a/packages/coding-agent/src/task/executor.ts
 +++ b/packages/coding-agent/src/task/executor.ts
 @@ -100,6 +100,7 @@ import { INTERRUPTED_TURN_ERROR } from "../session/exit-diagnostics";
@@ -2984,8 +3068,11 @@ index 47944dd2c3..87a24f7a6f 100644
  	type YieldItem,
  } from "@oh-my-pi/pi-tui/tools/task";
  import { yieldSectionShapes } from "./yield-assembly";
-@@ -181,6 +185,8 @@ import {
+@@ -179,8 +183,11 @@ import {
+ 	cfgTierAnthropic,
+ 	cfgTierOpenai,
  	cfgRetryFallbackChains,
++	cfgRetrySubagentFallbackChains,
  	cfgDefaultThinkingLevel,
  	cfgPrewalkAutoTarget,
 +	cfgProvidersMaxInFlightRequests,
@@ -2993,7 +3080,7 @@ index 47944dd2c3..87a24f7a6f 100644
  } from "../session/settings";
  import { type AutoPrewalkDecision, classifyAutoPrewalk } from "../auto-prewalk/classifier";
  import { type JudgmentUsage, journalJudgmentUsage, type NativeJudgmentDeps } from "../judgment";
-@@ -197,6 +203,36 @@ export type { YieldItem } from "@oh-my-pi/pi-tui/tools/task";
+@@ -197,6 +204,36 @@ export type { YieldItem } from "@oh-my-pi/pi-tui/tools/task";
  
  const TASK_ABORT_CLEANUP_GRACE_MS = 10_000;
  
@@ -3030,7 +3117,33 @@ index 47944dd2c3..87a24f7a6f 100644
  /**
   * Soft per-agent request budgets (assistant requests per run). Crossing the
   * budget injects a wrap-up steering notice (`task.softRequestBudgetNotice`,
-@@ -1382,6 +1418,10 @@ interface SubagentRunMonitor {
+@@ -343,6 +380,12 @@ function resolveSubagentRetryFallbackCandidates(
+  * model patterns are already expanded. Direct callers may still supply an
+  * unexpanded alias through `modelOverride` or `agent.model`; retain that
+  * existing path by deriving the role only when no preserved role was supplied.
++ *
++ * An explicit role chain (the subagent's own identity, e.g. the bundled
++ * `task`) still wins; below it `retry.subagentFallbackChains` separates
++ * subagent retry routing from the main session's `default` chain — an empty
++ * or unset list keeps inheriting `default` so pre-existing configs are
++ * untouched.
+  */
+ function resolveSubagentInheritedRetryFallbackChain(
+ 	settings: Settings,
+@@ -352,7 +395,11 @@ function resolveSubagentInheritedRetryFallbackChain(
+ 	const configuredChains = cfgRetryFallbackChains.get(settings);
+ 	// An explicitly emptied role chain means "no fallbacks", not "inherit
+ 	// default" — mirrors expandDefaultRetryFallbackChains.
+-	const fallbackChain = (role !== undefined ? configuredChains?.[role] : undefined) ?? configuredChains?.default;
++	const subagentChains = cfgRetrySubagentFallbackChains.get(settings);
++	const fallbackChain =
++		(role !== undefined ? configuredChains?.[role] : undefined) ??
++		(Array.isArray(subagentChains) && subagentChains.length > 0 ? subagentChains : undefined) ??
++		configuredChains?.default;
+ 	if (!Array.isArray(fallbackChain) || !fallbackChain.every(entry => typeof entry === "string")) {
+ 		return undefined;
+ 	}
+@@ -1382,6 +1429,10 @@ interface SubagentRunMonitor {
  	readonly accumulatedUsage: Usage;
  	hasUsage(): boolean;
  	yieldCalled(): boolean;
@@ -3041,7 +3154,7 @@ index 47944dd2c3..87a24f7a6f 100644
  	/**
  	 * Latch or clear the reminder ladder's forced final `yield`. While set, the
  	 * next accepted `yield` is terminal even when it carries incremental
-@@ -1545,6 +1585,9 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
+@@ -1545,6 +1596,9 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
  	const abortController = new AbortController();
  	const abortSignal = abortController.signal;
  	let activeSession: AgentSession | null = null;
@@ -3051,7 +3164,7 @@ index 47944dd2c3..87a24f7a6f 100644
  	let completionProbeStarted = false;
  	let yieldCalled = false;
  	let yieldCallPending = false;
-@@ -2115,6 +2158,13 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
+@@ -2115,6 +2169,13 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
  				if (event.toolName === "task") {
  					progress.inflightTaskDetails = undefined;
  				}
@@ -3065,7 +3178,7 @@ index 47944dd2c3..87a24f7a6f 100644
  
  				// Check for registered subagent tool handler
  				const handler = subprocessToolRegistry.getHandler(event.toolName);
-@@ -2218,6 +2268,19 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
+@@ -2218,6 +2279,19 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
  			}
  
  			case "tool_execution_update": {
@@ -3085,7 +3198,7 @@ index 47944dd2c3..87a24f7a6f 100644
  				// Surface nested-subagent progress mid-flight. The child task
  				// tool emits incremental `onUpdate` calls carrying its current
  				// `TaskToolDetails` (results + progress); we stash the latest
-@@ -2492,6 +2555,15 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
+@@ -2492,6 +2566,15 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
  		accumulatedUsage,
  		hasUsage: () => hasUsage,
  		yieldCalled: () => yieldCalled,
@@ -3101,7 +3214,7 @@ index 47944dd2c3..87a24f7a6f 100644
  		markFinalYieldForced: (forced: boolean) => {
  			finalYieldForced = forced;
  		},
-@@ -2683,6 +2755,8 @@ async function driveSessionToResult(
+@@ -2683,6 +2766,8 @@ async function driveSessionToResult(
  	} = {},
  ): Promise<DriveOutcome> {
  	const { solutionSpace, onPromptBusy, restore, steps, stepReports } = options;
@@ -3110,7 +3223,7 @@ index 47944dd2c3..87a24f7a6f 100644
  	const structured = options.structured !== false;
  	const abortSignal = monitor.abortSignal;
  	let exitCode = 0;
-@@ -2784,7 +2858,7 @@ async function driveSessionToResult(
+@@ -2784,7 +2869,7 @@ async function driveSessionToResult(
  	// Yields before this index belong to earlier steps (or an earlier turn).
  	let stepYieldStart = recordedYields(monitor.progress).length;
  	try {
@@ -3119,7 +3232,7 @@ index 47944dd2c3..87a24f7a6f 100644
  		monitor.holdForSteps(steps !== undefined && steps.sent < steps.prompts.length);
  		await runTurn(async () => {
  			// An IRC wake may own the session when this turn dispatches. Its prompt
-@@ -2980,7 +3054,9 @@ async function driveSessionToResult(
+@@ -2980,7 +3065,9 @@ async function driveSessionToResult(
  			monitor.holdForSteps(next + 1 < steps.prompts.length);
  			monitor.beginStep();
  			resetYieldTurnState(session.getToolByName("yield"));
@@ -3130,7 +3243,7 @@ index 47944dd2c3..87a24f7a6f 100644
  			const stepPrompt = steps.prompts[next];
  			await runTurn(() =>
  				dispatchPrompt(stepPrompt, { attribution: "agent", solutionSpace }, `step prompt ${next + 1}`),
-@@ -3070,6 +3146,39 @@ async function driveSessionToResult(
+@@ -3070,6 +3157,39 @@ async function driveSessionToResult(
  		}
  	}
  
@@ -3170,7 +3283,7 @@ index 47944dd2c3..87a24f7a6f 100644
  	return { exitCode, error, aborted, abortReasonText };
  }
  
-@@ -3269,6 +3378,19 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
+@@ -3269,6 +3389,19 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
  						: monitor.resolveAbortReasonText()
  		: undefined;
  	progress.status = wasAborted ? "aborted" : exitCode === 0 ? "completed" : "failed";
@@ -3190,7 +3303,7 @@ index 47944dd2c3..87a24f7a6f 100644
  	monitor.scheduleProgress(true);
  
  	// Emit lifecycle end event after finalization so yield status is reflected
-@@ -3280,6 +3402,7 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
+@@ -3280,6 +3413,7 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
  		agentSource: agent.source,
  		description: progress.description,
  		status: progress.status as "completed" | "failed" | "aborted",
@@ -3198,7 +3311,7 @@ index 47944dd2c3..87a24f7a6f 100644
  		sessionFile: args.sessionFile,
  		index,
  	};
-@@ -3298,6 +3421,8 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
+@@ -3298,6 +3432,8 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
  		output: truncatedOutput,
  		stderr,
  		truncated: Boolean(truncated),
@@ -3207,7 +3320,7 @@ index 47944dd2c3..87a24f7a6f 100644
  		...(finalized.structuredOutput ? { structuredOutput: finalized.structuredOutput } : {}),
  		durationMs: Date.now() - args.startTime,
  		tokens: progress.tokens,
-@@ -4842,6 +4967,9 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
+@@ -4842,6 +4978,9 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
  		outputSchemaSource: options.outputSchemaSource,
  		artifactsDir: options.artifactsDir,
  	};
@@ -3217,7 +3330,7 @@ index 47944dd2c3..87a24f7a6f 100644
  
  	const runSubagent = async (): Promise<{
  		exitCode: number;
-@@ -4932,7 +5060,9 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
+@@ -4932,7 +5071,9 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
  				thinkingLevel: resolvedThinkingLevel,
  				explicitThinkingLevel,
  				authFallbackUsed,
@@ -3227,7 +3340,7 @@ index 47944dd2c3..87a24f7a6f 100644
  			} = await awaitAbortable(
  				resolveModelOverrideWithAuthFallback(
  					modelPatterns,
-@@ -4940,7 +5070,17 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
+@@ -4940,7 +5081,17 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
  					modelRegistry,
  					settings,
  					id,
@@ -3246,7 +3359,7 @@ index 47944dd2c3..87a24f7a6f 100644
  				),
  			);
  			if (cfgOffline.get(settings) && !model) {
-@@ -4951,6 +5091,14 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
+@@ -4951,6 +5102,14 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
  					`Requested exact model ${JSON.stringify(modelPatterns)} is unavailable. Use an exact provider/model[:level] selector; do not substitute another model.`,
  				);
  			}
@@ -3261,7 +3374,7 @@ index 47944dd2c3..87a24f7a6f 100644
  			if (modelResolutionWarning) {
  				logger.warn("Subagent model resolution warning", {
  					warning: modelResolutionWarning,
-@@ -4965,6 +5113,13 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
+@@ -4965,6 +5124,13 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
  					resolvedModel: model.id,
  				});
  			}
@@ -3275,7 +3388,7 @@ index 47944dd2c3..87a24f7a6f 100644
  			// Preflight skips these checks while the registry is cold, so hold the model
  			// a per-call child actually starts on to them before its session exists.
  			if (options.perCallModelGrants && model) {
-@@ -5463,6 +5618,10 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
+@@ -5463,6 +5629,10 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
  				// even when the workspace was retained for recovery.
  				isolated: worktree !== undefined || undefined,
  			});
@@ -3286,7 +3399,7 @@ index 47944dd2c3..87a24f7a6f 100644
  
  			abortSignal.addEventListener(
  				"abort",
-@@ -5726,6 +5885,7 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
+@@ -5726,6 +5896,7 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
  			startTime,
  		});
  		AgentRegistry.global().setHistory(id, { outputPath: result.outputPath });
@@ -3507,7 +3620,7 @@ index 8071984834..721ef27dca 100644
  	steer: async (publisher, text, images, options) => settle(publisher, publisher.session.steer(text, images, options)),
  	abort: async (publisher, options) => settle(publisher, publisher.session.abort(options)),
 diff --git a/packages/coding-agent/src/utils/title-generator.ts b/packages/coding-agent/src/utils/title-generator.ts
-index 401205174c..27f940cb9e 100644
+index 401205174c..3738d337ce 100644
 --- a/packages/coding-agent/src/utils/title-generator.ts
 +++ b/packages/coding-agent/src/utils/title-generator.ts
 @@ -29,6 +29,7 @@ import { collectOnlineTinyCandidates, expandOnlineTinyModelFallbacks } from "../
@@ -3543,7 +3656,7 @@ index 401205174c..27f940cb9e 100644
  			sessionId,
  			metadataResolver,
  			signal,
-@@ -306,16 +318,26 @@ export async function generateSessionTitle(
+@@ -306,16 +318,24 @@ export async function generateSessionTitle(
  	// session untitled rather than advancing into a paid fallback candidate.
  	try {
  		const started = performance.now();
@@ -3561,9 +3674,7 @@ index 401205174c..27f940cb9e 100644
  				firstModel.id,
  				firstMessage,
 -				titleSystemPrompt ? { signal, systemPrompt: titleSystemPrompt } : { signal },
-+				localSystemPrompt !== undefined
-+					? { signal, systemPrompt: localSystemPrompt }
-+					: { signal },
++				localSystemPrompt !== undefined ? { signal, systemPrompt: localSystemPrompt } : { signal },
  			);
 -		} else if (titleSystemPrompt) {
 +		} else if (localSystemPrompt !== undefined) {
@@ -3573,7 +3684,7 @@ index 401205174c..27f940cb9e 100644
  			});
  		} else {
  			localTitle = await tinyTitleClient.generate(firstModel.id, firstMessage);
-@@ -368,6 +390,7 @@ export async function generateTitleOnline(
+@@ -368,6 +388,7 @@ export async function generateTitleOnline(
  		firstMessage,
  		models,
  		registry,
@@ -3581,7 +3692,7 @@ index 401205174c..27f940cb9e 100644
  		sessionId,
  		metadataResolver,
  		signal,
-@@ -381,6 +404,7 @@ async function generateTitleOnlineWithModels(
+@@ -381,6 +402,7 @@ async function generateTitleOnlineWithModels(
  	firstMessage: string,
  	models: Model<Api>[],
  	registry: ModelRegistry,
@@ -3589,7 +3700,7 @@ index 401205174c..27f940cb9e 100644
  	sessionId?: string,
  	metadataResolver?: (provider: string) => Record<string, unknown> | undefined,
  	signal?: AbortSignal,
-@@ -394,7 +418,11 @@ async function generateTitleOnlineWithModels(
+@@ -394,7 +416,11 @@ async function generateTitleOnlineWithModels(
  	// scheme, but hosts that ignore or reject forced `tool_choice` then echoed
  	// the prompt's `{"title": ...}` JSON example verbatim as the session title;
  	// markers work uniformly everywhere.
@@ -3764,6 +3875,133 @@ index a098555af3..cbc62a3eac 100644
  	it("walks the fallback chain when the primary provider has no credential, then restores it once one returns", async () => {
  		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
  		const fallbackModel = getBundledModel("openai", "gpt-4o");
+diff --git a/packages/coding-agent/test/issue-2750-subagent-runtime-fallback.test.ts b/packages/coding-agent/test/issue-2750-subagent-runtime-fallback.test.ts
+index c6a7fb5a99..0f2edd8754 100644
+--- a/packages/coding-agent/test/issue-2750-subagent-runtime-fallback.test.ts
++++ b/packages/coding-agent/test/issue-2750-subagent-runtime-fallback.test.ts
+@@ -404,6 +404,122 @@ describe("subagent runtime model resolution", () => {
+ 		expect(childFallbackChains?.["existing-local-role"]).toEqual(["other-provider/other-model"]);
+ 	});
+ 
++	it("inherits retry.subagentFallbackChains over the default chain for a single subagent model", async () => {
++		const primary = model("lm-studio", "local-reviewer");
++		const localFast = model("lm-studio", "local-fast");
++		const mainFallback = model("openai-codex", "gpt-5.6-sol");
++		let childFallbackChains: Record<string, string[]> | undefined;
++		vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async options => {
++			if (!options) throw new Error("Expected createAgentSession options");
++			childFallbackChains = (options.settings ? cfgRetryFallbackChains.get(options.settings) : undefined) as
++				| Record<string, string[]>
++				| undefined;
++			return { session: createYieldingSession(), extensionsResult: {}, setToolUIContext: () => {} } as never;
++		});
++
++		const agent: AgentDefinition = { name: "task", description: "test", systemPrompt: "test", source: "bundled" };
++		await runSubprocess({
++			cwd: "/tmp",
++			agent,
++			task: "work",
++			index: 0,
++			id: "subagent-chain-configured",
++			modelOverride: "lm-studio/local-reviewer",
++			settings: Settings.isolated({
++				"retry.fallbackChains": { default: ["openai-codex/gpt-5.6-sol"] },
++				"retry.subagentFallbackChains": ["lm-studio/local-fast"],
++			}),
++			modelRegistry: {
++				refresh: async () => {},
++				getAvailable: () => [primary, localFast, mainFallback],
++				getApiKey: async () => "test-key",
++			} as never,
++			enableLsp: false,
++		});
++
++		// 子代理重试换模型走独立配置，主代理 default 链保持不变。
++		expect(childFallbackChains?.["subagent:subagent-chain-configured"]).toEqual(["lm-studio/local-fast"]);
++		expect(childFallbackChains?.default).toEqual(["openai-codex/gpt-5.6-sol"]);
++	});
++
++	it("keeps the subagent's own role chain ahead of retry.subagentFallbackChains", async () => {
++		const fast = model("fast", "hy3");
++		const slow = model("slow", "opus");
++		let childFallbackChains: Record<string, string[]> | undefined;
++		vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async options => {
++			if (!options) throw new Error("Expected createAgentSession options");
++			childFallbackChains = (options.settings ? cfgRetryFallbackChains.get(options.settings) : undefined) as
++				| Record<string, string[]>
++				| undefined;
++			return { session: createYieldingSession(), extensionsResult: {}, setToolUIContext: () => {} } as never;
++		});
++
++		const agent: AgentDefinition = {
++			name: "scout",
++			description: "test",
++			systemPrompt: "test",
++			source: "bundled",
++			model: ["@smol"],
++		};
++		await runSubprocess({
++			cwd: "/tmp",
++			agent,
++			task: "work",
++			index: 0,
++			id: "role-beats-subagent-chain",
++			settings: Settings.isolated({
++				modelRoles: { default: "slow/opus", smol: "fast/hy3" },
++				"retry.fallbackChains": { default: ["slow/opus-backup"], smol: ["fast/composer"] },
++				"retry.subagentFallbackChains": ["fast/other"],
++			}),
++			modelRegistry: {
++				refresh: async () => {},
++				getAvailable: () => [fast, slow],
++				getApiKey: async () => "test-key",
++			} as never,
++			enableLsp: false,
++		});
++
++		// 显式角色链优先于全局子代理链。
++		expect(childFallbackChains?.["subagent:role-beats-subagent-chain"]).toEqual(["fast/composer"]);
++	});
++
++	it("falls back to the default chain when retry.subagentFallbackChains is empty", async () => {
++		const primary = model("lm-studio", "local-reviewer");
++		const mainFallback = model("openai-codex", "gpt-5.6-sol");
++		let childFallbackChains: Record<string, string[]> | undefined;
++		vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async options => {
++			if (!options) throw new Error("Expected createAgentSession options");
++			childFallbackChains = (options.settings ? cfgRetryFallbackChains.get(options.settings) : undefined) as
++				| Record<string, string[]>
++				| undefined;
++			return { session: createYieldingSession(), extensionsResult: {}, setToolUIContext: () => {} } as never;
++		});
++
++		const agent: AgentDefinition = { name: "task", description: "test", systemPrompt: "test", source: "bundled" };
++		await runSubprocess({
++			cwd: "/tmp",
++			agent,
++			task: "work",
++			index: 0,
++			id: "empty-subagent-chain",
++			modelOverride: "lm-studio/local-reviewer",
++			settings: Settings.isolated({
++				"retry.fallbackChains": { default: ["openai-codex/gpt-5.6-sol"] },
++				"retry.subagentFallbackChains": [],
++			}),
++			modelRegistry: {
++				refresh: async () => {},
++				getAvailable: () => [primary, mainFallback],
++				getApiKey: async () => "test-key",
++			} as never,
++			enableLsp: false,
++		});
++
++		// 空列表 = 未配置，保持旧行为（继承 default）。
++		expect(childFallbackChains?.["subagent:empty-subagent-chain"]).toEqual(["openai-codex/gpt-5.6-sol"]);
++	});
++
+ 	it("inherits the aliased role's chain, not the default chain, for a role-alias subagent model", async () => {
+ 		const fast = model("fast", "hy3");
+ 		const slow = model("slow", "opus");
 diff --git a/packages/coding-agent/test/subagent-inflight-concurrency.test.ts b/packages/coding-agent/test/subagent-inflight-concurrency.test.ts
 new file mode 100644
 index 0000000000..38b6569946

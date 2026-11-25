@@ -97,6 +97,7 @@ function readModel(): ModelConfigReadModel {
     projectScopeAvailable: false,
     modelProviderOrder: [],
     fallbackChains: {},
+    subagentFallbackChains: [],
     fallbackRevertPolicy: "cooldown-expiry",
     webSearch: {
       enabled: true,
