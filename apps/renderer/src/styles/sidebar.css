@@ -287,8 +287,9 @@
   visibility: visible;
   pointer-events: auto;
 }
-/* 等待胶囊占着最右槽：悬停也不露出归档 / 更多，避免和胶囊抢位。 */
-.thread-row.has-wait:hover .t-actions {
+/* 等待 / 完成胶囊占着最右槽：悬停也不露出归档 / 更多，避免和胶囊抢位。 */
+.thread-row.has-wait:hover .t-actions,
+.thread-row.has-completed:hover .t-actions {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
@@ -327,9 +328,11 @@
   --title-fade: 58px;
   --title-clear: 40px;
 }
-/* 等待状态位于会话按钮内的独立 flex 槽，按实际语言宽度让出空间。 */
+/* 等待 / 完成状态位于会话按钮内的独立 flex 槽，按实际语言宽度让出空间。 */
 .thread-row.has-wait .t-title,
-.thread-row.has-wait:hover .t-title {
+.thread-row.has-wait:hover .t-title,
+.thread-row.has-completed .t-title,
+.thread-row.has-completed:hover .t-title {
   --title-fade: 18px;
   --title-clear: 0px;
 }
@@ -363,7 +366,8 @@
   transform: translateX(min(100cqw - 100% - 58px, 0px));
   transition: transform var(--dur-marquee) linear calc(var(--tip-delay) + var(--dur-slower));
 }
-.thread-row.has-wait:hover .t-scroll {
+.thread-row.has-wait:hover .t-scroll,
+.thread-row.has-completed:hover .t-scroll {
   transform: translateX(min(100cqw - 100% - 18px, 0px));
 }
 /* 「展开更多」：第 7 位起的出现口，与会话标题同左缘（文件夹槽 + gap）。 */

@@ -13,7 +13,7 @@ import { createPortal } from "react-dom";
 import { beforeConversationLayoutChange } from "../conversation/conversationReflow";
 import { panelSize, SIDEBAR_LIMITS } from "../layout/workbenchLayout";
 import type { FormEvent as ReactFormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, RefObject } from "react";
-import type { ClientBootstrap, SessionId, StudioClient, WorkspaceId, WorkspaceFileNode } from "@omp-studio/client-contract";
+import type { ClientBootstrap, ResidentSessionPhase, SessionId, StudioClient, WorkspaceId, WorkspaceFileNode } from "@omp-studio/client-contract";
 import { AppIcon, Icon } from "../icons";
 import { MenuItem } from "../menus";
 import { useI18n } from "../i18n";
@@ -32,6 +32,7 @@ import { PreviewFileTree } from "../preview/surfaces";
 import { usableCapabilityManifest } from "../deck/interactionGate";
 import { ThreadSpin } from "./ThreadSpin";
 import { ThreadWaitChip } from "./ThreadWaitChip";
+import { ThreadCompletedChip } from "./ThreadCompletedChip";
 import { residentForSession, residentRowsOf, threadRunningFromLive } from "./threadRunning";
 import { sidebarProjectOrder } from "./projectOrder";
 import { isPlaceholderSessionTitle, projectHasSession, provisionalThreadForHistoryEntry, sidebarThreadTitle } from "./provisionalThread";
@@ -58,6 +59,23 @@ function relativeTime(iso: string, zh: boolean): string {
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
   if (seconds < 86400 * 7) return `${Math.floor(seconds / 86400)}d`;
   return new Date(then).toLocaleDateString();
+}
+
+/** 「最近完成」窗口：常驻会话由活跃转入 idle 后，行置顶并带完成标记，
+    窗口结束回到原排序。标记只存渲染进程内存（应用重启后重置）。 */
+const RECENTLY_COMPLETED_WINDOW_MS = 10 * 60 * 1000;
+/** 常驻流安静时也要到点摘标记：仅在存在标记时轮询。 */
+const RECENTLY_COMPLETED_SWEEP_MS = 10 * 1000;
+const RECENTLY_COMPLETED_ACTIVE_PHASES: ReadonlySet<ResidentSessionPhase> = new Set(["running", "compacting", "waiting"]);
+function sweepRecentlyCompleted(now: number, completed: Map<string, number>): boolean {
+  let changed = false;
+  for (const [sessionId, at] of [...completed]) {
+    if (now - at > RECENTLY_COMPLETED_WINDOW_MS) {
+      completed.delete(sessionId);
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 /** 左栏底部用户区（rail 收起时的回退位置）用的 Runtime 状态文案与语气。 */
@@ -320,6 +338,51 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
         ...(liveSnapshot?.plan?.status === undefined ? {} : { planStatus: liveSnapshot.plan.status }),
       }),
   });
+  /** 最近完成的会话：常驻相位「活跃 → idle」记完成时刻，窗口内置顶（运行之下）
+      并显示「已完成」标记；新回合开始或窗口到期即摘除。 */
+  const [recentlyCompletedVersion, setRecentlyCompletedVersion] = useState(0);
+  const recentlyCompletedRef = useRef(new Map<string, number>());
+  const residentPhaseRef = useRef(new Map<string, ResidentSessionPhase>());
+  useEffect(() => {
+    if (residentRows === undefined) return;
+    const previous = residentPhaseRef.current;
+    const next = new Map<string, ResidentSessionPhase>();
+    const completed = recentlyCompletedRef.current;
+    const now = Date.now();
+    let changed = false;
+    for (const row of residentRows) {
+      const prevPhase = previous.get(row.sessionId);
+      next.set(row.sessionId, row.phase);
+      const wasActive = prevPhase !== undefined && RECENTLY_COMPLETED_ACTIVE_PHASES.has(prevPhase);
+      const isActive = RECENTLY_COMPLETED_ACTIVE_PHASES.has(row.phase);
+      if (isActive && !wasActive) {
+        // 新回合开始：该会话的完成标记失效。
+        if (completed.delete(row.sessionId)) changed = true;
+      } else if (!isActive && row.phase === "idle" && wasActive) {
+        // 回合刚结束：记录完成时刻（已有标记保留更早时间）。
+        if (completed.get(row.sessionId) === undefined) {
+          completed.set(row.sessionId, now);
+          changed = true;
+        }
+      }
+    }
+    residentPhaseRef.current = next;
+    if (sweepRecentlyCompleted(now, completed)) changed = true;
+    if (changed) setRecentlyCompletedVersion(version => version + 1);
+  }, [residentRows]);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (recentlyCompletedRef.current.size === 0) return;
+      if (sweepRecentlyCompleted(Date.now(), recentlyCompletedRef.current)) setRecentlyCompletedVersion(version => version + 1);
+    }, RECENTLY_COMPLETED_SWEEP_MS);
+    return () => clearInterval(timer);
+  }, []);
+  const isRecentlyCompleted = (sessionId: SessionId | undefined): boolean => {
+    void recentlyCompletedVersion;
+    if (sessionId === undefined) return false;
+    const at = recentlyCompletedRef.current.get(sessionId);
+    return at !== undefined && Date.now() - at <= RECENTLY_COMPLETED_WINDOW_MS;
+  };
   // Explorer git 徽章：真实模式读取选中项目的仓库状态；预览模式的徽章来自 fixtures，不查 Host。
   const gitWorkspaceId = preview || !chrome.selectedProject ? undefined : (chrome.selectedProject.id as WorkspaceId);
   const { repository: gitRepository, refresh: refreshGitRepository } = useGitRepository(client, gitWorkspaceId);
@@ -734,11 +797,15 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                           ...(liveSnapshot?.isCompacting === undefined ? {} : { compacting: liveSnapshot.isCompacting }),
                         }),
                     });
-                    // 正在运行的会话始终置顶（含置顶条目之上）；跑完后随下一次全量排序回到原位。
+                    // 正在运行的会话始终置顶（含置顶条目之上）；最近完成的会话
+                    // （活跃→idle，窗口内）置顶于运行之下；窗口结束回到原位。
+                    const entryCompleted = (entry: (typeof entries)[number]) => !entryRunning(entry) && isRecentlyCompleted(entry.sessionId);
                     const runningEntries = entries.filter(entryRunning);
-                    const orderedEntries = runningEntries.length === 0 ? entries : [
+                    const completedEntries = entries.filter(entryCompleted);
+                    const orderedEntries = runningEntries.length === 0 && completedEntries.length === 0 ? entries : [
                       ...runningEntries,
-                      ...entries.filter(entry => !entryRunning(entry)),
+                      ...completedEntries,
+                      ...entries.filter(entry => !entryRunning(entry) && !entryCompleted(entry)),
                     ];
                     const projectProvisionalThreads = chrome.provisionalThreads.filter(
                       (thread) => thread.workspaceId === workspace.workspaceId,
@@ -857,9 +924,10 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                         const resolvedEntryTitle = sidebarThreadTitle(entry, provisional, t("conversation.untitledSession"), entryLiveTitle);
                         const wait = threadWaitForSession(entry.sessionId);
                         const running = entryRunning(entry);
+                        const completed = !wait && !running && isRecentlyCompleted(entry.sessionId);
                         return (
                         <div
-                          className={`thread-row${wait ? " has-wait" : ""}`}
+                          className={`thread-row${wait ? " has-wait" : ""}${completed ? " has-completed" : ""}`}
                           key={entry.historyId}
                           onContextMenu={(event) => openRowMenuAtCursor(event, entry.historyId)}
                         >
@@ -877,7 +945,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                               <SessionTitleMark row={titleMetadata.rows.get(entry.sessionId ?? "")} title={resolvedEntryTitle}/><span className="t-scroll">{resolvedEntryTitle}</span>
                             </span>
                             {wait || running ? null : <span className="t-meta">{relativeTime(entry.lastActiveAt, zh)}</span>}
-                          {wait ? <ThreadWaitChip kind={wait} /> : null}
+                          {wait ? <ThreadWaitChip kind={wait} /> : completed ? <ThreadCompletedChip /> : null}
                           </button>
                           {/* 悬停操作区：最右「归档」（session.archive），其左 ⋯ 菜单（顶栏同款；
                               会话动作作用于所在行，非当前会话先打开 resume 再执行）。 */}
