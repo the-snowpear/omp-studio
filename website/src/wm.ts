@@ -4,6 +4,7 @@
 // along the top of the desk lists every window, as the app's top bar does.
 import gsap from "gsap";
 import { a } from "../shared/app-icons";
+import { t } from "../shared/i18n";
 import { i as lucide } from "../shared/icons";
 import { KINDS, LAYOUTS, PIN_MODES, ompWindow, windowHead, windowTab, isConversation, SOURCE, type Kind } from "../shared/ui";
 import { enliven } from "./live";
@@ -47,7 +48,14 @@ const DOCK_SPACE = 70;
 const MIN_W = 250;
 const MIN_H = 150;
 const DIRS = ["n", "s", "e", "w", "ne", "nw", "se", "sw"] as const;
-const ZONE_LABELS: [ZoneName, string][] = [["left", "左半"], ["right", "右半"], ["tl", "左上"], ["tr", "右上"], ["bl", "左下"], ["br", "右下"]];
+const ZONE_LABELS: [ZoneName, string][] = [
+  ["left", t("左半", "Left half")],
+  ["right", t("右半", "Right half")],
+  ["tl", t("左上", "Top left")],
+  ["tr", t("右上", "Top right")],
+  ["bl", t("左下", "Bottom left")],
+  ["br", t("右下", "Bottom right")],
+];
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
 const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -101,7 +109,7 @@ export class Workbench {
     this.label.setAttribute("aria-hidden", "true");
     this.assist.className = "wm-assist";
     this.assist.setAttribute("role", "region");
-    this.assist.setAttribute("aria-label", "补齐空位");
+    this.assist.setAttribute("aria-label", t("补齐空位", "Fill empty space"));
     this.assist.addEventListener("click", (e) => this.pickAssist(e));
     canvas.append(this.label, this.assist);
     this.capsules.className = "wm-capsules";
@@ -326,20 +334,20 @@ export class Workbench {
     el.dataset.tabs = String(tabs.length);
     el.style.setProperty("--tint", KINDS[active].tint);
     win.bar.querySelector(".ow-head")!.innerHTML = windowHead(active, { sub: this.panel(active).sub, count: tabs.length });
-    win.bar.setAttribute("aria-label", `${KINDS[active].title} 窗口。方向键移动，Alt 加方向键吸附`);
+    win.bar.setAttribute("aria-label", t(`${KINDS[active].title} 窗口。方向键移动，Alt 加方向键吸附`, `${KINDS[active].title} window. Arrow keys move, Alt + Arrows snap`));
     for (const kind of tabs) this.panel(kind).body.hidden = kind !== active;
     win.strip.hidden = tabs.length + ghosts.length < 2;
     win.strip.innerHTML = win.strip.hidden
       ? ""
-      : `${tabs.map((k) => windowTab(k, k === active && !ghosts.length)).join("")}${ghosts.map((k) => windowTab(k, false, true)).join("")}<button type="button" class="ow-btn ow-tabs-all" data-tabs-all aria-label="全部标签">${a("chevron-d")}</button>`;
+      : `${tabs.map((k) => windowTab(k, k === active && !ghosts.length)).join("")}${ghosts.map((k) => windowTab(k, false, true)).join("")}<button type="button" class="ow-btn ow-tabs-all" data-tabs-all aria-label="${t("全部标签", "All tabs")}">${a("chevron-d")}</button>`;
     for (const tab of win.strip.querySelectorAll<HTMLElement>("[role=tab]")) tab.tabIndex = tab.ariaSelected === "true" ? 0 : -1;
     const pin = win.bar.querySelector<HTMLElement>('[data-act="pin"]')!;
     pin.setAttribute("aria-pressed", String(win.pin > 0));
-    pin.setAttribute("aria-label", win.native ? "收回应用" : "固定浮窗");
+    pin.setAttribute("aria-label", win.native ? t("收回应用", "Return to app") : t("固定浮窗", "Pin window"));
     const maxed = win.max;
     const max = win.bar.querySelector<HTMLElement>('[data-act="max"]')!;
     max.innerHTML = a(maxed ? "restore" : "maximize");
-    max.setAttribute("aria-label", maxed ? "还原" : "最大化，悬停可选布局");
+    max.setAttribute("aria-label", maxed ? t("还原", "Restore") : t("最大化，悬停可选布局", "Maximize, hover for layouts"));
     this.drawStrip();
   }
 
@@ -532,9 +540,9 @@ export class Workbench {
       const b = target.closest<HTMLElement>("[data-tabs-all]")!;
       const r = b.getBoundingClientRect();
       if (win.native) return;
-      return this.menu.open(r.right, r.bottom + 4, "全部标签", [
+      return this.menu.open(r.right, r.bottom + 4, t("全部标签", "All tabs"), [
         ...win.tabs.map((k): MenuItem => ({ label: KINDS[k].title, icon: KINDS[k].icon, checked: k === win.active, run: () => this.activate(win, k) })),
-        { label: "添加工具", icon: "plus", rule: true, items: this.addable(win) },
+        { label: t("添加工具", "Add tool"), icon: "plus", rule: true, items: this.addable(win) },
       ], { alignRight: true, back: b });
     }
     if (!tab) return;
@@ -635,7 +643,7 @@ export class Workbench {
         this.snap(win, zones(this.snapped(win).map((w) => w.cell!))[name]);
         this.emit("snap");
       } })),
-      { label: "浮窗", run: () => {
+      { label: t("浮窗", "Float"), run: () => {
         win.cell = null;
         win.max = false;
         this.paint(win);
@@ -647,16 +655,16 @@ export class Workbench {
 
   private windowMenu(win: Win, x: number, y: number, alignRight = false) {
     const others = this.standing(win);
-    const joins: MenuItem[] = others.map((o) => ({ label: `合并到「${this.nameOf(o)}」`, icon: KINDS[o.active].icon, run: () => {
+    const joins: MenuItem[] = others.map((o) => ({ label: t(`合并到「${this.nameOf(o)}」`, `Merge into "${this.nameOf(o)}"`), icon: KINDS[o.active].icon, run: () => {
       this.merge(win, o);
       this.emit("merge");
     } }));
-    if (win.tabs.length > 1) joins.unshift({ label: "每个标签拆成一个窗口", icon: "split", run: () => this.scatter(win) });
-    this.menu.open(x, y, win.tabs.length > 1 ? "整组操作" : KINDS[win.active].title, [
-      { label: "添加工具", icon: "plus", items: this.addable(win) },
-      ...(win.pin ? [] : [{ label: win.tabs.length > 1 ? "整组移动到" : "移动到", icon: "handoff" as const, items: this.snapItems(win) }]),
-      ...(joins.length && !win.pin ? [{ label: "拆分与合并", icon: "split" as const, items: joins }] : []),
-      { label: win.tabs.length > 1 ? "隐藏整组" : isConversation(win.active) ? "关闭对话视图" : "隐藏工具", icon: "eye-off", rule: true, run: () => this.close(win) },
+    if (win.tabs.length > 1) joins.unshift({ label: t("每个标签拆成一个窗口", "Split every tab into windows"), icon: "split", run: () => this.scatter(win) });
+    this.menu.open(x, y, win.tabs.length > 1 ? t("整组操作", "Window group") : KINDS[win.active].title, [
+      { label: t("添加工具", "Add tool"), icon: "plus", items: this.addable(win) },
+      ...(win.pin ? [] : [{ label: win.tabs.length > 1 ? t("整组移动到", "Snap group to") : t("移动到", "Snap to"), icon: "handoff" as const, items: this.snapItems(win) }]),
+      ...(joins.length && !win.pin ? [{ label: t("拆分与合并", "Split & merge"), icon: "split" as const, items: joins }] : []),
+      { label: win.tabs.length > 1 ? t("隐藏整组", "Hide group") : isConversation(win.active) ? t("关闭对话视图", "Close chat view") : t("隐藏工具", "Hide tool"), icon: "eye-off", rule: true, run: () => this.close(win) },
     ], { alignRight, back: win.bar });
   }
 
@@ -664,16 +672,16 @@ export class Workbench {
     const at = win.tabs.indexOf(kind);
     const others = this.standing(win);
     this.menu.open(x, y, KINDS[kind].title, [
-      { label: "移动到", icon: "handoff", items: [
-        { label: "单独的浮窗", icon: "external", run: () => this.popTab(win, kind) },
-        ...others.map((o): MenuItem => ({ label: `「${this.nameOf(o)}」的标签组`, icon: KINDS[o.active].icon, run: () => this.addTab(o, kind) })),
+      { label: t("移动到", "Move to"), icon: "handoff", items: [
+        { label: t("单独的浮窗", "New floating window"), icon: "external", run: () => this.popTab(win, kind) },
+        ...others.map((o): MenuItem => ({ label: t(`「${this.nameOf(o)}」的标签组`, `"${this.nameOf(o)}" tab group`), icon: KINDS[o.active].icon, run: () => this.addTab(o, kind) })),
       ] },
-      { label: "向前排列", icon: "arrow-u", disabled: at === 0 ? "已经在最前面" : undefined, run: () => this.reorder(win, kind, at - 1) },
-      { label: "向后排列", icon: "arrow-d", disabled: at === win.tabs.length - 1 ? "已经在最后面" : undefined, run: () => this.reorder(win, kind, at + 1) },
-      { label: "隐藏工具", icon: "eye-off", rule: true, run: () => this.hideTab(win, kind) },
-      { label: "标签组", icon: "layers", items: [
-        { label: "每个标签拆成一个窗口", icon: "split", run: () => this.scatter(win) },
-        { label: "隐藏整组", icon: "eye-off", run: () => this.close(win) },
+      { label: t("向前排列", "Move tab left"), icon: "arrow-u", disabled: at === 0 ? t("已经在最前面", "Already first") : undefined, run: () => this.reorder(win, kind, at - 1) },
+      { label: t("向后排列", "Move tab right"), icon: "arrow-d", disabled: at === win.tabs.length - 1 ? t("已经在最后面", "Already last") : undefined, run: () => this.reorder(win, kind, at + 1) },
+      { label: t("隐藏工具", "Hide tool"), icon: "eye-off", rule: true, run: () => this.hideTab(win, kind) },
+      { label: t("标签组", "Tab group"), icon: "layers", items: [
+        { label: t("每个标签拆成一个窗口", "Split every tab into windows"), icon: "split", run: () => this.scatter(win) },
+        { label: t("隐藏整组", "Hide group"), icon: "eye-off", run: () => this.close(win) },
       ] },
     ], { back: win.strip.querySelector<HTMLElement>('[aria-selected="true"]') });
   }
@@ -693,13 +701,13 @@ export class Workbench {
   private pinMenu(win: Win, button: HTMLElement) {
     const roomy = !matchMedia("(hover: none)").matches;
     const why = (mode: number) => {
-      if (mode === 3 && !roomy) return "手机上没有独立窗口";
-      if (mode === 4 && (!roomy || !documentPip())) return "这个浏览器不支持置顶小窗，桌面版可用";
+      if (mode === 3 && !roomy) return t("手机上没有独立窗口", "Standalone windows unavailable on mobile");
+      if (mode === 4 && (!roomy || !documentPip())) return t("这个浏览器不支持置顶小窗，桌面版可用", "Document PiP unsupported in this browser; available on desktop");
       return undefined;
     };
     const r = button.getBoundingClientRect();
     button.dataset.open = "";
-    this.menu.open(r.right + 12, r.bottom + 5, "固定浮窗", PIN_MODES.map((label, n): MenuItem => ({
+    this.menu.open(r.right + 12, r.bottom + 5, t("固定浮窗", "Pin window"), PIN_MODES.map((label, n): MenuItem => ({
       label,
       checked: n === win.pin,
       disabled: why(n),
@@ -759,7 +767,7 @@ export class Workbench {
     try {
       native = mode === 4 ? await documentPip()!.requestWindow({ width: w, height: h }) : window.open("", "", `popup,width=${w},height=${h}`);
     } catch { /* refused: told below */ }
-    if (!native) return this.say("浏览器拦下了新窗口，允许弹窗后再试");
+    if (!native) return this.say(t("浏览器拦下了新窗口，允许弹窗后再试", "Browser blocked the pop-out window — allow popups and try again"));
     if (win.native) {
       const old = win.native;
       win.native = undefined;
@@ -850,8 +858,8 @@ export class Workbench {
     this.assistFor = { cell, wins };
     const r = this.cellRect(cell);
     Object.assign(this.assist.style, { transform: `translate3d(${r.x + 8}px, ${r.y + 8}px, 0)`, width: `${r.w - 16}px`, height: `${r.h - 16}px` });
-    this.assist.innerHTML = `<header><span>选一个窗口补齐这里</span><button type="button" class="ow-btn" data-skip aria-label="不补齐">${a("x")}</button></header><div>${wins
-      .map((w, n) => `<button type="button" data-n="${n}" style="--tint:${KINDS[w.active].tint}"><span class="ow-mark">${a(KINDS[w.active].icon)}</span><span><b>${KINDS[w.active].title}${w.tabs.length > 1 ? ` <i>${w.tabs.length}</i>` : ""}</b><small>${w.state === "min" ? "已最小化" : "浮窗"}</small></span></button>`)
+    this.assist.innerHTML = `<header><span>${t("选一个窗口补齐这里", "Pick a window to fill")}</span><button type="button" class="ow-btn" data-skip aria-label="${t("不补齐", "Dismiss")}">${a("x")}</button></header><div>${wins
+      .map((w, n) => `<button type="button" data-n="${n}" style="--tint:${KINDS[w.active].tint}"><span class="ow-mark">${a(KINDS[w.active].icon)}</span><span><b>${KINDS[w.active].title}${w.tabs.length > 1 ? ` <i>${w.tabs.length}</i>` : ""}</b><small>${w.state === "min" ? t("已最小化", "Minimized") : t("浮窗", "Floating")}</small></span></button>`)
       .join("")}</div>`;
     this.assist.dataset.on = "";
   }
@@ -883,7 +891,7 @@ export class Workbench {
       el.className = "wm-line";
       el.tabIndex = 0;
       el.setAttribute("role", "separator");
-      el.setAttribute("aria-label", "调整窗口分区");
+      el.setAttribute("aria-label", t("调整窗口分区", "Resize split panes"));
       const n = this.lines.push(el) - 1;
       el.addEventListener("pointerdown", (e) => this.dragLine(n, e));
       el.addEventListener("dblclick", () => {
@@ -1086,7 +1094,7 @@ export class Workbench {
         rehearse(zone);
         this.showPreview(zone?.cell ?? null, win.rect);
       }
-      this.showLabel(join ? "加入浮窗标签组" : zone ? (zone.name === "full" ? "最大化" : "吸附窗口") : "", ev);
+      this.showLabel(join ? t("加入浮窗标签组", "Join tab group") : zone ? (zone.name === "full" ? t("最大化", "Maximize") : t("吸附窗口", "Snap window")) : "", ev);
     };
 
     const move = (ev: PointerEvent) => {
@@ -1255,10 +1263,10 @@ export class Workbench {
     const el = document.createElement("div");
     el.className = "picker";
     el.setAttribute("role", "dialog");
-    el.setAttribute("aria-label", "选择布局和位置");
-    el.innerHTML = `<p>选择布局和位置</p><div class="picker-grid">${LAYOUTS.map(
+    el.setAttribute("aria-label", t("选择布局和位置", "Choose layout & slot"));
+    el.innerHTML = `<p>${t("选择布局和位置", "Choose layout & slot")}</p><div class="picker-grid">${LAYOUTS.map(
       (layout, n) => `<figure><div class="picker-tile">${layout.cells
-        .map(([x, y, w, h], c) => `<button type="button" data-layout="${n}" data-cell="${c}" aria-label="${layout.name}，第 ${c + 1} 格" style="left:${x * 100}%;top:${y * 100}%;width:${w * 100}%;height:${h * 100}%"></button>`)
+        .map(([x, y, w, h], c) => `<button type="button" data-layout="${n}" data-cell="${c}" aria-label="${layout.name}${t(`，第 ${c + 1} 格`, `, slot ${c + 1}`)}" style="left:${x * 100}%;top:${y * 100}%;width:${w * 100}%;height:${h * 100}%"></button>`)
         .join("")}</div><figcaption>${layout.name}</figcaption></figure>`,
     ).join("")}</div>`;
     el.addEventListener("pointerenter", () => clearTimeout(this.pickerTimer));
@@ -1306,7 +1314,7 @@ export class Workbench {
   private buildStrip() {
     this.strip.className = "wm-strip";
     this.strip.setAttribute("role", "toolbar");
-    this.strip.setAttribute("aria-label", "窗口");
+    this.strip.setAttribute("aria-label", t("窗口", "Windows"));
     this.canvas.append(this.strip);
     this.strip.addEventListener("click", (e) => {
       const target = e.target as Element;
@@ -1314,9 +1322,9 @@ export class Workbench {
       if (add) {
         const r = add.getBoundingClientRect();
         const left = this.dockKinds.filter((k) => !this.holder(k));
-        return this.menu.open(r.left, r.bottom + 6, "新建标签", left.length
+        return this.menu.open(r.left, r.bottom + 6, t("新建标签", "Open tool"), left.length
           ? left.map((k): MenuItem => ({ label: KINDS[k].title, icon: KINDS[k].icon, run: () => this.open(k) }))
-          : [{ label: "所有工具都已打开", disabled: "所有工具都已打开" }], { back: add });
+          : [{ label: t("所有工具都已打开", "All tools open"), disabled: t("所有工具都已打开", "All tools open") }], { back: add });
       }
       const win = this.wins[Number(target.closest<HTMLElement>("[data-win]")?.dataset.win ?? -1)];
       if (!win) return;
@@ -1340,11 +1348,18 @@ export class Workbench {
         const from = isConversation(w.active) ? "" : ` · ${SOURCE}`;
         const state = w.state === "min" ? " data-min" : w.native ? " data-out" : "";
         const tone = w.active === "chat" ? "green" : w.active === "plan" ? "amber" : "";
-        return `<span class="wm-tab" data-win="${n}" style="--tint:${k.tint}"${w === this.focused && w.state === "open" ? " data-on" : ""}${state}><button type="button" aria-label="${k.title}${w.state === "min" ? "，已最小化" : ""}">${a(k.icon)}<span class="wm-tab-t">${k.title}<i>${from}</i></span>${tone ? `<span class="ow-dot" data-tone="${tone}"></span>` : ""}${w.tabs.length > 1 ? `<span class="ow-count">${w.tabs.length}</span>` : ""}${w.pin ? a(w.native ? "external" : "pin", "wm-tab-pin") : ""}</button><button type="button" class="ow-tab-x" data-x aria-label="关闭 ${k.title}">${a("x")}</button></span>`;
+        return `<span class="wm-tab" data-win="${n}" style="--tint:${k.tint}"${w === this.focused && w.state === "open" ? " data-on" : ""}${state}><button type="button" aria-label="${k.title}${w.state === "min" ? t("，已最小化", ", minimized") : ""}">${a(k.icon)}<span class="wm-tab-t">${k.title}<i>${from}</i></span>${tone ? `<span class="ow-dot" data-tone="${tone}"></span>` : ""}${w.tabs.length > 1 ? `<span class="ow-count">${w.tabs.length}</span>` : ""}${w.pin ? a(w.native ? "external" : "pin", "wm-tab-pin") : ""}</button><button type="button" class="ow-tab-x" data-x aria-label="${t("关闭", "Close")} ${k.title}">${a("x")}</button></span>`;
       })
-      .join("")}</div><button type="button" class="ow-btn" data-add aria-label="新建标签">${a("plus")}</button>`;
+      .join("")}</div><button type="button" class="ow-btn" data-add aria-label="${t("新建标签", "Open tool")}">${a("plus")}</button>`;
     if (focus !== undefined) this.strip.querySelector<HTMLElement>(`[data-win="${focus}"] button`)?.focus({ preventScroll: true });
-    this.strip.querySelector("[data-on]")?.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: "instant" });
+    const tabsEl = this.strip.querySelector<HTMLElement>(".wm-tabs");
+    const activeTab = tabsEl?.querySelector<HTMLElement>("[data-on]");
+    if (tabsEl && activeTab) {
+      const left = activeTab.offsetLeft;
+      const right = left + activeTab.offsetWidth;
+      if (left < tabsEl.scrollLeft) tabsEl.scrollLeft = left;
+      else if (right > tabsEl.scrollLeft + tabsEl.clientWidth) tabsEl.scrollLeft = right - tabsEl.clientWidth;
+    }
   }
 
   // ---------- capsules: minimised windows that are pinned, so they can be found from anywhere on the page ----------
@@ -1361,7 +1376,7 @@ export class Workbench {
       b.style.setProperty("--tint", KINDS[win.active].tint);
       b.dataset.pin = String(win.pin);
       b.innerHTML = `${a(KINDS[win.active].icon)}<span>${KINDS[win.active].title}</span>${win.tabs.length > 1 ? `<i>${win.tabs.length}</i>` : ""}`;
-      b.setAttribute("aria-label", `恢复 ${KINDS[win.active].title}`);
+      b.setAttribute("aria-label", `${t("恢复", "Restore")} ${KINDS[win.active].title}`);
       const at = { x: 0, y: 0 };
       let moved = false;
       b.addEventListener("pointerdown", (e) => {
@@ -1401,7 +1416,7 @@ export class Workbench {
     this.dock.innerHTML = this.dockKinds
       .map((kind) => {
         const k = KINDS[kind];
-        const name = kind === "chat" ? "对话" : kind === "plan" ? "计划审批" : k.title;
+        const name = kind === "chat" ? t("对话", "Chat") : kind === "plan" ? t("计划审批", "Plan review") : k.title;
         const icon = kind === "plan" ? lucide("clipboardCheck") : a(k.icon);
         return `<button type="button" class="dock-item" data-kind="${kind}" style="--tint:${k.tint}" aria-label="${name}" aria-pressed="false"><span class="dock-ico">${icon}</span><span class="dock-tip">${name}</span></button>`;
       })

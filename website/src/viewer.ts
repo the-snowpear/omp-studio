@@ -1,17 +1,18 @@
 // Feature viewer: one app window whose tabs are the app's pages. The page itself is the real
 // renderer in an iframe (public/live, built by tools/build-live.mjs); a screenshot holds its
 // place until it is ready, and stays there on screens too small to use it.
+import { locale, t } from "../shared/i18n";
 import { i } from "../shared/icons";
 import { PAGES, shot, type Theme } from "../shared/ui";
 
 const EMBED_SOURCE = "omp-studio-embed";
 const LIVE_W = 1280;
 const SUB_ROUTE_TITLES: Record<string, string> = {
-  statistics: "用量统计",
-  workbench: "工作台",
-  diagnostics: "诊断中心",
-  media: "媒体",
-  evaluation: "评测",
+  statistics: t("用量统计", "Usage stats"),
+  workbench: t("工作台", "Workbench"),
+  diagnostics: t("诊断中心", "Diagnostics"),
+  media: t("媒体", "Media"),
+  evaluation: t("评测", "Evaluation"),
 };
 const root = document.documentElement;
 const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -24,15 +25,15 @@ export interface Viewer {
 
 export function mountViewer(viewer: HTMLElement, currentTheme: () => Theme, onFrameTheme: (theme: Theme) => void): Viewer {
   viewer.innerHTML = `<div class="viewer-bar">
-<div class="viewer-tabs" role="tablist" aria-label="应用页面"><i class="viewer-mark" aria-hidden="true"></i>${PAGES.map(
+<div class="viewer-tabs" role="tablist" aria-label="${t("应用页面", "App pages")}"><i class="viewer-mark" aria-hidden="true"></i>${PAGES.map(
     (p, n) => `<button type="button" role="tab" id="vt-${n}" aria-controls="viewer-panel" aria-selected="${n === 0}" tabindex="${n === 0 ? 0 : -1}" title="${p.title}">${i(p.icon)}<span>${p.tab}</span></button>`,
   ).join("")}</div>
-<span class="viewer-note">演示数据<span class="live-only">，可以直接点</span></span>
+<span class="viewer-note">${t("演示数据", "Demo data")}<span class="live-only">${t("，可以直接点", ", interactive")}</span></span>
 <button type="button" class="viewer-btn" id="viewer-back" hidden>${i("arrowLeft")}<span></span></button>
-<button type="button" class="viewer-btn" id="viewer-reset" hidden title="重置当前演示页面">${i("refresh")}<span>重置</span></button>
+<button type="button" class="viewer-btn" id="viewer-reset" hidden title="${t("重置当前演示页面", "Reset live preview")}">${i("refresh")}<span>${t("重置", "Reset")}</span></button>
 </div>
 <div class="viewer-panel" id="viewer-panel" role="tabpanel" aria-labelledby="vt-0">
-<div class="viewer-shots" id="viewer-shots">${PAGES.map((p, n) => `<img data-shot="${p.shot}" src="${shot(p.shot, currentTheme())}" alt="${p.title}页面截图" width="1600" height="1000" ${n ? 'loading="lazy"' : ""} ${n === 0 ? "data-on" : ""}>`).join("")}</div>
+<div class="viewer-shots" id="viewer-shots">${PAGES.map((p, n) => `<img data-shot="${p.shot}" src="${shot(p.shot, currentTheme())}" alt="${t(`${p.title}页面截图`, `${p.title} screenshot`)}" width="1600" height="1000" ${n ? 'loading="lazy"' : ""} ${n === 0 ? "data-on" : ""}>`).join("")}</div>
 </div>`;
 
   const $ = <T extends HTMLElement = HTMLElement>(sel: string) => viewer.querySelector<T>(sel)!;
@@ -70,8 +71,9 @@ export function mountViewer(viewer: HTMLElement, currentTheme: () => Theme, onFr
     frame?.contentWindow?.postMessage({ source: EMBED_SOURCE, ...payload }, location.origin === "null" ? "*" : location.origin);
   }
 
+  const rootBase = root.dataset.root ?? ".";
   const liveUrl = (route: string, theme: Theme) =>
-    `./live/website-embed.html?preview=1&marks=off&embed=1&theme=${theme}&lang=zh&route=${encodeURIComponent(route)}`;
+    `${rootBase}/live/website-embed.html?preview=1&marks=off&embed=1&theme=${theme}&lang=${locale()}&route=${encodeURIComponent(route)}`;
 
   function scale() {
     const w = shotsEl.clientWidth;
@@ -108,7 +110,7 @@ export function mountViewer(viewer: HTMLElement, currentTheme: () => Theme, onFr
       else frame.tabIndex = -1;
     }
     const page = PAGES[activePage]!;
-    if (subRoute) backBtn.querySelector("span")!.textContent = `${SUB_ROUTE_TITLES[subRoute] ?? subRoute}，返回${page.tab}`;
+    if (subRoute) backBtn.querySelector("span")!.textContent = t(`${SUB_ROUTE_TITLES[subRoute] ?? subRoute}，返回${page.tab}`, `${SUB_ROUTE_TITLES[subRoute] ?? subRoute} · Back to ${page.tab}`);
     if (textEl.textContent !== page.text) {
       textEl.textContent = page.text;
       if (!reduced()) textEl.animate([{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }], { duration: 380, easing: "cubic-bezier(0.16, 1, 0.3, 1)" });
@@ -155,7 +157,7 @@ export function mountViewer(viewer: HTMLElement, currentTheme: () => Theme, onFr
     if (frame || failed || !liveQuery.matches) return;
     const el = document.createElement("iframe");
     el.className = "viewer-live";
-    el.title = "OMP Studio 真实可交互界面（演示数据）";
+    el.title = t("OMP Studio 真实可交互界面（演示数据）", "OMP Studio interactive preview (demo data)");
     el.inert = true;
     el.tabIndex = -1;
     el.src = liveUrl(subRoute ?? PAGES[activePage]!.shot, currentTheme());

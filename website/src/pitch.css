@@ -7,7 +7,8 @@
   flex-direction: column;
   min-width: 0;
   padding: clamp(20px, 3vh, 40px) clamp(24px, 2.8vw, 46px) clamp(8px, 1.6vh, 18px);
-  overflow: hidden auto;
+  overflow-x: clip;
+  overflow-y: auto;
   container-type: inline-size;
 }
 /* Spare height goes above the headline and above the list, a little more to the list. */
@@ -35,6 +36,9 @@ html[data-intro="pending"] .pitch > * {
   font-weight: 800;
   line-height: 1.16;
   letter-spacing: -0.035em;
+}
+:lang(en) .pitch h1 {
+  font-size: min(var(--step-4), 10.6cqi);
 }
 .h-vis,
 .h-line {

@@ -3,6 +3,7 @@
 // finishes its run and answers, the plan can be approved or sent back, the terminal
 // takes commands, the browser changes hands, Git commits, folders open.
 // Everything a visitor types is put back as text, never as markup.
+import { t } from "../shared/i18n";
 import { i } from "../shared/icons";
 import { a } from "../shared/app-icons";
 import { WEB_PAGES, composer as composerHTML, diffRows, stepPill, toolHead, userMessage, type Kind } from "../shared/ui";
@@ -44,7 +45,10 @@ async function stream(el: HTMLElement, text: string, list: HTMLElement) {
 }
 
 // ---------------- conversation ----------------
-const REPLY = "这里是网站上的演示，没有连接模型。装好 OMP Studio，同样的输入框会直接连到你自己的 Agent。";
+const REPLY = t(
+  "这里是网站上的演示，没有连接模型。装好 OMP Studio，同样的输入框会直接连到你自己的 Agent。",
+  "This is a website demo without a live model. Install OMP Studio to connect this exact composer to your own Agents.",
+);
 
 function composer(body: HTMLElement) {
   const list = body.querySelector<HTMLElement>(".os-msgs")!;
@@ -61,7 +65,7 @@ function composer(body: HTMLElement) {
     await wait(reduced() ? 0 : 520);
     const say = post(list, make("p", "os-say"));
     await stream(say, REPLY, list);
-    const link = make("a", "os-link", "去下载");
+    const link = make("a", "os-link", t("去下载", "Get OMP Studio"));
     (link as HTMLAnchorElement).href = "#download";
     say.append(" ", link);
     list.scrollTop = list.scrollHeight;
@@ -92,7 +96,7 @@ async function finishRun(body: HTMLElement) {
   spin?.replaceWith(make("span", "os-bad", a("x")));
   await beat(900);
   const say = post(list, make("p", "os-say"), working);
-  await stream(say, "报错出在 resolveTheme 的返回类型，改一处就够。", list);
+  await stream(say, t("报错出在 resolveTheme 的返回类型，改一处就够。", "Found it — the return type of resolveTheme needs one fix."), list);
   await beat(700);
   post(list, make("div", "os-tool", `${toolHead("Edit", "src/index.ts", a("pencil"))}<p class="os-cwd"><span class="os-add">+1</span> <span class="os-del">−1</span></p>`), working);
   await beat(1300);
@@ -105,12 +109,12 @@ async function finishRun(body: HTMLElement) {
   list.scrollTop = list.scrollHeight;
   await beat(700);
   todo.dataset.done = "";
-  pill.querySelector("b")!.textContent = "7 / 7 步";
-  pill.querySelector(".os-files")!.textContent = "3 个文件已更改";
+  pill.querySelector("b")!.textContent = t("7 / 7 步", "Step 7 / 7");
+  pill.querySelector(".os-files")!.textContent = t("3 个文件已更改", "3 files changed");
   pill.dataset.done = "";
   pill.querySelector(".os-add")!.textContent = "+88";
   clearInterval(timer);
-  working.innerHTML = `${a("check")}已完成<i>·</i><span class="os-dim">${seconds}s</span>`;
+  working.innerHTML = `${a("check")}${t("已完成", "Done")}<i>·</i><span class="os-dim">${seconds}s</span>`;
   working.dataset.done = "";
 }
 
@@ -136,18 +140,18 @@ function plan(body: HTMLElement, status: (text: string) => void) {
     if (b?.dataset.approve !== undefined) return approve();
     if (b?.dataset.refine === undefined) return;
     // Send the plan back with a note; it returns with the note written in.
-    foot.innerHTML = '<input class="os-field" type="text" placeholder="想让 Agent 改什么？" aria-label="修改意见" autocomplete="off" maxlength="60"><button class="os-btn" type="button" data-send>发回</button>';
+    foot.innerHTML = `<input class="os-field" type="text" placeholder="${t("想让 Agent 改什么？", "What should the Agent change?")}" aria-label="${t("修改意见", "Revision notes")}" autocomplete="off" maxlength="60"><button class="os-btn" type="button" data-send>${t("发回", "Send")}</button>`;
     const input = foot.querySelector("input")!;
     input.focus({ preventScroll: true });
     const back = () => {
-      const note = input.value.trim() || "补上键盘缩放";
+      const note = input.value.trim() || t("补上键盘缩放", "Add keyboard zoom shortcuts");
       const li = document.createElement("li");
-      li.textContent = `${note}。`;
+      li.textContent = `${note}${t("。", ".")}`;
       steps.append(li);
       rise(li);
       li.parentElement!.parentElement!.scrollTop = 9999;
-      foot.innerHTML = '<button class="os-btn" data-primary data-approve type="button">批准并执行</button><button class="os-btn" data-refine type="button">修改计划</button>';
-      status("计划已更新");
+      foot.innerHTML = `<button class="os-btn" data-primary data-approve type="button">${t("批准并执行", "Approve & run")}</button><button class="os-btn" data-refine type="button">${t("修改计划", "Refine plan")}</button>`;
+      status(t("计划已更新", "Plan updated"));
     };
     foot.querySelector("[data-send]")!.addEventListener("click", back);
     input.addEventListener("keydown", (ev) => {
@@ -156,36 +160,36 @@ function plan(body: HTMLElement, status: (text: string) => void) {
   });
 
   async function approve() {
-    status("执行中");
-    body.innerHTML = `<div class="os-chat"><div class="os-msgs"><p class="os-say">计划已批准，开始执行。</p><ul class="os-todo"><li>核对 pan / zoom 事件</li><li>接上拖拽惯性开关</li><li>跑一遍检查</li></ul><div class="os-working">${a("console")}<b>working</b><i>·</i><span class="os-dim">正在读取 Preview 面板</span></div></div>${stepPill("第 1 / 3 步", "执行计划", "", "")}${composerHTML()}</div>`;
+    status(t("执行中", "Running"));
+    body.innerHTML = `<div class="os-chat"><div class="os-msgs"><p class="os-say">${t("计划已批准，开始执行。", "Plan approved — starting execution.")}</p><ul class="os-todo"><li>${t("核对 pan / zoom 事件", "Check pan / zoom events")}</li><li>${t("接上拖拽惯性开关", "Wire inertia toggle")}</li><li>${t("跑一遍检查", "Run checks")}</li></ul><div class="os-working">${a("console")}<b>working</b><i>·</i><span class="os-dim">${t("正在读取 Preview 面板", "Reading Preview pane")}</span></div></div>${stepPill(t("第 1 / 3 步", "Step 1 / 3"), t("执行计划", "Executing plan"), "", "")}${composerHTML()}</div>`;
     const list = body.querySelector<HTMLElement>(".os-msgs")!;
     const pill = body.querySelector<HTMLElement>(".os-pill")!;
     composer(body);
     rise(body.firstElementChild as HTMLElement);
     const items = [...list.querySelectorAll<HTMLElement>(".os-todo li")];
-    const doing = ["正在接入惯性开关", "正在运行 npm run check", ""];
+    const doing = [t("正在接入惯性开关", "Wiring inertia toggle"), t("正在运行 npm run check", "Running npm run check"), ""];
     for (const [n, item] of items.entries()) {
       await wait(reduced() ? 0 : 1500);
       item.dataset.done = "";
       const note = list.querySelector(".os-working .os-dim");
       if (note) note.textContent = doing[n]!;
-      pill.querySelector("b")!.textContent = `第 ${Math.min(n + 2, 3)} / 3 步`;
+      pill.querySelector("b")!.textContent = t(`第 ${Math.min(n + 2, 3)} / 3 步`, `Step ${Math.min(n + 2, 3)} / 3`);
     }
     const working = list.querySelector<HTMLElement>(".os-working")!;
-    working.innerHTML = `${a("check")}已完成`;
+    working.innerHTML = `${a("check")}${t("已完成", "Done")}`;
     working.dataset.done = "";
-    status("已完成");
+    status(t("已完成", "Done"));
     pill.dataset.done = "";
-    pill.querySelector(".os-files")!.textContent = "2 个文件已更改";
+    pill.querySelector(".os-files")!.textContent = t("2 个文件已更改", "2 files changed");
     pill.querySelector(".os-add")!.textContent = "+46";
   }
 }
 
 // ---------------- terminal ----------------
 const COMMANDS: Record<string, string> = {
-  help: '可以试试：<b>npm run check</b>、<b>git status</b>、<b>ls</b>、<b>omp</b>、<b>clear</b>',
+  help: t('可以试试：<b>npm run check</b>、<b>git status</b>、<b>ls</b>、<b>omp</b>、<b>clear</b>', 'Try: <b>npm run check</b>, <b>git status</b>, <b>ls</b>, <b>omp</b>, <b>clear</b>'),
   ls: "app   components   docs   lib   package.json",
-  omp: "oh-my-pi 的命令行也在这里。装好之后，这就是你本机的 Shell。",
+  omp: t("oh-my-pi 的命令行也在这里。装好之后，这就是你本机的 Shell。", "The oh-my-pi CLI lives here too. Once installed, this is your real local shell."),
   "git status": 'On branch <b>fix/mermaid-theme</b>\n  <span class="os-err">M</span> components/MermaidBlock.tsx\n  <span class="os-ok">A</span> components/DirectoryPicker.tsx\n  <span class="os-err">D</span> lib/legacyZoom.ts',
   "npm run check": '<span class="os-ok">✓</span> arch constraints\n<span class="os-ok">✓</span> tsc --noEmit       0 errors\n<span class="os-ok">✓</span> core tests         214 / 214',
 };
@@ -221,7 +225,7 @@ function terminal(body: HTMLElement) {
           if (text === "npm run check" && !reduced()) await wait(340);
         }
       } else {
-        out.textContent = `这个演示不认识 ${text}，输入 help 看看能跑什么\n`;
+        out.textContent = t(`这个演示不认识 ${text}，输入 help 看看能跑什么\n`, `Command "${text}" is not in this demo. Type help to see what works.\n`);
         line(out);
       }
     }
@@ -317,7 +321,7 @@ function git(body: HTMLElement) {
     field.value = "";
     const done = () => {
       const clean = make("p", "os-clean");
-      clean.textContent = `已提交「${message}」，工作区是干净的。`;
+      clean.textContent = t(`已提交「${message}」，工作区是干净的。`, `Committed "${message}". Working tree clean.`);
       changes.replaceChildren(clean);
       diff.hidden = true;
       ahead.textContent = "↑3 ↓0";
@@ -355,7 +359,7 @@ function context(body: HTMLElement) {
   button.addEventListener("click", () => {
     if (button.dataset.done !== undefined) return;
     button.dataset.done = "";
-    button.textContent = "已压缩";
+    button.textContent = t("已压缩", "Compacted");
     bars[0]!.style.setProperty("--v", "1.4%");
     body.querySelector(".os-ctx-h strong")!.firstChild!.textContent = "11";
     body.querySelector(".os-ctx-h b")!.textContent = "111.2k";

@@ -3,6 +3,7 @@
 // way the open item puts the miniature into its state, and its controls drive it from there.
 import gsap from "gsap";
 import { a, type AppIcon } from "../shared/app-icons";
+import { t } from "../shared/i18n";
 import { piMark } from "../shared/icons";
 import { DOCK_ZONES, KINDS, LAYOUTS, PIN_MODES, SOURCE, composer, ompWindow, shot, surface, toolHead, userMessage, windowTab, type Kind, type Theme } from "../shared/ui";
 
@@ -27,38 +28,38 @@ const GAP = 4;
 
 const STEPS = [
   {
-    title: "拖出来就是一个窗口",
-    text: "从侧栏拖一场会话到列表外，松手就是一个浮窗。移动、最小化、收回都不会重建对话，草稿、阅读位置和终端状态全部保留。",
+    title: t("拖出来就是一个窗口", "Drag out into a window"),
+    text: t("从侧栏拖一场会话到列表外，松手就是一个浮窗。移动、最小化、收回都不会重建对话，草稿、阅读位置和终端状态全部保留。", "Drag any session out of the sidebar to open it as a floating window. Moving, minimizing, or docking back never reloads the chat—drafts, scroll position, and terminal state stay intact."),
   },
   {
-    title: "贴边吸附，六种模板",
-    text: "左右边缘是半屏，四角是四分之一，顶部是最大化。新窗口吸附进来时，原来的窗口自动移到剩下最大的空位。",
+    title: t("贴边吸附，六种模板", "Snap edges, six templates"),
+    text: t("左右边缘是半屏，四角是四分之一，顶部是最大化。新窗口吸附进来时，原来的窗口自动移到剩下最大的空位。", "Snap to left/right halves, four quarters, or maximize at the top. When a new window snaps in, existing ones automatically shift into the largest open space."),
   },
   {
-    title: "工具停在哪都行",
-    text: "Explorer、Git、Browser、Terminal、Agents 等工具都能在五个位置之间移动。拖动时就能看到落点，松手才提交。",
+    title: t("工具停在哪都行", "Dock tools anywhere"),
+    text: t("Explorer、Git、Browser、Terminal、Agents 等工具都能在五个位置之间移动。拖动时就能看到落点，松手才提交。", "Explorer, Git, Browser, Terminal, and Agents move freely across five dock locations. A live drop preview shows where it lands before you release."),
   },
   {
-    title: "钉住，或者干脆独立出去",
-    text: "图钉有五档，决定窗口跟着谁走。独立窗口在任务栏有自己的图标，可以拖到另一块显示器，重启后恢复位置。",
+    title: t("钉住，或者干脆独立出去", "Pin or pop out separately"),
+    text: t("图钉有五档，决定窗口跟着谁走。独立窗口在任务栏有自己的图标，可以拖到另一块显示器，重启后恢复位置。", "Five pin levels control what a window follows. Standalone OS windows get their own taskbar icon, move across monitors, and restore after restart."),
   },
 ];
 
 const ORDER = ["chat", "plan", "browser", "git"] as const;
 
 const ZONE_NOTES = [
-  "停在左侧栏，和会话列表、Explorer 在一起。",
-  "停在对话工具区，是一张可折叠的卡片，跟着这场对话走。",
-  "停在右侧栏，和其他工具排成标签。右侧栏最多可以分上下两组。",
-  "停在底栏，和 Terminal、OMP Logs 排成标签。底栏最多可以分左右两组。",
-  "浮起来。拖到另一个浮窗的标题栏上，就合成一组标签。",
+  t("停在左侧栏，和会话列表、Explorer 在一起。", "Docked in the left sidebar alongside sessions and Explorer."),
+  t("停在对话工具区，是一张可折叠的卡片，跟着这场对话走。", "Docked in conversation tools as a collapsible card attached to this thread."),
+  t("停在右侧栏，和其他工具排成标签。右侧栏最多可以分上下两组。", "Docked in the right sidebar as tabs, supporting up to two stacked groups."),
+  t("停在底栏，和 Terminal、OMP Logs 排成标签。底栏最多可以分左右两组。", "Docked in the bottom bar with Terminal and Logs, supporting two side-by-side groups."),
+  t("浮起来。拖到另一个浮窗的标题栏上，就合成一组标签。", "Floating freely. Drop onto another window's title bar to group them into tabs."),
 ];
 const PIN_NOTES = [
-  "不固定：跟随当前会话的布局，只在工作台显示。",
-  "固定在工作区：换到另一场会话，Git 还在。",
-  "固定在应用：离开工作台去了首页，Git 还在。",
-  "独立窗口：成为普通的系统窗口，任务栏有自己的图标，可以拖到另一块显示器。",
-  "独立窗口并置顶：同一个独立窗口，保持在其他应用窗口上方。",
+  t("不固定：跟随当前会话的布局，只在工作台显示。", "Unpinned: follows the current conversation layout inside the workbench."),
+  t("固定在工作区：换到另一场会话，Git 还在。", "Pin to workspace: stays open as you switch between conversations."),
+  t("固定在应用：离开工作台去了首页，Git 还在。", "Pin to app: stays visible even when navigating to Home or Settings."),
+  t("独立窗口：成为普通的系统窗口，任务栏有自己的图标，可以拖到另一块显示器。", "Standalone window: a real OS window with its own taskbar icon for multi-monitor setups."),
+  t("独立窗口并置顶：同一个独立窗口，保持在其他应用窗口上方。", "Always on top: keeps that standalone window above other desktop apps."),
 ];
 
 const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -77,36 +78,36 @@ const task = (icon: AppIcon, name: string, tone: string, time: string) => `<li>$
 const ring = (icon: AppIcon, c: string, n = "") => `<span style="--c:${c}">${a(icon)}${n ? `<b>${n}</b>` : ""}</span>`;
 
 /** The app around the windows: title row, rail, sidebar with Explorer, top bar, tool cards. */
-const APP = `<div class="mini-top">${a("layout")}${a("arrow-l")}${a("arrow-r")}<span>文件</span><span>编辑</span><span>视图</span><span>帮助</span><i></i>${a("minimize")}${a("maximize")}${a("x")}</div>
+const APP = `<div class="mini-top">${a("layout")}${a("arrow-l")}${a("arrow-r")}<span>${t("文件", "File")}</span><span>${t("编辑", "Edit")}</span><span>${t("视图", "View")}</span><span>${t("帮助", "Help")}</span><i></i>${a("minimize")}${a("maximize")}${a("x")}</div>
 <div class="mini-rail">${(["workbench", "home", "history", "package", "server", "settings"] as const).map((n, k) => `<span${k ? "" : " data-on"}>${a(n)}</span>`).join("")}<i></i><span class="mini-up">${a("download")}</span><span class="mini-face">S</span></div>
 <div class="mini-side"><header>${a("menu")}${piMark(17)}<b>OMP Studio</b><i></i>${a("search")}</header>
-<p class="mini-new">${a("plus")}新建对话</p><p class="mini-new">${a("layers")}技能&插件<i></i><small>5</small>${a("chevron-r")}</p>
-<p class="mini-cap">项目与对话</p>
+<p class="mini-new">${a("plus")}${t("新建对话", "New chat")}</p><p class="mini-new">${a("layers")}${t("技能&插件", "Skills & Plugins")}<i></i><small>5</small>${a("chevron-r")}</p>
+<p class="mini-cap">${t("项目与对话", "Projects & Chats")}</p>
 <p class="mini-proj">${a("folder-open")}<b>omp-web</b><i></i><u></u>3</p>
-<span class="mini-row" data-row="chat"><span class="os-spin"></span>跟踪上游 pi-web 更新</span>
-<span class="mini-row" data-row="audit">Audit and fix OSS repo${chip("待回答", "blue")}</span>
-<button class="mini-row" type="button" data-pull data-row="plan">Mermaid 全屏缩放计划${chip("待审核", "violet")}</button>
-<span class="mini-row">修复 Git Bash 路径未找到${chip("待确认", "amber")}</span>
+<span class="mini-row" data-row="chat"><span class="os-spin"></span>${t("跟踪上游 pi-web 更新", "Sync upstream pi-web")}</span>
+<span class="mini-row" data-row="audit">Audit and fix OSS repo${chip(t("待回答", "Answer"), "blue")}</span>
+<button class="mini-row" type="button" data-pull data-row="plan">${t("Mermaid 全屏缩放计划", "Mermaid zoom plan")}${chip(t("待审核", "Review"), "violet")}</button>
+<span class="mini-row">${t("修复 Git Bash 路径未找到", "Fix Git Bash path lookup")}${chip(t("待确认", "Confirm"), "amber")}</span>
 <p class="mini-proj mini-more">${a("folder")}<b>pi-web (upstream)</b></p>
 <div class="mini-explorer"><header>${a("chevron-d")}${a("file-tree")}Explorer<i></i>${a("more")}</header>${surface("files")}</div></div>
 <div class="mini-bar"><div class="mini-crumb">${a("folder-open")}<span>omp-web</span>${a("chevron-d")}<i>›</i>${a("branch")}<span>main</span><i>›</i><b class="mini-crumb-t"></b>${a("chevron-d")}${a("fork")}${a("handoff")}</div><div class="mini-tabs"></div><span class="mini-grow"></span>
 <div class="mini-tools">${a("bot")}${a("history")}<span class="mini-meter"></span>${a("formation", "mini-t-cards")}${a("panel", "mini-t-right")}${a("light")}${a("home")}</div></div>
-<div class="mini-cards">${card("cpu", "Environment", "", `<div class="mini-env"><p>${a("folder-open")}<b>omp-web</b><small>此计算机</small></p><p>${a("branch")}<span class="mono">fix/mermaid-theme</span><small>↑2</small></p><p>${a("changes")}3 个文件<small><span class="os-add">+87</span> <span class="os-del">−45</span></small></p></div>`)}
+<div class="mini-cards">${card("cpu", "Environment", "", `<div class="mini-env"><p>${a("folder-open")}<b>omp-web</b><small>${t("此计算机", "Local")}</small></p><p>${a("branch")}<span class="mono">fix/mermaid-theme</span><small>↑2</small></p><p>${a("changes")}${t("3 个文件", "3 files")}<small><span class="os-add">+87</span> <span class="os-del">−45</span></small></p></div>`)}
 ${card("layers", "Context", '22% <u style="--v:22%"></u>')}
 ${card("branch", "Git", '↑2 <i data-tone="amber"></i>1 M <i data-tone="green"></i>1 U <i data-tone="red"></i>1 D', "", "git")}
-${card("bot", "Agents", '<i data-tone="red"></i>1 失败 <i data-tone="green"></i>2 运行')}
+${card("bot", "Agents", `<i data-tone="red"></i>${t("1 失败", "1 failed")} <i data-tone="green"></i>${t("2 运行", "2 active")}`)}
 ${card("terminal", "Background tasks", "", `<ul>${task("terminal", "bunx tsc --noEmit", "green", "28s")}${task("terminal", "npm run check", "amber", "–")}${task("server", "web-dev", "green", ":30141")}${task("server", "test-watch", "amber", "59s")}</ul>`)}</div>
 <div class="mini-rings">${ring("cpu", "var(--o-border-strong)")}${ring("layers", "conic-gradient(var(--t-blue) 22%, var(--o-surface-3) 0)")}${ring("branch", "var(--t-orange)", "3")}${ring("bot", "conic-gradient(var(--t-green) 60%, var(--o-red) 0)", "4")}${ring("terminal", "var(--t-green)", "4")}</div>`;
 
 export function mountRules(root: HTMLElement) {
-  root.innerHTML = `<div class="rules-pin"><div class="rules-text"><h2 id="windows-h"><span class="keep">四件事，</span><span class="keep">就是整个工作台</span></h2><ol class="rules-steps">${STEPS.map(
+  root.innerHTML = `<div class="rules-pin"><div class="rules-text"><h2 id="windows-h"><span class="keep">${t("四件事，", "Four rules,")}</span><span class="keep">${t("就是整个工作台", "one workbench")}</span></h2><ol class="rules-steps">${STEPS.map(
     (s, n) => `<li class="rule" data-step="${n}"><h3><button type="button" id="rule-${n}" aria-controls="rule-body-${n}">${s.title}</button></h3><div class="rule-body" id="rule-body-${n}" role="region" aria-labelledby="rule-${n}"><div><p>${s.text}</p><div class="rule-ctl" data-ctl="${n}"></div></div></div><i class="rule-bar" aria-hidden="true"></i></li>`,
   ).join("")}</ol></div>
 <div class="rules-stage"><div class="mini omp" data-theme="${document.documentElement.dataset.theme ?? "light"}"><div class="mini-inner">
 <div class="mini-desktop" aria-hidden="true"><div class="mini-taskbar"><span class="mini-task" data-on>${piMark(20)}</span><span class="mini-task" data-task="git">${a("branch")}</span></div></div>
 <div class="mini-app">${APP}<img class="mini-page" alt="" aria-hidden="true"></div>
 <div class="mini-drop" aria-hidden="true"><span></span></div>
-<div class="mini-menu" role="group" aria-label="固定浮窗"><p>固定浮窗</p>${PIN_MODES.map((p, n) => `<button type="button" data-pin="${n}"><span>${p}</span>${a("check")}</button>`).join("")}</div>
+<div class="mini-menu" role="group" aria-label="${t("固定浮窗", "Pin window")}"><p>${t("固定浮窗", "Pin window")}</p>${PIN_MODES.map((p, n) => `<button type="button" data-pin="${n}"><span>${p}</span>${a("check")}</button>`).join("")}</div>
 </div></div><p class="mini-note"></p></div></div>`;
 
   const mini = root.querySelector<HTMLElement>(".mini")!;
@@ -140,14 +141,14 @@ export function mountRules(root: HTMLElement) {
     audit: make("chat", app, 1, "Audit and fix OSS repository"),
     plan: make("plan", app, 3),
     browser: make("browser", app, 3),
-    other: make("files", inner, 5, "其他应用"),
+    other: make("files", inner, 5, t("其他应用", "Other app")),
     git: make("git", inner, 6),
   };
   type Actor = keyof typeof actors;
 
   // The other conversation, for showing what outlives a switch.
   const auditBody = actors.audit.el.querySelector<HTMLElement>(".ow-body")!;
-  auditBody.innerHTML = `<div class="os-chat"><div class="os-msgs">${userMessage("审一遍这个开源仓库，能直接修的就修", "13:40")}<p class="os-say">看完了。许可证和依赖没有问题，有两处需要你决定。</p><div class="os-tool">${toolHead("Grep", "eval\\(", a("search"))}<p class="os-cwd">2 处命中</p></div><p class="os-say">第一处在 <code>scripts/build.ts</code>，可以换成静态导入。要我改吗？</p></div>${composer()}</div>`;
+  auditBody.innerHTML = `<div class="os-chat"><div class="os-msgs">${userMessage(t("审一遍这个开源仓库，能直接修的就修", "Audit this open-source repo and fix safe issues"), "13:40")}<p class="os-say">${t("看完了。许可证和依赖没有问题，有两处需要你决定。", "Done. License and dependencies look clean; two findings need your call.")}</p><div class="os-tool">${toolHead("Grep", "eval\\(", a("search"))}<p class="os-cwd">${t("2 处命中", "2 matches")}</p></div><p class="os-say">${t("第一处在 <code>scripts/build.ts</code>，可以换成静态导入。要我改吗？", "First one is in <code>scripts/build.ts</code> and can use a static import. Want me to change it?")}</p></div>${composer()}</div>`;
   actors.other.el.querySelector(".ow-from")?.remove();
   actors.other.el.style.setProperty("--tint", "var(--o-glyph)");
   actors.other.el.querySelector(".ow-mark")!.innerHTML = a("file");
@@ -200,7 +201,7 @@ export function mountRules(root: HTMLElement) {
     const hidden = (b: Omit<Box, "o">): Box => ({ ...b, o: 0 });
     const full: Box = { ...WS, o: 1 };
     const float = SMALL ? part(0.3, 0.1, 0.6, 0.62) : part(0.34, 0.07, 0.46, 0.6);
-    const t: Record<Actor, Box> = {
+    const boxes: Record<Actor, Box> = {
       chat: full,
       audit: hidden(WS),
       plan: hidden({ x: RAIL + 8, y: TOP + 170, w: WS.w * 0.31, h: WS.h * 0.27 }),
@@ -218,38 +219,38 @@ export function mountRules(root: HTMLElement) {
         const h = WS.h * (SMALL ? 0.7 : 0.66);
         const cx = state.drop?.x ?? WS.x + WS.w * 0.6;
         const cy = state.drop?.y ?? WS.y + WS.h * 0.3;
-        t.plan = { w, h, o: 1, x: Math.min(Math.max(cx - w / 2, WS.x + 12), WS.x + WS.w - w - 12), y: Math.min(Math.max(cy - 20, WS.y + 12), WS.y + WS.h - h - 12) };
-        text = "「Mermaid 全屏缩放计划」现在是一个浮窗，主对话没有动。";
+        boxes.plan = { w, h, o: 1, x: Math.min(Math.max(cx - w / 2, WS.x + 12), WS.x + WS.w - w - 12), y: Math.min(Math.max(cy - 20, WS.y + 12), WS.y + WS.h - h - 12) };
+        text = t("「Mermaid 全屏缩放计划」现在是一个浮窗，主对话没有动。", '"Mermaid zoom plan" is now a floating window while the main chat stayed in place.');
         on = "plan";
       } else {
-        text = "把侧栏里的「Mermaid 全屏缩放计划」拖进工作区，或者直接点它。";
+        text = t("把侧栏里的「Mermaid 全屏缩放计划」拖进工作区，或者直接点它。", 'Drag "Mermaid zoom plan" from the sidebar into the workspace, or click it.');
       }
     } else if (state.step === 1) {
       const cells = LAYOUTS[state.layout]!.cells;
       ORDER.forEach((name, n) => {
-        if (cells[n]) t[name] = cellBox(cells[n]);
-        else if (name === "chat") t.chat = hidden(WS);
+        if (cells[n]) boxes[name] = cellBox(cells[n]);
+        else if (name === "chat") boxes.chat = hidden(WS);
       });
-      text = `${LAYOUTS[state.layout]!.name}。对话全在窗口里时，顶栏换成窗口标签栏；放不下的窗口留在标签里。`;
+      text = t(`${LAYOUTS[state.layout]!.name}。对话全在窗口里时，顶栏换成窗口标签栏；放不下的窗口留在标签里。`, `${LAYOUTS[state.layout]!.name}. When every chat is windowed, the top bar becomes a window tab strip.`);
     } else if (state.step === 2) {
-      t.git = gitBox(state.zone);
-      if (state.zone === 2) t.chat = { ...WS, w: WS.w - t.git.w, o: 1 };
-      if (state.zone === 3) t.chat = { ...WS, h: WS.h - t.git.h, o: 1 };
+      boxes.git = gitBox(state.zone);
+      if (state.zone === 2) boxes.chat = { ...WS, w: WS.w - boxes.git.w, o: 1 };
+      if (state.zone === 3) boxes.chat = { ...WS, h: WS.h - boxes.git.h, o: 1 };
       text = ZONE_NOTES[state.zone]!;
     } else if (state.step === 3) {
-      t.git = { ...float, o: 1 };
+      boxes.git = { ...float, o: 1 };
       text = PIN_NOTES[state.pin]!;
       if (state.pin === 1) {
-        t.audit = full;
-        t.chat = hidden(WS);
+        boxes.audit = full;
+        boxes.chat = hidden(WS);
         on = "audit";
       } else if (state.pin >= 3) {
         frameTo = { x: 24, y: 20, s: 0.66 };
-        t.git = { x: VW * 0.6, y: VH * 0.3, w: VW * 0.37, h: VH * 0.56, o: 1 };
-        if (state.pin === 4) t.other = { x: VW * 0.42, y: VH * 0.46, w: VW * 0.36, h: VH * 0.4, o: 1 };
+        boxes.git = { x: VW * 0.6, y: VH * 0.3, w: VW * 0.37, h: VH * 0.56, o: 1 };
+        if (state.pin === 4) boxes.other = { x: VW * 0.42, y: VH * 0.46, w: VW * 0.36, h: VH * 0.4, o: 1 };
       }
     }
-    return { t, frameTo, text, on };
+    return { t: boxes, frameTo, text, on };
   }
 
   function render(instant = false) {
@@ -305,17 +306,17 @@ export function mountRules(root: HTMLElement) {
   // ---- controls ----
   const ctl = (n: number) => root.querySelector<HTMLElement>(`[data-ctl="${n}"]`)!;
   ctl(0).innerHTML = `<button class="seg-btn" type="button" data-pull-btn></button>`;
-  ctl(1).innerHTML = `<div class="tiles" role="group" aria-label="布局模板">${LAYOUTS.map(
+  ctl(1).innerHTML = `<div class="tiles" role="group" aria-label="${t("布局模板", "Layout templates")}">${LAYOUTS.map(
     (l, n) => `<button type="button" class="tile" data-layout="${n}" aria-label="${l.name}">${l.cells
       .map(([x, y, w, h]) => `<i style="left:${x * 100}%;top:${y * 100}%;width:${w * 100}%;height:${h * 100}%"></i>`)
       .join("")}</button>`,
   ).join("")}</div>`;
-  ctl(2).innerHTML = `<div class="seg" role="group" aria-label="停靠位置">${DOCK_ZONES.map((z, n) => `<button class="seg-btn" type="button" data-zone="${n}">${z}</button>`).join("")}</div>`;
-  ctl(3).innerHTML = `<div class="seg" role="group" aria-label="固定方式">${PIN_MODES.map((p, n) => `<button class="seg-btn" type="button" data-pin="${n}">${p}</button>`).join("")}</div>`;
+  ctl(2).innerHTML = `<div class="seg" role="group" aria-label="${t("停靠位置", "Dock regions")}">${DOCK_ZONES.map((z, n) => `<button class="seg-btn" type="button" data-zone="${n}">${z}</button>`).join("")}</div>`;
+  ctl(3).innerHTML = `<div class="seg" role="group" aria-label="${t("固定方式", "Pin modes")}">${PIN_MODES.map((p, n) => `<button class="seg-btn" type="button" data-pin="${n}">${p}</button>`).join("")}</div>`;
 
   function syncControls() {
     const pullBtn = root.querySelector<HTMLElement>("[data-pull-btn]")!;
-    pullBtn.textContent = state.pulled ? "收回去" : "把「Mermaid 全屏缩放计划」拖出来";
+    pullBtn.textContent = state.pulled ? t("收回去", "Dock back") : t("把「Mermaid 全屏缩放计划」拖出来", 'Pop out "Mermaid zoom plan"');
     pullBtn.setAttribute("aria-pressed", String(state.pulled));
     root.querySelectorAll<HTMLElement>("[data-layout]").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.layout) === state.layout)));
     root.querySelectorAll<HTMLElement>("[data-zone]").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.zone) === state.zone)));
@@ -352,7 +353,13 @@ export function mountRules(root: HTMLElement) {
     if (!SMALL && x > VW - CARDS) return 1;
     return 4;
   };
-  const ZONE_LABELS = ["停到左侧栏", "停到对话工具区", "停到右侧栏", "停到底栏", "作为浮窗"];
+  const ZONE_LABELS = [
+    t("停到左侧栏", "Dock to left sidebar"),
+    t("停到对话工具区", "Dock to chat tools"),
+    t("停到右侧栏", "Dock to right sidebar"),
+    t("停到底栏", "Dock to bottom bar"),
+    t("作为浮窗", "Float window"),
+  ];
   git.addEventListener("pointerdown", (e) => {
     if (state.step !== 2 || e.button !== 0 || !(e.target as Element).closest(".ow-bar, .mini-sec, .mini-strip")) return;
     if (gitStack.contains(e.target as Node)) return;

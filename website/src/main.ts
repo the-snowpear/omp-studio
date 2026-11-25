@@ -11,6 +11,7 @@ import "./viewer.css";
 import "./bento.css";
 import "./download.css";
 
+import { t } from "../shared/i18n";
 import { icon, piMark } from "../shared/icons";
 import type { Theme } from "../shared/ui";
 import iconUrl from "../shared/media/icon-256.webp";
@@ -105,7 +106,7 @@ function boot() {
     walls.forEach((w) => w.setDark(dark));
     themeBtn.innerHTML = dark ? icon.sun : icon.moon;
     themeBtn.setAttribute("aria-pressed", String(dark));
-    themeBtn.setAttribute("aria-label", dark ? "切换浅色主题" : "切换深色主题");
+    themeBtn.setAttribute("aria-label", dark ? t("切换浅色主题", "Switch to light theme") : t("切换深色主题", "Switch to dark theme"));
     $<HTMLMetaElement>('meta[name="theme-color"]').content = dark ? "#0c0c10" : "#f4f4f7";
     viewer.setTheme(theme, notifyFrame);
   }

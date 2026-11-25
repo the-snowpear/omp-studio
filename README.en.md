@@ -25,7 +25,8 @@
 </p>
 
 <p align="center">
-  <b><a href="#windowed-workbench">Windowed Workbench</a></b>
+  <b><a href="https://the-snowpear.github.io/omp-studio/en/">Website</a></b>
+  &nbsp;·&nbsp; <a href="#windowed-workbench">Windowed Workbench</a>
   &nbsp;·&nbsp; <a href="#capabilities">Capabilities</a>
   &nbsp;·&nbsp; <a href="#download--install">Download &amp; Install</a>
   &nbsp;·&nbsp; <a href="#run-from-source">Run from Source</a>
@@ -280,7 +281,7 @@ Clearly categorized, searchable settings; Runtime config saves across global, pr
 | **macOS Apple Silicon** | `OMP-Studio-<version>-macos-arm64.dmg` | macOS 13+; ad hoc signed, not yet notarized |
 | **Linux x64** | `OMP-Studio-<version>-linux-x64.deb` / `.AppImage` | Ubuntu 24.04 / glibc 2.39+, in-app differential updates; [installation &amp; sandbox guide](docs/linux.md) |
 
-Download from **[GitHub Releases](https://github.com/the-snowpear/omp-studio/releases)**. Exact filenames follow the Release page. Runtime artifacts and update catalogs use Ed25519 signatures; Windows installers are not Authenticode-signed.
+Download from the **[Official Website](https://the-snowpear.github.io/omp-studio/en/#download)** or **[GitHub Releases](https://github.com/the-snowpear/omp-studio/releases)**. Exact filenames follow the Release page. Runtime artifacts and update catalogs use Ed25519 signatures; Windows installers are not Authenticode-signed.
 
 <details>
 <summary><b>macOS blocked on first launch?</b></summary>

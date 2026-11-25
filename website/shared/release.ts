@@ -6,6 +6,7 @@
 //    half an hour so reloads and shared networks don't hit the anonymous rate
 //    limit, and swaps it in only if it differs from what is already on screen.
 import { REPO, fromGithub, type GithubRelease, type Platform, type StoredRelease } from "./github-release";
+import { t } from "./i18n";
 import snapshotFile from "./release.snapshot.json";
 
 export type { Platform };
@@ -33,11 +34,11 @@ export interface Release {
 }
 
 const ABOUT: Record<Platform, Pick<Asset, "label" | "os" | "variant" | "requires">> = {
-  "win-x64": { label: "Windows", os: "Windows", variant: "x64", requires: "Windows 10 或更新" },
-  "win-arm64": { label: "Windows ARM", os: "Windows", variant: "ARM64", requires: "Windows 11，骁龙等 ARM 机型" },
-  "mac-arm64": { label: "macOS", os: "macOS", variant: "Apple Silicon", requires: "macOS 13 或更新" },
-  "linux-x64": { label: "Linux AppImage", os: "Linux", variant: "AppImage", requires: "x64（AVX2），glibc 2.39+，FUSE 2" },
-  "linux-x64-deb": { label: "Linux deb", os: "Linux", variant: "deb", requires: "Ubuntu 24.04+ / Debian 13+，x64（AVX2）" },
+  "win-x64": { label: "Windows", os: "Windows", variant: "x64", requires: t("Windows 10 或更新", "Windows 10 or later") },
+  "win-arm64": { label: "Windows ARM", os: "Windows", variant: "ARM64", requires: t("Windows 11，骁龙等 ARM 机型", "Windows 11, Snapdragon / ARM") },
+  "mac-arm64": { label: "macOS", os: "macOS", variant: "Apple Silicon", requires: t("macOS 13 或更新", "macOS 13 or later") },
+  "linux-x64": { label: "Linux AppImage", os: "Linux", variant: "AppImage", requires: t("x64（AVX2），glibc 2.39+，FUSE 2", "x64 (AVX2), glibc 2.39+, FUSE 2") },
+  "linux-x64-deb": { label: "Linux deb", os: "Linux", variant: "deb", requires: t("Ubuntu 24.04+ / Debian 13+，x64（AVX2）", "Ubuntu 24.04+ / Debian 13+, x64 (AVX2)") },
 };
 
 /** The stored numbers plus the wording that belongs to this site, so copy edits apply to old snapshots and caches too. */

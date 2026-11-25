@@ -301,6 +301,23 @@ a {
 .top-dl {
   margin-left: 6px;
 }
+.top-lang {
+  display: inline-grid;
+  place-items: center;
+  min-width: 34px;
+  height: 32px;
+  padding: 0 9px;
+  border-radius: var(--r-ctl);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.2s, color 0.2s;
+}
+.top-lang:hover {
+  background: var(--fill);
+  color: var(--ink);
+}
 
 /* ---------- hero: side panel + desk ---------- */
 .hero {
@@ -331,6 +348,84 @@ a {
   margin-top: 12px;
   color: var(--ink-2);
   font-size: var(--step-1);
+}
+
+/* ---------- faq & crawlable semantic fallbacks ---------- */
+.faq {
+  max-width: 960px;
+  margin-inline: auto;
+}
+.faq .sec-head {
+  margin-bottom: clamp(20px, 3.2vh, 34px);
+}
+.faq-list {
+  border-top: 1px solid var(--line);
+}
+.faq-list details {
+  border-bottom: 1px solid var(--line);
+}
+.faq-list summary {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 4px;
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: var(--step-1);
+  font-weight: 600;
+  line-height: 1.4;
+  list-style: none;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.faq-list summary::-webkit-details-marker {
+  display: none;
+}
+.faq-list summary::after {
+  content: "+";
+  flex: none;
+  color: var(--ink-3);
+  font-size: 1.25rem;
+  font-weight: 400;
+  line-height: 1;
+  transition: transform 0.25s var(--ease-out), color 0.2s;
+}
+.faq-list details[open] summary::after {
+  transform: rotate(45deg);
+  color: var(--accent-ink);
+}
+.faq-list summary:hover {
+  color: var(--accent-ink);
+}
+.faq-list details p {
+  padding: 0 4px 18px;
+  color: var(--ink-2);
+  font-size: var(--step-0);
+  line-height: 1.75;
+}
+.faq-list code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--fill);
+  font-family: var(--mono);
+  font-size: 0.88em;
+}
+.seo-fallback {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+  border-radius: var(--r-card);
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+.seo-fallback h3 {
+  font-size: var(--step-1);
+}
+.seo-fallback p {
+  color: var(--ink-2);
+  font-size: var(--step--1);
 }
 
 /* ---------- footer ---------- */

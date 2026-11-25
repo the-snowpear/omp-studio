@@ -985,6 +985,12 @@ button.mini-row {
   font-size: 10.5px;
   font-weight: 600;
 }
+:lang(en) .mini[data-ontop] .mini-win[data-kind="git"] .ow-title::after {
+  content: "On top";
+}
+:lang(en) .mini-top {
+  gap: 13px;
+}
 
 .keep {
   display: inline-block;
