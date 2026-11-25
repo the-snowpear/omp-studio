@@ -2811,6 +2811,7 @@ export class StudioHostClientFacade implements ClientTransport {
         projectScopeAvailable: false,
         modelProviderOrder: [],
         fallbackChains: {},
+        subagentFallbackChains: [],
         fallbackRevertPolicy: "cooldown-expiry",
         webSearch: {
           enabled: true,

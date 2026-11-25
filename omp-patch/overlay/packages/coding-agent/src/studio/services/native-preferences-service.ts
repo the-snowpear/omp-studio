@@ -11,7 +11,12 @@ import {
 } from "../../advisor/settings";
 import { cfgLspRequestTimeout } from "../../lsp/settings";
 import { cfgSharpshooterMinPromptLength } from "../../sharpshooter/settings";
-import { cfgTitleIcons, cfgTitleGenerator, cfgTitleLanguage, cfgTitleRefreshOnReplan } from "../../utils/title-settings";
+import {
+	cfgTitleIcons,
+	cfgTitleGenerator,
+	cfgTitleLanguage,
+	cfgTitleRefreshOnReplan,
+} from "../../utils/title-settings";
 import { cfgThinkLanguage } from "../../session/settings";
 import { cfgTelemetryOtlpExportEnabled } from "../../telemetry-settings";
 import type { AgentSession } from "../../session/agent-session";

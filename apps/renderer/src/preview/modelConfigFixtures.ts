@@ -285,6 +285,7 @@ export function createPreviewModelConfig(zh = isZh()): ModelConfigReadModel {
     fallbackChains: {
       "anthropic/claude-sonnet-4.5": ["openai/gpt-5.2", "openai/gpt-5-mini"],
     },
+    subagentFallbackChains: ["openai/gpt-5-mini"],
     fallbackRevertPolicy: "cooldown-expiry",
     webSearch: {
       routing: { primary: "web/perplexity", fallbacks: ["web/exa", "google/gemini-2.5-flash"], defaultCandidates: ["web/parallel", "web/perplexity", "google/gemini-2.5-flash"], migratedLegacy: false },

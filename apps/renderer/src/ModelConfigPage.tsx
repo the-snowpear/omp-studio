@@ -157,6 +157,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const [newRole, setNewRole] = useState({ id: "", name: "", desc: "" });
   const [fallbackDraft, setFallbackDraft] = useState<string[] | null>(null);
   const [revertPolicyDraft, setRevertPolicyDraft] = useState<ModelFallbackRevertPolicy | null>(null);
+  const [subagentFallbackDraft, setSubagentFallbackDraft] = useState<string[] | null>(null);
   const [modelsTab, setModelsTab] = useState<ModelsTab>("custom");
   const [modelEdit, setModelEdit] = useState<ModelEditState | null>(null);
   const { shown: modelEditView, leaving: modelEditLeaving } = useOverlayPresence(modelEdit);
@@ -272,6 +273,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     setCandidates(null);
     setFallbackDraft(null);
     setRevertPolicyDraft(null);
+    setSubagentFallbackDraft(null);
     setCreateRoleOpen(false);
     setOrderEdit(false);
   }, [preview, zh]);
@@ -1312,6 +1314,34 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       return true;
     } catch (error) {
       toast(hostErrorMessage(error, t("modelConfig.toastFallbackSaveFailed")));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** 子代理重试换模型链（retry.subagentFallbackChains）：全局单链，空 = 继承 default。 */
+  const saveSubagentFallback = async (opts?: { refreshAfter?: boolean; announce?: boolean }): Promise<boolean> => {
+    const refreshAfter = opts?.refreshAfter !== false;
+    const announce = opts?.announce !== false;
+    const chains = { ...(data?.fallbackChains ?? {}) };
+    const nextChain = subagentFallbackDraft !== null ? [...subagentFallbackDraft] : [...(data?.subagentFallbackChains ?? [])];
+    const revertPolicy = data?.fallbackRevertPolicy ?? "cooldown-expiry";
+    if (preview) {
+      mutateLocal((current) => ({ ...current, subagentFallbackChains: [...nextChain] }));
+      setSubagentFallbackDraft(nextChain);
+      if (announce && marks) toast(t("modelConfig.toastDemoSubagentFallbackUpdated"));
+      return true;
+    }
+    setBusy(true);
+    try {
+      const result = await runWrite(client, "models.fallback.set", { chains, subagentChains: nextChain, revertPolicy });
+      if (announce) toast(result.message ?? t("modelConfig.toastSubagentFallbackSaved"));
+      setSubagentFallbackDraft(nextChain);
+      if (refreshAfter) await refresh();
+      return true;
+    } catch (error) {
+      toast(hostErrorMessage(error, t("modelConfig.toastSubagentFallbackSaveFailed")));
       return false;
     } finally {
       setBusy(false);
@@ -2432,6 +2462,35 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
           )}
           </div>
           <ModelSystemTemplates context={modelContext} visible={shownTab === "roles" && !roleDraft} models={usable} onDirty={setSystemTemplatesDirty} onSaved={() => { void refresh(); }} />
+          <div className="mp-sec" style={{ marginTop: 20 }}>
+            <h3>{t("modelConfig.subagentFallbackChains")}</h3>
+            <p className="sec-desc">{t("modelConfig.subagentFallbackChainsDesc")}</p>
+            <div className="cycle-pool" style={{ marginTop: 8 }}>
+              {(subagentFallbackDraft ?? data?.subagentFallbackChains ?? []).map((selector, index, chain) => (
+                <span key={selector} className="cycle-chip">
+                  <span className="mono">{selector}</span>
+                  <button type="button" className="icon-btn small" aria-label={t("modelConfig.moveUp")} disabled={index === 0} onClick={() => { const next = [...chain]; [next[index - 1], next[index]] = [next[index]!, next[index - 1]!]; setSubagentFallbackDraft(next); }}><Icon name="chevron-u" extra="sm" /></button>
+                  <button type="button" className="icon-btn small" aria-label={t("modelConfig.moveDown")} disabled={index === chain.length - 1} onClick={() => { const next = [...chain]; [next[index + 1], next[index]] = [next[index]!, next[index + 1]!]; setSubagentFallbackDraft(next); }}><Icon name="chevron-d" extra="sm" /></button>
+                  <span className="chip-remove" role="button" tabIndex={0} onClick={() => {
+                    const current = subagentFallbackDraft ?? data?.subagentFallbackChains ?? [];
+                    setSubagentFallbackDraft(current.filter((item) => item !== selector));
+                  }}><Icon name="x" /></span>
+                </span>
+              ))}
+            </div>
+            <div className="cycle-pool">
+              <span className="cycle-pool-label">{t("modelConfig.addSubagentFallback")}</span>
+              <RoleModelPicker
+                ariaLabel={t("modelConfig.addSubagentFallback")}
+                value=""
+                groups={groupModelsByProvider(usable.filter((model) => !(subagentFallbackDraft ?? data?.subagentFallbackChains ?? []).includes(model.selector)), orderedProviders)}
+                onChange={(selector) => { if (selector) setSubagentFallbackDraft([...(subagentFallbackDraft ?? data?.subagentFallbackChains ?? []), selector]); }}
+              />
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <button type="button" className="btn small outline" disabled={busy} onClick={() => void saveSubagentFallback()}>{t("modelConfig.saveSubagentFallback")}</button>
+            </div>
+          </div>
 </section>
         <section id="mcPanelSubagents" role="tabpanel" aria-labelledby="mcTabSubagents" hidden={shownTab !== "subagents"} {...tabPanelMotion("subagents")}>
           <SubagentsPanel

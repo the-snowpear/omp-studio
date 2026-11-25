@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 模型设置页新增「子代理重试换模型」区块：配置 `retry.subagentFallbackChains` 有序模型列表——子代理重试需要更换模型且自身没有多模型模式或角色链时按此顺序重试；留空则继承主代理 default 链，支持芯片增删与上下排序。
+- Model settings page adds a "Subagent retry model switch" section: an ordered model list written to `retry.subagentFallbackChains`, used when a subagent retry needs a different model and owns no multi-model pattern or role chain; empty keeps inheriting the main agent's default chain.
+
 ### Changed
 
 - 侧栏项目会话列表中，正在运行（含压缩中）的会话始终置顶显示，跑完后回到原位置；置顶条目与其余会话的相对顺序保持不变。

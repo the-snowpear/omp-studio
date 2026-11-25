@@ -18,7 +18,7 @@ const config = (label = "configuration"): ModelConfigReadModel => ({
   providers: [], presets: [], roles: [{ id: "default", alias: "@default", name: "Default", desc: "", builtin: true, primary: "gateway/deleted", scope: "global", thinking: "high" }],
   cycleOrder: [], availableModels: [], loginProviders: [], generatedModelsYml: "providers: {}\n", generatedConfigYml: label,
   runtimeEffectHint: "", loginAvailable: false, ompAvailable: true, modelRoleStorage: "global", projectScopeAvailable: false,
-  modelProviderOrder: [], fallbackChains: {}, fallbackRevertPolicy: "cooldown-expiry",
+  modelProviderOrder: [], fallbackChains: {}, subagentFallbackChains: [], fallbackRevertPolicy: "cooldown-expiry",
   webSearch: { enabled: true, order: [], exclude: [], timeoutSeconds: 60, geminiModel: "", providers: [], advanced: { searxng: { endpoint: "", tokenSet: false, basicUsername: "", passwordSet: false }, exa: { enabled: true, searchDelayMs: 1000 } } },
 });
 function deferred<T>() {

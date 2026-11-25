@@ -1500,9 +1500,16 @@ describe("P1/P2 model-config adapter surfaces", () => {
       assert.deepEqual(snapshot.fallbackChains["acme/fast"], ["acme/slow"]);
       assert.equal(snapshot.fallbackRevertPolicy, "never");
       assert.deepEqual(snapshot.modelProviderOrder, ["anthropic", "openai"]);
+      assert.deepEqual(snapshot.subagentFallbackChains, []);
+      // 主链写入不带 subagentChains 时保留已存的子代理链。
+      await service.setFallback({ chains: { "acme/fast": ["acme/slow", "acme/turbo"] }, subagentChains: ["acme/mini"] });
+      await service.setFallback({ chains: { "acme/fast": ["acme/slow"] } });
+      const updated = await service.get();
+      assert.deepEqual(updated.subagentFallbackChains, ["acme/mini"]);
       const config = await readFile(join(dir, "config.yml"), "utf8");
       assert.match(config, /fallbackRevertPolicy: never/);
       assert.match(config, /modelProviderOrder:/);
+      assert.match(config, /subagentFallbackChains: \[.*acme\/mini/);
     });
   });
 
