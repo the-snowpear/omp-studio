@@ -25,6 +25,8 @@ Public documentation for OMP Studio.
 | [dictation.md](dictation.md) | 工作台与 BTW 语音输入、原生模式、麦克风配置和内存恢复 |
 | [btw.md](btw.md) | BTW 原生功能对齐、话题历史、图片、子代理与快捷键 |
 | [fonts.md](fonts.md) | Independent interface, terminal and output font preferences |
+| [releases/v0.2.11.md](releases/v0.2.11.md) | 0.2.11 安装包、独立 Web 工作台、Mermaid 浮窗、同窗新会话与命令补全修复 |
+| [reviews/v0.2.11-release-review.md](reviews/v0.2.11-release-review.md) | 0.2.10 以来的改动审查、发布门禁与验证边界 |
 | [releases/v0.2.10.md](releases/v0.2.10.md) | 0.2.10 安装包、项目移除、模型选择器、工具卡片与 SSH 修复 |
 | [releases/v0.2.9.md](releases/v0.2.9.md) | 0.2.9 安装包、胶囊拖拽、Agent 界面与问题修复 |
 | [releases/v0.2.8.md](releases/v0.2.8.md) | 0.2.8 安装包、会话引用、归档清理、对话状态、表格预览与 SSH 截图 |

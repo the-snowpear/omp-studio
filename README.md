@@ -55,7 +55,7 @@
 </p>
 
 > [!NOTE]
-> **0.2.10** 支持从侧栏移除项目并选择是否保留会话，改善模型名称显示，修复 Bash 工具卡片加载状态和 SSH 恢复。内置 Runtime 为 `19.0.1-studio.1`。 [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.10) · [发布说明](docs/releases/v0.2.10.md)
+> **0.2.11** 新增独立 Web 工作台，支持 Mermaid 图表缩放浮窗、同窗开启新会话并保留工具状态，修复命令菜单反复弹出。内置 Runtime 为 `19.0.1-studio.1`。 [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.11) · [发布说明](docs/releases/v0.2.11.md)
 
 <table>
 <tr>

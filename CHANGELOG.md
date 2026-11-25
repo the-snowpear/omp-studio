@@ -7,10 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-11-25
+
 ### Added
 
 - 独立 Web 工作台与桌面共用 Host，支持局域网 HTTPS 配对、持久设备授权、控制权接管、项目文件和 Git 操作、共享交互终端。六平台运行环境包提供 `omp-studio-web` 启动器。[使用说明](docs/web-ui.md)
-- Standalone Web workbench sharing the desktop Host, with LAN HTTPS pairing, remembered devices, control transfer, project files, Git and persistent interactive terminals. The six platform environment archives include an `omp-studio-web` launcher.[Web guide](docs/web-ui.md)
+- Standalone Web workbench sharing the desktop Host, with LAN HTTPS pairing, remembered devices, control transfer, project files, Git and persistent interactive terminals. The six platform environment archives include an `omp-studio-web` launcher. [Web guide](docs/web-ui.md) · [#60](https://github.com/the-snowpear/omp-studio/issues/60)
+- 中英文官网提供可交互工作台演示、功能介绍、FAQ 和自动更新的安装包下载信息，并按浏览器语言选择初始页面。
+- The bilingual website adds an interactive workbench demo, feature guides, FAQ and release-aware downloads, with an initial page selected from the browser language.
+
+### Changed
+
+- 后台任务窗口精简为单行任务卡，支持一次停止全部任务；并发停止服务时，旧列表请求不会重新显示已经停止的服务。
+- Background tasks use compact single-row entries and support stopping all tasks. Stopping services concurrently no longer lets stale list responses bring completed entries back.
 
 ### Fixed
 
@@ -20,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/new`, the new-session shortcut and menu now start a conversation in the current window while preserving its layout, running terminals and unsaved file edits. New windows inherit layouts by default, including the connection's last layout when no project is selected; saved preferences are preserved. [#73](https://github.com/the-snowpear/omp-studio/issues/73)
 - 输入框命令菜单在确认、Tab 补全、ESC 或点击外部后保持关闭；输入空格、换行或移出命令 token 也会关闭，继续输入和重新聚焦不再反复弹出。 [#74](https://github.com/the-snowpear/omp-studio/issues/74)
 - Composer command completion stays dismissed after selection, Tab, Escape or an outside click. Spaces, newlines and moving the caret outside the command token close it; continued typing and refocusing no longer reopen it. [#74](https://github.com/the-snowpear/omp-studio/issues/74)
+- 移除显示器后，完全位于屏幕外的独立窗口回到工作台；Windows 远端上传在 SFTP 和 SCP 不可用时保留 SSH 流式传输路径。
+- Native windows entirely outside the remaining displays return to the workbench. Windows remote uploads retain SSH streaming when SFTP and SCP are unavailable.
+- 修复共享 Host 终端继承 Electron 启动开关的问题，避免从终端启动 Electron 应用时进入 Node 模式；文件浏览器继续使用桌面系统返回的实际快捷目录，包括已重定向的下载等目录。
+- Shared Host terminals no longer inherit Electron launch switches that could start Electron apps in Node mode. File browser shortcuts continue to use the desktop's actual system folders, including redirected Downloads and other locations.
 
 ## [0.2.10] - 2026-11-23
 
