@@ -20,9 +20,10 @@ class Contents extends EventEmitter {
 class Window extends EventEmitter {
   webContents = new Contents();
   shown = false; minimized = false; maximized = false; destroyed = false; topmost = false; focused = false;
+  normalBounds = { x: 100, y: 100, width: 600, height: 400 };
   getBounds() { return { x: 20, y: 20, width: 1200, height: 800 }; }
   getContentBounds() { return this.getBounds(); }
-  getNormalBounds() { return { x: 100, y: 100, width: 600, height: 400 }; }
+  getNormalBounds() { return this.normalBounds; }
   isVisible() { return this.shown; }
   isMinimized() { return this.minimized; }
   isMaximized() { return this.maximized; }
@@ -37,12 +38,12 @@ class Window extends EventEmitter {
   setAlwaysOnTop(value: boolean) { this.topmost = value; }
   destroy() { this.destroyed = true; this.emit("closed"); }
 }
-function setup(restoreMainOnLastClose = false) {
+function setup(restoreMainOnLastClose = false, areas = [{ x: 0, y: 0, width: 1920, height: 1040 }]) {
   const parent = new Window();
   const handlers = new Map<string, (event: { sender: Contents }, input: unknown) => unknown>();
   const ipc = { handle: (key: string, handler: (event: { sender: Contents }, input: unknown) => unknown) => handlers.set(key, handler), removeHandler: (key: string) => handlers.delete(key) };
   let quitting = false;
-  const manager = registerFloatingWindows({ parent: parent as unknown as BrowserWindow, ipcMain: ipc as unknown as IpcMain, allowedOrigin: "http://localhost:5173", preloadPath: "preload.js", areas: () => [{ x: 0, y: 0, width: 1920, height: 1040 }], isQuitting: () => quitting, openExternal: () => {}, restoreMainOnLastClose });
+  const manager = registerFloatingWindows({ parent: parent as unknown as BrowserWindow, ipcMain: ipc as unknown as IpcMain, allowedOrigin: "http://localhost:5173", preloadPath: "preload.js", areas: () => areas, isQuitting: () => quitting, openExternal: () => {}, restoreMainOnLastClose });
   const call = (channel: string, input: unknown) => handlers.get(channel)!({ sender: parent.webContents }, input);
   const ticket = call(CHANNELS.prepare, { id: "real:group", title: "Terminal", topmost: false, minimized: false, maximized: false, sourceRect: { x: 80, y: 60, width: 640, height: 480 } }) as FloatWindowTicket;
   const creation = parent.webContents.handler({ url: ticket.url, frameName: ticket.key });
@@ -96,4 +97,25 @@ test("saved native geometry survives negative-coordinate monitors and returns on
   const rect = { x: -1500, y: 80, width: 900, height: 600 };
   assert.deepEqual(visibleWindowBounds(rect, areas), rect);
   assert.deepEqual(visibleWindowBounds(rect, areas.slice(0, 1)), { ...rect, x: 0 });
+});
+test("display removal asks offscreen native windows to return to the workbench", () => {
+  const areas = [{ x: 0, y: 0, width: 1920, height: 1040 }, { x: 1920, y: 0, width: 1920, height: 1040 }];
+  const { parent, child, manager, control } = setup(false, areas);
+  control("ready"); parent.hide();
+  child.normalBounds = { x: 2200, y: 80, width: 900, height: 600 };
+  areas.splice(1, 1);
+  manager.rehomeOffscreen();
+  assert.equal(parent.shown, true);
+  assert.equal(parent.webContents.events.at(-1)?.kind, "rehome");
+  manager.dispose();
+});
+test("display removal keeps native windows that still overlap a connected display", () => {
+  const areas = [{ x: 0, y: 0, width: 1920, height: 1040 }, { x: 1920, y: 0, width: 1920, height: 1040 }];
+  const { child, manager, control, parent } = setup(false, areas);
+  control("ready");
+  child.normalBounds = { x: 1600, y: 80, width: 900, height: 600 };
+  areas.splice(1, 1);
+  manager.rehomeOffscreen();
+  assert.equal(parent.webContents.events.some(event => event.kind === "rehome"), false);
+  manager.dispose();
 });

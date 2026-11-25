@@ -715,6 +715,8 @@ export async function main(): Promise<void> {
       onClosed: contents => { browserObservation.disposeWindow(contents.id); desktopConversationViews.remove(contents); },
       onWillClose: child => managedBrowser?.detachWindow(child),
     });
+    const onDisplayRemoved = () => floatingWindows.rehomeOffscreen();
+    screen.on("display-removed", onDisplayRemoved);
     managedBrowser = new DesktopManagedBrowser({ directory: join(activeProfileDirectory(), "browser"), downloadsDirectory: app.getPath("downloads"), windowFor: floatingWindows.windowFor, language: () => getDesktopLanguage() });
     new ManagedBrowserRelay({ manager: managedBrowser, directory: activeMediaDirectory });
     window.on("close", () => { if (context.isQuitting()) managedBrowser?.detachWindow(window as BrowserWindow); });
@@ -1155,6 +1157,7 @@ export async function main(): Promise<void> {
       },
       dispose: () => {
         floatingWindows.dispose();
+        screen.removeListener("display-removed", onDisplayRemoved);
         disposeUpdates.dispose();
         disposeUnifiedUpdates?.();
         updateCoordinator?.dispose();

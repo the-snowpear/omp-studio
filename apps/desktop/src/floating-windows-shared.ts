@@ -10,5 +10,6 @@ export type FloatWindowControl = { key: string; action: "ready" | "focus" | "min
 export type FloatWindowEvent = { key: string; id: string } & (
   | { kind: "close-request" }
   | { kind: "closed" }
+  | { kind: "rehome" }
   | { kind: "state"; rect: FloatWindowRect; minimized: boolean; maximized: boolean; visible: boolean }
 );

@@ -3,7 +3,7 @@ import type { BrowserWindow, IpcMain, Rectangle, WebContents } from "electron";
 import { FLOAT_WINDOW_CHANNELS as CHANNELS, type FloatWindowControl, type FloatWindowEvent, type FloatWindowPrepare, type FloatWindowTicket } from "./floating-windows-shared.js";
 import { isExternalWebLink, isTrustedRendererUrl, secureWebPreferences } from "./security.js";
 
-type Entry = { key: string; url: string; input: FloatWindowPrepare; window?: BrowserWindow; closing: boolean };
+type Entry = { key: string; url: string; input: FloatWindowPrepare; window?: BrowserWindow; closing: boolean; rehomeRequested?: boolean };
 export function visibleWindowBounds(rect: Rectangle, areas: readonly Rectangle[]): Rectangle {
   if (areas.length === 0) {
     return {
@@ -17,6 +17,11 @@ export function visibleWindowBounds(rect: Rectangle, areas: readonly Rectangle[]
   const width = Math.min(Math.max(320, Math.round(rect.width)), area.width);
   const height = Math.min(Math.max(200, Math.round(rect.height)), area.height);
   return { x: Math.round(Math.max(area.x, Math.min(rect.x, area.x + area.width - width))), y: Math.round(Math.max(area.y, Math.min(rect.y, area.y + area.height - height))), width, height };
+}
+
+function intersectsArea(rect: Rectangle, area: Rectangle): boolean {
+  return rect.x < area.x + area.width && rect.x + rect.width > area.x
+    && rect.y < area.y + area.height && rect.y + rect.height > area.y;
 }
 
 /** The opener owns business state; these windows only host the existing panel DOM. */
@@ -37,6 +42,22 @@ export function registerFloatingWindows(options: {
   const visible = () => [...entries.values()].some(entry => entry.window?.isVisible() && !entry.window.isMinimized());
   const refreshThrottle = () => { if (!parent.webContents.isDestroyed()) parent.webContents.setBackgroundThrottling(!visible()); };
   const showMain = () => { if (parent.isMinimized()) parent.restore(); parent.show(); parent.focus(); };
+  const rehomeOffscreen = () => {
+    if (options.isQuitting()) return;
+    const areas = options.areas();
+    if (areas.length === 0) return;
+    const offscreen = [...entries.values()].filter(entry => {
+      const child = entry.window;
+      const bounds = child?.isMaximized() ? child.getBounds() : child?.getNormalBounds();
+      return !!child && !entry.closing && !child.isDestroyed() && !!bounds && !areas.some(area => intersectsArea(bounds, area));
+    });
+    if (!offscreen.length) return;
+    showMain();
+    for (const entry of offscreen) {
+      entry.rehomeRequested = true;
+      send({ key: entry.key, id: entry.input.id, kind: "rehome" });
+    }
+  };
 
   ipcMain.handle(CHANNELS.prepare, (event, input: FloatWindowPrepare): FloatWindowTicket => {
     if (event.sender !== parent.webContents || !isTrustedRendererUrl(event.sender.getURL(), options.allowedOrigin)) throw new Error("Untrusted floating window request");
@@ -107,7 +128,10 @@ export function registerFloatingWindows(options: {
     if (input.action === "close") { if (entry) entry.closing = true; if (child && !child.isDestroyed()) destroy(child); entries.delete(input.key); refreshThrottle(); return; }
     if (!entry || !child || child.isDestroyed()) throw new Error("Floating window is unavailable");
     switch (input.action) {
-      case "ready": child.show(); if (entry.input.maximized) child.maximize(); if (entry.input.minimized) child.minimize(); break;
+      case "ready":
+        child.show(); if (entry.input.maximized) child.maximize(); if (entry.input.minimized) child.minimize();
+        if (entry.rehomeRequested) { entry.rehomeRequested = false; send({ key: entry.key, id: entry.input.id, kind: "rehome" }); }
+        break;
       case "focus": if (child.isMinimized()) child.restore(); child.show(); child.focus(); break;
       case "minimize": child.minimize(); break;
       case "maximize": if (child.isMaximized()) child.unmaximize(); else child.maximize(); break;
@@ -116,6 +140,7 @@ export function registerFloatingWindows(options: {
   });
   return {
     windowFor: (key?: string) => key ? entries.get(key)?.window : parent,
+    rehomeOffscreen,
     owns, hasWindows,
     dispose() {
       parent.webContents.removeListener("did-create-window", didCreate);

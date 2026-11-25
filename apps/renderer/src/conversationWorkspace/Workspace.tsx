@@ -296,6 +296,7 @@ function ConversationWindow({ view, store, hosts, bounds, order, snapLayer }: { 
     sourceRect={{ ...view.rect, x: bounds.x + view.rect.x, y: bounds.y + view.rect.y }} minimum={MIN_VIEW}
     minimized={view.minimized} maximized={view.maximized} topmost={view.pin === "topmost"}
     onFocus={() => store.activate(view.id)} onClose={() => store.close(view.id)}
+    onRehome={() => store.setPin(view.id, "none")}
     onState={event => { if (JSON.stringify(view.nativeRect) !== JSON.stringify(event.rect) || view.minimized !== event.minimized || view.maximized !== event.maximized) store.setWindow(view.id, { nativeRect: event.rect, minimized: event.minimized, maximized: event.maximized }); }}
     onError={message => { console.error(message); store.setPin(view.id, "none"); }} focusEvent="omp:conversation-focus" acceptsFocus={event => (event as CustomEvent).detail === view.id}>
     {({ key, bounds }) => content(bounds, key)}
