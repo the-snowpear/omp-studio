@@ -2,20 +2,125 @@
 .desk {
   position: relative;
   min-width: 0;
+  border-radius: var(--r-stage);
   overflow: hidden;
   isolation: isolate;
   touch-action: pan-y;
+}
+/* A hairline inside the edge, so the desk reads as a screen in both themes. */
+.desk > .desk-wall::after,
+.dl-stage > .desk-wall::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+  pointer-events: none;
+}
+:root[data-theme="dark"] .desk-wall::after {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
 }
 .desk-wall {
   position: absolute;
   inset: 0;
   z-index: -1;
+  border-radius: inherit;
+  overflow: hidden;
   background:
-    radial-gradient(var(--dot) 1px, transparent 1.4px) 0 0 / 22px 22px,
     radial-gradient(60% 55% at 22% 18%, var(--wall-a), transparent 70%),
     radial-gradient(50% 60% at 88% 30%, var(--wall-b), transparent 70%),
     radial-gradient(70% 60% at 62% 100%, var(--wall-c), transparent 72%),
     var(--page);
+}
+.desk-wall canvas {
+  width: 100%;
+  height: 100%;
+}
+
+/* ---------- the strip: every window on the desk, as the app's top bar lists them ---------- */
+.wm-strip {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 8960;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 40px;
+  padding: 0 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--o-border) 80%, transparent);
+  background: color-mix(in srgb, var(--o-bg) 78%, transparent);
+  backdrop-filter: blur(22px) saturate(1.6);
+}
+.wm-tabs {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.wm-tab {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  min-width: 76px;
+  max-width: 220px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: var(--o-text-2);
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.wm-tab:hover {
+  background: var(--o-hover);
+}
+.wm-tab[data-on] {
+  border-color: color-mix(in srgb, var(--tint) 45%, var(--o-border-strong));
+  background: color-mix(in srgb, var(--tint) 8%, var(--o-inset));
+  color: var(--o-text);
+}
+.wm-tab[data-min] > button:first-child {
+  opacity: 0.55;
+}
+.wm-tab > button:first-child {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0 2px 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.wm-tab > button > .i:first-child {
+  color: var(--tint);
+}
+.wm-tab-t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wm-tab-t i {
+  color: var(--o-faint);
+  font-style: normal;
+}
+.wm-tab-pin {
+  color: var(--tint);
+  font-size: 10.5px;
+}
+.wm-tab:is(:hover, :focus-within, [data-on]) .ow-tab-x {
+  opacity: 1;
+}
+.wm-tab button:focus-visible,
+.wm-strip .ow-btn:focus-visible {
+  outline: 2px solid var(--tint, var(--o-accent));
+  outline-offset: -2px;
 }
 
 /* ---------- windows ---------- */
@@ -24,40 +129,159 @@
   top: 0;
   left: 0;
   transform-origin: 0 0;
-  will-change: transform;
-  transition: box-shadow 0.2s, border-color 0.2s;
+  container: desk-win / inline-size;
+  transition: box-shadow 0.3s, border-color 0.2s, opacity 0.18s;
 }
-.wm-win .ow-bar {
+.wm-win .ow-bar,
+.wm-win .ow-tabs {
   cursor: grab;
   touch-action: none;
 }
 .wm-win .ow-bar:focus-visible {
-  outline: 2px solid var(--o-accent);
+  outline: 2px solid var(--tint);
   outline-offset: -2px;
-  border-radius: 10px 10px 0 0;
+  border-radius: 11px 11px 0 0;
 }
 .wm-win:not([data-focused]) {
-  box-shadow: 0 1px 2px rgba(24, 20, 48, 0.05), 0 6px 18px -10px rgba(24, 20, 48, 0.2);
+  box-shadow: 0 1px 2px rgba(24, 16, 60, 0.08), 0 14px 34px -16px rgba(40, 16, 90, 0.42);
 }
+/* The window in front wears its own colour. */
 .wm-win[data-focused] {
-  border-color: var(--o-accent-border);
+  border-color: var(--tint);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--tint) 45%, transparent),
+    0 0 18px color-mix(in srgb, var(--tint) 18%, transparent),
+    0 30px 64px -22px rgba(40, 16, 90, 0.55);
 }
 .wm-win[data-dragging] {
-  box-shadow: 0 2px 4px rgba(24, 20, 48, 0.08), 0 34px 70px -18px rgba(40, 24, 110, 0.42);
-  transition: none;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tint) 45%, transparent), 0 48px 90px -22px rgba(30, 10, 90, 0.66);
+  will-change: transform;
+}
+/* About to join another window's tabs: step back so the tab it will become can be seen. */
+.wm-win[data-joining] {
+  opacity: 0.16;
+}
+.wm-win[data-drop] {
+  border-color: var(--o-accent);
+  outline: 2px solid var(--o-accent);
+  outline-offset: 2px;
 }
 .wm-win[data-dragging] .ow-bar {
   cursor: grabbing;
 }
-/* The demo content is a picture of the app; only the chrome is live. */
-.wm-win .ow-body {
+/* The pin shows when the title bar is pointed at, or when it is holding something. */
+@media (hover: hover) {
+  .wm-win .ow-bar [data-act="pin"] {
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .wm-win .ow-bar:is(:hover, :focus-within) [data-act="pin"],
+  .wm-win .ow-bar [data-act="pin"]:is([aria-pressed="true"], [data-open]),
+  html:is([data-cue="pin"]) .wm-win [data-act="pin"] {
+    opacity: 1;
+  }
+}
+.ow-tabs-all {
+  margin-left: auto;
+}
+
+/* Surfaces are live (src/live.ts), but give way while anything is being dragged. */
+html[data-wm-dragging] .wm-win .ow-stack {
   pointer-events: none;
-  user-select: none;
+}
+.wm-win .os-msgs {
+  justify-content: flex-start;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.wm-win .os-msgs > :first-child {
+  margin-top: auto;
+}
+.wm-win .os-term,
+.wm-win .os-plan-b,
+.wm-win .os-tree,
+.wm-win .os-diff {
+  overflow: auto;
+  scrollbar-width: none;
+}
+.wm-win .os-term {
+  cursor: text;
+}
+.os-link {
+  color: var(--o-accent);
+  font-weight: 600;
+}
+.os-bad,
+.os-good {
+  display: inline-flex;
+  color: var(--o-red);
+}
+.os-good,
+.os-working[data-done] .i {
+  color: var(--o-green);
+}
+.os-toast {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  margin-top: 10px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  background: var(--o-text);
+  color: var(--o-bg);
+}
+.os-page {
+  position: relative;
+}
+/* The Agent's own cursor, while it holds the page. */
+.os-agent-hand {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate3d(300px, 150px, 0);
+  transition: transform 0.85s cubic-bezier(0.6, 0, 0.2, 1), opacity 0.3s;
+}
+.os-agent-hand[data-on] {
+  opacity: 1;
+}
+.os-agent-hand[data-off] {
+  opacity: 0;
+}
+.os-agent-hand svg {
+  overflow: visible;
+  transition: scale 0.12s;
+  transform-origin: 3px 2px;
+}
+.os-agent-hand[data-down] svg {
+  scale: 0.8;
+}
+.os-agent-hand path {
+  fill: var(--o-blue);
+  stroke: var(--o-surface);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.os-agent-hand b {
+  margin: 11px 0 0 -4px;
+  padding: 0 7px;
+  border-radius: 4px 999px 999px;
+  background: var(--o-blue);
+  color: var(--o-surface);
+  font-size: 11px;
+  line-height: 18px;
 }
 html[data-wm-dragging] {
   user-select: none;
   cursor: grabbing;
 }
+html[data-wm-dragging="x"] { cursor: col-resize; }
+html[data-wm-dragging="y"] { cursor: row-resize; }
 
 .wm-grip {
   position: absolute;
@@ -82,15 +306,250 @@ html[data-wm-dragging] {
   top: 0;
   left: 0;
   z-index: 5;
-  border: 1.5px solid var(--accent);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 2px solid var(--o-accent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--o-surface) 42%, transparent);
+  backdrop-filter: blur(10px) saturate(1.3);
   opacity: 0;
   pointer-events: none;
   transition: transform 0.24s var(--ease-out), width 0.24s var(--ease-out), height 0.24s var(--ease-out), opacity 0.16s;
 }
 .wm-preview[data-on] {
   opacity: 1;
+}
+/* What letting go here will do. */
+.wm-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 9400;
+  padding: 3px 9px;
+  border: 1px solid var(--o-border-strong);
+  border-radius: 8px;
+  background: var(--o-surface);
+  color: var(--o-text);
+  font-size: 12px;
+  white-space: nowrap;
+  box-shadow: var(--o-shadow);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+.wm-label[data-on] {
+  opacity: 1;
+}
+
+/* ---------- the edge two snapped windows share ---------- */
+.wm-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  touch-action: none;
+  outline: 0;
+}
+.wm-line[data-axis="x"] {
+  width: 10px;
+  margin-left: -5px;
+  cursor: col-resize;
+}
+.wm-line[data-axis="y"] {
+  height: 10px;
+  margin-top: -5px;
+  cursor: row-resize;
+}
+.wm-line::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  border-radius: 999px;
+  background: var(--o-accent);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.wm-line[data-axis="x"]::after { width: 3px; height: min(72px, 40%); }
+.wm-line[data-axis="y"]::after { width: min(72px, 40%); height: 3px; }
+.wm-line:is(:hover, :focus-visible, [data-live])::after {
+  opacity: 1;
+}
+
+/* ---------- filling the space a snap leaves ---------- */
+.wm-assist {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 8950;
+  display: flex;
+  flex-direction: column;
+  border: 1.5px dashed var(--o-accent-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--o-inset) 92%, transparent);
+  box-shadow: 0 10px 34px rgba(24, 16, 60, 0.14);
+  backdrop-filter: blur(14px);
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  scale: 0.98;
+  transition: opacity 0.18s, scale 0.3s var(--ease-out), visibility 0s 0.18s;
+}
+.wm-assist[data-on] {
+  opacity: 1;
+  visibility: visible;
+  scale: 1;
+  transition: opacity 0.2s 0.12s, scale 0.35s 0.12s var(--ease-out);
+}
+.wm-assist header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 6px 14px;
+  color: var(--o-text-3);
+}
+.wm-assist > div {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-height: 0;
+  padding: 0 10px 10px;
+  overflow: auto;
+}
+.wm-assist > div button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--o-border);
+  border-radius: 9px;
+  background: var(--o-surface-2);
+  color: var(--o-text);
+  font: inherit;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+}
+.wm-assist > div button:is(:hover, :focus-visible) {
+  border-color: color-mix(in srgb, var(--tint) 55%, transparent);
+  background: color-mix(in srgb, var(--tint) 9%, var(--o-surface));
+  outline: none;
+}
+.wm-assist > div button > span:last-child {
+  display: grid;
+  min-width: 0;
+}
+.wm-assist b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.wm-assist b i {
+  color: var(--o-text-3);
+  font-style: normal;
+}
+.wm-assist small {
+  color: var(--o-text-3);
+  font-size: 11px;
+}
+
+/* ---------- menus ---------- */
+.wm-menu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 40;
+  width: 232px;
+  max-height: calc(100vh - 16px);
+  padding: 6px;
+  border: 1px solid var(--o-border-strong);
+  border-radius: 12px;
+  background: var(--o-surface);
+  box-shadow: var(--o-shadow);
+  overflow: auto;
+  scrollbar-width: none;
+  opacity: 0;
+  visibility: hidden;
+  scale: 0.97;
+  pointer-events: auto;
+  transition: opacity 0.12s, scale 0.16s var(--ease-out), visibility 0s 0.12s;
+}
+.wm-menu[data-on] {
+  opacity: 1;
+  visibility: visible;
+  scale: 1;
+  transition: opacity 0.12s, scale 0.18s var(--ease-out);
+}
+.wm-menu p {
+  padding: 4px 9px 5px;
+  color: var(--o-text-3);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wm-menu hr {
+  height: 1px;
+  margin: 5px 9px;
+  border: 0;
+  background: var(--o-border);
+}
+.wm-menu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--o-text);
+  font: inherit;
+  text-align: left;
+}
+.wm-menu button > .i:first-child {
+  color: var(--o-text-2);
+}
+.wm-menu button > span:not(.i) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wm-menu button:is(:hover, :focus-visible, [data-hot]):not([aria-disabled="true"]) {
+  background: var(--o-hover);
+  outline: none;
+}
+.wm-menu button:focus-visible {
+  box-shadow: inset 0 0 0 1.5px var(--o-accent-border);
+}
+.wm-menu button[aria-disabled="true"] {
+  color: var(--o-glyph);
+  cursor: default;
+}
+.wm-menu-end {
+  color: var(--o-text-2);
+  font-size: 11px;
+  transition: rotate 0.2s;
+}
+.wm-menu [aria-expanded="true"] .wm-menu-end {
+  rotate: 180deg;
+}
+.wm-menu-sub {
+  display: grid;
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  transition: grid-template-rows 0.25s var(--ease-out), visibility 0s 0.25s;
+}
+.wm-menu-sub > div {
+  min-height: 0;
+  padding-left: 12px;
+  overflow: hidden;
+}
+.wm-menu [aria-expanded="true"] + .wm-menu-sub {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  transition: grid-template-rows 0.25s var(--ease-out);
 }
 
 /* ---------- first-run hint ---------- */
@@ -176,11 +635,14 @@ html[data-wm-dragging] {
 .picker-tile button {
   position: absolute;
   padding: 0;
-  border: 2px solid var(--o-surface);
-  border-radius: 6px;
-  background: var(--o-surface-3);
+  border: 2px solid transparent;
+  border-radius: 7px;
+  background: var(--o-surface-2);
+  background-clip: padding-box;
+  box-shadow: inset 0 0 0 2px var(--o-surface), inset 0 0 0 3px var(--o-border-strong);
   transition: background 0.12s;
 }
+.picker-tile button[data-hot],
 .picker-tile button:hover,
 .picker-tile button:focus-visible {
   background: var(--o-accent);
@@ -203,12 +665,12 @@ html[data-wm-dragging] {
   display: flex;
   align-items: flex-end;
   gap: 6px;
-  padding: 7px 9px;
-  border: 1px solid var(--o-border-strong);
+  padding: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
   border-radius: 20px;
-  background: color-mix(in srgb, var(--o-surface) 78%, transparent);
-  box-shadow: var(--o-shadow);
-  backdrop-filter: blur(18px) saturate(1.5);
+  background: color-mix(in srgb, var(--o-surface) 46%, transparent);
+  box-shadow: 0 16px 40px -14px rgba(30, 10, 80, 0.45);
+  backdrop-filter: blur(22px) saturate(1.7);
   translate: -50% 0;
 }
 .dock-item {
@@ -216,26 +678,36 @@ html[data-wm-dragging] {
   position: relative;
   display: grid;
   place-items: center;
-  width: calc(38px + var(--grow) * 16px);
-  height: calc(38px + var(--grow) * 16px);
-  margin-top: calc(var(--grow) * -16px);
+  width: calc(40px + var(--grow) * 18px);
+  height: calc(40px + var(--grow) * 18px);
+  margin-top: calc(var(--grow) * -18px);
   padding: 0;
   border: 0;
-  border-radius: 50%;
+  border-radius: calc(13px + var(--grow) * 4px);
   background: var(--o-surface);
-  color: var(--o-text);
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--tint) 75%, transparent);
+  color: color-mix(in srgb, var(--tint) 82%, var(--o-text));
+  box-shadow: 0 1px 2px rgba(30, 10, 80, 0.14);
   transition: width 0.22s var(--ease-out), height 0.22s var(--ease-out), margin 0.22s var(--ease-out), background 0.15s;
 }
 .dock[data-live] .dock-item {
   transition: background 0.15s;
 }
 .dock-item:hover {
-  background: color-mix(in srgb, var(--tint) 12%, var(--o-surface));
+  background: color-mix(in srgb, var(--tint) 10%, var(--o-surface));
+}
+.dock-item:active .dock-ico {
+  scale: 0.86;
+}
+:root[data-theme="dark"] .dock {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+:root[data-theme="dark"] .dock-item {
+  color: var(--tint);
 }
 .dock-ico {
   display: inline-flex;
-  font-size: calc(17px + var(--grow) * 6px);
+  font-size: calc(18px + var(--grow) * 7px);
+  transition: scale 0.2s var(--ease-out);
 }
 .dock-ico .i {
   width: 1em;
@@ -245,15 +717,20 @@ html[data-wm-dragging] {
   content: "";
   position: absolute;
   bottom: -5px;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--o-text-2);
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--o-text);
   opacity: 0;
-  transition: opacity 0.2s;
+  scale: 0.2 1;
+  transition: opacity 0.2s, scale 0.4s var(--ease-spring);
 }
 .dock-item[data-open]::after {
-  opacity: 1;
+  opacity: 0.75;
+  scale: 1;
+}
+.dock-item[data-open][aria-pressed="false"]::after {
+  scale: 0.34 1;
 }
 .dock-tip {
   position: absolute;
@@ -292,6 +769,9 @@ html[data-cue="layout"] .wm-win [data-act="max"] {
   color: var(--o-accent);
   animation: cue-ring 1.2s var(--ease-out) infinite;
 }
+html[data-cue="merge"] .wm-win:not([data-focused]) .ow-bar {
+  animation: cue-ring 1.2s var(--ease-out) infinite;
+}
 html[data-cue="theme"] #theme {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent-ink);
@@ -310,7 +790,7 @@ html[data-cue="open"] .dock,
   translate: 0;
 }
 /* Snapping: the title bar to take hold of, and the two edges to carry it to. */
-html[data-cue="snap"] .wm-win[data-focused] .ow-bar {
+html:is([data-cue="snap"], [data-cue="merge"]) .wm-win[data-focused] .ow-bar {
   background-image: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--o-accent) 30%, transparent) 50%, transparent 70%);
   background-size: 240% 100%;
   animation: cue-sweep 1.4s linear infinite;
@@ -323,13 +803,13 @@ html[data-cue="snap"] .wm-win[data-focused] .ow-bar {
 .desk::after {
   content: "";
   position: absolute;
-  top: 10px;
+  top: 52px;
   bottom: 80px;
   z-index: 8990;
   width: 6px;
   border-radius: 999px;
-  background: var(--accent);
-  box-shadow: 0 0 22px 4px color-mix(in srgb, var(--accent) 55%, transparent);
+  background: #fff;
+  box-shadow: 0 0 18px 2px rgba(255, 255, 255, 0.7);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.25s;
@@ -356,9 +836,79 @@ html[data-cue="snap"] .desk::after {
   z-index: 80;
   pointer-events: none;
 }
+/* Pinned to the workspace, a window steps aside once the desk has scrolled away. */
+.pip [data-pin="1"] {
+  transition: opacity 0.25s, visibility 0s;
+}
+.pip[data-away] [data-pin="1"] {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.25s, visibility 0s 0.25s;
+}
+.wm-capsules {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: calc(100vw - 32px);
+}
+.wm-capsule {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 178px;
+  height: 32px;
+  padding: 4px 10px 4px 9px;
+  border: 1px solid var(--o-border-strong);
+  border-radius: 9px;
+  background: var(--o-surface);
+  color: var(--o-text);
+  font: inherit;
+  box-shadow: 0 6px 20px rgba(24, 16, 60, 0.18);
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+}
+.wm-capsule:hover {
+  border-color: var(--tint);
+}
+.wm-capsule .i {
+  color: var(--tint);
+}
+.wm-capsule i {
+  color: var(--o-text-3);
+  font-style: normal;
+}
+/* A window of the visitor's own system: its frame is the system's. */
+.wm-native {
+  margin: 0;
+  height: 100vh;
+  background: var(--o-bg);
+}
+.wm-native .wm-win {
+  position: static;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none !important;
+}
+.wm-native .wm-win .ow-bar {
+  cursor: default;
+}
+.wm-native :is(.wm-grip, [data-act="min"], [data-act="max"], [data-act="more"], .ow-tabs-all) {
+  display: none;
+}
+.wm-native .ow-bar [data-act="pin"] {
+  opacity: 1 !important;
+}
 .pip .wm-win {
   pointer-events: auto;
-  box-shadow: 0 2px 4px rgba(24, 20, 48, 0.1), 0 30px 70px -20px rgba(30, 16, 90, 0.5), 0 0 0 1px var(--o-accent-border);
+  box-shadow: 0 2px 4px rgba(24, 20, 48, 0.1), 0 30px 70px -20px rgba(30, 16, 90, 0.5), 0 0 0 1px color-mix(in srgb, var(--tint) 50%, transparent);
 }
 
 /* ---------- toast ---------- */
@@ -391,4 +941,27 @@ html[data-theme-swap]::view-transition-new(root) {
 }
 html[data-theme-swap]::view-transition-new(root) {
   z-index: 2;
+}
+
+@media (max-width: 960px) {
+  .pitch {
+    overflow: visible;
+  }
+  .pitch::before {
+    content: none;
+  }
+  .pitch-gap {
+    flex: none;
+    height: 26px;
+  }
+  .desk {
+    height: min(78svh, 640px);
+    margin: 12px var(--frame) 0;
+  }
+}
+@media (max-width: 620px) {
+  .dock {
+    gap: 4px;
+    padding: 6px;
+  }
 }

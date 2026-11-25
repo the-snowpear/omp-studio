@@ -6,7 +6,7 @@
 // Options: --w --h --scroll <px|selector> --full --dark --reduce --wait <ms> --eval <js> --dpr <n> --seq <px,px,...>
 //          --mouse "move 600 120; down; move 20 300; up; wait 500; click 30 40"  (real pointer input, runs before --eval)
 // Page errors and console errors are printed. Output goes to .shots/.
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { chromium } from "playwright-core";
@@ -19,7 +19,10 @@ const opt = (name, fallback) => {
 };
 const flag = (name) => args.includes(`--${name}`);
 
-const exe = path.join(os.homedir(), "AppData/Local/ms-playwright/chromium-1234/chrome-win64/chrome.exe");
+// The newest Chromium Playwright has downloaded, whatever its revision.
+const cache = path.join(os.homedir(), "AppData/Local/ms-playwright");
+const revision = readdirSync(cache).filter((d) => /^chromium-\d+$/.test(d)).sort((a, b) => Number(b.slice(9)) - Number(a.slice(9)))[0];
+const exe = path.join(cache, revision ?? "", "chrome-win64/chrome.exe");
 const dir = path.join(import.meta.dirname, "..", ".shots");
 mkdirSync(dir, { recursive: true });
 

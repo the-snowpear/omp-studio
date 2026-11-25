@@ -1,13 +1,23 @@
-// Downloads. The page asks GitHub for the latest release when it loads and
-// falls back to the snapshot below, so the buttons always lead somewhere real.
-// After a release, update SNAPSHOT so the offline fallback stays current.
+// Downloads. Nothing here is edited for a release.
+//  - release.snapshot.json is rewritten from GitHub on every `npm run build`
+//    (tools/sync-release.mjs); it is what shows first and what stays if GitHub
+//    can't be reached from the visitor's network.
+//  - On load the page asks GitHub for the latest release, keeps the answer for
+//    half an hour so reloads and shared networks don't hit the anonymous rate
+//    limit, and swaps it in only if it differs from what is already on screen.
+import { REPO, fromGithub, type GithubRelease, type Platform, type StoredRelease } from "./github-release";
+import { t } from "./i18n";
+import snapshotFile from "./release.snapshot.json";
 
-export type Platform = "win-x64" | "win-arm64" | "mac-arm64" | "linux-x64" | "linux-x64-deb";
+export type { Platform };
 
 export interface Asset {
   platform: Platform;
   /** What the visitor reads on the button. */
   label: string;
+  /** The operating system's group in the list, and this package's name inside it. */
+  os: "Windows" | "macOS" | "Linux";
+  variant: string;
   /** Hardware and system requirement, shown under the button. */
   requires: string;
   file: string;
@@ -17,81 +27,77 @@ export interface Asset {
 
 export interface Release {
   version: string;
-  date: string;
+  /** ISO time; format it with formatDate. */
+  published: string;
   page: string;
   assets: Asset[];
-  /** True when the numbers came from GitHub just now rather than the snapshot. */
-  live: boolean;
 }
 
-const REPO = "the-snowpear/omp-studio";
-export const REPO_URL = `https://github.com/${REPO}`;
-export const RELEASES_URL = `${REPO_URL}/releases`;
-/** The windowed workbench this site describes ships in this version. */
-export const WORKBENCH_VERSION = "0.2.0";
-
-const META: Record<Platform, { label: string; requires: string; match: RegExp }> = {
-  "win-x64": { label: "Windows", requires: "Windows 10 或更新，x64", match: /Setup-.*windows-x64\.exe$/ },
-  "win-arm64": { label: "Windows ARM", requires: "Windows 11，ARM64（骁龙等）", match: /Setup-.*windows-arm64\.exe$/ },
-  "mac-arm64": { label: "macOS", requires: "macOS 13 或更新，Apple Silicon", match: /macos-arm64\.dmg$/ },
-  "linux-x64": { label: "Linux · AppImage", requires: "x64（AVX2），glibc 2.39+，FUSE 2", match: /^OMP-Studio-.*-linux-x64\.AppImage$/ },
-  "linux-x64-deb": { label: "Linux · deb", requires: "Ubuntu 24.04+ / Debian 13+，x64（AVX2）", match: /^OMP-Studio-.*-linux-x64\.deb$/ },
+const ABOUT: Record<Platform, Pick<Asset, "label" | "os" | "variant" | "requires">> = {
+  "win-x64": { label: "Windows", os: "Windows", variant: "x64", requires: t("Windows 10 或更新", "Windows 10 or later") },
+  "win-arm64": { label: "Windows ARM", os: "Windows", variant: "ARM64", requires: t("Windows 11，骁龙等 ARM 机型", "Windows 11, Snapdragon / ARM") },
+  "mac-arm64": { label: "macOS", os: "macOS", variant: "Apple Silicon", requires: t("macOS 13 或更新", "macOS 13 or later") },
+  "linux-x64": { label: "Linux AppImage", os: "Linux", variant: "AppImage", requires: t("x64（AVX2），glibc 2.39+，FUSE 2", "x64 (AVX2), glibc 2.39+, FUSE 2") },
+  "linux-x64-deb": { label: "Linux deb", os: "Linux", variant: "deb", requires: t("Ubuntu 24.04+ / Debian 13+，x64（AVX2）", "Ubuntu 24.04+ / Debian 13+, x64 (AVX2)") },
 };
-export const PLATFORMS = Object.keys(META) as Platform[];
 
-const snapshotAsset = (platform: Platform, file: string, bytes: number): Asset => ({
-  platform,
-  label: META[platform].label,
-  requires: META[platform].requires,
-  file,
-  url: `${RELEASES_URL}/download/v0.2.0/${file}`,
-  bytes,
+/** The stored numbers plus the wording that belongs to this site, so copy edits apply to old snapshots and caches too. */
+const describe = (stored: StoredRelease): Release => ({
+  ...stored,
+  assets: stored.assets.map((a) => ({ ...ABOUT[a.platform], ...a })),
 });
 
-const SNAPSHOT: Release = {
-  version: "0.2.0",
-  date: "2026-11-13",
-  page: `${RELEASES_URL}/tag/v0.2.0`,
-  live: false,
-  assets: [
-    snapshotAsset("win-x64", "OMP-Studio-Setup-0.2.0-windows-x64.exe", 232629277),
-    snapshotAsset("win-arm64", "OMP-Studio-Setup-0.2.0-windows-arm64.exe", 218641142),
-    snapshotAsset("mac-arm64", "OMP-Studio-0.2.0-macos-arm64.dmg", 259376896),
-  ],
-};
+const SNAPSHOT = snapshotFile as StoredRelease;
 
-interface GithubRelease {
-  tag_name: string;
-  published_at: string;
-  html_url: string;
-  assets: { name: string; size: number; browser_download_url: string }[];
+const CACHE_KEY = "omp-site-release-1";
+const FRESH_MS = 30 * 60_000;
+
+interface Cached {
+  at: number;
+  release: StoredRelease;
 }
 
-let pending: Promise<Release> | undefined;
+/** The last answer from GitHub, unless this build already carries a newer release. */
+function cached(): Cached | null {
+  try {
+    const hit = JSON.parse(localStorage.getItem(CACHE_KEY) ?? "null") as Cached | null;
+    return hit && Date.parse(hit.release.published) >= Date.parse(SNAPSHOT.published) ? hit : null;
+  } catch {
+    return null;
+  }
+}
 
-/** Latest published release. Never rejects: any failure yields the snapshot. */
-export function loadRelease(): Promise<Release> {
+/** The newest release known without waiting for the network. */
+export const knownRelease = (): Release => describe(cached()?.release ?? SNAPSHOT);
+
+let pending: Promise<Release | null> | undefined;
+
+/** The latest published release, or null when GitHub can't be reached (the caller keeps what it already shows). */
+export function loadRelease(): Promise<Release | null> {
   pending ??= (async () => {
+    const hit = cached();
+    if (hit && Date.now() - hit.at < FRESH_MS) return describe(hit.release);
     try {
       const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
         headers: { Accept: "application/vnd.github+json" },
         signal: AbortSignal.timeout(4000),
       });
-      if (!res.ok) return SNAPSHOT;
-      const data = (await res.json()) as GithubRelease;
-      const assets = PLATFORMS.flatMap((platform): Asset[] => {
-        const hit = data.assets.find((a) => META[platform].match.test(a.name));
-        return hit
-          ? [{ platform, label: META[platform].label, requires: META[platform].requires, file: hit.name, url: hit.browser_download_url, bytes: hit.size }]
-          : [];
-      });
-      if (!assets.length) return SNAPSHOT;
-      return { version: data.tag_name.replace(/^v/, ""), date: data.published_at.slice(0, 10), page: data.html_url, assets, live: true };
+      if (!res.ok) return null;
+      const release = fromGithub((await res.json()) as GithubRelease);
+      if (!release) return null;
+      try { localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), release } satisfies Cached)); } catch { /* Private mode or a full store: just don't cache. */ }
+      return describe(release);
     } catch {
-      return SNAPSHOT;
+      return null;
     }
   })();
   return pending;
+}
+
+/** YYYY-MM-DD in the visitor's own time zone. */
+export function formatDate(iso: string) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 /** A matching installer; ARM Linux and mobile visitors choose from the available downloads. */
@@ -121,15 +127,8 @@ export async function detectPlatform(): Promise<Platform | null> {
 
 export const formatSize = (bytes: number) => `${Math.round(bytes / 1048576)} MB`;
 
-/** True while the latest published installer predates the windowed workbench. */
-export function predatesWorkbench(release: Release): boolean {
-  const [a = 0, b = 0, c = 0] = release.version.split(".").map(Number);
-  const [x = 0, y = 0, z = 0] = WORKBENCH_VERSION.split(".").map(Number);
-  return a !== x ? a < x : b !== y ? b < y : c < z;
-}
-
 export const SOURCE_COMMANDS = [
-  `git clone --branch ${WORKBENCH_VERSION} --recurse-submodules https://github.com/the-snowpear/omp-studio.git`,
+  "git clone --recurse-submodules https://github.com/the-snowpear/omp-studio.git",
   "cd omp-studio",
   "npm install",
   "npm run omp:overlay:apply",

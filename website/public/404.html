@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>页面未找到 — OMP Studio</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="/omp-studio/favicon.ico">
+<script>
+  // Fix bare /omp-studio/en without trailing slash or legacy preview subpaths.
+  (function () {
+    var p = location.pathname;
+    if (/\/en$/i.test(p)) location.replace(p + "/" + location.search + location.hash);
+  })();
+</script>
+<style>
+  :root { color-scheme: light dark; --bg: #f4f4f7; --panel: #ffffff; --ink: #15141a; --mute: #53515d; --accent: #6e56cf; --line: rgba(24,20,44,.12); }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0c0c10; --panel: #15151b; --ink: #ececf2; --mute: #a9a8b5; --accent: #9e8cfc; --line: rgba(230,226,255,.12); }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { min-height: 100svh; display: grid; place-items: center; padding: 24px; background: var(--bg); color: var(--ink); font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; line-height: 1.6; }
+  main { max-width: 480px; padding: 32px; border-radius: 18px; background: var(--panel); border: 1px solid var(--line); text-align: center; }
+  h1 { font-size: 1.4rem; margin-bottom: 8px; }
+  p { color: var(--mute); font-size: 0.95rem; margin-bottom: 20px; }
+  nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+  a { padding: 8px 16px; border-radius: 10px; border: 1px solid var(--line); color: var(--ink); text-decoration: none; font-size: 0.9rem; font-weight: 600; }
+  a.primary { background: var(--accent); border-color: transparent; color: #fff; }
+</style>
+</head>
+<body>
+  <main>
+    <h1>页面未找到 · Page not found</h1>
+    <p>你访问的页面已迁移或不存在，请前往 OMP Studio 官网首页。</p>
+    <nav>
+      <a class="primary" href="/omp-studio/">中文首页</a>
+      <a href="/omp-studio/en/">English Home</a>
+      <a href="https://github.com/the-snowpear/omp-studio">GitHub</a>
+    </nav>
+  </main>
+</body>
+</html>

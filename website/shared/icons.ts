@@ -7,9 +7,11 @@ import atSign from "lucide-static/icons/at-sign.svg?raw";
 import bot from "lucide-static/icons/bot.svg?raw";
 import boxes from "lucide-static/icons/boxes.svg?raw";
 import brain from "lucide-static/icons/brain.svg?raw";
+import bookOpen from "lucide-static/icons/book-open.svg?raw";
 import check from "lucide-static/icons/check.svg?raw";
 import chevronDown from "lucide-static/icons/chevron-down.svg?raw";
 import chevronRight from "lucide-static/icons/chevron-right.svg?raw";
+import clipboardCheck from "lucide-static/icons/clipboard-check.svg?raw";
 import code from "lucide-static/icons/code.svg?raw";
 import copy from "lucide-static/icons/copy.svg?raw";
 import download from "lucide-static/icons/download.svg?raw";
@@ -28,11 +30,13 @@ import maximize from "lucide-static/icons/square.svg?raw";
 import messageCircle from "lucide-static/icons/message-circle.svg?raw";
 import messageSquare from "lucide-static/icons/message-square.svg?raw";
 import mic from "lucide-static/icons/mic.svg?raw";
+import mousePointer from "lucide-static/icons/mouse-pointer-2.svg?raw";
 import minus from "lucide-static/icons/minus.svg?raw";
 import monitor from "lucide-static/icons/monitor.svg?raw";
 import moon from "lucide-static/icons/moon.svg?raw";
 import paperclip from "lucide-static/icons/paperclip.svg?raw";
 import pin from "lucide-static/icons/pin.svg?raw";
+import play from "lucide-static/icons/play.svg?raw";
 import plus from "lucide-static/icons/plus.svg?raw";
 import refresh from "lucide-static/icons/rotate-cw.svg?raw";
 import ruler from "lucide-static/icons/ruler.svg?raw";
@@ -40,22 +44,26 @@ import scrollText from "lucide-static/icons/scroll-text.svg?raw";
 import server from "lucide-static/icons/server.svg?raw";
 import settings from "lucide-static/icons/settings.svg?raw";
 import shield from "lucide-static/icons/shield-alert.svg?raw";
+import smartphone from "lucide-static/icons/smartphone.svg?raw";
 import slash from "lucide-static/icons/slash.svg?raw";
 import sparkles from "lucide-static/icons/sparkles.svg?raw";
 import sun from "lucide-static/icons/sun.svg?raw";
 import terminal from "lucide-static/icons/square-terminal.svg?raw";
 import x from "lucide-static/icons/x.svg?raw";
+// Simple Icons, CC0.
+import linux from "./media/linux.svg?raw";
 
 const brand = (d: string, vb = "0 0 24 24") =>
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" fill="currentColor" aria-hidden="true"><path d="${d}"/></svg>`;
 
 export const icon = {
-  arrowLeft, arrowRight, arrowUp, atSign, bot, boxes, brain, check,
+  arrowLeft, arrowRight, arrowUp, atSign, bookOpen, bot, boxes, brain, check, clipboardCheck, mousePointer, play, smartphone,
   chevronDown, chevronRight, code, copy, download, file, fileDiff, folder, folderOpen,
   gitBranch, globe, history, house, keyboard, layers, layoutGrid, maximize, messageCircle,
   messageSquare, mic, minus, monitor, moon,
   paperclip, pin, plus, refresh, ruler, scrollText, server, settings,
   shield, slash, sparkles, sun, terminal, x,
+  linux: linux.replace("<svg", '<svg fill="currentColor" aria-hidden="true"').replace(/<title>.*?<\/title>/, ""),
   windows: brand("M3 5.1 10.6 4v7.4H3zM11.6 3.9 21 2.5v8.9h-9.4zM3 12.4h7.6v7.5L3 18.8zM11.6 12.4H21v9l-9.4-1.3z"),
   apple: brand(
     "M16.4 12.6c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.9-.8-3.1-.8-1.6 0-3.1.9-3.9 2.4-1.7 2.9-.4 7.2 1.2 9.5.8 1.2 1.7 2.4 3 2.4 1.2 0 1.6-.8 3.1-.8 1.4 0 1.8.8 3.1.8 1.3 0 2.1-1.2 2.9-2.3.9-1.3 1.3-2.6 1.3-2.7 0 0-2.6-1-2.7-4.100zM14.200 5.7c.7-.8 1.100-1.900 1-3-1 .0-2.100.6-2.800 1.400-.6.7-1.200 1.800-1 2.900 1.100.1 2.200-.5 2.800-1.300z",

@@ -1,0 +1,51 @@
+# OMP Studio
+
+> Cross-platform desktop GUI and arrangeable multi-window workbench for the oh-my-pi (`omp`) AI coding agent on Windows, macOS, and Linux.
+
+- Official Website (zh-CN): https://the-snowpear.github.io/omp-studio/
+- Official Website (English): https://the-snowpear.github.io/omp-studio/en/
+- GitHub Repository: https://github.com/the-snowpear/omp-studio
+- Releases & Installers: https://github.com/the-snowpear/omp-studio/releases
+- Documentation: https://github.com/the-snowpear/omp-studio/tree/main/docs
+- Changelog: https://github.com/the-snowpear/omp-studio/blob/main/CHANGELOG.md
+- Upstream Runtime (`oh-my-pi`): https://github.com/can1357/oh-my-pi
+- License: MIT
+
+## Overview
+
+OMP Studio is an Electron + React desktop console for `oh-my-pi` (`omp`). Instead of wrapping a terminal or scraping ANSI output, it communicates with the managed Runtime (`omp --mode studio-host`) through a typed **Studio Bridge** (`query` / `command` / `event`).
+
+Conversations, plans, Git, files, terminals, managed browsers, Agent Hub, and logs are first-class windows inside one arrangeable workbench:
+- Drag any conversation from the sidebar or header into a floating window without restarting sessions or losing drafts.
+- Snap windows to edges (half), corners (quarter), or top (maximize), or pick from 6 split layout templates with synchronized divider resizing.
+- Dock tools across 5 regions: Left sidebar, Conversation tools, Right sidebar, Bottom bar, or Floating windows with tab groups.
+- Pin windows to workspace, application, or pop them out as independent OS windows (with always-on-top support and layout persistence across restarts).
+
+## Core Features
+
+- **Home & Usage**: Recent projects one-click resume, Token usage charts and heatmaps by year/month/week/day, per-turn cache hits and context occupancy.
+- **Session History & Time Travel**: Turn-level workspace checkpoints with file diff preview and selective restore (code only, conversation only, or both) with automatic backup.
+- **Agent Hub**: Monitor main conversation and spawned worker subagents, request counts, token consumption, spend, task files, and per-subagent policies.
+- **Unified Model Configuration**: Configure Anthropic, OpenAI, OpenRouter, local LM Studio, and custom endpoints (`models.yml`, `omp login`, `modelProviderOrder`, role assignments for `@default`, `@plan`, `@task`). No API keys are bundled.
+- **Capabilities Center**: Enable, disable, and inspect Skills, Plugins, MCP servers, and Slash Commands in one place.
+- **Computer Use**: Action-linked screenshots, visual scrubbable history, per-session stop and explicit resume, read-only UI inspection.
+- **Chat Browser & WebMCP**: Multi-tab native browser inside the workbench, human/agent control handoff, element screenshot quoting, persistent auth profiles, and native WebMCP integration.
+- **Git & File Viewer**: Diffs, staging, commit graph, Worktrees, turn-level Changes, and built-in editing/preview for code, Markdown, PDF, images, audio/video, Excel/CSV (plus optional Office support).
+- **Remote & Mobile**: SSH workspaces with signed remote runtime deployment, Windows WSL 2 workspaces, LAN mobile pairing for approvals and chat continuation, and voice dictation.
+
+## Downloads
+
+Latest release assets are published on GitHub Releases:
+- Windows x64: `OMP-Studio-Setup-<version>-windows-x64.exe` (Windows 10+)
+- Windows ARM64: `OMP-Studio-Setup-<version>-windows-arm64.exe` (Windows 11 ARM)
+- macOS Apple Silicon: `OMP-Studio-<version>-macos-arm64.dmg` (macOS 13+)
+- Linux x64: `OMP-Studio-<version>-linux-x64.AppImage` and `.deb` (x64 AVX2, glibc 2.39+)
+
+Run from source (requires Node.js 22+, Git, Bun):
+```bash
+git clone --recurse-submodules https://github.com/the-snowpear/omp-studio.git
+cd omp-studio
+npm install
+npm run omp:overlay:apply
+npm run preview
+```
