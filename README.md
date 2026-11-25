@@ -25,9 +25,11 @@
 </p>
 
 <p align="center">
-  <b><a href="#窗口化工作台">窗口化工作台</a></b>
+  <b><a href="https://the-snowpear.github.io/omp-studio/">官方网站</a></b>
+  &nbsp;·&nbsp; <a href="#窗口化工作台">窗口化工作台</a>
   &nbsp;·&nbsp; <a href="#能力全景">能力全景</a>
   &nbsp;·&nbsp; <a href="#下载安装">下载安装</a>
+  &nbsp;·&nbsp; <a href="#独立-web-工作台">Web 工作台</a>
   &nbsp;·&nbsp; <a href="#从源码运行">从源码运行</a>
   &nbsp;·&nbsp; <a href="#架构">架构</a>
   &nbsp;·&nbsp; <a href="docs/README.md">文档</a>
@@ -54,7 +56,7 @@
 </p>
 
 > [!NOTE]
-> **0.2.10** 支持从侧栏移除项目并选择是否保留会话，改善模型名称显示，修复 Bash 工具卡片加载状态和 SSH 恢复。内置 Runtime 为 `19.0.1-studio.1`。 [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.10) · [发布说明](docs/releases/v0.2.10.md)
+> **0.2.11** 新增独立 Web 工作台，支持 Mermaid 图表缩放浮窗、同窗开启新会话并保留工具状态，修复命令菜单反复弹出。内置 Runtime 为 `19.0.1-studio.1`。 [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.11) · [发布说明](docs/releases/v0.2.11.md)
 
 <table>
 <tr>
@@ -260,6 +262,7 @@ Anthropic、OpenAI、OpenRouter、本地 LM Studio 等供应商在同一页管�
 | **SSH 工作区** | 连接远程项目并按需部署签名运行环境，在远端运行 Agent、编辑文件、使用 Git 和终端。短时断线时会尝试重新附加原 Host | [ssh-workspaces.md](docs/ssh-workspaces.md) |
 | **WSL 2 工作区** | 从 Windows 桌面版选择 Linux 发行版和目录，在其中运行 Agent、Git 和终端 | [wsl-workspaces.md](docs/wsl-workspaces.md) |
 | **手机访问** | 在同一局域网内配对手机，继续所选本地项目中的已有会话 | [mobile-access.md](docs/mobile-access.md) |
+| **Web 工作台** | 独立 Host、局域网 HTTPS、设备接管、文件和 Git 读写、共享终端 | [web-ui.md](docs/web-ui.md) |
 | **BTW 旁路追问** | 不打断主线程地追问；支持图片、分支和子代理复用 | [btw.md](docs/btw.md) |
 | **语音输入** | 点击或按住空格听写，内容插入到光标位置；失败后可从内存恢复录音 | [dictation.md](docs/dictation.md) |
 | **评测工作区** | 原生基准、指令遵循评测、后台执行、历史对比，以及 Ratchet 最佳版本差异导出 | [evaluation.md](docs/evaluation.md) |
@@ -280,7 +283,7 @@ Anthropic、OpenAI、OpenRouter、本地 LM Studio 等供应商在同一页管�
 | **macOS Apple Silicon** | `OMP-Studio-<版本>-macos-arm64.dmg` | macOS 13+；ad hoc 签名，尚未公证 |
 | **Linux x64** | `OMP-Studio-<版本>-linux-x64.deb` / `.AppImage` | Ubuntu 24.04 / glibc 2.39+；[安装与沙箱说明](docs/linux.md) |
 
-前往 **[GitHub Releases](https://github.com/the-snowpear/omp-studio/releases)** 下载。具体文件名以 Release 页为准。Runtime 与更新目录使用 Ed25519 签名；Windows 安装包没有 Authenticode 签名。
+前往 **[官方网站下载页](https://the-snowpear.github.io/omp-studio/#download)** 或 **[GitHub Releases](https://github.com/the-snowpear/omp-studio/releases)** 下载。具体文件名以 Release 页为准。Runtime 与更新目录使用 Ed25519 签名；Windows 安装包没有 Authenticode 签名。
 
 <details>
 <summary><b>macOS 首次打开被拦截？</b></summary>
@@ -300,6 +303,72 @@ xattr -dr com.apple.quarantine "/Applications/OMP Studio.app"
 
 > [!TIP]
 > 模型与登录沿用 OMP 的 `models.yml` / `omp login`。**本仓库不内置任何供应商密钥。**
+
+<br>
+
+<a id="独立-web-工作台"></a>
+
+## 独立 Web 工作台
+
+<details>
+<summary><b>展开教程：独立启动、浏览器配对与局域网访问</b></summary>
+
+无需启动桌面程序，就能在浏览器里使用工作台。Web 与桌面共用 Host 所在系统账户的项目、会话、模型配置和终端；关闭浏览器页面或退出桌面程序后，Host 继续运行。
+
+### 1 · 下载并启动
+
+从 **[GitHub Releases](https://github.com/the-snowpear/omp-studio/releases/latest)** 下载匹配系统与架构的 `omp-studio-remote-<版本>-<平台>` 运行环境包并解压。Windows、macOS、Linux 均提供 x64 / ARM64 包，内含 Node、Runtime、Web 页面与终端模块。
+
+在解压目录打开终端，执行对应命令。
+
+**Windows（PowerShell）：**
+
+```powershell
+.\omp-studio-web.cmd start
+.\omp-studio-web.cmd pair
+```
+
+**macOS / Linux：**
+
+```bash
+./omp-studio-web start
+./omp-studio-web pair
+```
+
+默认本机地址为 `http://127.0.0.1:8560`。打开 `pair` 输出的链接，确认授权范围并点击配对；链接有效期为 **60 秒**，过期后重新运行 `pair`。后续命令以 macOS / Linux 为例，Windows 将 `./omp-studio-web` 换成 `.\omp-studio-web.cmd`。
+
+### 2 · 打开项目并开始使用
+
+配对后点击 **接管**，即可发送消息、处理审批、编辑文件、执行 Git 操作和使用终端。点击 **打开本地文件夹** 时，填写的是 **Host 机器上的绝对目录路径**。模型与账号在工作台的模型配置中设置。
+
+已配对浏览器可在刷新和 Host 重启后继续连接。切换设备时，再次点击 **接管**；原设备保留草稿，已有任务继续执行。关闭网页不会结束 Shell，关闭终端或停止 Host 才会结束它。
+
+### 3 · 从局域网其他设备访问
+
+将示例 IP 换成 Host 机器实际的局域网地址：
+
+```bash
+./omp-studio-web listen --ip 192.168.1.20
+./omp-studio-web certificate OMP-Studio-CA.cer
+./omp-studio-web pair
+```
+
+通过可信方式把导出的 CA 证书传到自己的电脑、平板或手机，安装并信任后，再打开 `pair` 输出的 **HTTPS 链接**。使用桌面程序时，也可以从右下角的 **Web 访问** 完成地址选择、证书导出与配对，并核对证书 SHA-256 指纹。
+
+用 `./omp-studio-web devices` 查看设备，`./omp-studio-web revoke <device-id>` 撤销授权。运行不带 `--ip` 的 `./omp-studio-web listen` 可关闭局域网访问。本功能面向本机或局域网内同一系统账户的工作台共享。
+
+### 4 · 查看状态、停止与升级
+
+```bash
+./omp-studio-web status
+./omp-studio-web stop
+```
+
+停止前先结束正在运行的任务和终端；明确需要强制终止时使用 `stop --force`。升级时停止旧 Host，再替换运行环境包并重新启动，项目与会话数据仍保留在 Studio 配置目录中。
+
+源码启动、设备授权、日志与功能范围详见 **[Web 工作台完整教程](docs/web-ui.md#中文)**。
+
+</details>
 
 <br>
 
@@ -326,7 +395,7 @@ npm run preview
 
 Windows 也可以直接双击仓库根目录的 `preview.cmd`；macOS 需要先安装 Xcode Command Line Tools。
 
-Linux 支持源码运行与 `npm run pack:linux` 原生打包；环境、安装、更新与沙箱说明见 [Linux 客户端](docs/linux.md)。正式桌面附件为 AppImage / deb；Release 中的 Linux remote 压缩包用于 SSH Host。
+Linux 支持源码运行与 `npm run pack:linux` 原生打包；环境、安装、更新与沙箱说明见 [Linux 客户端](docs/linux.md)。正式桌面附件为 AppImage / deb；Release 中的 Linux remote 压缩包用于 SSH Host 与独立 Web 工作台。
 
 <details>
 <summary><b>接上真实的托管 Runtime</b>（首次较慢）</summary>

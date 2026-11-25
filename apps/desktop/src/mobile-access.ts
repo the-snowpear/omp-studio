@@ -27,6 +27,8 @@ export async function startMobileAccess(options: {
   workspaceName: string;
   profileDirectory: string;
   rendererDirectory: string;
+  onPaired?: () => Promise<void>;
+  onRevoked?: () => void;
 }) {
   const entry = await readFile(join(options.rendererDirectory, "mobile.html"));
   const material = await getMobileCertificate(options.profileDirectory, options.ip);
@@ -49,6 +51,8 @@ export async function startMobileAccess(options: {
     pairingTtlMs: 60_000,
     sessionTtlMs: 8 * 60 * 60 * 1000,
     mobile: { workspaceName: options.workspaceName, workspaceId: options.workspaceId },
+    ...(options.onPaired ? { onPaired: options.onPaired } : {}),
+    ...(options.onRevoked ? { onRevoked: options.onRevoked } : {}),
   });
   await adapter.revokeAll();
   server.on("request", (request, response) => {

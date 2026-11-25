@@ -5,11 +5,90 @@ import {
   PENDING_MAX_BYTES,
   TerminalSessions,
   TerminalSessionsProvider,
+  terminalOwnerKey,
   useTerminalSessions,
   utf8Length,
 } from "./terminalSessions";
 import type { Terminal } from "@xterm/xterm";
 import type { TmuxTopology } from "../../desktop/src/tmux/tmux-shared";
+import type { SharedTerminal } from "../../desktop/src/web/terminals";
+
+it("keeps the same screen through delayed scope snapshots and respects a subsequent peer handoff", async () => {
+  const runtime = harness(), rebind = vi.fn(async () => {});
+  let publish: (rows: SharedTerminal[]) => void = () => {};
+  const store = new TerminalSessions({ ...runtime.value, persistent: true, rebind, list: async () => [],
+    onSessions: (listener: typeof publish) => { publish = listener; return () => {}; },
+  } as unknown as NonNullable<typeof globalThis.ompStudioTerminal>);
+  const off = store.restore(); await settle();
+  const id = await store.create(null, "workspace", "previous-session", "previous-document");
+  const row = { id, name: "Shell", cwd: "D:/work", workspaceId: "workspace", sessionId: "previous-session", status: "running" as const, output: "initial output", sequence: 1, truncated: false };
+  publish([row]);
+  const screen = fakeScreen(); store.attachHost(id, screen.host); screen.fireCallbacks();
+  store.transferConversation("previous-document", "next-document");
+  await store.rebindConversation("next-document", "next-session", null, "workspace");
+  publish([row]);
+  expect(store.snapshot().sessions[0]).toMatchObject({ conversationId: "next-document", sessionId: "next-session" });
+  publish([{ ...row, sessionId: "next-session" }]);
+  expect(store.snapshot().sessions[0]?.conversationId).toBe("next-document");
+  expect(screen.written()).toBe("initial output");
+  publish([{ ...row, sessionId: "peer-conversation" }]);
+  expect(store.snapshot().sessions[0]?.conversationId).toBeUndefined();
+  expect(store.snapshot().sessions[0]?.sessionId).toBe("peer-conversation");
+  expect(rebind).toHaveBeenCalledTimes(1);
+  expect(runtime.value.dispose).not.toHaveBeenCalled();
+  off(); store.close();
+});
+
+it.each([null, "ssh-target"])("hands off a live terminal without recreating its process or screen (target=%s)", async target => {
+  const runtime = harness(), rebind = vi.fn(async () => {});
+  const store = new TerminalSessions({ ...runtime.value, persistent: true, rebind } as unknown as NonNullable<typeof globalThis.ompStudioTerminal>);
+  const id = await store.create(target, "workspace", "previous-session", "previous-document");
+  const screen = fakeScreen(); store.attachHost(id, screen.host);
+  runtime.emit(id, "before\r\n"); screen.fireCallbacks();
+  store.transferConversation("previous-document", "next-document");
+  await store.disposeConversation("previous-document");
+  await store.rebindConversation("next-document", "next-session", target, "workspace");
+  runtime.emit(id, "after\r\n"); screen.fireCallbacks();
+  expect(store.snapshot().sessions[0]).toMatchObject({ id, conversationId: "next-document", sessionId: "next-session" });
+  expect(store.activeIds.get(terminalOwnerKey(target, "workspace", "next-document"))).toBe(id);
+  expect(store.hosts.get(id)).toBe(screen.host);
+  expect(screen.written()).toBe("before\r\nafter\r\n");
+  expect(runtime.value.create).toHaveBeenCalledTimes(1);
+  expect(runtime.value.dispose).not.toHaveBeenCalled();
+  if (target === null) expect(rebind).toHaveBeenCalledWith({ ids: [id], sessionId: "next-session" });
+  else expect(rebind).not.toHaveBeenCalled();
+  await store.disposeConversation("next-document");
+  expect(runtime.value.dispose).toHaveBeenCalledWith(id);
+  store.close();
+});
+
+it("hands off a terminal still being created to the new document and session", async () => {
+  const runtime = harness(), pending = Promise.withResolvers<{ id: string; name: string; cwd: string }>();
+  const rebind = vi.fn(async () => {});
+  const store = new TerminalSessions({ ...runtime.value, persistent: true, create: () => pending.promise, rebind } as unknown as NonNullable<typeof globalThis.ompStudioTerminal>);
+  const creating = store.create(null, "workspace", "previous-session", "previous-document");
+  store.transferConversation("previous-document", "next-document");
+  await store.rebindConversation("next-document", "next-session", null, "workspace");
+  pending.resolve({ id: "pending-terminal", name: "Shell", cwd: "D:/work" });
+  expect(await creating).toBe("pending-terminal");
+  await store.disposeConversation("previous-document");
+  expect(store.snapshot().sessions[0]).toMatchObject({ conversationId: "next-document", sessionId: "next-session" });
+  expect(rebind).toHaveBeenCalledWith({ ids: ["pending-terminal"], sessionId: "next-session" });
+  expect(runtime.value.dispose).not.toHaveBeenCalled();
+  await store.disposeConversation("next-document"); store.close();
+});
+
+it("preserves the handed-off terminal when updating the shared session fails", async () => {
+  const runtime = harness();
+  const store = new TerminalSessions({ ...runtime.value, persistent: true, rebind: async () => { throw new Error("Host disconnected"); } } as unknown as NonNullable<typeof globalThis.ompStudioTerminal>);
+  const id = await store.create(null, "workspace", "previous-session", "previous-document");
+  store.transferConversation("previous-document", "next-document");
+  await expect(store.rebindConversation("next-document", "next-session", null, "workspace")).rejects.toThrow("Host disconnected");
+  await store.disposeConversation("previous-document");
+  expect(store.snapshot().sessions[0]).toMatchObject({ id, conversationId: "next-document", sessionId: "previous-session" });
+  expect(runtime.value.dispose).not.toHaveBeenCalled();
+  await store.disposeConversation("next-document"); store.close();
+});
 
 interface SentBatch {
   readonly id: string;

@@ -22,6 +22,7 @@ export interface TerminalSession {
 }
 export interface TerminalScreenHost { readonly term: Terminal; readonly fit?: FitAddon; }
 interface TerminalState {
+  restoring: boolean;
   sessions: readonly TerminalSession[];
   graphics: Readonly<Record<string, TerminalGraphic[]>>;
   graphicsErrors: Readonly<Record<string, string>>;
@@ -32,6 +33,7 @@ interface TerminalState {
   tmuxOwners: Readonly<Record<string, string>>;
   hiddenWindows: Readonly<Record<string, readonly string[]>>;
 }
+type TerminalOwner = { targetId: string | null; workspaceId: string | undefined; sessionId: string | undefined; conversationId: string | undefined };
 
 /**
  * Backlog cap per terminal while no xterm host is attached, in wire bytes.
@@ -157,12 +159,50 @@ export class TerminalSessions {
   readonly #removing = new Set<string>();
   readonly #forgettingTmux = new Set<string>();
   #ackScheduled = false;
-  #state: TerminalState = { sessions: [], graphics: {}, graphicsErrors: {}, notices: {}, controlMode: {}, tmux: {}, tmuxOwners: {}, hiddenWindows: {} };
+  #state: TerminalState = { restoring: false, sessions: [], graphics: {}, graphicsErrors: {}, notices: {}, controlMode: {}, tmux: {}, tmuxOwners: {}, hiddenWindows: {} };
   #off: (() => void) | undefined;
   #creating = 0;
   #closed = false;
+  readonly #sharedSequences = new Map<string, number>();
+  readonly #pendingOwners = new Set<TerminalOwner>();
+  readonly #sharedBindings = new Map<string, string>();
 
-  constructor(readonly api: Api | undefined) {}
+  constructor(readonly api: Api | undefined) { this.#state.restoring = Boolean(api?.list); }
+  restore(): () => void {
+    if (!this.api?.list) return () => {};
+    this.#listen();
+    const apply = (rows: import("../../desktop/src/web/terminals").SharedTerminal[]) => {
+      if (this.#closed) return;
+      for (const row of rows) {
+        const previous = this.#sharedSequences.get(row.id);
+        if (previous !== undefined && previous >= row.sequence) continue;
+        this.#sessionIds.add(row.id);
+        this.#sharedSequences.set(row.id, row.sequence);
+        this.#queue(row.id).clear();
+        this.hosts.get(row.id)?.term.reset();
+        this.#queue(row.id).append(row.output, 0, PENDING_MAX_BYTES);
+        if (row.truncated) this.#state = { ...this.#state, notices: { ...this.#state.notices, [row.id]: "host-replay-truncated" } };
+      }
+      const known = new Set(rows.map(row => row.id));
+      const remote = this.#state.sessions.filter(row => row.targetId !== null);
+      const local = rows.map(row => {
+        const existing = this.#state.sessions.find(item => item.id === row.id);
+        const binding = this.#sharedBindings.get(row.id);
+        const sessionId = binding ?? row.sessionId;
+        if (binding === row.sessionId) this.#sharedBindings.delete(row.id);
+        const { sessionId: _previousSession, conversationId, ...previous } = existing ?? {};
+        const owner = binding !== undefined || existing?.sessionId === sessionId ? conversationId : undefined;
+        return { ...previous, id: row.id, name: row.name, cwd: row.cwd, status: row.status, targetId: null,
+          ...(owner ? { conversationId: owner } : {}), ...(row.workspaceId ? { workspaceId: row.workspaceId } : {}), ...(sessionId ? { sessionId } : {}) };
+      });
+      for (const previous of this.#state.sessions) if (previous.targetId === null && !known.has(previous.id)) this.#releaseScreen(previous.id);
+      this.#publish({ ...this.#state, restoring: false, sessions: [...remote, ...local] });
+      for (const row of rows) this.#drain(row.id);
+    };
+    const off = this.api.onSessions?.(apply);
+    void this.api.list().then(apply).catch(() => { if (!this.#closed) this.#publish({ ...this.#state, restoring: false }); });
+    return () => off?.();
+  }
   snapshot = (): TerminalState => this.#state;
   subscribe = (listener: () => void): (() => void) => { this.#listeners.add(listener); return () => { this.#listeners.delete(listener); }; };
 
@@ -170,21 +210,77 @@ export class TerminalSessions {
     if (!this.api || this.#closed) throw new Error("Terminal is unavailable");
     this.#listen();
     this.#creating++;
+    const owner: TerminalOwner = { targetId, workspaceId, sessionId, conversationId };
+    this.#pendingOwners.add(owner);
     try {
       // `flowControl: true` is the opt-in handshake: Main then pauses the PTY
       // when this store falls behind, and resumes on our ACKs below.
-      const info = await this.api.create({ cols: 80, rows: 24, ...(this.api.ack ? { flowControl: true } : {}), ...(workspaceId ? { workspaceId } : {}), ...(targetId ? { targetId } : {}), ...(command ? { command } : {}) });
+      const info = await this.api.create({ cols: 80, rows: 24, ...(this.api.ack ? { flowControl: true } : {}), ...(workspaceId ? { workspaceId } : {}), ...(this.api.persistent && !targetId && sessionId ? { sessionId } : {}), ...(targetId ? { targetId } : {}), ...(command ? { command } : {}) });
       if (this.#closed) { await this.api.dispose(info.id); throw new Error("Terminal window has closed"); }
-      const session: TerminalSession = { ...info, targetId, ...(conversationId ? { conversationId } : {}), status: this.#earlyExits.delete(info.id) ? "ended" : "running", ...(workspaceId ? { workspaceId } : {}), ...(sessionId ? { sessionId } : {}) };
-      this.activeIds.set(terminalOwnerKey(targetId, workspaceId, conversationId ?? sessionId), info.id);
-      this.#publish({ ...this.#state, sessions: [...this.#state.sessions, session] });
+      const scope = this.api.persistent && !targetId && !this.api.rebind ? sessionId : owner.sessionId;
+      const session: TerminalSession = { ...info, targetId, ...(owner.conversationId ? { conversationId: owner.conversationId } : {}), status: this.#earlyExits.delete(info.id) ? "ended" : "running", ...(workspaceId ? { workspaceId } : {}), ...(scope ? { sessionId: scope } : {}) };
+      this.activeIds.set(terminalOwnerKey(targetId, workspaceId, owner.conversationId ?? scope), info.id);
+      if (this.api.persistent && !targetId && owner.sessionId && owner.sessionId !== sessionId && this.api.rebind) this.#sharedBindings.set(info.id, owner.sessionId);
+      this.#publish({ ...this.#state, sessions: [...this.#state.sessions.filter(row => row.id !== session.id), session] });
+      if (this.#sharedBindings.has(info.id)) await this.#rebindShared([info.id], owner.sessionId!, new Map([[info.id, sessionId]]));
       return info.id;
     } finally {
+      this.#pendingOwners.delete(owner);
       this.#creating--;
       if (!this.#creating) {
         for (const id of this.pending.keys()) if (!this.#sessionIds.has(id)) this.pending.delete(id);
         this.#earlyExits.clear();
       }
+    }
+  }
+
+  /** Move the existing screens and PTYs before the old conversation unmounts. */
+  transferConversation(from: string, to: string): void {
+    for (const owner of this.#pendingOwners) if (owner.conversationId === from) owner.conversationId = to;
+    const suffix = `,${JSON.stringify(from)}]`;
+    const keyFor = (key: string) => key.endsWith(suffix) ? `${key.slice(0, -suffix.length)},${JSON.stringify(to)}]` : key;
+    for (const [key, id] of [...this.activeIds]) if (key) {
+      const next = keyFor(key);
+      if (next !== key) { this.activeIds.delete(key); this.activeIds.set(next, id); }
+    }
+    this.#publish({ ...this.#state,
+      sessions: this.#state.sessions.map(session => session.conversationId === from ? { ...session, conversationId: to } : session),
+      tmuxOwners: Object.fromEntries(Object.entries(this.#state.tmuxOwners).map(([id, key]) => [id, keyFor(key)])),
+    });
+  }
+
+  /** A ready context gives transferred and restored terminals their actual session. */
+  async rebindConversation(conversationId: string, sessionId: string, targetId: string | null, workspaceId?: string): Promise<void> {
+    for (const owner of this.#pendingOwners) if (owner.conversationId === conversationId) owner.sessionId = sessionId;
+    const ids: string[] = [], previous = new Map<string, string | undefined>();
+    let changed = false;
+    const sessions = this.#state.sessions.map(session => {
+      if (session.kind === "tmux-pane" || session.targetId !== targetId || session.workspaceId !== workspaceId
+        || !(session.conversationId === conversationId || !session.conversationId && session.sessionId === sessionId)) return session;
+      const scope = this.api?.persistent && !targetId && !this.api.rebind ? session.sessionId : sessionId;
+      if (session.conversationId === conversationId && session.sessionId === scope) return session;
+      changed = true;
+      if (this.api?.persistent && !targetId && this.api.rebind && session.sessionId !== sessionId) {
+        ids.push(session.id); previous.set(session.id, session.sessionId); this.#sharedBindings.set(session.id, sessionId);
+      }
+      return { ...session, conversationId, ...(scope ? { sessionId: scope } : {}) };
+    });
+    if (changed) this.#publish({ ...this.#state, sessions });
+    if (ids.length) await this.#rebindShared(ids, sessionId, previous);
+  }
+
+  async #rebindShared(ids: string[], sessionId: string, previous: Map<string, string | undefined>): Promise<void> {
+    try { await this.api!.rebind!({ ids, sessionId }); }
+    catch (error) {
+      const restore = new Set(ids.filter(id => this.#sharedBindings.get(id) === sessionId));
+      for (const id of restore) this.#sharedBindings.delete(id);
+      this.#publish({ ...this.#state, sessions: this.#state.sessions.map(session => {
+        if (!restore.has(session.id)) return session;
+        const { sessionId: _scope, ...rest } = session;
+        const scope = previous.get(session.id);
+        return { ...rest, ...(scope ? { sessionId: scope } : {}) };
+      }) });
+      throw error;
     }
   }
 
@@ -280,7 +376,7 @@ export class TerminalSessions {
     if (this.#closed) return;
     this.#closed = true;
     this.#off?.();
-    for (const session of this.#state.sessions) if (session.kind !== "tmux-pane") void this.api?.dispose(session.id).catch(() => {});
+    for (const session of this.#state.sessions) if (session.kind !== "tmux-pane" && (!this.api?.persistent || session.targetId !== null)) void this.api?.dispose(session.id).catch(() => {});
     for (const id of Object.keys(this.#state.tmux)) void this.api?.tmuxDetach?.(id).catch(() => {});
     for (const id of this.hosts.keys()) this.#releaseScreen(id);
     this.activeIds.clear();
@@ -288,6 +384,8 @@ export class TerminalSessions {
     this.#acked.clear();
     this.#creditsClosed.clear();
     this.#sessionIds.clear();
+    this.#sharedSequences.clear();
+    this.#sharedBindings.clear();
     this.#decoders.clear();
     this.#listeners.clear();
   }
@@ -322,6 +420,10 @@ export class TerminalSessions {
     const offData = this.api.onData(event => {
       if (this.#removing.has(event.id)) return;
       if (!this.#creating && !this.#sessionIds.has(event.id)) return;
+      if (event.sequence !== undefined) {
+        if ((this.#sharedSequences.get(event.id) ?? -1) >= event.sequence) return;
+        this.#sharedSequences.set(event.id, event.sequence);
+      }
       // An ended terminal still accepts output: Main keeps the batcher open for
       // one window after the exit notification because ConPTY can hand over the
       // shell's last line afterwards. Those bytes are shown (or queued, still
@@ -471,6 +573,7 @@ export class TerminalSessions {
   }
 
   #releaseScreen(id: string): void {
+    this.#sharedBindings.delete(id);
     this.#removing.add(id);
     this.hosts.get(id)?.term.dispose();
     this.hosts.delete(id);
@@ -497,6 +600,7 @@ export const terminalOwnerKey = (targetId: string | null, workspaceId?: string, 
 export function TerminalSessionsProvider({ children }: { children: ReactNode }) {
   const store = useMemo(() => new TerminalSessions(globalThis.ompStudioTerminal), []);
   useEffect(() => () => store.close(), [store]);
+  useEffect(() => store.restore(), [store]);
   return <Context.Provider value={store}>{children}</Context.Provider>;
 }
 export function useTerminalStore() {

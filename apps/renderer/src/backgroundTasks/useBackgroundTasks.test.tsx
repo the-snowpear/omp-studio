@@ -86,7 +86,7 @@ it("preview stops both sources locally and refresh never resurrects them or call
   const service = result.current.rows.find((row) => row.kind === "service" && row.active)!;
   expect(result.current.jobsReady).toBe(true);
   expect(result.current.servicesState).toBe("ready");
-  await act(async () => { await result.current.stop(job); await result.current.stop(service); });
+  await act(async () => { await Promise.all(result.current.rows.filter(row => row.active).map(result.current.stop)); });
   await act(async () => { await result.current.refresh(); });
   rerender({ ...input, jobs: [{ ...running }] });
   await advance(8000);
@@ -94,6 +94,7 @@ it("preview stops both sources locally and refresh never resurrects them or call
   expect(result.current.rows.find((row) => row.key === service.key)?.state).toBe("exited");
   expect(result.current.rows.find((row) => row.key === job.key)?.startedAt).toBe(job.startedAt);
   expect(result.current.pending.size).toBe(0);
+  expect(result.current.rows.every(row => !row.active)).toBe(true);
   expect(f.command).not.toHaveBeenCalled();
   expect(PREVIEW_BACKGROUND_JOBS.find((row) => row.jobId === job.job?.jobId)?.status).toBe("running");
   expect(PREVIEW_BACKGROUND_SERVICES.find((row) => row.instanceId === service.service?.instanceId)?.state).toBe("ready");
@@ -264,6 +265,51 @@ it("keeps action failures separate from business state and rejects replaced-run 
   await act(async () => { await result.current.stop(oldJob); await result.current.stop(oldService); });
   expect(f.sent).toHaveLength(sentBefore);
   expect(result.current.actionErrors.size).toBe(0);
+});
+
+it("settles simultaneous service stops independently, ignores stale lists, and continues polling pending services", async () => {
+  const watcher = { ...web, name: "watcher", instanceId: "watcher-one" };
+  const locked = { ...web, name: "locked", instanceId: "locked-one" };
+  const f = clientFixture([web, watcher, locked]);
+  const { result } = renderHook(useBackgroundTasks, { initialProps: options(f.client, { jobs: [] }) });
+  await flush();
+  f.holdLists();
+  let oldList!: Promise<void>;
+  let stops!: Promise<void[]>;
+  act(() => {
+    oldList = result.current.refresh();
+    stops = Promise.all(result.current.rows.map(result.current.stop));
+    for (const row of result.current.rows) void result.current.stop(row);
+  });
+  const stale = f.latest("services.list");
+  const commands = f.sent.filter(command => command.kind === "services.stop");
+  expect(commands.map(command => command.payload)).toEqual([
+    { name: web.name, instanceId: web.instanceId },
+    { name: watcher.name, instanceId: watcher.instanceId },
+    { name: locked.name, instanceId: locked.instanceId },
+  ]);
+  const exited = { ...web, state: "exited" as const, exitedAt: startedAt + 55000, exitCode: 0 };
+  await act(async () => { f.complete(commands[0]!, { result: { service: exited } }); });
+  await act(async () => {
+    f.fail(commands[2]!, "Permission denied");
+    f.complete(commands[1]!, { result: { service: { ...watcher, state: "stopping" } } });
+    await stops;
+  });
+  const byName = (name: string) => result.current.rows.find(row => row.label === name)!;
+  expect(byName(web.name).state).toBe("exited");
+  expect(byName(watcher.name).state).toBe("stopping");
+  expect(result.current.pending).toEqual(new Set([byName(watcher.name).key]));
+  expect(result.current.actionErrors.get(byName(locked.name).key)).toBe("Permission denied");
+  await act(async () => { f.listResult(stale, [web, watcher, locked]); await oldList; });
+  expect(byName(web.name).state).toBe("exited");
+  expect(byName(watcher.name).state).toBe("stopping");
+
+  await advance(4000);
+  expect(f.sent.filter(command => command.kind === "services.list")).toHaveLength(3);
+  await act(async () => { f.listResult(f.latest("services.list"), [exited, { ...watcher, state: "exited", exitedAt: startedAt + 56000 }, locked]); });
+  expect(result.current.pending.size).toBe(0);
+  expect(byName(watcher.name).active).toBe(false);
+  expect(result.current.canStop(byName(locked.name))).toBe(true);
 });
 
 it("reports unavailable sources honestly and honors independent control capabilities", async () => {

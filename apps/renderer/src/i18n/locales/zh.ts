@@ -1,6 +1,24 @@
 type DeepString<T> = { readonly [K in keyof T]: T[K] extends string ? string : DeepString<T[K]> };
 
 const zhRaw = {
+  diagrams: {
+    title: "Mermaid 图表",
+    open: "查看图表",
+    close: "关闭图表",
+    fit: "适应窗口",
+    actualSize: "原尺寸",
+    zoomIn: "放大",
+    zoomOut: "缩小",
+    zoomLevel: "缩放比例",
+    viewport: "图表查看区域",
+    source: "查看源码",
+    showDiagram: "返回图表",
+    hint: "滚轮缩放 · 拖动平移",
+    pending: "图表等待渲染…",
+    failure: "图表无法渲染，已保留源码",
+    sourceStatus: "Mermaid 源码",
+    demo: "演示",
+  },
   sessionReference: {
     title: "会话引用",
     copy: "复制会话 ID",

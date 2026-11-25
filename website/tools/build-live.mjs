@@ -8,7 +8,7 @@
  *   node tools/build-live.mjs --force
  */
 import { existsSync, realpathSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -88,5 +88,10 @@ await vite.build({
     },
   },
 });
+
+const builtHtml = await readFile(OUT_ENTRY, "utf8");
+if (!builtHtml.includes('name="robots"')) {
+  await writeFile(OUT_ENTRY, builtHtml.replace("<head>", '<head>\n    <meta name="robots" content="noindex, nofollow" />'));
+}
 
 console.log("LIVE-DONE", OUT);

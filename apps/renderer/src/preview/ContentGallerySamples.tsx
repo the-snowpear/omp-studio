@@ -4,6 +4,7 @@ import { useI18n } from "../i18n";
 import { MarkdownText } from "../conversation/markdown";
 import { CONTENT_GALLERY_GRAPHICS, contentGalleryGlb } from "./contentGalleryGraphics";
 import { usePreviewMode } from "./PreviewContext";
+import { PREVIEW_MERMAID_LARGE, PREVIEW_MERMAID_WIDE } from "./mermaidPreview";
 
 function getStreamingSamples(zh: boolean) {
   return [
@@ -52,6 +53,12 @@ export function ContentGallerySamples() {
     return () => URL.revokeObjectURL(url);
   }, []);
   return <>
+    <div className="ev ev-assistant" data-item-id="content-gallery-mermaid">
+      <MarkdownText text={zh ? "## 大型 Mermaid 图表\n\n打开图表浮窗，以原尺寸阅读，再用滚轮缩放、拖动平移。" : "## Large Mermaid diagrams\n\nOpen the diagram window to read at actual size, then scroll to zoom and drag to pan."} />
+      {marks ? <span className="chip gray xs">{zh ? "演示" : "Demo"}</span> : null}
+      <MarkdownText text={"```mermaid\n" + PREVIEW_MERMAID_LARGE + "\n```"} />
+      <MarkdownText text={"```mermaid\n" + PREVIEW_MERMAID_WIDE + "\n```"} />
+    </div>
     <div className="ev ev-assistant" data-item-id="content-gallery-glb">
       <MarkdownText
         text={

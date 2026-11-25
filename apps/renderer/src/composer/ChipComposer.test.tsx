@@ -478,10 +478,11 @@ describe("ChipComposer", () => {
     fireEvent.paste(editor, {
       clipboardData: {
         files: [],
-        getData: (type: string) => (type === "text/plain" ? "/fast 帮我加速" : ""),
+        getData: (type: string) => (type === "text/plain" ? "/fast" : ""),
       },
     });
     fireEvent.mouseDown(screen.getByRole("option", { name: /\/fast/ }));
+    pasteText(editor, "帮我加速");
     expect(onRunCommand).not.toHaveBeenCalled();
     const snapshot = ref.current?.getSnapshot();
     expect(snapshot?.text).toBe("帮我加速");
@@ -578,6 +579,73 @@ describe("ChipComposer", () => {
       ref.current?.openCommandMenu();
     });
     expect(screen.getByRole("listbox", { name: "指令" })).toBeDefined();
+  });
+
+  it.each(["Escape", "outside"])("keeps a dismissed slash closed through typing and refocus (%s)", (close) => {
+    const ref = createRef<ChipComposerHandle>();
+    render(<><button type="button">Outside</button><ChipComposer ref={ref} /></>);
+    const editor = editorOf();
+    editor.focus();
+    pasteText(editor, "/mod");
+    expect(screen.getByRole("listbox", { name: "指令" })).toBeDefined();
+    if (close === "Escape") fireEvent.keyDown(editor, { key: "Escape" });
+    else fireEvent.pointerDown(screen.getByRole("button", { name: "Outside" }));
+    pasteText(editor, "el");
+    expect(ref.current!.getSnapshot().text).toBe("/model");
+    expect(screen.queryByRole("listbox", { name: "指令" })).toBeNull();
+    screen.getByRole("button", { name: "Outside" }).focus();
+    editor.focus();
+    expect(screen.queryByRole("listbox", { name: "指令" })).toBeNull();
+    act(() => ref.current!.openCommandMenu());
+    expect(screen.getByRole("listbox", { name: "指令" })).toBeDefined();
+    act(() => ref.current!.clear());
+    pasteText(editor, "/");
+    expect(screen.getByRole("listbox", { name: "指令" })).toBeDefined();
+  });
+
+  it.each([" ", "\n"])("closes completion at a separator and preserves arguments for submission (%j)", (separator) => {
+    const ref = createRef<ChipComposerHandle>(), onSubmit = vi.fn();
+    render(<ChipComposer ref={ref} onSubmit={onSubmit} />);
+    const editor = editorOf();
+    editor.focus();
+    pasteText(editor, "/compact");
+    expect(screen.getByRole("listbox", { name: "指令" })).toBeDefined();
+    pasteText(editor, separator);
+    expect(screen.queryByRole("listbox", { name: "指令" })).toBeNull();
+    pasteText(editor, "keep the decisions");
+    expect(screen.queryByRole("listbox", { name: "指令" })).toBeNull();
+    if (separator === " ") {
+      fireEvent.keyDown(editor, { key: "Enter" });
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+      expect(ref.current!.getSnapshot().text).toBe("/compact keep the decisions");
+    }
+  });
+
+  it.each(["click", "Tab"])("closes after argument completion and keeps the subsequent prompt (%s)", (accept) => {
+    const ref = createRef<ChipComposerHandle>();
+    render(<ChipComposer ref={ref} />);
+    const editor = editorOf();
+    editor.focus();
+    pasteText(editor, "/compac");
+    if (accept === "Tab") fireEvent.keyDown(editor, { key: "Tab" });
+    else fireEvent.mouseDown(screen.getByRole("option", { name: /\/compact/ }));
+    expect(screen.queryByRole("listbox", { name: "指令" })).toBeNull();
+    pasteText(editor, "keep this context\nthen continue");
+    expect(screen.queryByRole("listbox", { name: "指令" })).toBeNull();
+    expect(ref.current!.getSnapshot().text).toBe("/compact keep this context\nthen continue");
+  });
+
+  it("closes completion when the caret leaves the command token", () => {
+    render(<ChipComposer />);
+    const editor = editorOf();
+    editor.focus();
+    pasteText(editor, "/mod");
+    expect(screen.getByRole("listbox", { name: "指令" })).toBeDefined();
+    act(() => {
+      selectText(editor.firstChild!, 0);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+    expect(screen.queryByRole("listbox", { name: "指令" })).toBeNull();
   });
 
   it("serializes file, folder and skill capsules as Runtime tokens", () => {

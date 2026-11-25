@@ -101,6 +101,32 @@ function drag(element: Element, cancel = false) {
   else fireEvent.pointerUp(window, { clientX: 550, clientY: 200 });
 }
 describe("conversation windows", () => {
+  it.each([false, true])("starts a new conversation in the focused window and retains its original draft (preview=%s)", async preview => {
+    await mount(preview);
+    const originalRow = document.querySelector<HTMLElement>("#projectList .thread:not(.active)")!;
+    const originalTitle = originalRow.textContent;
+    drag(originalRow);
+    await waitFor(() => expect(document.querySelector(".dock-conversation-window [contenteditable=true]")).not.toBeNull());
+    const floating = document.querySelector<HTMLElement>(".dock-conversation-window")!;
+    const originalDocument = floating.querySelector<HTMLElement>(".cw-document")!.dataset.conversationDocument;
+    const editor = floating.querySelector<HTMLElement>("[contenteditable=true]")!;
+    editor.focus(); editor.textContent = "keep this unsent draft"; fireEvent.input(editor);
+    const windowCount = document.querySelectorAll(".dock-conversation-window").length;
+    const position = [floating.style.left, floating.style.top, floating.style.width, floating.style.height];
+    fireEvent.keyDown(editor, { key: "o", code: "KeyO", ctrlKey: true, shiftKey: true });
+    await waitFor(() => expect(floating.querySelector<HTMLElement>(".cw-document")?.dataset.conversationDocument).not.toBe(originalDocument));
+    await waitFor(() => expect(floating.querySelector("[contenteditable=true]")).not.toBeNull());
+    expect(document.querySelectorAll(".dock-conversation-window")).toHaveLength(windowCount);
+    expect([floating.style.left, floating.style.top, floating.style.width, floating.style.height]).toEqual(position);
+    expect(floating.querySelector("[contenteditable=true]")!.textContent).toBe("");
+    const row = [...document.querySelectorAll<HTMLElement>("#projectList .thread")].find(item => item.textContent === originalTitle)!;
+    fireEvent.click(row);
+    await waitFor(() => {
+      const restored = document.querySelector<HTMLElement>(`[data-conversation-document="${originalDocument}"] [contenteditable=true]`);
+      expect(restored?.textContent).toBe("keep this unsent draft");
+    });
+  });
+
   it("keeps shared sidebar, right and bottom sizes locked for keyboard and double-click resizing", async () => {
     await mount(true);
     fireEvent.click(document.querySelector('.topbar button[aria-controls="sidePanel"]')!);

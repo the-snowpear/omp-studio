@@ -1,9 +1,53 @@
 import { describe, expect, it, vi } from "vitest";
 import { ConversationWorkspaceStore, WORKSPACE_STORAGE_KEY } from "./store";
+import { conversationDockScope } from "./model";
+import { DockStore } from "../dock/store";
+import { locatePanel } from "../dock/model";
+import { PanelHosts } from "../dock/hosts";
 
 const a = { targetId: null, workspaceId: "a", sessionId: "chat-a" };
 const b = { targetId: "ssh-b", workspaceId: "b", sessionId: "chat-b" };
 describe("conversation workspace", () => {
+  it.each(["float", "snap", "native"])("starts a draft in the source window and preserves its geometry (%s)", kind => {
+    const store = new ConversationWorkspaceStore(null), dock = new DockStore(null);
+    store.setGeometry({ x: 0, y: 0, width: 1600, height: 1000 }, { x: 100, y: 80, width: 1400, height: 900 });
+    const first = store.open(a, "float"), owner = store.documentFor(first)!;
+    if (kind === "snap") store.snapView(first, "halves", 0);
+    if (kind === "native") store.setPin(first, "topmost");
+    const local = dock.fork(conversationDockScope(owner.ref, owner.id, false));
+    local.dispatch({ type: "move", panels: ["terminal"], target: { region: "right" } });
+    store.hosts.registerTools(owner.id, new PanelHosts(), local);
+    const other = store.open(b, "float"), before = store.getSnapshot().views.find(view => view.id === first)!;
+    const snap = store.getSnapshot().snap, transfer = vi.fn();
+    expect(store.startDraftInView(first, transfer)).toBe(first);
+    const next = store.documentFor(first)!;
+    expect(next.id).not.toBe(owner.id);
+    expect(next.ref).toMatchObject({ targetId: a.targetId, workspaceId: a.workspaceId, draftId: expect.any(String) });
+    expect(next.ref.sessionId).toBeUndefined();
+    expect(store.getSnapshot().views.find(view => view.id === first)).toMatchObject({ rect: before.rect, placement: before.placement, pin: before.pin });
+    expect(store.getSnapshot().views.find(view => view.id === other)?.documentId).not.toBe(next.id);
+    expect(store.getSnapshot().snap).toBe(snap);
+    expect(transfer).toHaveBeenCalledExactlyOnceWith(owner.id, next.id);
+    const nextDock = dock.fork(conversationDockScope(next.ref, next.id, false));
+    expect(locatePanel(nextDock.getSnapshot().layout, "terminal")?.region).toBe("right");
+    expect(store.getSnapshot().documents.find(doc => doc.id === owner.id)?.ref).toEqual(a);
+    nextDock.dispose(); local.dispose(); dock.dispose();
+  });
+
+  it("gives preview drafts independent dock identities while retaining the window", () => {
+    const store = new ConversationWorkspaceStore(null, true), dock = new DockStore(null);
+    const view = store.open({ targetId: null, workspaceId: "p0", previewProjectId: "p0", previewThreadId: "t1" }, "float");
+    const source = store.documentFor(view)!, local = dock.fork(conversationDockScope(source.ref, source.id, true), true);
+    local.dispatch({ type: "move", panels: ["terminal"], target: { region: "right" } });
+    store.hosts.registerTools(source.id, new PanelHosts(), local);
+    store.startDraftInView(view);
+    const next = store.documentFor(view)!, scope = conversationDockScope(next.ref, next.id, true);
+    expect(scope.session).toBe(next.ref.draftId);
+    expect(scope.draft).toBe(true);
+    const nextDock = dock.fork(scope, true);
+    expect(locatePanel(nextDock.getSnapshot().layout, "terminal")?.region).toBe("right");
+    nextDock.dispose(); local.dispose(); dock.dispose();
+  });
   it("mounts only referenced documents while keeping identities for draft restoration", () => {
     const store = new ConversationWorkspaceStore(null);
     const first = store.open(a);

@@ -10,6 +10,7 @@ Public documentation for OMP Studio.
 | [linux.md](linux.md) | Linux AppImage / deb 安装、更新、沙箱、源码开发与原生包验收 |
 | [settings.md](settings.md) | 设置分类、搜索与 Runtime 保存范围 |
 | [mobile-access.md](mobile-access.md) | 手机访问的证书信任、扫码配对、会话与审批 / Mobile setup and pairing |
+| [web-ui.md](web-ui.md) | 独立 Web 工作台、局域网 HTTPS、共享 Host 与设备控制 / Standalone Web workbench and shared Host |
 | [time-travel.md](time-travel.md) | Time Travel 开启、检查点、代码/对话恢复、存储与限制 |
 | [ssh-workspaces.md](ssh-workspaces.md) | SSH 工作区连接、签名运行环境、远端文件与终端、断线恢复 |
 | [wsl-workspaces.md](wsl-workspaces.md) | Windows WSL 2 工作区、项目文件、本机编辑器和连接恢复 |
@@ -24,6 +25,8 @@ Public documentation for OMP Studio.
 | [dictation.md](dictation.md) | 工作台与 BTW 语音输入、原生模式、麦克风配置和内存恢复 |
 | [btw.md](btw.md) | BTW 原生功能对齐、话题历史、图片、子代理与快捷键 |
 | [fonts.md](fonts.md) | Independent interface, terminal and output font preferences |
+| [releases/v0.2.11.md](releases/v0.2.11.md) | 0.2.11 安装包、独立 Web 工作台、Mermaid 浮窗、同窗新会话与命令补全修复 |
+| [reviews/v0.2.11-release-review.md](reviews/v0.2.11-release-review.md) | 0.2.10 以来的改动审查、发布门禁与验证边界 |
 | [releases/v0.2.10.md](releases/v0.2.10.md) | 0.2.10 安装包、项目移除、模型选择器、工具卡片与 SSH 修复 |
 | [releases/v0.2.9.md](releases/v0.2.9.md) | 0.2.9 安装包、胶囊拖拽、Agent 界面与问题修复 |
 | [releases/v0.2.8.md](releases/v0.2.8.md) | 0.2.8 安装包、会话引用、归档清理、对话状态、表格预览与 SSH 截图 |

@@ -1,5 +1,6 @@
 import { pickLocale } from "../i18n";
-import { isFilePanelId, isRepeatablePanelId, isScopedPanelId, panelBaseId, scopedPanelId, type FilePanelId, type FilePanelDescriptor, PANEL_IDS, agentPanelId, browserPagePanelId, isAgentPanelId, isBrowserPagePanelId, isConversationPanelId, type AgentPanelId, type AgentPanelTarget, type BrowserPagePanelId, type DockAction, type DockFloat, type DockGroup, type DockLayout, type DockLocation, type DockPreset, type DockRect, type DockTarget, type PanelId, type ScopedPanelId } from "./types";
+import { isDiagramPanelId, type DiagramPanelId } from "./types";
+import { isFilePanelId, isFocusWindowPanel, isRepeatablePanelId, isScopedPanelId, panelBaseId, scopedPanelId, type FilePanelId, type FilePanelDescriptor, PANEL_IDS, agentPanelId, browserPagePanelId, isAgentPanelId, isBrowserPagePanelId, isConversationPanelId, type AgentPanelId, type AgentPanelTarget, type BrowserPagePanelId, type DockAction, type DockFloat, type DockGroup, type DockLayout, type DockLocation, type DockPreset, type DockRect, type DockTarget, type PanelId, type ScopedPanelId } from "./types";
 
 const FLOAT_RECT: DockRect = { x: 80, y: 60, width: 560, height: 400 };
 const isPanel = (value: unknown): value is PanelId => typeof value === "string" && (PANEL_IDS as readonly string[]).includes(value);
@@ -23,6 +24,7 @@ export function createDefaultLayout(): DockLayout {
     agentPanels: {},
     browserPages: {},
     fileViews: {},
+    diagramViews: {},
     presetId: "default",
   };
 }
@@ -50,6 +52,7 @@ function copy(layout: DockLayout): DockLayout {
   return {
     ...layout,
     fileViews: { ...layout.fileViews },
+    diagramViews: { ...layout.diagramViews },
     left: { ...layout.left, panels: [...layout.left.panels] },
     rail: { ...layout.rail, panels: [...layout.rail.panels] },
     right: { ...layout.right, groups: layout.right.groups.map(group => ({ ...group, panels: [...group.panels] })) },
@@ -385,6 +388,18 @@ export function dockReducer(layout: DockLayout, action: DockAction, locked = fal
       const opened = dockReducer(next, { type: "open", panel: action.panel }, locked);
       return replaceLegacy ? dockReducer(opened, { type: "hide", panels: ["agent-detail"] }, locked) : opened;
     }
+    case "diagram-open": {
+      next.diagramViews[action.panel] = { ...action.descriptor };
+      next.cards[action.panel] ??= { collapsed: false, height: null };
+      if (!locatePanel(next, action.panel) && !next.hidden[action.panel]) next.hidden[action.panel] = { region: "float", groupId: `float-${action.panel}`, rect: action.rect ?? { x: 100, y: 70, width: 900, height: 680 } };
+      return dockReducer(next, { type: "open", panel: action.panel }, locked);
+    }
+    case "diagram-close": {
+      remove(next, action.panels);
+      for (const id of action.panels) { delete next.diagramViews[id]; delete next.cards[id]; }
+      clean(next);
+      break;
+    }
     case "file-open": {
       next.fileViews[action.panel] = { ...next.fileViews[action.panel], ...action.descriptor };
       next.cards[action.panel] ??= { collapsed: false, height: null };
@@ -616,8 +631,9 @@ export function applyBrowserPagePreset(preset: DockLayout, current: DockLayout):
 
 /** Presets and the "modified" baseline never carry per-session Agents or pages. */
 export const instancePresetLayout = (layout: DockLayout): DockLayout => {
-  const result = removePanels(browserPagePresetLayout(agentPresetLayout(layout)), Object.keys(layout.cards).filter(id => isConversationPanelId(id) || isFilePanelId(id)));
+  const result = removePanels(browserPagePresetLayout(agentPresetLayout(layout)), Object.keys(layout.cards).filter(id => isConversationPanelId(id) || isFilePanelId(id) || isDiagramPanelId(id)));
   result.fileViews = {};
+  result.diagramViews = {};
   return result;
 };
 export function preserveFileViews(layout: DockLayout, current: DockLayout): DockLayout {
@@ -635,8 +651,40 @@ export function preserveFileViews(layout: DockLayout, current: DockLayout): Dock
   return result;
 }
 
+/** /new copies the current workspace, including file buffers, with fresh view identities. */
+export function newConversationLayout(layout: DockLayout): DockLayout {
+  const pinned = new Set(layout.floats.filter(group => group.pin).flatMap(group => group.panels));
+  const current = removePanels(copy(layout), [...pinned]);
+  current.fileViews = Object.fromEntries(Object.entries(current.fileViews).filter(([id]) => !pinned.has(id as PanelId)));
+  let next = preserveFileViews(instancePresetLayout(current), current);
+  next = dockReducer(next, { type: "hide", panels: PANEL_IDS.filter(isFocusWindowPanel) });
+  for (const [oldId, descriptor] of Object.entries(next.fileViews)) {
+    const previous = oldId as FilePanelId, id: FilePanelId = `file-view:${crypto.randomUUID()}`;
+    replaceInPlace(next, previous, id);
+    next.fileViews[id] = { ...descriptor };
+    next.cards[id] = { ...next.cards[previous]! };
+    if (next.hidden[previous]) next.hidden[id] = next.hidden[previous];
+    delete next.fileViews[previous]; delete next.cards[previous]; delete next.hidden[previous];
+  }
+  return next;
+}
+
+/** Layout undo moves open diagrams, but never reopens a diagram the user closed. */
+export function preserveDiagramViews(layout: DockLayout, current: DockLayout): DockLayout {
+  let result = copy(layout);
+  result = dockReducer(result, { type: "diagram-close", panels: Object.keys(result.diagramViews).filter(id => !current.diagramViews[id]) as DiagramPanelId[] });
+  for (const [id, descriptor] of Object.entries(current.diagramViews)) {
+    if (result.diagramViews[id]) { result.diagramViews[id] = descriptor; continue; }
+    result = dockReducer(result, { type: "diagram-open", panel: id as DiagramPanelId, descriptor });
+    const location = locatePanel(current, id as PanelId) ?? current.hidden[id as PanelId];
+    if (location) result = dockReducer(result, { type: "move", panels: [id as PanelId], target: location });
+    if (!locatePanel(current, id as PanelId)) result = dockReducer(result, { type: "hide", panels: [id as PanelId] });
+  }
+  return result;
+}
+
 export const applyInstancePreset = (preset: DockLayout, current: DockLayout): DockLayout => {
-  let result = preserveFileViews(applyBrowserPagePreset(applyAgentPreset(preset, current), current), current);
+  let result = preserveDiagramViews(preserveFileViews(applyBrowserPagePreset(applyAgentPreset(preset, current), current), current), current);
   for (const panel of Object.keys(current.cards).filter(isConversationPanelId)) {
     const location = locatePanel(current, panel) ?? current.hidden[panel];
     result = { ...result, cards: { ...result.cards, [panel]: current.cards[panel]! }, hidden: { ...result.hidden, [panel]: location ?? { region: "float" } } };
@@ -695,7 +743,11 @@ export function normalizeLayout(value: unknown): DockLayout {
     const descriptor = record(value);
     if (isFilePanelId(id) && typeof descriptor.workspaceId === "string" && typeof descriptor.path === "string" && typeof descriptor.fileId === "string") layout.fileViews[id] = descriptor as FilePanelDescriptor;
   }
-  const validPanel = (id: unknown): id is PanelId => isPanel(id) || typeof id === "string" && (isAgentPanelId(id) && !!layout.agentPanels[id] || isBrowserPagePanelId(id) && !!layout.browserPages[id] || isConversationPanelId(id) || isFilePanelId(id) && !!layout.fileViews[id] || isScopedPanelId(id));
+  for (const [id, value] of Object.entries(record(raw.diagramViews))) {
+    const descriptor = record(value);
+    if (isDiagramPanelId(id) && typeof descriptor.code === "string") layout.diagramViews[id] = { code: descriptor.code };
+  }
+  const validPanel = (id: unknown): id is PanelId => isPanel(id) || typeof id === "string" && (isAgentPanelId(id) && !!layout.agentPanels[id] || isBrowserPagePanelId(id) && !!layout.browserPages[id] || isConversationPanelId(id) || isFilePanelId(id) && !!layout.fileViews[id] || isDiagramPanelId(id) && !!layout.diagramViews[id] || isScopedPanelId(id));
   const seen = new Set<PanelId>();
   const ids = new Set<string>();
   const panels = (value: unknown): PanelId[] => Array.isArray(value) ? value.map(id => id === "ida" ? "disassembler" : id).filter((id): id is PanelId => {
@@ -810,6 +862,10 @@ export function normalizeLayout(value: unknown): DockLayout {
   }
   if (typeof raw.lastBrowserPage === "string" && isBrowserPagePanelId(raw.lastBrowserPage) && layout.browserPages[raw.lastBrowserPage]) layout.lastBrowserPage = raw.lastBrowserPage;
   for (const id of Object.keys(layout.fileViews) as FilePanelId[]) {
+    layout.cards[id] = { collapsed: false, height: null };
+    if (!locatePanel(layout, id)) layout.hidden[id] = { region: "float", groupId: `float-${id}` };
+  }
+  for (const id of Object.keys(layout.diagramViews) as DiagramPanelId[]) {
     layout.cards[id] = { collapsed: false, height: null };
     if (!locatePanel(layout, id)) layout.hidden[id] = { region: "float", groupId: `float-${id}` };
   }

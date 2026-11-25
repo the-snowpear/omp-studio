@@ -42,7 +42,7 @@ import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, net, powerMonitor, powerSaveBlocker, protocol, safeStorage, session, shell, systemPreferences, Tray, type NativeImage, type WebContents } from "electron";
 import { registerServiceDefinitionsIpc } from "./chrome-services.js";
 import { ServiceDefinitionStore } from "./service-definitions.js";
-import { MemoryCredentialStore, localMemoryCredentialProvider } from "./memory-credentials.js";
+import { MemoryCredentialStore } from "./memory-credentials.js";
 import { registerMemoryCredentialIpc } from "./memory-credentials-ipc.js";
 import { activeArtifactLibrary, activeMediaDirectory, activeProfileDirectory } from "./artifact-library.js";
 import { runtimeSocketDirectory } from "./runtime-session.js";
@@ -92,7 +92,6 @@ import {
   loadInstallerTrustedKeys,
   packagedRuntimeInstallLayout,
 } from "./runtime-install.js";
-import { pendingRuntimeArtifact } from "./host-factory.js";
 import { createAppTray, quitBusyDialogStrings, quitBusyMessageBoxOptions } from "./tray.js";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -102,7 +101,6 @@ import { createRequire } from "node:module";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 import { createDesktopApplication } from "./composition.js";
-import { completeDesktopRuntimeTrial } from "./runtime-startup.js";
 import { registerDesktopIpc } from "./ipc.js";
 import { registerMobileAccessIpc } from "./mobile-access-ipc.js";
 import { screen } from "electron";
@@ -120,7 +118,9 @@ import {
   rendererDevServerUrl,
 } from "./security.js";
 import type { DesktopTray, DesktopWindowFactory, DesktopWindowSurface } from "./types.js";
-import { createProductionHostFactory } from "./host-factory.js";
+import { createSharedDesktopHostFactory, SharedHostConnection } from "./web/client.js";
+import { connectLocalChannel } from "./web/local-channel.js";
+import { registerWebAccessIpc } from "./web/ipc.js";
 import { defaultHostLogsDirectory } from "./host-log.js";
 import { TmuxControlManager } from "./tmux/manager.js";
 import { desktopPaths } from "./platform/desktop-paths.js";
@@ -278,25 +278,37 @@ export async function main(): Promise<void> {
     available: () => safeStorage.isEncryptionAvailable(),
     encrypt: value => safeStorage.encryptString(value), decrypt: value => safeStorage.decryptString(value),
   });
-  const hostFactory = createProductionHostFactory({
-    managedBrowser: true,
+  const hostFactory = createSharedDesktopHostFactory({
+    executable: process.execPath,
+    entry: join(app.getAppPath(), "dist", "web-host", "host.mjs"),
+    rendererDirectory: join(app.getAppPath(), "..", "renderer", "dist"),
+    packaged: app.isPackaged,
+    ...(runtimeInstallLayout ? { installLayout: runtimeInstallLayout } : {}),
+  }, {
     loginEnvironment,
-    memoryCredentials: localMemoryCredentialProvider(memoryCredentials, "local"),
+    pickDirectory: async () => {
+      const selected = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
+      return selected.canceled ? undefined : selected.filePaths[0];
+    },
+    openUrl: async url => {
+      if (!/^https?:\/\//iu.test(url)) throw new Error("Unsupported login URL");
+      await shell.openExternal(url);
+    },
+    revealDirectory: async path => { const error = await shell.openPath(path); if (error) throw new Error(error); },
+    systemFiles: {
+      knownFolders: { home: app.getPath("home"), desktop: app.getPath("desktop"), downloads: app.getPath("downloads"), documents: app.getPath("documents"), pictures: app.getPath("pictures") },
+      trash: path => shell.trashItem(path),
+    },
     beforeCreate: async () => { await updateCoordinator?.initialize(); },
     afterCreate: async (composition, workspaceSelected) => {
       if (!updateCoordinator?.hasRuntimeTrial || !workspaceSelected) return false;
-      return completeDesktopRuntimeTrial(composition,
-        (ready, selected) => updateCoordinator!.completeStartup(ready, selected), workspaceSelected);
-    },
-    openUrl: async (url) => {
-      if (!/^https?:\/\//i.test(url)) throw new Error("refusing to open a non-http login url");
-      await shell.openExternal(url);
-    },
-    revealDirectory: async (absDir) => {
-      const error = await shell.openPath(absDir);
-      if (error.length > 0) throw new Error(error);
+      await composition.whenRuntimeReady?.();
+      if (composition.status !== "ready") await hostFactory.stopForRuntimeRecovery();
+      return updateCoordinator.completeStartup(composition.status === "ready", workspaceSelected);
     },
   });
+  const syncMemoryCredentials = async () => (await hostFactory.connection()).call("memory.credentials", await memoryCredentials.list("local"));
+  memoryCredentials.subscribe(target => { if (target === "local") void syncMemoryCredentials().catch(error => hostFactory.log.write("warn", "memory.credentials", String(error))); });
   // P0-6: GPU / low-spec probe. `getGPUInfo("basic")` cannot distinguish
   // hardware from software compositing (its fields are identical), so the
   // grading reads `app.getGPUFeatureStatus()` and only falls back to the
@@ -625,6 +637,7 @@ export async function main(): Promise<void> {
   let mobileAccess: ReturnType<typeof registerMobileAccessIpc> | undefined;
 
   const createWindow: DesktopWindowFactory = async (context) => {
+    void syncMemoryCredentials().catch(error => hostFactory.log.write("warn", "memory.credentials", String(error)));
     const windowStarted = performance.now();
     // Payload boot accounting belongs to the instance that acquired the lock.
     const layout = await resolveAppResourceLayout({
@@ -705,6 +718,8 @@ export async function main(): Promise<void> {
       onClosed: contents => { browserObservation.disposeWindow(contents.id); desktopConversationViews.remove(contents); },
       onWillClose: child => managedBrowser?.detachWindow(child),
     });
+    const onDisplayRemoved = () => floatingWindows.rehomeOffscreen();
+    screen.on("display-removed", onDisplayRemoved);
     managedBrowser = new DesktopManagedBrowser({ directory: join(activeProfileDirectory(), "browser"), downloadsDirectory: app.getPath("downloads"), windowFor: floatingWindows.windowFor, language: () => getDesktopLanguage() });
     new ManagedBrowserRelay({ manager: managedBrowser, directory: activeMediaDirectory });
     window.on("close", () => { if (context.isQuitting()) managedBrowser?.detachWindow(window as BrowserWindow); });
@@ -733,8 +748,20 @@ export async function main(): Promise<void> {
     });
     window.webContents.once("render-process-gone", () => payloadHealth.failed());
     const ipc = registerDesktopIpc({ facade: context.transport, isTrustedSender });
+    const webAccess = registerWebAccessIpc({ connection: () => hostFactory.connection(), isTrustedSender });
     const mobile = registerMobileAccessIpc({
       host: context.transport,
+      createHost: async () => {
+        const client = new SharedHostConnection(await connectLocalChannel(desktopPaths().stateRoot));
+        await client.initialize();
+        const transport = client.transport();
+        return {
+          transport,
+          paired: async () => { await client.takeControl(desktopText("手机访问", "Mobile access")); },
+          revoked: () => { void client.call("control.release").catch(() => {}); },
+          close: async () => { await transport.close(); await client.close(); },
+        };
+      },
       isTrustedSender,
       profileDirectory: join(app.getPath("userData"), "mobile-access"),
       rendererDirectory: layout.rendererDist,
@@ -829,8 +856,8 @@ export async function main(): Promise<void> {
     window.webContents.on("destroyed", releaseBrowserObservation);
     window.webContents.on("destroyed", cancelRemotePreparation);
     window.webContents.on("destroyed", removeConversationVisibility);
-    ipcMain.handle(CONVERSATION_VIEW_CHANNEL, ({ sender }, input: unknown) =>
-      !sender.isDestroyed() && isTrustedLocalSender(sender) && desktopConversationViews.report(sender, input));
+    ipcMain.handle(CONVERSATION_VIEW_CHANNEL, async ({ sender }, input: unknown) =>
+      !sender.isDestroyed() && isTrustedLocalSender(sender) && (await hostFactory.connection()).call("view.report", input));
     const logsDirectory = defaultHostLogsDirectory();
     const disposeLogs = registerChromeLogsIpc({
       ipcMain: {
@@ -954,6 +981,7 @@ export async function main(): Promise<void> {
       },
     });
     const disposeTerminal = registerTerminalIpc({
+      shared: () => hostFactory.connection(),
       ipcMain: {
         handle(channel, listener) {
           ipcMain.handle(channel, (event, payload: unknown) => listener({ sender: event.sender }, payload));
@@ -1050,7 +1078,7 @@ export async function main(): Promise<void> {
       trustedKeys,
       platform: `${process.platform}-${process.arch}`,
       runtime: { electron: process.versions.electron, modules: process.versions.modules, nodePty: NODE_PTY_VERSION },
-      pendingArtifact: pendingRuntimeArtifact,
+      pendingArtifact: { peek: () => undefined, set: async directory => { await (await hostFactory.connection()).call("runtime.artifact", directory); } },
       showOpenDialog: (options) => dialog.showOpenDialog(window, options),
       appVersion: layout.effectiveVersion,
       bundledAppVersion: app.getVersion(),
@@ -1132,6 +1160,7 @@ export async function main(): Promise<void> {
       },
       dispose: () => {
         floatingWindows.dispose();
+        screen.removeListener("display-removed", onDisplayRemoved);
         disposeUpdates.dispose();
         disposeUnifiedUpdates?.();
         updateCoordinator?.dispose();
@@ -1179,6 +1208,7 @@ export async function main(): Promise<void> {
         disposeChrome();
         remoteIpc.dispose();
         mobile.dispose();
+        webAccess.dispose();
         ipc.dispose();
       },
     };

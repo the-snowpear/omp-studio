@@ -330,6 +330,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   const [detachedCommand, setDetachedCommand] = useState(false);
   const [commandDismissed, setCommandDismissed] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
+  const hadLeadingSlash = useRef(false);
 
   const closeCommandMenu = (): void => {
     setDetachedCommand(false);
@@ -355,10 +356,15 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     const snapshot = snapshotOf(editor, imagesRef.current);
     const typed = typedSlashSource(snapshot.doc);
     setSlashSource(typed);
-    if (typed.startsWith("/")) {
+    const leadingSlash = typed.startsWith("/");
+    if (leadingSlash && !hadLeadingSlash.current) {
       setDetachedCommand(false);
       setCommandDismissed(false);
     }
+    hadLeadingSlash.current = leadingSlash;
+    // Arguments and prose are still parsed when sending, but are no longer
+    // completion queries. Dismissing this slash lasts until a new one is typed.
+    if (!/^\/[^\s:]*$/u.test(typed)) closeCommandMenu();
     setEmpty(snapshotIsEmpty(snapshot));
     // Preview URLs are base64 data URLs; rebuilding them per keystroke allocates
     // the whole payload again for an image capsule that cannot have changed.
@@ -791,7 +797,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         setCommandIndex(0);
         return;
       }
-      if (typed.startsWith("/")) {
+      if (/^\/[^\s:]*$/u.test(typed)) {
+        setSlashSource(typed);
         setDetachedCommand(false);
         return;
       }
@@ -917,12 +924,13 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   };
 
   const slashDraft = parseSlashDraft(slashSource);
+  const slashCompletion = /^\/[^\s:]*$/u.test(slashSource) ? slashDraft : null;
   const commandItems = detachedCommand
     ? filterSlashCommands("", slashCatalog)
-    : slashDraft
-      ? filterSlashCommands(slashDraft.name, slashCatalog)
+    : slashCompletion
+      ? filterSlashCommands(slashCompletion.name, slashCatalog)
       : [];
-  const commandOpen = (detachedCommand || slashDraft !== null) && mention === null && !commandDismissed;
+  const commandOpen = (detachedCommand || slashCompletion !== null) && mention === null && !commandDismissed;
   keyboardBlockedRef.current = !!disabled || !!mention || commandOpen || !!legacyPrediction;
   useEffect(()=>{
     setPrediction(null);
@@ -950,15 +958,33 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   useEffect(() => {
     if (!commandOpen) return;
     const onPointerDown = (event: globalThis.PointerEvent): void => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
+      const target = event.target as Node | null;
+      if (!target) return;
       if (editorRef.current?.contains(target)) return;
-      if (target instanceof Element && target.closest(".cm-mention") !== null) return;
+      if (editorRef.current?.parentElement?.querySelector(".cm-command")?.contains(target)) return;
       closeCommandMenu();
     };
+    const onSelectionChange = (): void => {
+      if (detachedCommand) return;
+      const editor = editorRef.current, selection = window.getSelection();
+      if (!editor || !selection?.isCollapsed || !selection.rangeCount || !editor.contains(selection.anchorNode)) {
+        closeCommandMenu();
+        return;
+      }
+      const range = selection.getRangeAt(0).cloneRange();
+      range.selectNodeContents(editor);
+      range.setEnd(selection.anchorNode!, selection.anchorOffset);
+      const prefix = range.cloneContents();
+      prefix.querySelectorAll(".cm-chip-mode").forEach(chip => chip.remove());
+      if (!/^\/[^\s:]*$/u.test(prefix.textContent ?? "")) closeCommandMenu();
+    };
     document.addEventListener("pointerdown", onPointerDown, true);
-    return () => document.removeEventListener("pointerdown", onPointerDown, true);
-  }, [commandOpen]);
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("selectionchange", onSelectionChange);
+    };
+  }, [commandOpen, detachedCommand, document, window]);
 
   const acceptCommand = (item: StudioSlashCommand): void => {
     const args = slashDraft !== null && (slashDraft.name === item.name || item.aliases.includes(slashDraft.name))
@@ -966,6 +992,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       : "";
     if (item.availability === "disabled") return;
     const overlay = detachedCommand;
+    closeCommandMenu();
     if (item.select === "chip") {
       setDetachedCommand(false);
       if (!overlay) replaceSlashCommand("", "prefix");
@@ -1283,6 +1310,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
           return;
         }
         replaceSlashCommand(item.allowArgs ? `/${item.name} ` : `/${item.name}`, "prefix");
+        closeCommandMenu();
         return;
       }
     }
@@ -1415,9 +1443,6 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
           removeChip(chipId);
         }}
         onFocus={(event) => {
-          if (editorRef.current && typedSlashSource(snapshotOf(editorRef.current, imagesRef.current).doc).startsWith("/")) {
-            setCommandDismissed(false);
-          }
           onFocus?.(event);
         }}
         onBlur={(event) => {

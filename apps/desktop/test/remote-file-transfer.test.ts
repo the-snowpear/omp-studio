@@ -5,8 +5,8 @@ import { RemoteConnectionError } from "../src/remote/errors.js";
 
 const connection = { host: "deskserver", user: "the_snowpear", port: 2222, authMode: "agent" as const };
 
-test("Windows configuration uploads prefer SFTP and retain SCP as the fallback", () => {
-  assert.deepEqual(remoteUploadRoutes("win32", "ssh"), ["sftp", "scp-legacy"]);
+test("Windows configuration uploads prefer SFTP and retain SCP and SSH stream fallbacks", () => {
+  assert.deepEqual(remoteUploadRoutes("win32", "ssh"), ["sftp", "scp-legacy", "ssh-stream"]);
   assert.deepEqual(remoteUploadRoutes("linux", "ssh"), ["ssh-stream", "sftp"]);
   assert.deepEqual(remoteUploadRoutes("linux", "wsl"), ["ssh-stream"]);
 });
@@ -50,6 +50,19 @@ test("a retryable first route is cleaned before trying the fallback", async () =
   assert.deepEqual(attempts, ["sftp", "scp-legacy"]);
   assert.deepEqual(cleanups, ["sftp"]);
   assert.deepEqual(result, { route: "scp-legacy", value: "verified" });
+});
+
+test("Windows uploads retain the SSH stream path when both copy helpers fail", async () => {
+  const attempts: string[] = [];
+  const cleanups: string[] = [];
+  const result = await runUploadFallback(["sftp", "scp-legacy", "ssh-stream"], async route => {
+    attempts.push(route);
+    if (route !== "ssh-stream") throw new RemoteConnectionError("network", `${route} unavailable`);
+    return "verified";
+  }, async route => { cleanups.push(route); });
+  assert.deepEqual(attempts, ["sftp", "scp-legacy", "ssh-stream"]);
+  assert.deepEqual(cleanups, ["sftp", "scp-legacy"]);
+  assert.deepEqual(result, { route: "ssh-stream", value: "verified" });
 });
 
 test("authentication, host-key, configuration, and cancellation failures stop before fallback", async () => {

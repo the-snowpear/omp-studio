@@ -9,10 +9,12 @@ export function registerMobileAccessIpc(options: {
   isTrustedSender: (sender: WebContents) => boolean;
   profileDirectory: string;
   rendererDirectory: string;
+  createHost?: () => Promise<{ transport: ClientTransport; paired(): Promise<void>; revoked(): void; close(): Promise<void> }>;
 }) {
   let running: Awaited<ReturnType<typeof startMobileAccess>> | undefined;
   let starting: Promise<void> | undefined;
   let disposed = false;
+  let shared: Awaited<ReturnType<NonNullable<typeof options.createHost>>> | undefined;
   const projects = async (): Promise<MobileAccessStatus["projects"]> => {
     const result = await options.host?.query({ queryName: "projects.list", input: {} });
     return result?.ok ? result.result.workspaces.filter(row => !row.unavailable).map(row => ({ id: row.workspaceId, name: row.name })) : [];
@@ -26,6 +28,8 @@ export function registerMobileAccessIpc(options: {
     const current = running;
     running = undefined;
     await current?.close();
+    await shared?.close();
+    shared = undefined;
   };
   const handle = (channel: string, action: (...args: unknown[]) => unknown) => {
     ipcMain.handle(channel, (event, ...args: unknown[]) => {
@@ -47,10 +51,18 @@ export function registerMobileAccessIpc(options: {
     starting = (async () => {
       const project = (await projects()).find(row => row.id === workspaceId);
       if (!project) throw new Error("mobile_project_unavailable");
-      running = await startMobileAccess({
-        host, ip, workspaceId: project.id as WorkspaceId, workspaceName: project.name,
-        profileDirectory: options.profileDirectory, rendererDirectory: options.rendererDirectory,
-      });
+      shared = await options.createHost?.();
+      try {
+        running = await startMobileAccess({
+          host: shared?.transport ?? host, ip, workspaceId: project.id as WorkspaceId, workspaceName: project.name,
+          profileDirectory: options.profileDirectory, rendererDirectory: options.rendererDirectory,
+          ...(shared ? { onPaired: () => shared!.paired(), onRevoked: () => shared?.revoked() } : {}),
+        });
+      } catch (error) {
+        await shared?.close();
+        shared = undefined;
+        throw error;
+      }
     })();
     try { await starting; } finally { starting = undefined; }
   });

@@ -1,6 +1,6 @@
 {
   "name": "omp-studio",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "private": true,
   "description": "Desktop GUI and arrangeable workbench for oh-my-pi (omp) AI coding agent — typed Studio Bridge and Electron app for Windows, macOS, and Linux",
   "license": "MIT",
@@ -41,7 +41,8 @@
     "preview": "node scripts/preview.mjs",
     "models:catalog:generate": "node scripts/model-catalog.mjs",
     "models:catalog:check": "node scripts/model-catalog.mjs --check",
-    "build": "npm run build:packages && npm run build -w @omp-studio/renderer && npm run build -w @omp-studio/desktop && node scripts/bundle-remote-host.mjs",
+    "build": "npm run build:packages && npm run build -w @omp-studio/renderer && npm run build -w @omp-studio/desktop && node scripts/bundle-remote-host.mjs && node scripts/bundle-web-host.mjs",
+    "web": "node apps/desktop/dist/web-host/host.mjs",
     "build:remote": "npm run build:packages && npm run build -w @omp-studio/desktop && node scripts/bundle-remote-host.mjs",
     "build:release-tools": "npm run build:packages && npm run build -w @omp-studio/desktop",
     "typecheck": "node scripts/check.mjs --fast",

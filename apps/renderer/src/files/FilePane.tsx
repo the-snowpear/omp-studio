@@ -61,6 +61,10 @@ export default function FilePane({ id, descriptor, session, visible, onSettings,
     if (preview) {
       const fixture = previewFile(descriptor.path, descriptor.workspaceId);
       void previewFileBlob(fixture).then(sample => { if (sample && alive) { blob = URL.createObjectURL(sample); setResource({ id: "demo", url: blob, file: { ...fixture, size: sample.size } }); } }).catch(error => { if (alive) setError(String(error)); });
+    } else if (globalThis.OMP_STUDIO_WEB_ENTRY) {
+      void session.client().then(client => descriptor.source === "system" ? client.query("fs.file.inspect", { path: descriptor.path }) : client.query("workspace.file.inspect", { workspaceId: descriptor.workspaceId as WorkspaceId, path: descriptor.path })).then(file => {
+        if (alive) setResource({ id: file.id, file, url: `/api/web/file?${new URLSearchParams({ workspaceId: descriptor.workspaceId, path: descriptor.path, ...(descriptor.source ? { source: descriptor.source } : {}) })}` });
+      }).catch(error => { if (alive) setError(String(error)); });
     } else if (globalThis.ompStudioChrome?.files) {
       void globalThis.ompStudioChrome.files.open({ targetId: descriptor.targetId, workspaceId: descriptor.workspaceId, path: descriptor.path, ...(descriptor.source ? { source: descriptor.source } : {}) }).then(result => { lease = result.id; if (alive) setResource(result); else void globalThis.ompStudioChrome?.files?.release(result.id); }).catch(error => { if (alive) setError(error instanceof Error ? error.message : String(error)); });
     } else setError(zh ? "此连接没有桌面文件资源通道" : "Desktop file resource channel unavailable on this connection");
@@ -157,7 +161,14 @@ export default function FilePane({ id, descriptor, session, visible, onSettings,
     { kind: "item", id: "reveal", label: t("shell.fileRevealInExplorer", { fileManager: fileManagerName(t) }), icon: "folder-open", disabled: !!desktopReason, tip: desktopReason, run: () => shell({ type: "reveal" }) },
     { kind: "item", id: "open-system", label: zh ? "使用系统应用打开" : "Open with system app", icon: "external", disabled: !!desktopReason, tip: desktopReason, run: () => shell({ type: "openSystem" }) },
     ...(!desktopReason ? actions?.openers.map((opener): FileMenuEntry => ({ kind: "item", id: `open-${opener.id}`, label: zh ? `用 ${opener.name} 打开` : `Open with ${opener.name}`, icon: "code", run: () => shell({ type: "openWith", openerId: opener.id }) })) ?? [] : []),
-    { kind: "item", id: "download", label: zh ? "下载副本…" : "Download copy…", icon: "download", disabled: preview, tip: preview ? (zh ? "预览演示中不可用" : "Unavailable in preview demo") : undefined, run: () => { void globalThis.ompStudioChrome?.files?.export({ targetId: descriptor.targetId, workspaceId: descriptor.workspaceId, path: descriptor.path, ...(descriptor.source ? { source: descriptor.source } : {}) }).catch(error => setError(String(error))); } },
+    { kind: "item", id: "download", label: zh ? "下载副本…" : "Download copy…", icon: "download", disabled: preview, tip: preview ? (zh ? "预览演示中不可用" : "Unavailable in preview demo") : undefined, run: () => {
+      if (globalThis.OMP_STUDIO_WEB_ENTRY) {
+        const link = surface.createElement("a");
+        link.href = `/api/web/file?${new URLSearchParams({ workspaceId: descriptor.workspaceId, path: descriptor.path, download: "1", ...(descriptor.source ? { source: descriptor.source } : {}) })}`;
+        link.download = name; link.click(); return;
+      }
+      void globalThis.ompStudioChrome?.files?.export({ targetId: descriptor.targetId, workspaceId: descriptor.workspaceId, path: descriptor.path, ...(descriptor.source ? { source: descriptor.source } : {}) }).catch(error => setError(String(error)));
+    } },
     { kind: "sep", id: "s2" },
     { kind: "item", id: "context", label: zh ? "添加到对话" : "Add to conversation", icon: "at", disabled: !actions, tip: actions ? (zh ? "在对话输入框插入文件引用" : "Insert file reference in composer") : (zh ? "此窗口没有关联的对话" : "No conversation linked to this window"), run: () => addContext() },
     ...(showsEditor && cursor?.selected ? [{ kind: "item", id: "context-selection", label: zh ? "添加选中行到对话" : "Add selected lines to conversation", icon: "at", kbd: `${MOD_KEY} Shift L`, disabled: !actions, run: () => { const selection = controller.current?.selection(); if (selection) addContext([selection.from, selection.to]); } }] as FileMenuEntry[] : []),

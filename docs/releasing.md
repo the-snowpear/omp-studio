@@ -178,8 +178,11 @@ in [release-operations.md](release-operations.md).
 | SSH targets (six OS/CPU combinations) | `outputs/remote-environments/<platform>/` | Signed `remote-environment-<platform>.json` and complete `omp-studio-remote-<version>-<platform>.zip` / `.tar.gz` |
 
 Desktop releases also build remote environments on native Windows, Linux and
-macOS x64/arm64 runners. Each archive contains private Node, the Host bundle
-and signed Runtime. All six jobs must succeed before the desktop publication.
+macOS x64/arm64 runners. Each archive contains private Node, the Host bundle,
+signed Runtime and the standalone Web workbench. The `omp-studio-web` launcher
+uses the bundled Node. Packaging checks the target terminal module and starts
+a PTY with that Node before signing the archive. All six jobs must succeed
+before the desktop publication.
 
 Runtime-only releases build `build:release-tools` instead of the complete workspace:
 they skip the Renderer, remote Host bundle, Electron binary download, desktop

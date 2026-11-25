@@ -42,6 +42,38 @@ function setup(): { store: DockStore; storage: MemoryStorage } {
 }
 
 describe("dock persistence and session scope", () => {
+  it("defaults to inheritance while preserving a saved opt-out", () => {
+    const { store, storage } = setup();
+    expect(store.getSnapshot().preferences.inherit).toBe(true);
+    store.updatePreferences({ inherit: false });
+    const reload = new DockStore(storage);
+    expect(reload.getSnapshot().preferences.inherit).toBe(false);
+  });
+
+  it("new draft forks inherit the project's saved layout before mounting", () => {
+    const { store } = setup();
+    store.dispatch({ type: "move", panels: ["terminal"], target: { region: "right" } });
+    const source = layout(store);
+    const next = store.fork(draft);
+    expect(layout(next)).toEqual(source);
+    next.dispatch({ type: "card", panel: "terminal", collapsed: true });
+    expect(layout(store).cards.terminal.collapsed).toBe(false);
+    next.adoptDraft(b);
+    expect(layout(next).cards.terminal.collapsed).toBe(true);
+    next.dispose();
+  });
+
+  it("unscoped drafts use only their connection's latest committed layout", () => {
+    const { store, storage } = setup();
+    store.dispatch({ type: "move", panels: ["terminal"], target: { region: "left" } });
+    const recent = layout(store);
+    store.flush();
+    const reload = new DockStore(storage);
+    reload.beginDraft({ target: "local", project: null, session: "without-project" });
+    expect(layout(reload)).toEqual(recent);
+    reload.beginDraft({ target: "other-connection", project: null, session: "remote-draft" });
+    expect(layout(reload)).toEqual(createDefaultLayout());
+  });
   it.each(["context-viewer", "annotations"] as const)("centers and dims %s again after closing, including after a restart", panel => {
     const { store, storage } = setup();
     store.dispatch({ type: "open", panel });
@@ -224,8 +256,8 @@ describe("dock persistence and session scope", () => {
     store.dispatch({ type: "move", panels: ["terminal"], target: { region: "left" } });
     const original = layout(store);
     store.updatePreferences({ inherit: true });
-    const saved = [...storage.data.entries()];
     store.beginDraft(draft);
+    const saved = [...storage.data.entries()];
     expect(layout(store)).toEqual(original);
     expect(layout(store)).not.toBe(original);
     expect(store.getSnapshot().scope.draft).toBe(true);
@@ -623,13 +655,13 @@ describe("dock storage failures", () => {
     expect(previous).toContain('"recent":{}');
     storage.attempts = 0;
     storage.failAll = true;
-    store.dispatch({ type: "resize", region: "left", size: 300 });
+    store.updatePreferences({ locked: true });
     store.flush();
     // Full payload, then the identical cache-less one: the previous payload survives.
     expect(storage.attempts).toBe(2);
     expect(storage.data.get("omp.dock.v1")).toBe(previous);
     expect(storage.data.has("omp.dock.v1.backup")).toBe(false);
-    expect(layout(store).left.width).toBe(300);
+    expect(store.getSnapshot().preferences.locked).toBe(true);
   });
 
   it("keeps a one-time snapshot of the last good payload", () => {

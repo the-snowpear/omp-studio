@@ -56,9 +56,11 @@ test("the HTTPS phone can pair, stream and command only the selected conversatio
   const directory = await mkdtemp(join(tmpdir(), "omp-mobile-test-"));
   await writeFile(join(directory, "mobile.html"), "<title>OMP Studio</title>");
   const fake = fakeHost();
+  let pairedClients = 0;
   const access = await startMobileAccess({
     host: fake.host, ip: "127.0.0.1", workspaceId, workspaceName: "Workspace",
     profileDirectory: directory, rendererDirectory: directory,
+    onPaired: async () => { pairedClients++; },
   });
   t.after(() => access.close());
   const ca = `-----BEGIN CERTIFICATE-----\n${access.certificate.toString("base64")}\n-----END CERTIFICATE-----\n`;
@@ -95,11 +97,13 @@ test("the HTTPS phone can pair, stream and command only the selected conversatio
   const code = new URLSearchParams(new URL(pair.url).hash.slice(1)).get("pair");
   const paired = await call("/api/v1/pair", { code });
   assert.equal(paired.status, 200);
+  assert.equal(pairedClients, 1);
   assert.match(paired.cookie!, /HttpOnly; SameSite=Strict; Path=\/; Secure/);
   cookie = paired.cookie!.split(";")[0]!;
   csrf = (await call("/api/v1/session")).data.csrf as string;
   assert.equal(access.paired(), true);
   assert.equal((await call("/api/v1/pair", { code })).status, 401);
+  assert.equal(pairedClients, 1);
   assert.equal((await call("/api/v1/context/open", { workspaceId: "another", sessionId })).status, 400);
   assert.equal((await call("/api/v1/context/open", { workspaceId, sessionId: "another" })).status, 400);
   const recent = await call("/api/v1/query", { queryName: "history.list", input: {} });

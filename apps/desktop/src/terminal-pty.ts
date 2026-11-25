@@ -142,7 +142,7 @@ function loadNodePty(): NodePtyModule {
 /**
  * The shell's environment. `process.env` already carries the macOS login
  * shell's PATH and LANG (`platform/login-env.ts`); POSIX also names the
- * terminal and keeps Electron's own switches out of the user's shell.
+ * terminal. Electron's own switches never enter the user's shell.
  */
 export function terminalEnvironment(
   source: NodeJS.ProcessEnv = process.env,
@@ -152,7 +152,7 @@ export function terminalEnvironment(
   const posix = platform === "darwin" || platform === "linux";
   for (const [key, value] of Object.entries(source)) {
     if (value === undefined) continue;
-    if (posix && key.startsWith("ELECTRON_")) continue;
+    if (key.startsWith("ELECTRON_")) continue;
     env[key] = value;
   }
   env.TERM = env.TERM ?? "xterm-256color";

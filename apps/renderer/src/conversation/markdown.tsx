@@ -13,6 +13,7 @@ import remarkGfm from "remark-gfm";
 import { scanStreamingMarkdown, type StreamingCodeFence, type StreamingMarkdownScan } from "./markdownBlocks";
 import { withMagicKeywordChildren } from "./magicKeywordMarkdown";
 import { LazyMermaid } from "./LazyMermaid";
+import { MermaidFigure } from "../diagrams/MermaidFigure";
 import { performanceOptions } from "../performanceOptions";
 import { HighlightedCode } from "../highlight/HighlightedCode";
 import { ExtensionAwareLink } from "./ExtensionLinks";
@@ -71,7 +72,7 @@ function LegacyMermaid({ code }: { code: string }) {
     }
     return () => { active = false; };
   }, [code, svg]);
-  return <div ref={host} className="mermaid-box" {...(svg ? { dangerouslySetInnerHTML: { __html: svg } } : {})}>{svg === null ? <span className="mermaid-pending">{zh ? "图表等待渲染…" : "Diagram pending…"}</span> : svg === "" ? <pre className="codeblock md-code-pre"><code>{code}</code></pre> : null}</div>;
+  return <div ref={host}>{svg ? <MermaidFigure code={code} svg={svg} /> : <div className="mermaid-box">{svg === null ? <span className="mermaid-pending">{zh ? "图表等待渲染…" : "Diagram pending…"}</span> : <pre className="codeblock md-code-pre"><code>{code}</code></pre>}</div>}</div>;
 }
 
 function CodeFrame({ language, text, children, streaming }: { language: string; text: string; children: ReactNode; streaming: boolean }) {

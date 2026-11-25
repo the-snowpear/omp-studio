@@ -1,14 +1,15 @@
 import type { LayoutMemory } from "../settings/appSettings";
 import { isZh, pickLocale } from "../i18n";
-import { preserveFileViews, applyBrowserPagePreset, applyInstancePreset, builtInPresets, clampFloat, createDefaultLayout, dockReducer, instancePresetLayout, locatePanel, moveConflicts, normalizeLayout, removePanels, resolveOpenIn } from "./model";
+import { preserveDiagramViews, preserveFileViews, applyBrowserPagePreset, applyInstancePreset, builtInPresets, clampFloat, createDefaultLayout, dockReducer, instancePresetLayout, locatePanel, moveConflicts, newConversationLayout, normalizeLayout, removePanels, resolveOpenIn } from "./model";
 import { projectConversationPanel } from "./conversationPanels";
 import { workbenchBounds } from "./workbenchGeometry";
 import { pinWorkspace, pinsForScope, putPin, readPins, subtractPinPanels, withPins } from "./pins";
 import type { DockFloat, DockPinMode, DockRect } from "./types";
+import { isDiagramPanelId } from "./types";
 import { WorkbenchWindows, toolWindowId, type WorkbenchWindow } from "./windows";
 import { WINDOW_MINIMUM } from "./snap";
 import { WORKBENCH_PANELS, localizePanelDefinition } from "../panels/registry";
-import { isFilePanelId, isFocusWindowPanel, PANEL_IDS, conversationPanelId, isConversationPanelId, isAgentPanelId, isBrowserPagePanelId, panelBaseId, type DockAction, type DockLayout, type DockPreferences, type DockPreset, type DockScope, type DockSnapshot, type DockTarget, type PanelId } from "./types";
+import { isFilePanelId, isFocusWindowPanel, isSessionWindowPanel, PANEL_IDS, conversationPanelId, isConversationPanelId, isAgentPanelId, isBrowserPagePanelId, panelBaseId, type DockAction, type DockLayout, type DockPreferences, type DockPreset, type DockScope, type DockSnapshot, type DockTarget, type PanelId } from "./types";
 
 const STORAGE_KEY = "omp.dock.v1";
 /** One manual-recovery snapshot of the last good payload; never rewritten. */
@@ -38,14 +39,15 @@ function scopeKey(scope: DockScope): string {
 }
 
 /** A pin carries the descriptors of the Agents and pages it holds, so it can render them in any session. */
-function withPinnedInstances<Pin extends object>(pin: Pin, panels: readonly PanelId[], layout: DockLayout): Pin & { agentPanels: DockLayout["agentPanels"]; browserPages?: DockLayout["browserPages"]; fileViews?: DockLayout["fileViews"] } {
+function withPinnedInstances<Pin extends object>(pin: Pin, panels: readonly PanelId[], layout: DockLayout): Pin & { agentPanels: DockLayout["agentPanels"]; browserPages?: DockLayout["browserPages"]; fileViews?: DockLayout["fileViews"]; diagramViews?: DockLayout["diagramViews"] } {
   const pick = <Value,>(source: Record<string, Value>, keep: (id: PanelId) => boolean) => Object.fromEntries(panels.filter(keep).flatMap(id => source[id] ? [[id, source[id]]] : [])) as Record<string, Value>;
   const browserPages = pick(layout.browserPages ?? {}, isBrowserPagePanelId);
-  return { ...pin, fileViews: pick(layout.fileViews ?? {}, isFilePanelId), agentPanels: pick(layout.agentPanels, isAgentPanelId), ...(Object.keys(browserPages).length ? { browserPages } : {}) };
+  const diagramViews = pick(layout.diagramViews, isDiagramPanelId);
+  return { ...pin, fileViews: pick(layout.fileViews ?? {}, isFilePanelId), ...(Object.keys(diagramViews).length ? { diagramViews } : {}), agentPanels: pick(layout.agentPanels, isAgentPanelId), ...(Object.keys(browserPages).length ? { browserPages } : {}) };
 }
 
 function defaultPreferences(): DockPreferences {
-  return { snap: true, locked: false, inherit: false, appDefault: "default", projectDefaults: {} };
+  return { snap: true, locked: false, inherit: true, appDefault: "default", projectDefaults: {} };
 }
 
 type LayoutHistoryEntry = { layout: DockLayout; conversation: WorkbenchWindow | undefined };
@@ -162,6 +164,7 @@ export class DockStore {
   private dirty = false;
   private sequence = 0;
   private modalPanel: PanelId | null = null;
+  private toolsDormant = false;
   /** Pending debounced write; a drag resize dispatches per frame but stores once. */
   private timer: ReturnType<typeof setTimeout> | undefined;
   /** Lifecycle listeners exist only while a write is pending. */
@@ -180,7 +183,7 @@ export class DockStore {
       this.demo = owner.demo;
       this.scope = { ...(scope ?? owner.scope) };
       this.preview = preview;
-      if (!this.state.layouts.has(scopeKey(this.scope))) this.state.layouts.set(scopeKey(this.scope), this.startingLayout(this.scope));
+      if (!this.state.layouts.has(scopeKey(this.scope))) this.state.layouts.set(scopeKey(this.scope), this.startingLayout(this.scope, !!this.scope.draft));
       this.snapshot = this.makeSnapshot();
       return;
     }
@@ -299,6 +302,20 @@ export class DockStore {
     return unsubscribe;
   }
   setConversationTitle(title: string) { if (title !== this.conversationTitle) { this.conversationTitle = title; this.publish(); } }
+  setToolsDormant(dormant: boolean): void {
+    if (this.toolsDormant === dormant) return;
+    this.toolsDormant = dormant;
+    this.publish();
+  }
+  private presentedLayout(): DockLayout {
+    if (!this.toolsDormant) return this.layout;
+    const panels = this.layout.floats.flatMap(group => group.panels.filter(panel => !isSessionWindowPanel(panel)));
+    if (!panels.length) return this.layout;
+    const next = removePanels(this.layout, panels);
+    next.fileViews = Object.fromEntries(Object.entries(next.fileViews).filter(([id]) => !panels.includes(id as PanelId)));
+    return next;
+  }
+  newDraftLayout(): DockLayout { return newConversationLayout(this.snapshot.layout); }
   private bindWindowGeometry(group: DockFloat): DockFloat {
     const manager = this.windowManager!, id = this.windowId(group.id);
     const { rect, minimized, maximized, ...content } = group;
@@ -323,7 +340,7 @@ export class DockStore {
     if (!manager || this.reconcilingWindows) return;
     this.reconcilingWindows = true;
     try { manager.transaction(() => {
-      const groups = withPins(projectConversationPanel(this.layout, this.conversationWindow(), false), pinsForScope(this.state.pins, this.scope)).floats;
+      const groups = withPins(projectConversationPanel(this.presentedLayout(), this.conversationWindow(), false), pinsForScope(this.state.pins, this.scope)).floats;
       const ids = new Set(groups.map(group => this.windowId(group.id)));
       for (const record of manager.getSnapshot().records) if (record.content.kind === "tools" && record.content.documentId === this.documentId && !ids.has(record.id)) manager.remove(record.id);
       const zh = (this.owner ?? this).localeZh ?? isZh();
@@ -333,7 +350,7 @@ export class DockStore {
         const definition = rawDefinition ? localizePanelDefinition(rawDefinition, zh) : undefined;
         const conversationActive = isConversationPanelId(group.active);
         const minimum = toolWindowMinimum(group.active, group.panels.length);
-        const title = conversationActive ? this.conversationTitle : `${definition?.title ?? this.snapshot?.layout.agentPanels[group.active]?.target.displayName ?? (isFilePanelId(group.active) ? this.snapshot?.layout.fileViews[group.active]?.title || "File" : isBrowserPagePanelId(group.active) ? this.snapshot?.layout.browserPages[group.active]?.title || "Browser" : group.active)}${this.conversationTitle ? ` · ${this.conversationTitle}` : ""}`;
+        const title = conversationActive ? this.conversationTitle : `${definition?.title ?? this.snapshot?.layout.agentPanels[group.active]?.target.displayName ?? (isDiagramPanelId(group.active) ? zh ? "Mermaid 图表" : "Mermaid diagram" : isFilePanelId(group.active) ? this.snapshot?.layout.fileViews[group.active]?.title || "File" : isBrowserPagePanelId(group.active) ? this.snapshot?.layout.browserPages[group.active]?.title || "Browser" : group.active)}${this.conversationTitle ? ` · ${this.conversationTitle}` : ""}`;
         if (!manager.get(id)) {
           if (group.pin ? group.pin.coordinateVersion !== 1 : this.layout.floatCoordinateVersion !== 1) this.unmigratedWindows.add(id);
           manager.register({ id, content: { kind: "tools", documentId: this.documentId!, groupId: group.id }, title, minimum, placement: pin === "window" || pin === "topmost" ? "native" : "float", pin, rect: group.rect, minimized: group.minimized, maximized: group.maximized, ...(group.pin?.windowRect ? { nativeRect: group.pin.windowRect } : {}) });
@@ -371,7 +388,7 @@ export class DockStore {
     const preset = state.presets.find(preset => preset.id === layout.presetId)?.layout;
     const baseline = preset && Object.keys(layout.browserPages).length ? instancePresetLayout(applyBrowserPagePreset(preset, layout)) : preset;
     return {
-      layout: this.projectLayout(withPins(layout, pinsForScope(state.pins, this.scope))), preferences: state.preferences, presets: state.presets, scope: this.scope, preview: this.preview, modalPanel: this.modalPanel,
+      layout: this.projectLayout(withPins(this.presentedLayout(), pinsForScope(state.pins, this.scope))), preferences: state.preferences, presets: state.presets, scope: this.scope, preview: this.preview, modalPanel: this.modalPanel,
       canUndo: !!history?.undo.length, canRedo: !!history?.redo.length,
       modified: !equal(instancePresetLayout(layout), baseline),
     };
@@ -481,9 +498,15 @@ export class DockStore {
     state.layouts.set(key, layout);
     if (!scope.draft || Object.keys(layout.cards).some(isConversationPanelId)) {
       state.saved.set(key, layout);
-      if (scope.project !== null) state.recent.set(dockProjectKey(scope), { scopeKey: key, layout });
+      this.rememberRecent(state, scope, layout);
       if (!this.preview) this.dirty = true;
     }
+  }
+
+  private rememberRecent(state: StoreState, scope: DockScope, layout: DockLayout): void {
+    const recent = { scopeKey: scopeKey(scope), layout };
+    if (scope.project !== null) state.recent.set(dockProjectKey(scope), recent);
+    state.recent.set(dockProjectKey({ ...scope, project: null }), recent);
   }
 
   private commit(layout: DockLayout, undoable = true, conversation = this.conversationWindow()): void {
@@ -603,9 +626,9 @@ export class DockStore {
       } finally { this.reconcilingWindows = false; }
     }
     // Page tabs follow the browser's own state, so undo must never restore a closed page or drop an open one.
-    if (base !== this.layout) this.commit(base, action.type !== "activate" && action.type !== "reveal" && action.type !== "raise" && action.type !== "agent-focus" && !action.type.startsWith("browser-page-") && !action.type.startsWith("file-"), conversation);
+    if (base !== this.layout) this.commit(base, action.type !== "activate" && action.type !== "reveal" && action.type !== "raise" && action.type !== "agent-focus" && !action.type.startsWith("browser-page-") && !action.type.startsWith("file-") && !action.type.startsWith("diagram-"), conversation);
     else if (pinsChanged) { this.queue(); this.publish(); }
-    if (action.type === "file-close") {
+    if (action.type === "file-close" || action.type === "diagram-close") {
       this.state.pins = subtractPinPanels(this.state.pins, action.panels);
       for (const [key, layout] of this.state.layouts) {
         const next = dockReducer(layout, action);
@@ -639,6 +662,10 @@ export class DockStore {
         if (descriptor && !base.agentPanels[panel]) base = dockReducer(base, { type: "agent-open", panel, descriptor });
       }
       // Another chat's pages go home to that chat's layout instead of joining this one.
+      for (const panel of group.panels) if (isDiagramPanelId(panel) && !base.diagramViews[panel]) {
+        const descriptor = this.snapshot.layout.diagramViews[panel];
+        if (descriptor) base = dockReducer(base, { type: "diagram-open", panel, descriptor });
+      }
       for (const panel of group.panels) if (isFilePanelId(panel) && !base.fileViews[panel]) {
         const descriptor = this.snapshot.layout.fileViews[panel];
         if (descriptor) base = dockReducer(base, { type: "file-open", panel, descriptor });
@@ -677,7 +704,7 @@ export class DockStore {
   }
 
   private startingLayout(scope: DockScope, inherit = false): DockLayout {
-    if (inherit && this.state.preferences.inherit && scope.project !== null) {
+    if (inherit && this.state.preferences.inherit) {
       const recent = this.state.recent.get(dockProjectKey(scope));
       if (recent) return instancePresetLayout(recent.layout);
     }
@@ -699,21 +726,24 @@ export class DockStore {
     this.preview = preview;
     this.scope = { ...scope };
     if (this.owner && !scope.draft) this.state.pins = this.state.pins.map(group => group.pin && !group.pin.owner ? { ...group, pin: { ...group.pin, owner: key } } : group);
-    if (!this.state.layouts.has(key) || (!scope.draft && !this.state.saved.has(key))) this.state.layouts.set(key, this.startingLayout(scope));
+    if (!this.state.layouts.has(key) || (!scope.draft && !this.state.saved.has(key))) this.state.layouts.set(key, this.startingLayout(scope, !!scope.draft));
     this.flush();
     this.publish();
   }
 
-  beginDraft(scope: DockScope): void {
+  prepareDraft(scope: DockScope, layout?: DockLayout): DockScope {
     this.flush();
-    this.modalPanel = null;
     const draft = { ...scope, draft: true };
     const key = scopeKey(draft);
-    const layout = this.startingLayout(draft, true);
-    this.state.layouts.set(key, layout);
+    this.state.layouts.set(key, layout ? cloneLayout(layout) : this.startingLayout(draft, true));
     this.state.histories.delete(key);
     this.state.drafts.set(dockProjectKey(draft), key);
-    this.scope = draft;
+    return draft;
+  }
+
+  beginDraft(scope: DockScope): void {
+    this.modalPanel = null;
+    this.scope = this.prepareDraft(scope);
     this.publish();
   }
 
@@ -725,6 +755,7 @@ export class DockStore {
     const currentIsDraft = namespaceMatches && !!this.scope.draft && dockProjectKey(this.scope) === project && (!origin || scopeKey(this.scope) === scopeKey(origin.scope));
     const draftKey = origin ? scopeKey(origin.scope) : currentIsDraft ? scopeKey(this.scope) : state.drafts.get(project);
     if (!draftKey) return;
+    const adoptsCurrent = namespaceMatches && scopeKey(this.scope) === draftKey;
     const draft = state.layouts.get(draftKey);
     if (!draft) return;
     const key = scopeKey(formal);
@@ -733,13 +764,14 @@ export class DockStore {
     const adopted = cloneLayout(draft);
     state.layouts.set(key, adopted);
     state.saved.set(key, adopted);
-    if (formal.project !== null) state.recent.set(project, { scopeKey: key, layout: adopted });
+    this.rememberRecent(state, formal, adopted);
     if (state === this.real) this.dirty = true;
     if (history) state.histories.set(key, { undo: [...history.undo], redo: [...history.redo] });
-    state.layouts.delete(draftKey);
-    state.histories.delete(draftKey);
-    state.drafts.delete(project);
-    if (currentIsDraft) this.scope = formal;
+    // The root store (or another mounted fork) may still hold this initial scope.
+    const retained = [...this.handles].some(handle => handle !== this && handle.state === state && scopeKey(handle.scope) === draftKey);
+    if (!retained) { state.layouts.delete(draftKey); state.histories.delete(draftKey); }
+    if (state.drafts.get(project) === draftKey) state.drafts.delete(project);
+    if (adoptsCurrent) this.scope = formal;
     this.flush();
     this.publish();
   }
@@ -751,8 +783,7 @@ export class DockStore {
     state.saved.delete(key);
     state.layouts.delete(key);
     state.histories.delete(key);
-    const project = dockProjectKey(formal);
-    if (state.recent.get(project)?.scopeKey === key) state.recent.delete(project);
+    for (const [recentKey, recent] of state.recent) if (recent.scopeKey === key) state.recent.delete(recentKey);
     if (scopeKey(this.scope) === key) state.layouts.set(key, this.startingLayout(formal));
     if (!this.preview) this.dirty = true;
     this.flush();
@@ -765,7 +796,7 @@ export class DockStore {
     if (!entry) return;
     this.modalPanel = null;
     history.redo.push({ layout: this.layout, conversation: this.conversationWindow() });
-    this.save(this.scope, preserveFileViews(entry.layout, this.layout));
+    this.save(this.scope, preserveDiagramViews(preserveFileViews(entry.layout, this.layout), this.layout));
     if (entry.conversation) this.windowManager?.patch(entry.conversation.id, entry.conversation);
     this.flush();
     this.publish();
@@ -777,7 +808,7 @@ export class DockStore {
     if (!entry) return;
     this.modalPanel = null;
     history.undo.push({ layout: this.layout, conversation: this.conversationWindow() });
-    this.save(this.scope, preserveFileViews(entry.layout, this.layout));
+    this.save(this.scope, preserveDiagramViews(preserveFileViews(entry.layout, this.layout), this.layout));
     if (entry.conversation) this.windowManager?.patch(entry.conversation.id, entry.conversation);
     this.flush();
     this.publish();

@@ -42,7 +42,7 @@ function entryName(name: string): string {
 
 export interface SystemFileServiceOptions {
   readonly registry: WorkspaceRegistry;
-  readonly knownFolders?: Partial<Record<SystemQuickKind, string>>;
+  readonly knownFolders?: Partial<Record<SystemQuickKind, string>> | (() => Promise<Partial<Record<SystemQuickKind, string>> | undefined>);
   readonly trash?: (path: string) => Promise<void>;
 }
 
@@ -84,10 +84,11 @@ export function createSystemFileService({ registry, knownFolders, trash }: Syste
     return entries.filter(entry => entry.isDirectory()).map(entry => join(parent, entry.name));
   }
   async function places(): Promise<SystemPlaces> {
+    const folders = typeof knownFolders === "function" ? await knownFolders() : knownFolders;
     const home = homedir();
     const quick = (await Promise.all((["home", "desktop", "downloads", "documents", "pictures"] as const).map(async kind => {
       const label = kind[0]!.toUpperCase() + kind.slice(1);
-      const path = knownFolders?.[kind] ?? (kind === "home" ? home : join(home, label));
+      const path = folders?.[kind] ?? (kind === "home" ? home : join(home, label));
       return await stat(path).then(info => info.isDirectory() ? { kind, label, path } : undefined, () => undefined);
     }))).filter(item => item !== undefined);
     const volumes = platform === "win32" ? await windowsVolumes() : await localVolumes();

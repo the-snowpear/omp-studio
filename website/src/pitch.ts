@@ -4,9 +4,11 @@
 // named in the lede open their windows on the desk, and each thing-to-try is
 // ticked by a spark that flies in from wherever on the page it was done.
 import gsap from "gsap";
+import { isEn, t } from "../shared/i18n";
+import { i } from "../shared/icons";
 import { KINDS, type Kind } from "../shared/ui";
 
-export type Quest = "snap" | "layout" | "open" | "pin" | "theme";
+export type Quest = "snap" | "merge" | "layout" | "open" | "pin" | "theme";
 interface Point { x: number; y: number }
 
 export interface Pitch {
@@ -22,7 +24,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), h
 const centre = (r: DOMRect): Point => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
 const rand = (lo: number, hi: number) => lo + Math.random() * (hi - lo);
 
-export function mountPitch(pitch: HTMLElement, openTool: (kind: Kind) => void): Pitch {
+export function mountPitch(pitch: HTMLElement, openTool: (kind: Kind) => void, demo: (quest: Quest) => Promise<void>): Pitch {
   const $ = <T extends HTMLElement = HTMLElement>(sel: string) => pitch.querySelector<T>(sel)!;
   const $$ = <T extends HTMLElement = HTMLElement>(sel: string) => [...pitch.querySelectorAll<T>(sel)];
 
@@ -189,7 +191,7 @@ export function mountPitch(pitch: HTMLElement, openTool: (kind: Kind) => void): 
     const kind = word.dataset.open as Kind;
     const shelf = () => document.querySelector(`.dock-item[data-kind="${kind}"]`);
     word.style.setProperty("--tint", KINDS[kind].tint);
-    word.title = `在工作台打开「${word.textContent}」窗口`;
+    word.title = t(`在工作台打开「${word.textContent}」窗口`, `Open ${word.textContent} window on desk`);
     word.addEventListener("click", () => openTool(kind));
     for (const [on, off] of [["pointerenter", "pointerleave"], ["focus", "blur"]] as const) {
       word.addEventListener(on, () => shelf()?.setAttribute("data-cue", ""));
@@ -199,31 +201,37 @@ export function mountPitch(pitch: HTMLElement, openTool: (kind: Kind) => void): 
 
   // ---------------- things to try ----------------
   const meter = $("#q-meter");
-  const count = $("#q-count");
   const rows = new Map<Quest, HTMLElement>();
   for (const row of $$("[data-quest]")) {
     const quest = row.dataset.quest as Quest;
     rows.set(quest, row);
     row.querySelector(".q-box")!.innerHTML = CHECK;
+    row.querySelector(".q-play")!.innerHTML = `${i("play")}${t("示范", "Demo")}`;
+    meter.append(document.createElement("i"));
+    // Pressing a row has a hand do it on the desk. One at a time.
+    row.querySelector("button")!.addEventListener("click", () => {
+      if (pitch.querySelector("[data-playing]")) return;
+      delete root.dataset.cue;
+      row.dataset.playing = "";
+      demo(quest).finally(() => delete row.dataset.playing);
+    });
     // Pointing at a task lights up the control it is about (styles in desk.css).
     row.addEventListener("pointerenter", (e) => {
-      if (e.pointerType === "mouse") root.dataset.cue = quest;
+      if (e.pointerType === "mouse" && !pitch.querySelector("[data-playing]")) root.dataset.cue = quest;
     });
     row.addEventListener("pointerleave", () => delete root.dataset.cue);
   }
-  meter.addEventListener("animationend", () => meter.removeAttribute("data-bump"));
 
   const started = new Set<Quest>();
   let ticked = 0;
   const tick = (quest: Quest) => {
     const row = rows.get(quest)!;
     row.dataset.done = "";
-    row.setAttribute("aria-label", `已完成：${row.querySelector(".q-text")!.textContent}`);
-    ticked++;
-    count.textContent = String(ticked);
-    meter.setAttribute("aria-label", `已完成 ${ticked} 项，共 ${rows.size} 项`);
-    meter.dataset.some = "";
-    meter.dataset.bump = "";
+    row.querySelector("button")!.setAttribute("aria-label", t(`已完成：${row.querySelector(".q-text")!.textContent}`, `Done: ${row.querySelector(".q-text")!.textContent}`));
+    const bar = meter.children[ticked++] as HTMLElement;
+    bar.dataset.on = "";
+    bar.dataset.bump = "";
+    meter.setAttribute("aria-label", t(`已完成 ${ticked} 项，共 ${rows.size} 项`, `${ticked} of ${rows.size} completed`));
     if (ticked < rows.size) return;
     $("#quests-done").hidden = false;
     if (!reduced()) confetti(centre(meter.getBoundingClientRect()));
@@ -298,7 +306,9 @@ export function mountPitch(pitch: HTMLElement, openTool: (kind: Kind) => void): 
 
   // ---------------- entrance ----------------
   if (root.dataset.intro === "pending") {
-    const faces = [document.fonts.load('800 1em "Noto Sans SC Variable"', "把装进一张随你摆放的工作台"), document.fonts.load('800 1em "Bricolage Grotesque Variable"', "Agent")];
+    const faces = isEn()
+      ? [document.fonts.load('800 1em "Bricolage Grotesque Variable"', "Put Agents on a movable desk you arrange")]
+      : [document.fonts.load('800 1em "Noto Sans SC Variable"', "把装进一张随你摆放的工作台"), document.fonts.load('800 1em "Bricolage Grotesque Variable"', "Agent")];
     // Wait for the headline's own type, but not for long: a late font is better than a late page.
     Promise.race([Promise.allSettled(faces), new Promise((done) => setTimeout(done, 900))]).then(() => {
       if (root.dataset.intro !== "pending") return;

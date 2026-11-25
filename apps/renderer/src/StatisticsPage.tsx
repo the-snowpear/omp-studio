@@ -57,7 +57,8 @@ export function StatisticsPage({ client }: { client: StudioClient }) {
             return;
           }
           framedRef.current = false;
-          setUrl(result.url);
+          const dashboard = new URL(result.url);
+          setUrl(globalThis.OMP_STUDIO_WEB_ENTRY ? `/stats/${dashboard.search}${dashboard.hash}` : result.url);
           return;
         }
         framedRef.current = false;

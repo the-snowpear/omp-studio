@@ -16,7 +16,7 @@ import { PREVIEW_BACKGROUND_SERVICES } from "../preview/backgroundTasksPreview";
 import { useWindowOrder } from "../dock/windowOrder";
 
 /** Deterministic scene using the production windows, task bodies, and managed browser tabs. */
-function Scene() {
+function Scene({ language, onLanguage }: { language: "zh" | "en"; onLanguage: (language: "zh" | "en") => void }) {
   const { store, layout, scope } = useDock();
   const mainWindow = useWindowOrder(0, { id: "background-task-main", floating: false });
   const { preview } = usePreviewMode();
@@ -35,6 +35,7 @@ function Scene() {
       <button className="btn small" onClick={() => { store.dispatch({ type: "railMode", mode: "expanded" }); store.dispatch({ type: "card", panel: "jobs", collapsed: true }); }}>折叠卡片</button>
       <button className="btn small" onClick={() => store.dispatch({ type: "railMode", mode: "compact" })}>图标</button>
       <button className="btn small" onClick={() => { document.documentElement.dataset.theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark"; }}>明暗</button>
+      <button className="btn small" onClick={() => onLanguage(language === "zh" ? "en" : "zh")}>{language === "zh" ? "English" : "中文"}</button>
     </div>
     <main className="adaptive-workbench" data-dock-window={mainWindow.id} style={{ display: "flex", width: "100vw", height: "calc(100vh - 32px)", position: "relative", background: "var(--bg)" }}>
       <div className="convo-wrap" style={{ flex: 1, position: "relative", minWidth: 0, height: "100%" }}><DockRail mode={layout.rail.mode} /></div>
@@ -50,6 +51,7 @@ function Scene() {
   </>;
 }
 export function BackgroundTasksHarness() {
+  const [language, setLanguage] = useState<"zh" | "en">("zh");
   const [store] = useState(() => {
     const value = new DockStore(null);
     value.switchScope({ target: "preview", project: "background-tasks", session: "background-tasks-acceptance" }, true);
@@ -63,5 +65,5 @@ export function BackgroundTasksHarness() {
     }
     return value;
   });
-  return <I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled><DockProvider store={store} definitions={WORKBENCH_PANELS}><Scene /></DockProvider></PreviewModeProvider></I18nProvider>;
+  return <I18nProvider forcedLanguage={language}><PreviewModeProvider switchEnabled><DockProvider store={store} definitions={WORKBENCH_PANELS}><Scene language={language} onLanguage={setLanguage} /></DockProvider></PreviewModeProvider></I18nProvider>;
 }

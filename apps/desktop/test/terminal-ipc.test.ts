@@ -247,6 +247,7 @@ describe("registerTerminalIpc", () => {
         TERMINAL_IPC_CHANNELS.create,
         TERMINAL_IPC_CHANNELS.dispose,
         TERMINAL_IPC_CHANNELS.resize,
+        TERMINAL_IPC_CHANNELS.rebind,
         TERMINAL_IPC_CHANNELS.write,
         TERMINAL_IPC_CHANNELS.recordingStart,
         TERMINAL_IPC_CHANNELS.recordingStop,

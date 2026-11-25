@@ -60,15 +60,15 @@ export function waitForDocument(child: Window, key: string): Promise<Document> {
 }
 
 /** Native tool and conversation windows share creation, appearance and lifecycle. */
-export function NativeWindowHost({ id, title, rect, sourceRect, minimized, maximized, topmost, minimum, onSurface, onState, onClose, onError, onFocus, focusEvent, acceptsFocus, children }: {
+export function NativeWindowHost({ id, title, rect, sourceRect, minimized, maximized, topmost, minimum, onSurface, onState, onClose, onRehome, onError, onFocus, focusEvent, acceptsFocus, children }: {
   id: string; title: string; rect?: DockRect | undefined; sourceRect?: DockRect | undefined; minimized: boolean; maximized: boolean; topmost: boolean;
   minimum?: { width: number; height: number }; onSurface?: (document: Document) => () => void;
-  onState: (state: { rect: DockRect; minimized: boolean; maximized: boolean }) => void; onClose: () => void; onError: (message: string) => void; onFocus?: () => void;
+  onState: (state: { rect: DockRect; minimized: boolean; maximized: boolean }) => void; onClose: () => void; onRehome?: () => void; onError: (message: string) => void; onFocus?: () => void;
   focusEvent: string; acceptsFocus: (event: Event) => boolean;
   children: (surface: { doc: Document; key: string; bounds: DockRect }) => ReactNode;
 }) {
-  const current = useRef({ title, rect, sourceRect, minimized, maximized, topmost, minimum, onSurface, onState, onClose, onError, onFocus, acceptsFocus });
-  current.current = { title, rect, sourceRect, minimized, maximized, topmost, minimum, onSurface, onState, onClose, onError, onFocus, acceptsFocus };
+  const current = useRef({ title, rect, sourceRect, minimized, maximized, topmost, minimum, onSurface, onState, onClose, onRehome, onError, onFocus, acceptsFocus });
+  current.current = { title, rect, sourceRect, minimized, maximized, topmost, minimum, onSurface, onState, onClose, onRehome, onError, onFocus, acceptsFocus };
   const [surface, setSurface] = useState<{ doc: Document; key: string } | null>(null);
   const [bounds, setBounds] = useState<DockRect>({ x: 0, y: 0, width: 640, height: 560 });
   useEffect(() => {
@@ -94,6 +94,7 @@ export function NativeWindowHost({ id, title, rect, sourceRect, minimized, maxim
         unwatch = api.onFloatWindow?.(event => {
           if (event.key !== key || disposed) return;
           if (event.kind === "close-request") current.current.onClose();
+          else if (event.kind === "rehome") current.current.onRehome?.();
           else if (event.kind === "state") current.current.onState(event);
         });
         setSurface({ doc, key });
@@ -137,6 +138,7 @@ export function NativeFloat({ group, namespace, onError }: { group: DockFloat; n
     onSurface={doc => hosts.attachWindow(doc)} onState={event => { store.setNativeState(group.id, event); if (event.minimized) windows?.forget(`tool:${store.documentId ?? "standalone"}:${group.id}`); hosts.flush(); }}
     onFocus={() => windows?.activate(`tool:${store.documentId ?? "standalone"}:${group.id}`, store.documentId ?? null)}
     onClose={() => closePanels(store, definitions, group.panels)}
+    onRehome={() => store.setPin(group.id, group.pin?.returnMode ?? "application")}
     onError={message => { store.setPin(group.id, group.pin?.returnMode ?? "application"); onError(message); }}
     focusEvent="omp:dock-open" acceptsFocus={event => {
       const { panel, documentId } = (event as CustomEvent).detail;

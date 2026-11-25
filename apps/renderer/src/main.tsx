@@ -108,7 +108,7 @@ export function mountRenderer(element: Element, client: StudioClient): void {
 }
 
 const host = document.getElementById("root");
-if (host !== null && !new URL(window.location.href).searchParams.has("dockHost")) {
+if (host !== null && !globalThis.OMP_STUDIO_WEB_ENTRY && !new URL(window.location.href).searchParams.has("dockHost")) {
   let client: StudioClient | undefined = globalThis.OMP_STUDIO_CLIENT;
   if (client === undefined) {
     const bridge = globalThis.ompStudio;

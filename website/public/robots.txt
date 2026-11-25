@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /omp-studio/live/
+Disallow: /live/
+
+Sitemap: https://the-snowpear.github.io/omp-studio/sitemap.xml

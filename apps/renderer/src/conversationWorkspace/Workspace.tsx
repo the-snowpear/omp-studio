@@ -23,7 +23,7 @@ import { ExecutionTargetScope, useExecutionTargets } from "../workspaces/Executi
 import { Icon } from "../icons";
 import { useI18n } from "../i18n";
 import { ConversationViewContext, WorkspaceContext, useConversationLayoutLocked, type SharedRegion } from "./Context";
-import { conversationVisible, MIN_VIEW, type ConversationDocument, type ConversationView } from "./model";
+import { conversationDockScope, conversationVisible, MIN_VIEW, type ConversationDocument, type ConversationView } from "./model";
 import { ConversationWorkspaceStore } from "./store";
 import type { DocumentHosts } from "./hosts";
 import { snapCells } from "./snap";
@@ -152,7 +152,7 @@ function ConversationDocumentHost({ enabled, record, client: initialClient, stor
   const view = state.views.find(view => view.documentId === record.id);
   const active = enabled && record.id === state.activeDocumentId;
   useLayoutEffect(() => { if (active) sessionSwitchPerformance.mark("switch.commit"); }, [active, record.id]);
-  const [localDock] = useState(() => dock.fork({ target: record.ref.targetId ?? "local", project: record.ref.workspaceId ?? null, session: record.ref.sessionId ?? record.ref.draftId ?? record.id, ...(!record.ref.sessionId ? { draft: true } : {}) }, store.demo));
+  const [localDock] = useState(() => dock.fork(conversationDockScope(record.ref, record.id, store.demo), store.demo));
   const dockedVisible = useSyncExternalStore(localDock.subscribe, () => view?.placement !== "docked" || active && dockedPanelVisible(localDock.getSnapshot().layout, conversationPanelId(view.id)));
   const visible = enabled && !!view && conversationVisible(view, state) && dockedVisible;
   localDock.documentId = record.id;
@@ -162,6 +162,10 @@ function ConversationDocumentHost({ enabled, record, client: initialClient, stor
     return release;
   }, [localDock, store, record.id]);
   useLayoutEffect(() => localDock.setConversationTitle(record.title), [localDock, record.title]);
+  useLayoutEffect(() => {
+    localDock.setToolsDormant(!!record.toolsTransferred && !view);
+    if (view && record.toolsTransferred) store.updateDocument(record.id, { toolsTransferred: false });
+  }, [localDock, store, record.id, record.toolsTransferred, view?.id]);
   const content = useMemo<PanelContentAdapter | undefined>(() => {
     if (!view) return undefined;
     const id = view.id;
@@ -292,6 +296,7 @@ function ConversationWindow({ view, store, hosts, bounds, order, snapLayer }: { 
     sourceRect={{ ...view.rect, x: bounds.x + view.rect.x, y: bounds.y + view.rect.y }} minimum={MIN_VIEW}
     minimized={view.minimized} maximized={view.maximized} topmost={view.pin === "topmost"}
     onFocus={() => store.activate(view.id)} onClose={() => store.close(view.id)}
+    onRehome={() => store.setPin(view.id, "none")}
     onState={event => { if (JSON.stringify(view.nativeRect) !== JSON.stringify(event.rect) || view.minimized !== event.minimized || view.maximized !== event.maximized) store.setWindow(view.id, { nativeRect: event.rect, minimized: event.minimized, maximized: event.maximized }); }}
     onError={message => { console.error(message); store.setPin(view.id, "none"); }} focusEvent="omp:conversation-focus" acceptsFocus={event => (event as CustomEvent).detail === view.id}>
     {({ key, bounds }) => content(bounds, key)}

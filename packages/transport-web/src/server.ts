@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import type {
   ClientBootstrap, ClientCommandRequest, ClientQueryRequest, ClientQueryResponse,
@@ -14,6 +14,7 @@ export interface WebAdapterHost {
 }
 
 export interface WebAdapterOptions {
+  openView?: () => Promise<import("@omp-studio/client-contract").ClientTransport>;
   host: WebAdapterHost;
   origins: readonly string[];
   pairingCode?: string;
@@ -23,9 +24,28 @@ export interface WebAdapterOptions {
   maxOutstandingCommands?: number;
   now?: () => number;
   mobile?: { workspaceName: string; workspaceId: WorkspaceId };
+  secure?: boolean;
+  cookieName?: string;
+  rememberedSessions?: readonly RememberedWebSession[];
+  saveSessions?: (sessions: RememberedWebSession[]) => Promise<void>;
+  beforeCommand?: (request: IncomingMessage, command: ClientCommandRequest) => void;
+  onRevoked?: (deviceId: string) => void;
+  onPaired?: () => Promise<void>;
+}
+
+export interface RememberedWebSession {
+  tokenHash: string;
+  id: string;
+  name: string;
+  createdAt: number;
+  lastSeenAt: number;
+  expiresAt: number;
 }
 
 interface Session {
+  view?: import("@omp-studio/client-contract").ClientTransport;
+  openingView?: Promise<void>;
+  device: RememberedWebSession;
   contexts: Map<string, import("@omp-studio/client-contract").ClientTransport>;
   connections: Set<{ contextId: string; close: () => void }>;
   csrf: string;
@@ -38,6 +58,7 @@ interface Session {
 }
 
 function token(bytes = 24): string { return randomBytes(bytes).toString("base64url"); }
+function hash(value: string): string { return createHash("sha256").update(value).digest("hex"); }
 function json(res: ServerResponse, status: number, body: unknown, headers: Record<string,string> = {}): void {
   const data = JSON.stringify(body); res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store", ...headers }); res.end(data);
 }
@@ -55,6 +76,7 @@ function parseCookies(value: string | undefined): Record<string,string> {
 
 /** Loopback HTTP adapter implementing pairing, session/CSRF and semantic query/command routes. */
 export class LoopbackWebAdapter {
+  #closed = false;
   readonly #options: Required<Pick<WebAdapterOptions,"pairingTtlMs"|"sessionTtlMs"|"maxBodyBytes"|"maxOutstandingCommands">> & WebAdapterOptions;
   readonly #sessions = new Map<string, Session>();
   #pairing: { code: string; expiresAt: number; used: boolean };
@@ -62,6 +84,52 @@ export class LoopbackWebAdapter {
     if (!options.origins.length) throw new TypeError("at least one allowed origin is required");
     this.#options = { pairingTtlMs: 60_000, sessionTtlMs: 3_600_000, maxBodyBytes: 1_048_576, maxOutstandingCommands: 8, ...options };
     this.#pairing = { code: options.pairingCode ?? token(8), expiresAt: this.now() + this.#options.pairingTtlMs, used: false };
+    for (const device of options.rememberedSessions ?? []) {
+      if (device.expiresAt > this.now()) this.#sessions.set(device.tokenHash, this.newSession(device));
+    }
+  }
+  private newSession(device: RememberedWebSession): Session {
+    return { device, contexts: new Map(), connections: new Set(), csrf: token(), expiresAt: device.expiresAt, scope: { scope: "all" }, outstanding: 0, revoked: false };
+  }
+  private persist(): Promise<void> {
+    return this.#options.saveSessions?.([...this.#sessions.values()].map(session => session.device)) ?? Promise.resolve();
+  }
+  private prepareView(session: Session): Promise<void> {
+    if (!this.#options.openView || session.view) return Promise.resolve();
+    session.openingView ??= this.#options.openView().then(async view => {
+      if (session.revoked || this.#closed) { await view.close(); return; }
+      session.view = view;
+    }).finally(() => { delete session.openingView; });
+    return session.openingView;
+  }
+  devices(): Omit<RememberedWebSession, "tokenHash" | "expiresAt">[] {
+    this.pruneSessions();
+    return [...this.#sessions.values()].map(({ device: { tokenHash, expiresAt, ...device } }) => device);
+  }
+  async renameDevice(id: string, name: string): Promise<void> {
+    const session = [...this.#sessions.values()].find(row => row.device.id === id);
+    if (!session || !name.trim() || name.length > 100) throw new Error("invalid_device_name");
+    session.device.name = name.trim();
+    await this.persist();
+  }
+  async revokeDevice(id: string): Promise<void> {
+    const entry = [...this.#sessions].find(([, session]) => session.device.id === id);
+    if (entry) await this.revoke(...entry);
+  }
+  /** Authenticated extensions use the same cookie, origin and CSRF boundary. */
+  authorize(req: IncomingMessage, mutate = false): { id: string; name: string } | undefined {
+    const session = this.auth(req, mutate)?.[1];
+    return session ? { id: session.device.id, name: session.device.name } : undefined;
+  }
+  async close(): Promise<void> {
+    this.#closed = true;
+    for (const session of this.#sessions.values()) {
+      clearTimeout(session.expiry);
+      for (const connection of session.connections) connection.close();
+      await Promise.allSettled([...session.contexts.keys()].map(id => this.closeContext(session, id)));
+      await session.view?.close();
+    }
+    await this.persist();
   }
   get pairingCode(): string { return this.#pairing.code; }
   get paired(): boolean { this.pruneSessions(); return this.#sessions.size > 0; }
@@ -88,9 +156,12 @@ export class LoopbackWebAdapter {
     session.revoked = true;
     clearTimeout(session.expiry);
     this.#sessions.delete(id);
+    this.#options.onRevoked?.(session.device.id);
     for (const connection of session.connections) connection.close();
     session.connections.clear();
     await Promise.allSettled([...session.contexts.keys()].map(contextId => this.closeContext(session, contextId)));
+    await session.view?.close();
+    await this.persist();
   }
   private pruneSessions(): void {
     const now = this.now();
@@ -107,21 +178,24 @@ export class LoopbackWebAdapter {
     const host = req.headers.host?.toLowerCase();
     return host !== undefined && this.#options.origins.some(value => value !== "null" && new URL(value).host.toLowerCase() === host);
   }
-  private session(req: IncomingMessage): [string, Session] | undefined { this.pruneSessions(); const id = parseCookies(req.headers.cookie).studio_session; if (!id) return; const s = this.#sessions.get(id); if (!s || s.revoked || s.expiresAt <= this.now()) return; return [id,s]; }
+  private session(req: IncomingMessage): [string, Session] | undefined { this.pruneSessions(); const cookie = parseCookies(req.headers.cookie)[this.#options.cookieName ?? "studio_session"]; if (!cookie) return; const id = hash(cookie); const s = this.#sessions.get(id); if (!s || s.revoked || s.expiresAt <= this.now()) return; s.device.lastSeenAt = this.now(); return [id,s]; }
   private async body(req: IncomingMessage): Promise<unknown> { const chunks: Buffer[] = []; let n=0; for await (const c of req) { n += Buffer.byteLength(c); if (n > this.#options.maxBodyBytes) throw new Error("body_too_large"); chunks.push(Buffer.from(c)); } if (!n) return {}; return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown; }
   private auth(req: IncomingMessage, mutate = false): [string,Session] | undefined { if (!this.originAllowed(req, !mutate && req.method === "GET")) return; const s = this.session(req); if (!s) return; if (mutate && req.headers["x-studio-csrf"] !== s[1].csrf) return; return s; }
   private target(req: IncomingMessage, session: Session): WebAdapterHost {
     const id = req.headers["x-studio-context"] ?? new URL(req.url ?? "/", "http://localhost").searchParams.get("contextId");
-    if (!id) return this.#options.host;
+    if (!id) return session.view ?? this.#options.host;
     const context = session.contexts.get(String(id));
     if (!context) throw new Error("context_closed");
     return context;
   }
   async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (this.#closed) return json(res, 503, { error: "host_stopping" });
     if (req.url === "/health" && req.method === "GET") return json(res, 200, { ok: true, protocolVersion: 1 });
     if (!this.originAllowed(req, req.method === "GET")) return json(res, 403, { error: "forbidden" });
     const path = (req.url ?? "").split("?")[0];
     try {
+      const existing = this.session(req)?.[1];
+      if (existing) await this.prepareView(existing);
       if (path === "/api/v1/pair" && req.method === "POST") {
         this.pruneSessions();
         const b = await this.body(req); const code = b !== null && typeof b === "object" && "code" in b ? String((b as { code?: unknown }).code ?? "") : "";
@@ -130,19 +204,23 @@ export class LoopbackWebAdapter {
         if (this.#options.mobile) {
           for (const [id, session] of this.#sessions) void this.revoke(id, session);
         }
-        const sid = token(32), csrf = token(24);
-        const s: Session = { contexts: new Map(), connections: new Set(), csrf, expiresAt: this.now() + this.#options.sessionTtlMs, scope: { scope: "all" }, outstanding: 0, revoked: false };
-        this.#sessions.set(sid, s);
+        const sid = token(32);
+        const name = b && typeof b === "object" && "name" in b && typeof b.name === "string" ? b.name.slice(0, 100) : "Browser";
+        const s = this.newSession({ tokenHash: hash(sid), id: randomUUID(), name, createdAt: this.now(), lastSeenAt: this.now(), expiresAt: this.now() + this.#options.sessionTtlMs });
+        this.#sessions.set(hash(sid), s);
+        await this.prepareView(s);
         if (this.#options.mobile) {
-          s.expiry = setTimeout(() => void this.revoke(sid, s), this.#options.sessionTtlMs);
+          s.expiry = setTimeout(() => void this.revoke(hash(sid), s), this.#options.sessionTtlMs);
           s.expiry.unref();
         }
-        return json(res, 200, { csrf, expiresAt: s.expiresAt }, { "set-cookie": `studio_session=${encodeURIComponent(sid)}; HttpOnly; SameSite=Strict; Path=/${this.#options.mobile ? "; Secure" : ""}` });
+        await this.persist();
+        await this.#options.onPaired?.();
+        return json(res, 200, { csrf: s.csrf, expiresAt: s.expiresAt }, { "set-cookie": `${this.#options.cookieName ?? "studio_session"}=${encodeURIComponent(sid)}; HttpOnly; SameSite=Strict; Path=/${this.#options.saveSessions ? `; Max-Age=${Math.floor(this.#options.sessionTtlMs / 1000)}` : ""}${this.#options.mobile || this.#options.secure ? "; Secure" : ""}` });
       }
-      if (path === "/api/v1/session" && req.method === "GET" && this.#options.mobile) {
+      if (path === "/api/v1/session" && req.method === "GET") {
         const auth = this.auth(req);
         if (!auth) return json(res, 401, { error: "unauthenticated" });
-        return json(res, 200, { csrf: auth[1].csrf, expiresAt: auth[1].expiresAt, ...this.#options.mobile });
+        return json(res, 200, { csrf: auth[1].csrf, expiresAt: auth[1].expiresAt, deviceId: auth[1].device.id, ...this.#options.mobile });
       }
       if (path === "/api/v1/context/open" && req.method === "POST") {
         const a = this.auth(req, true); if (!a) return json(res,401,{error:"unauthenticated"});
@@ -154,7 +232,7 @@ export class LoopbackWebAdapter {
           if (this.#options.mobile) {
             await Promise.allSettled([...a[1].contexts.keys()].map(id => this.closeContext(a[1], id)));
           }
-          if (a[1].revoked || a[1].expiresAt <= this.now()) { await context.close(); return json(res,401,{error:"unauthenticated"}); }
+          if (this.#closed || a[1].revoked || a[1].expiresAt <= this.now()) { await context.close(); return json(res,401,{error:"unauthenticated"}); }
           const contextId = token(); a[1].contexts.set(contextId, context); return json(res,200,{contextId});
         } finally {
           a[1].opening = false;
@@ -175,6 +253,7 @@ export class LoopbackWebAdapter {
         a[1].outstanding++;
         try {
           const request = await this.body(req) as ClientCommandRequest;
+          this.#options.beforeCommand?.(req, request);
           if (!this.auth(req, true)) return json(res, 401, { error: "unauthenticated" });
           const contextId = req.headers["x-studio-context"];
           if (this.#options.mobile && ![...a[1].connections].some(connection => connection.contextId === contextId)) return json(res, 409, { error: "event_stream_required" });
@@ -184,7 +263,10 @@ export class LoopbackWebAdapter {
         }
       }
       return json(res,404,{error:"not_found"});
-    } catch (e) { return json(res,400,{error: e instanceof Error && e.message === "body_too_large" ? "body_too_large" : "bad_request"}); }
+    } catch (e) {
+      if (e instanceof Error && "code" in e && e.code === "control_required") return json(res, 409, { error: "control_required", message: e.message });
+      return json(res,400,{error: e instanceof Error && e.message === "body_too_large" ? "body_too_large" : "bad_request"});
+    }
   }
   /** Validate a WebSocket upgrade before accepting it; caller performs actual upgrade. */
   authenticateWebSocket(req: IncomingMessage): { sessionId: string; session: Session; host: WebAdapterHost } | undefined {
@@ -203,6 +285,17 @@ export class LoopbackWebAdapter {
     const connection = { contextId, close };
     auth.session.connections.add(connection);
     return { host: auth.host, unsubscribe: () => { auth.session.connections.delete(connection); } };
+  }
+  trackEvents(req: IncomingMessage, close: () => void): { host: WebAdapterHost; unsubscribe: () => void } | undefined {
+    const auth = this.authenticateWebSocket(req);
+    if (!auth) return;
+    const contextId = new URL(req.url ?? "/", "http://localhost").searchParams.get("contextId") ?? "";
+    const connection = { contextId, close };
+    auth.session.connections.add(connection);
+    return { host: auth.host, unsubscribe: () => {
+      auth.session.connections.delete(connection);
+      if (contextId && ![...auth.session.connections].some(row => row.contextId === contextId)) void this.closeContext(auth.session, contextId);
+    } };
   }
 }
 

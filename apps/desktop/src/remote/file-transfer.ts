@@ -35,7 +35,7 @@ class UploadAttemptError extends Error {
 
 export function remoteUploadRoutes(platform: RemotePlatform, connectionKind?: SshConnection["kind"]): RemoteUploadRoute[] {
   if (connectionKind === "wsl") return ["ssh-stream"];
-  return platform === "win32" ? ["sftp", "scp-legacy"] : ["ssh-stream", "sftp"];
+  return platform === "win32" ? ["sftp", "scp-legacy", "ssh-stream"] : ["ssh-stream", "sftp"];
 }
 
 export function hasUploadStalled(lastProgressAt: number, now = Date.now()): boolean {

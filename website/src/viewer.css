@@ -1,0 +1,199 @@
+/* Feature viewer: an app window whose title bar is its tab strip. */
+.features {
+  --stage-w: 100%;
+  padding-top: clamp(48px, 8vh, 88px);
+}
+.features .sec-head,
+.viewer {
+  width: min(100%, var(--stage-w));
+  max-width: none;
+  margin-inline: auto;
+}
+.features .sec-head {
+  margin-bottom: clamp(18px, 3vh, 30px);
+}
+.features .sec-head p {
+  margin-top: 8px;
+}
+.viewer-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px;
+  border-radius: var(--r-card) var(--r-card) 0 0;
+  background: color-mix(in srgb, var(--panel) 70%, var(--page));
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.viewer-tabs {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.viewer-tabs::-webkit-scrollbar {
+  display: none;
+}
+.viewer-tabs button {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--r-ctl);
+  background: none;
+  color: var(--ink-2);
+  font-size: var(--step--1);
+  white-space: nowrap;
+  transition: color 0.2s;
+}
+.viewer-tabs button .i {
+  font-size: 15px;
+}
+.viewer-tabs button:hover {
+  color: var(--ink);
+}
+.viewer-tabs button:focus-visible {
+  outline-offset: -2px;
+}
+.viewer-tabs button[aria-selected="true"] {
+  color: var(--ink);
+  font-weight: 600;
+}
+.viewer-tabs button[aria-selected="true"] .i {
+  color: var(--accent-ink);
+}
+/* The selected tab's plate slides under the labels. */
+.viewer-mark {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: var(--r-ctl);
+  background: var(--panel);
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition: transform 0.45s var(--ease-out), width 0.45s var(--ease-out);
+}
+:root[data-theme="dark"] .viewer-mark {
+  background: var(--fill);
+}
+.viewer-note {
+  flex: 1 0 auto;
+  padding: 0 10px;
+  color: var(--ink-3);
+  font-size: 12px;
+  text-align: right;
+}
+.viewer-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-ctl);
+  background: none;
+  color: var(--ink-2);
+  font-size: var(--step--1);
+  white-space: nowrap;
+  transition: background 0.2s, color 0.2s;
+}
+.viewer-btn .i {
+  font-size: 13px;
+  transition: rotate 0.6s var(--ease-out);
+}
+.viewer-btn:hover {
+  background: var(--fill);
+  color: var(--ink);
+}
+#viewer-reset:active .i {
+  rotate: 180deg;
+}
+.viewer-panel {
+  border-radius: 0 0 var(--r-card) var(--r-card);
+  box-shadow: 0 0 0 1px var(--line-2), var(--lift);
+  overflow: hidden;
+}
+.viewer-shots {
+  position: relative;
+  display: grid;
+  aspect-ratio: 16 / 10;
+  background: var(--panel);
+  overflow: hidden;
+}
+.viewer-shots img {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 0 0;
+  opacity: 0;
+  scale: 1.012;
+  transition: opacity 0.28s, scale 0.5s var(--ease-out);
+}
+.viewer-shots img[data-on] {
+  opacity: 1;
+  scale: 1;
+}
+.viewer-live {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  width: 1280px;
+  height: 800px;
+  border: 0;
+  transform-origin: 0 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.28s;
+}
+.viewer-live[data-ready] {
+  opacity: 1;
+  pointer-events: auto;
+}
+html[data-wm-dragging] .viewer-live {
+  pointer-events: none !important;
+}
+.viewer-text {
+  min-height: 1.7em;
+}
+.live-only {
+  display: none;
+}
+@media (min-width: 1080px) {
+  .viewer-shots[data-live-settled] img {
+    visibility: hidden;
+  }
+  .live-only {
+    display: inline;
+  }
+}
+@media (max-width: 1079px) {
+  .viewer-live {
+    display: none;
+  }
+}
+@media (max-width: 767px) {
+  .viewer-note {
+    display: none;
+  }
+  .viewer-text {
+    min-height: 3.4em;
+  }
+  .viewer-tabs button {
+    padding: 0 12px;
+  }
+  /* A phone shows the page's top left, large enough to read, rather than all of it, too small to. */
+  .viewer-shots {
+    aspect-ratio: 1;
+  }
+  .viewer-shots img {
+    width: 190%;
+    max-width: none;
+    height: auto;
+  }
+}

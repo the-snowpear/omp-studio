@@ -7,6 +7,7 @@ import { Icon } from "../icons";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { getPreviewWorkspaceRecovery } from "../preview/fixtures";
 import { waitForCommandReceipt } from "../sessionLifecycle";
+import { pickProject as chooseHostProject } from "../web/chooseProject";
 
 /** Recovery uses the connection's root client, so a stale conversation cannot block it. */
 export function WorkspaceRecoveryPane({ client, onOpenWorkspace, onChooseRemoteWorkspace }: {
@@ -44,7 +45,10 @@ export function WorkspaceRecoveryPane({ client, onOpenWorkspace, onChooseRemoteW
     setBusy(true); setError(undefined); setNotice(undefined);
     try {
       await initializeConversationClient(client);
-      const handle = await client.command(kind === "choose" ? "workspace.pick" : "workspace.forgetUnavailable", {});
+      const handle = kind === "choose"
+        ? await chooseHostProject(client)
+        : await client.command("workspace.forgetUnavailable", {});
+      if (!handle) return;
       const receipt = await waitForCommandReceipt(client, handle.requestId);
       if (receipt.status === "failed") throw receipt.error;
       if (receipt.status !== "completed") throw new Error(t("workspaceRecovery.actionFailed"));

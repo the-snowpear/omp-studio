@@ -18,16 +18,22 @@ app.whenReady().then(async () => {
   const { registerFloatingWindows } = await import(pathToFileURL(join(root, "apps/desktop/dist/src/floating-windows.js")));
   const { registerTerminalIpc } = await import(pathToFileURL(join(root, "apps/desktop/dist/src/terminal-ipc.js")));
   const { TerminalSessionManager, createNodePtySpawner } = await import(pathToFileURL(join(root, "apps/desktop/dist/src/terminal-pty.js")));
+  const { SharedTerminals } = await import(pathToFileURL(join(root, "apps/desktop/dist/src/web/terminals.js")));
   const { secureWebPreferences, rendererOriginFor, isTrustedRendererUrl } = await import(pathToFileURL(join(root, "apps/desktop/dist/src/security.js")));
   const preloadPath = join(profile, "pin-preload.cjs");
   require("esbuild").buildSync({ stdin: { contents: `import ${JSON.stringify(join(root, "apps/desktop/src/preload.ts"))}; import { contextBridge, ipcRenderer } from "electron"; contextBridge.exposeInMainWorld("pinAcceptance", { closeMain: () => ipcRenderer.invoke("pin-smoke:close-main"), state: () => ipcRenderer.invoke("pin-smoke:state"), quit: () => ipcRenderer.invoke("pin-smoke:quit") });`, resolveDir: root, loader: "ts" }, bundle: true, platform: "node", format: "cjs", external: ["electron"], outfile: preloadPath });
   ipcMain.on("omp-studio:desktop:perf-profile-cached", event => { event.returnValue = null; });
+  // The complete workspace harness reads this local-only inventory at startup.
+  ipcMain.handle("omp-studio:remote:list", () => ({ profiles: [], statuses: [] }));
+  ipcMain.handle("omp-studio:remote:wsl-distributions", () => ({ available: false, distributions: [] }));
+  ipcMain.handle("omp-studio:web-access", () => ({ deviceId: "acceptance", origin: "", addresses: [], devices: [], control: { version: "acceptance", owner: { id: "acceptance", name: "Acceptance" } } }));
+  for (const channel of ["omp-studio:desktop:language", "omp-studio:desktop:chrome-theme", "omp-studio:files-dirty", "omp-studio:chrome:set-conversation-view-state"]) ipcMain.handle(channel, () => true);
   const targetUrl = process.env.OMP_PIN_SMOKE_URL || "http://127.0.0.1:5189/pin-harness.html";
   const target = targetUrl.startsWith("file:") ? { kind: "file", path: require("node:url").fileURLToPath(targetUrl) } : { kind: "url", url: targetUrl };
   const allowedOrigin = rendererOriginFor(target);
   const parent = new BrowserWindow({ width: 1450, height: 900, show: true, webPreferences: { ...secureWebPreferences(preloadPath), backgroundThrottling: false } });
   ipcMain.handle("pin-smoke:close-main", () => { parent.close(); return true; });
-  ipcMain.handle("pin-smoke:state", () => ({ mainVisible: parent.isVisible(), windows: BrowserWindow.getAllWindows().map(window => ({ id: window.id, title: window.getTitle(), visible: window.isVisible(), topmost: window.isAlwaysOnTop(), maximized: window.isMaximized(), minimized: window.isMinimized() })) }));
+  ipcMain.handle("pin-smoke:state", () => ({ mainVisible: parent.isVisible(), ptyCount: count, terminals: sharedTerminals.list().map(({ id, pid, sessionId, workspaceId, status }) => ({ id, pid, sessionId, workspaceId, status })), windows: BrowserWindow.getAllWindows().map(window => ({ id: window.id, title: window.getTitle(), visible: window.isVisible(), topmost: window.isAlwaysOnTop(), maximized: window.isMaximized(), minimized: window.isMinimized() })) }));
   ipcMain.handle("pin-smoke:quit", () => { setTimeout(() => app.quit(), 20); return true; });
   const floats = registerFloatingWindows({ parent, ipcMain, allowedOrigin, preloadPath, areas: () => screen.getAllDisplays().map(display => display.workArea), isQuitting: () => quitting, openExternal: () => {},
     onWindow: child => {
@@ -38,11 +44,28 @@ app.whenReady().then(async () => {
     onVisibility: child => console.log("FLOAT_STATE", child.id, JSON.stringify({ visible: child.isVisible(), minimized: child.isMinimized(), maximized: child.isMaximized(), topmost: child.isAlwaysOnTop(), bounds: child.getBounds() })),
   });
   const spawner = createNodePtySpawner(true); let count = 0;
-  const manager = new TerminalSessionManager({ spawner: { spawn(options) { console.log("PTY_SPAWN", ++count); return spawner.spawn(options); } }, resolveCwd: () => profile });
-  const terminal = registerTerminalIpc({ ipcMain, manager, isTrustedSender: sender => sender === parent.webContents && isTrustedRendererUrl(sender.getURL(), allowedOrigin) });
+  const countedSpawner = { spawn(options) { console.log("PTY_SPAWN", ++count); return spawner.spawn(options); } };
+  const manager = new TerminalSessionManager({ spawner: countedSpawner, resolveCwd: () => profile });
+  const sharedTerminals = new SharedTerminals(async () => profile, countedSpawner);
+  const shared = {
+    async call(action, input) {
+      if (action === "terminals.list") return sharedTerminals.list();
+      if (action === "terminals.create") return sharedTerminals.create(input);
+      if (action === "terminals.write") return sharedTerminals.write(input);
+      if (action === "terminals.resize") return sharedTerminals.resize(input);
+      if (action === "terminals.rebind") return sharedTerminals.rebind(input);
+      if (action === "terminals.dispose") return sharedTerminals.remove(input);
+      if (action === "terminals.recordingStart") return sharedTerminals.record("start", input);
+      if (action === "terminals.recordingStop") return sharedTerminals.record("stop", input);
+      if (action === "terminals.recordingStatus") return sharedTerminals.record("status", input);
+      throw new Error("Unknown acceptance terminal action: " + action);
+    },
+    onEvent(listener) { return sharedTerminals.subscribe(event => listener(event.kind === "terminal.changed" ? { kind: "terminal.snapshot", rows: sharedTerminals.list() } : event)); },
+  };
+  const terminal = registerTerminalIpc({ ipcMain, manager, shared: async () => shared, isTrustedSender: sender => sender === parent.webContents && isTrustedRendererUrl(sender.getURL(), allowedOrigin) });
   parent.on("close", event => { if (!quitting && floats.hasWindows()) { event.preventDefault(); parent.hide(); console.log("MAIN_HIDDEN"); } });
   parent.webContents.on("console-message", event => { if (event.level === "error") console.error("MAIN_ERROR", event.message); });
-  app.on("before-quit", () => { floats.dispose(); terminal.dispose(); });
+  app.on("before-quit", () => { floats.dispose(); terminal.dispose(); void sharedTerminals.close(); });
   await parent.loadURL(targetUrl);
   console.log("PIN_ACCEPTANCE_READY", targetUrl);
 }).catch(error => { console.error(error); app.exit(1); });
