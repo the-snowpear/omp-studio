@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 独立 Web 工作台与桌面共用 Host，支持局域网 HTTPS 配对、持久设备授权、控制权接管、项目文件和 Git 操作、共享交互终端。六平台运行环境包提供 `omp-studio-web` 启动器。[使用说明](docs/web-ui.md)
 - Standalone Web workbench sharing the desktop Host, with LAN HTTPS pairing, remembered devices, control transfer, project files, Git and persistent interactive terminals. The six platform environment archives include an `omp-studio-web` launcher.[Web guide](docs/web-ui.md)
 
+### Fixed
+
+- 输入框命令菜单在确认、Tab 补全、ESC 或点击外部后保持关闭；输入空格、换行或移出命令 token 也会关闭，继续输入和重新聚焦不再反复弹出。 [#74](https://github.com/the-snowpear/omp-studio/issues/74)
+- Composer command completion stays dismissed after selection, Tab, Escape or an outside click. Spaces, newlines and moving the caret outside the command token close it; continued typing and refocusing no longer reopen it. [#74](https://github.com/the-snowpear/omp-studio/issues/74)
+
 ## [0.2.10] - 2026-11-23
 
 ### Added
