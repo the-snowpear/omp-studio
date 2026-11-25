@@ -113,7 +113,7 @@ function effectiveRuntimeChannel(channel: RuntimeChannel | undefined): RuntimeCh
 export interface PendingArtifactRegistry {
   /** 已验签、可直接交给 RuntimeInstaller.install() 的目录；无则 undefined。 */
   peek(): string | undefined;
-  set(directory: string | undefined): void;
+  set(directory: string | undefined): void | Promise<void>;
 }
 
 export function createPendingArtifactRegistry(): PendingArtifactRegistry {

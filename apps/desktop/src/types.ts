@@ -17,7 +17,6 @@
  */
 
 import type { ClientTransport } from "@omp-studio/client-contract";
-import type { StudioHostClientFacade } from "@omp-studio/host-client-api";
 
 /** Public Host availability as surfaced to the window (no secrets). */
 export type DesktopRuntimeStatus = "ready" | "read-only";
@@ -32,8 +31,9 @@ export type DesktopRuntimeStatus = "ready" | "read-only";
  * it is invoked only on app quit, never on renderer reload.
  */
 export interface DesktopHostComposition {
+  openView?(): Promise<ClientTransport>;
   /** Facade session serving the renderer's client identity. */
-  readonly facade: StudioHostClientFacade;
+  readonly facade: ClientTransport & { readonly hasPendingCommands: boolean };
   /** Renderer-facing transport the IPC layer serves calls from. */
   readonly transport: ClientTransport;
   readonly status: DesktopRuntimeStatus;

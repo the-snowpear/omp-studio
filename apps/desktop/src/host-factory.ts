@@ -33,12 +33,10 @@
  */
 
 import { execFile } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { chmod, lstat, mkdir, open, readFile, rm, unlink, writeFile, type FileHandle } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-
-import { app, dialog, shell } from "electron";
 
 import type { ArchId, WorkspaceId } from "@omp-studio/client-contract";
 import type { RuntimePreference } from "@omp-studio/studio-protocol";
@@ -194,20 +192,6 @@ export function createDesktopHostFactory(options: DesktopHostFactoryOptions): De
 /** Production workspace registry path (paths live only in the Host). */
 function productionWorkspaceRegistryPath(): string {
   return join(desktopPaths().stateRoot, "workspaces.json");
-}
-
-/** Production system directory picker; `undefined` = user cancelled. */
-function createProductionPickDirectory(): () => Promise<string | undefined> {
-  return async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ["openDirectory", "createDirectory"],
-      title: desktopText("打开本地文件夹", "Open Local Folder"),
-    });
-    if (result.canceled || result.filePaths[0] === undefined) {
-      return undefined;
-    }
-    return result.filePaths[0];
-  };
 }
 
 /** Production pure-Node realizations of the native platform operations (Windows). */
@@ -513,17 +497,13 @@ function createProductionDarwinEndpointProviders(): DarwinEndpointProviders {
 export const pendingRuntimeArtifact = createPendingArtifactRegistry();
 
 /** Packaged extraFiles layout; unpackaged keeps AppData runtimes + repo artifact discovery. */
-function productionManagedInstall(hostLog: HostLog): DesktopManagedInstallOptions {
-  const layout = packagedRuntimeInstallLayout({
-    isPackaged: app.isPackaged,
-    execPath: process.execPath,
-    resourcesPath: process.resourcesPath,
-  });
+function productionManagedInstall(hostLog: HostLog, options: ProductionHostOptions): DesktopManagedInstallOptions {
+  const layout = options.installLayout;
   return {
     seedOnStart: true,
     pendingArtifact: pendingRuntimeArtifact,
     // Packaged builds trust only the keys they ship; env overrides are for development.
-    environmentTrustedKeys: !app.isPackaged,
+    environmentTrustedKeys: !options.packaged,
     activateOptions: {
       selfCheck: withCodeSignatureCheck(createSmokeTestRunner({
         timeoutMs: 240_000,
@@ -566,7 +546,12 @@ export interface ProductionDesktopHostFactory extends DesktopHostFactory {
  * These methods stay in the Main process and never cross the Host facade.
  * Packaged builds keep the live `omp.exe` under `$INSTDIR\runtime`.
  */
-export function createProductionHostFactory(options?: {
+export interface ProductionHostOptions {
+  readonly environmentKey?: string;
+  readonly packaged?: boolean;
+  readonly installLayout?: ReturnType<typeof packagedRuntimeInstallLayout>;
+  readonly pickDirectory?: () => Promise<string | undefined>;
+  readonly systemFiles?: Pick<import("./system-files.js").SystemFileServiceOptions, "knownFolders" | "trash">;
   readonly managedBrowser?: boolean;
   readonly memoryCredentials?: MemoryCredentialProvider;
   /** Settles once `process.env` is ready to spawn with (the macOS login shell). */
@@ -575,7 +560,9 @@ export function createProductionHostFactory(options?: {
   readonly afterCreate?: (composition: DesktopHostComposition, workspaceSelected: boolean) => Promise<boolean>;
   readonly openUrl?: (url: string) => Promise<void>;
   readonly revealDirectory?: (absDir: string) => Promise<void>;
-}): ProductionDesktopHostFactory {
+}
+
+export function createProductionHostFactory(options: ProductionHostOptions = {}): ProductionDesktopHostFactory {
   const registry = new WorkspaceRegistry(productionWorkspaceRegistryPath());
   let registryReady: Promise<void> | undefined;
   const ensureRegistry = (): Promise<void> => {
@@ -584,7 +571,7 @@ export function createProductionHostFactory(options?: {
     });
     return registryReady;
   };
-  const pickDirectory = createProductionPickDirectory();
+  const pickDirectory = options.pickDirectory ?? (async () => { throw new Error(desktopText("请使用项目路径打开文件夹", "Open a folder using its project path")); });
   const hostLog = createHostFileLog({
     directory: defaultHostLogsDirectory(),
   });
@@ -678,9 +665,7 @@ export function createProductionHostFactory(options?: {
     ...(options?.revealDirectory === undefined ? {} : { revealDirectory: options.revealDirectory }),
     workspaces,
     workspaceFiles: createWorkspaceFileService({ registry }),
-    systemFiles: createSystemFileService({ registry, knownFolders: {
-      home: app.getPath("home"), desktop: app.getPath("desktop"), downloads: app.getPath("downloads"), documents: app.getPath("documents"), pictures: app.getPath("pictures"),
-    }, trash: path => shell.trashItem(path) }),
+    systemFiles: createSystemFileService({ registry, ...options.systemFiles }),
     git,
     github,
     disposeHostOperations: () => {
@@ -703,6 +688,7 @@ export function createProductionHostFactory(options?: {
     },
   };
   const baseOptions = {
+    environmentKey: options.environmentKey ?? `desktop-${createHash("sha256").update(process.platform === "win32" ? desktopPaths().stateRoot.toLowerCase() : desktopPaths().stateRoot).digest("hex").slice(0, 24)}`,
     authorityLockServices: createProductionAuthorityLockServices(),
     resolver: {
       probe: createProcessProbe({
@@ -715,7 +701,7 @@ export function createProductionHostFactory(options?: {
     },
     runtimeSession,
     deferredRuntime: true,
-    managedInstall: productionManagedInstall(hostLog),
+    managedInstall: productionManagedInstall(hostLog, options),
     facade,
   };
   if (process.platform !== "win32" && process.platform !== "darwin" && process.platform !== "linux") {

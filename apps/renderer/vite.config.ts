@@ -52,6 +52,7 @@ export default defineConfig({
         index: fileURLToPath(new URL("./index.html", import.meta.url)),
         graphic: fileURLToPath(new URL("./graphic-preview.html", import.meta.url)),
         mobile: fileURLToPath(new URL("./mobile.html", import.meta.url)),
+        web: fileURLToPath(new URL("./web.html", import.meta.url)),
       },
       output: {
         onlyExplicitManualChunks: true,

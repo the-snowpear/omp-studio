@@ -260,6 +260,7 @@ Anthropic、OpenAI、OpenRouter、本地 LM Studio 等供应商在同一页管�
 | **SSH 工作区** | 连接远程项目并按需部署签名运行环境，在远端运行 Agent、编辑文件、使用 Git 和终端。短时断线时会尝试重新附加原 Host | [ssh-workspaces.md](docs/ssh-workspaces.md) |
 | **WSL 2 工作区** | 从 Windows 桌面版选择 Linux 发行版和目录，在其中运行 Agent、Git 和终端 | [wsl-workspaces.md](docs/wsl-workspaces.md) |
 | **手机访问** | 在同一局域网内配对手机，继续所选本地项目中的已有会话 | [mobile-access.md](docs/mobile-access.md) |
+| **Web 工作台** | 独立 Host、局域网 HTTPS、设备接管、文件和 Git 读写、共享终端 | [web-ui.md](docs/web-ui.md) |
 | **BTW 旁路追问** | 不打断主线程地追问；支持图片、分支和子代理复用 | [btw.md](docs/btw.md) |
 | **语音输入** | 点击或按住空格听写，内容插入到光标位置；失败后可从内存恢复录音 | [dictation.md](docs/dictation.md) |
 | **评测工作区** | 原生基准、指令遵循评测、后台执行、历史对比，以及 Ratchet 最佳版本差异导出 | [evaluation.md](docs/evaluation.md) |

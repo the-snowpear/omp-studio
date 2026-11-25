@@ -30,6 +30,23 @@ function Harness({ visible }: { visible: boolean }) {
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); mocks.targetId = null; mocks.terminals.length = 0; __resetAppSettingsForTests(null); window.history.replaceState(null, "", "/"); });
 
+it("waits for retained Host terminals before automatically starting a new Shell", async () => {
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+  let restore!: (rows: import("../../desktop/src/web/terminals").SharedTerminal[]) => void;
+  const retained = new Promise<import("../../desktop/src/web/terminals").SharedTerminal[]>(resolve => { restore = resolve; });
+  const create = vi.fn(async () => ({ id: "new-shell", name: "Shell", cwd: "/work" }));
+  vi.stubGlobal("ompStudioTerminal", {
+    persistent: true, list: () => retained, create,
+    write: vi.fn(async () => {}), resize: vi.fn(async () => {}), dispose: vi.fn(async () => {}),
+    onData: () => () => {}, onExit: () => () => {},
+  });
+  render(<Harness visible />);
+  expect(create).not.toHaveBeenCalled();
+  await act(async () => restore([{ id: "retained-shell", name: "Retained Shell", cwd: "/work", status: "running", output: "earlier output", sequence: 1, truncated: false }]));
+  await screen.findByRole("option", { name: /Retained Shell/ });
+  expect(create).not.toHaveBeenCalled();
+});
+
 function tmuxApi() {
   let onTopology: (topology: TmuxTopology) => void = () => {};
   const topology: TmuxTopology = { connectionId: "connection-1", targetId: "remote", workspaceId: "ws", state: "attached", session: { id: "$0", name: "work" }, activeWindowId: "@0", windows: [{ id: "@0", index: 0, name: "shell", zoomed: false, cols: 80, rows: 24, layout: { type: "pane", paneId: "%0", x: 0, y: 0, cols: 80, rows: 24 } }], panes: { "%0": { terminalId: "pane-1", windowId: "@0", active: true, title: "shell", paused: false, dead: false, off: false } } };

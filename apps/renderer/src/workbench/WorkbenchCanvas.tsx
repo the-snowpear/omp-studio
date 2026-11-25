@@ -1,4 +1,6 @@
 import { previewHintCompression } from "../preview/runtimeQueuePreview";
+import { pickProject as chooseHostProject } from "../web/chooseProject";
+import { useHostControl } from "../web/controlState";
 import "../composer/composerModes.css";
 import { WorkspaceEmpty } from "../workspaces/Workspace";
 import { SpillViewer } from "../conversation/SpillLink";
@@ -300,10 +302,12 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   const mdi = useConversationView();
   const openFileInViewer = useOpenFile();
   const { t, resolvedLanguage } = useI18n();
+  const localHostWritable = useHostControl();
   const zh = resolvedLanguage === "zh";
   const zhRef = useRef(zh);
   zhRef.current = zh;
   const executionTarget = useExecutionTarget();
+  const hostWritable = executionTarget.id !== null || localHostWritable;
   const [draft, setDraft] = useTargetMemory<ComposerSnapshot>("composer-current-draft", () => composerDraft ?? emptySnapshot());
   const composerDraftRef = useRef<ComposerSnapshot | undefined>(composerDraft);
   composerDraftRef.current = composerDraft;
@@ -779,7 +783,8 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     if (!preview && executionTarget.id) { setCreateProjectOpen(false); executionTarget.openDirectory(); return; }
     setCreateProjectBusy(true);
     try {
-      const handle = await client.command("workspace.pick", name ? { name } : {});
+      const handle = await chooseHostProject(client, name);
+      if (!handle) return;
       const model = await waitReceipt<WorkspaceListReadModel>(client, handle.requestId, null);
       const active = model.workspaces.find((workspace) => workspace.active);
       if (!active) throw new Error(zhRef.current ? "选择的文件夹未注册为项目" : "The selected folder is not registered as a project");
@@ -1007,7 +1012,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     }
   }, []);
 
-  const gated = worktreeGated || busy || Boolean(connection?.resyncRequired) || !runtimeConnected || !snapshotReady || !executionMatches;
+  const gated = !hostWritable || worktreeGated || busy || Boolean(connection?.resyncRequired) || !runtimeConnected || !snapshotReady || !executionMatches;
   // Composer `gated` / can() flicker while snapshot, capabilities, or the
   // selected session catch up. The ask is already on screen — lock only when
   // the Host cannot take interaction.respond. That is why the card went dead
@@ -2317,7 +2322,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
           </form>
         </section>
       </div> : null}
-      <WorktreeLaunchGate client={client} context={{ sessionId: snapshot?.sessionId, available: runtimeConnected && executionMatches && !connection?.resyncRequired, capabilities }} visible={state.route === "workbench"} onGateChange={changeWorktreeGate} onOpenWorkspace={onOpenWorktree} />
+      <WorktreeLaunchGate client={client} context={{ sessionId: snapshot?.sessionId, available: hostWritable && runtimeConnected && executionMatches && !connection?.resyncRequired, capabilities }} visible={state.route === "workbench" && hostWritable} onGateChange={changeWorktreeGate} onOpenWorkspace={onOpenWorktree} />
       <div className={`workbench${!mdi && sideOpen ? " split-right" : ""}`} id="workbench">
         <div ref={readingColumnRef} className={`convo-wrap${surfaceWelcome ? " is-empty" : ""}`} inert={state.loading}>
           {state.loading && <div className="cw-content-loading" role="status"><span className="spinner" />{zh ? "正在打开对话…" : "Opening conversation…"}</div>}
@@ -2852,7 +2857,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
                   const fileWorkspace = preview ? previewProjectId : workspaceId;
                   openFileInViewer({ path, rect, ...(fileWorkspace === undefined ? {} : { workspaceId: fileWorkspace }), ...(onOpened ? { onOpened } : {}) });
                 } })}
-                submitDisabled={worktreeGated}
+                submitDisabled={worktreeGated || !hostWritable}
                 compact={composerRunning && !composerExpanded}
                 sessionReferences
                 placeholder={queueEdit === undefined ? t("conversation.composerPlaceholder") : t("conversation.editingQueuedMessage")}
@@ -3061,7 +3066,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
                   ) : (
                     <button
                       className="send-btn"
-                      disabled={worktreeGated || (queueEdit === undefined && !((btwMode || skipAsk) && textReady || promptEnabled || queueEnabled || slashExecuteReady || (preview && running) || (composerRunning && textReady)))}
+                      disabled={!hostWritable || worktreeGated || (queueEdit === undefined && !((btwMode || skipAsk) && textReady || promptEnabled || queueEnabled || slashExecuteReady || (preview && running) || (composerRunning && textReady)))}
                       onClick={() => {
                         setComposerExpanded(true);
                         if (queueEdit !== undefined) {

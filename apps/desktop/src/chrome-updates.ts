@@ -611,7 +611,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
           throw new Error(desktopText(`通道不匹配: 期望 ${prefs.runtimeChannel}, 实际 ${verified.manifest.channel}`, `Channel mismatch: expected ${prefs.runtimeChannel}, got ${verified.manifest.channel}`));
         }
 
-        options.pendingArtifact.set(targetDir);
+        await options.pendingArtifact.set(targetDir);
         pendingRuntimeJobId = jobId;
         options.send(CHROME_UPDATES_CHANNELS.progress, {
           jobId,
@@ -763,7 +763,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
       return { ok: false, message: msg };
     }
 
-    options.pendingArtifact.set(directory);
+    await options.pendingArtifact.set(directory);
     pendingRuntimeJobId = jobId;
     options.send(CHROME_UPDATES_CHANNELS.progress, {
       jobId,
@@ -810,7 +810,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
     }
 
     if (pendingRuntimeJobId === input.jobId) {
-      options.pendingArtifact.set(undefined);
+      await options.pendingArtifact.set(undefined);
       pendingRuntimeJobId = undefined;
     }
     if (pendingAppJobId === input.jobId) {

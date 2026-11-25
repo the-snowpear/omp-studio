@@ -85,6 +85,10 @@ export function LocalFileImage({ src, alt }: { src: string; alt: string }) {
       return () => { active = false; if (blob) URL.revokeObjectURL(blob); };
     }
     const api = globalThis.ompStudioChrome?.files;
+    if (globalThis.OMP_STUDIO_WEB_ENTRY && !network && (isSystem || workspaceId)) {
+      setUrl(`/api/web/file?${new URLSearchParams({ workspaceId: workspaceId ?? "", path, ...(isSystem ? { source: "system" } : {}) })}`);
+      return;
+    }
     if (network || !api || !workspaceId && !isSystem) return;
     void api.open({ targetId, workspaceId: isSystem ? "" : (workspaceId ?? ""), path, ...(isSystem ? { source: "system" } : {}) }).then(resource => { id = resource.id; if (active) setUrl(resource.url); else void api.release(id); }).catch(() => { if (active) setUrl(undefined); });
     return () => { active = false; if (id) void api.release(id); };

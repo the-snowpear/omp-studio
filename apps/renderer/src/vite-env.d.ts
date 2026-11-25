@@ -4,6 +4,9 @@ import type { StudioClient } from "@omp-studio/client-contract";
 import type { OmpStudioDesktopApi, MobileAccessApi } from "@omp-studio/transport-desktop";
 
 declare global {
+  var ompWebControlVersion: string | undefined;
+  var OMP_STUDIO_WEB_ENTRY: boolean | undefined;
+  var ompStudioWebAccess: import("../../desktop/src/web/shared").WebAccessApi | undefined;
   var ompStudioMobileAccess: MobileAccessApi | undefined;
   /**
    * Semantic client injected by the hosting shell (local WebUI bridge or a

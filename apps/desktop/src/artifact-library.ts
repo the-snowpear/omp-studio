@@ -5,6 +5,12 @@ const libraries = new Map<string, ArtifactLibrary>();
 let active: ArtifactLibrary | undefined;
 let activeProfile: string | undefined;
 
+export function attachArtifactLibrary(profile: string, library: ArtifactLibrary): void {
+  libraries.set(resolve(profile), library);
+  active = library;
+  activeProfile = resolve(profile);
+}
+
 /** Facade rebuilds and desktop file/media IPC share one writer for the profile. */
 export function artifactLibraryForProfile(profileDirectory: string): ArtifactLibrary {
   const key = resolve(profileDirectory);

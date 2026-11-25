@@ -357,6 +357,7 @@ macOS host 日志：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-
 
 | 主题 | 文件 |
 |---|---|
+| 共享 Host / 独立 Web 工作台 | Desktop `web/{main,daemon,client,local-channel,server,control,terminals,artifacts,ipc}.ts`；Renderer `web/`；`transport-web` 会话持久化与重连；`scripts/{bundle-web-host,stage-web-environment}.mjs`；使用说明 `docs/web-ui.md` |
 | 局域网手机访问 | Desktop `mobile-access{,-ipc}.ts`、`mobile-certificate.ts`、`mobile-scope.ts`；`transport-web` HTTP/WS 传输；Renderer `mobile/`、`settings/MobileAccessSettings.tsx`；配对、会话与证书说明见 `docs/mobile-access.md` |
 | WSL 工作位置 | Desktop `apps/desktop/src/remote/{wsl,channel,wsl-paths,manager,environment-installer}.ts`；Renderer `apps/renderer/src/workspaces/{ExecutionTargets,ExecutionTargetPicker,SshPreparationDialog}.tsx`；用法见 [WSL 工作区](../docs/wsl-workspaces.md) |
 | SSH 工作位置与连接管理 | `apps/renderer/src/workspaces/{ExecutionTargets,ExecutionTargetPicker,RemoteScopeNotice,SshPasswordDialog}.tsx`、`{remoteTransport,remoteStatus}.ts`；`apps/desktop/src/remote/{manager,ipc,shared,errors}.ts`；有界重连、健康检查、目标代次同步；用法见 `docs/ssh-workspaces.md` |

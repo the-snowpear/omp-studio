@@ -12,6 +12,8 @@ export const CORE_NODE_SUITES = [
   "packages/client/dist/test/reducer.test.js",
   "packages/client/dist/test/receipt-selectors.test.js",
   "packages/testkit/dist/test/transport-contract.test.js",
+  "packages/transport-web/test/server.test.mjs",
+  "apps/desktop/dist/test/shared-web.test.js",
   // Opening, recovering, browsing and deleting conversations.
   "packages/studio-host/dist/test/backend-lifecycle.test.js",
   "packages/studio-host/dist/test/host-foundation.test.js",

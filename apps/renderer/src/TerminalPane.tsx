@@ -21,6 +21,7 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { Icon } from "./icons";
 import { useI18n } from "./i18n";
+import { useHostControl } from "./web/controlState";
 
 /** 每个终端的回滚行数。乘以同时存在的终端数就是本面板的内存底数。 */
 const TERMINAL_SCROLLBACK_LINES = 1_000;
@@ -40,19 +41,20 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
   const executionTarget = useExecutionTarget();
   const { preview } = usePreviewMode();
   const targetId = preview ? null : executionTarget.id;
-  const { store, sessions: allSessions, graphics, graphicsErrors, notices, controlMode } = useTerminalSessions();
+  const hostControl = useHostControl();
+  const { store, sessions: allSessions, restoring, graphics, graphicsErrors, notices, controlMode } = useTerminalSessions();
   const ownerKey = JSON.stringify([targetId, workspaceId ?? null, conversationId ?? sessionId ?? null]);
-  const sessions = allSessions.filter(session => session.kind !== "tmux-pane" && session.targetId === targetId && (conversationId ? session.conversationId === conversationId : session.workspaceId === workspaceId && session.sessionId === sessionId));
+  const sessions = allSessions.filter(session => session.kind !== "tmux-pane" && session.targetId === targetId && (api?.persistent && !targetId ? session.workspaceId === workspaceId && session.sessionId === sessionId : conversationId ? session.conversationId === conversationId : session.workspaceId === workspaceId && session.sessionId === sessionId));
   const [activeId, setActiveId] = useState<string | null>(() => store.activeIds.get(ownerKey) ?? null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const bootstrapped = useRef(sessions.length > 0);
   const createLock = useRef(false);
   const targetStatus = executionTarget.inventory.statuses.find(status => status.id === executionTarget.id);
-  const canCreate = !targetId || (targetStatus?.state === "connected" && !targetStatus.operation);
+  const canCreate = targetId ? (targetStatus?.state === "connected" && !targetStatus.operation) : hostControl;
   const selectSession = (id: string): void => { store.activeIds.set(ownerKey, id); setActiveId(id); };
   const tmuxPanel = useTmuxPanel({ targetId, workspaceId, ownerKey, connected: canCreate, cwd: sessions[0]?.cwd ?? executionTarget.inventory.profiles.find(profile => profile.id === targetId)?.lastDirectory ?? "", activeId, select: selectSession, visible, onError: setError });
-  useEffect(() => { setActiveId(store.activeIds.get(ownerKey) ?? null); bootstrapped.current = sessions.length > 0; }, [ownerKey, allSessions, store]);
+  useEffect(() => { setActiveId(store.activeIds.get(ownerKey) ?? sessions[0]?.id ?? null); bootstrapped.current = sessions.length > 0; }, [ownerKey, allSessions, store]);
 
   const createSession = useCallback(async () => {
     if (!api || createLock.current || !canCreate) return;
@@ -67,10 +69,10 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
 
   useImperativeHandle(ref, () => ({ create: () => { void createSession(); }, available: api !== undefined && canCreate }), [api, canCreate, createSession]);
   useEffect(() => {
-    if (!api || bootstrapped.current || !visible || !canCreate) return;
+    if (!api || bootstrapped.current || !visible || !canCreate || (!targetId && restoring)) return;
     bootstrapped.current = true;
     void createSession();
-  }, [api, visible, canCreate, createSession]);
+  }, [api, visible, canCreate, createSession, targetId, restoring]);
 
   if (!api && !preview) {
     return (
@@ -137,7 +139,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
             </div>
             {active.targetId ? <p className="muted small">{zh ? "SSH 终端暂不支持本机录制；关闭标签会结束该终端。" : "Local recording is not supported on SSH terminals; closing this tab ends the session."}</p> : api ? <TerminalRecordingControls key={active.id} api={api} id={active.id} visible={visible} ended={active.status === "ended"} workspaceId={active.workspaceId} sessionId={active.sessionId} /> : null}
             {error ? <p role="alert" className="muted small">{error}</p> : null}
-            {notices[active.id] ? <p role="status" className="muted small">{notices[active.id]}</p> : null}
+            {notices[active.id] ? <p role="status" className="muted small">{notices[active.id] === "host-replay-truncated" ? (zh ? "已显示最近的终端输出，较早输出已移出回放缓存。" : "Showing recent terminal output. Earlier output has left the replay buffer.") : notices[active.id]}</p> : null}
             {controlMode[active.id] && api ? <div role="status" className="muted small">
               <p>{t("terminal.tmux.controlNotice")}</p>
               <button type="button" className="btn" onClick={() => void api.write(active.id, "\n").catch(cause => setError(String(cause)))}>{t("terminal.tmux.exitControl")}</button>
@@ -193,6 +195,8 @@ function XtermScreen({
   const [linkMenu, setLinkMenu] = useState<{ url: string; x: number; y: number }>();
   const document = useSurfaceDocument();
   const { settings } = useAppSettings();
+  const controlling = useHostControl();
+  const writable = session.targetId !== null || !api.persistent || controlling;
 
   useEffect(() => {
     const node = containerRef.current;
@@ -215,7 +219,7 @@ function XtermScreen({
       term.loadAddon(fit);
       term.open(node);
       term.onData((data) => {
-        void api.write(session.id, data);
+        void api.write(session.id, data).catch(() => {});
       });
       host = { term, fit };
     } else if (termParentMissing(host.term, node)) {
@@ -228,8 +232,8 @@ function XtermScreen({
     // (it deliberately does not acknowledge queued-but-unwritten output).
     store.attachHost(session.id, host);
 
-    host.term.options.disableStdin = session.status === "ended";
-    host.term.options.cursorBlink = session.status !== "ended";
+    host.term.options.disableStdin = session.status === "ended" || !writable;
+    host.term.options.cursorBlink = session.status !== "ended" && writable;
     const links = registerTerminalBrowserLinks(host.term, url => { hoveredLink.current = url; });
     const observer = new MutationObserver(() => applyTheme(host.term));
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
@@ -238,7 +242,7 @@ function XtermScreen({
       observer.disconnect();
       links.dispose();
     };
-  }, [api, hosts, store, session.id, session.status, document]);
+  }, [api, hosts, store, session.id, session.status, document, writable]);
 
   useEffect(() => {
     const host = hosts.get(session.id);
@@ -249,12 +253,12 @@ function XtermScreen({
     const fit = () => {
       if (disposed || !active || !node || node.clientWidth === 0 || node.clientHeight === 0) return;
       host.fit?.fit();
-      void api.resize(session.id, host.term.cols, host.term.rows);
+      if (writable) void api.resize(session.id, host.term.cols, host.term.rows).catch(() => {});
     };
     const frame = requestAnimationFrame(fit);
     void document.fonts?.ready.then(fit);
     return () => { disposed = true; cancelAnimationFrame(frame); };
-  }, [active, api, hosts, session.id, settings.terminalFontFamily, settings.terminalFontSize, document]);
+  }, [active, api, hosts, session.id, settings.terminalFontFamily, settings.terminalFontSize, document, writable]);
 
   useEffect(() => {
     const host = hosts.get(session.id);
@@ -263,7 +267,7 @@ function XtermScreen({
     const sync = (): void => {
       try {
         host.fit?.fit();
-        void api.resize(session.id, host.term.cols, host.term.rows);
+        if (writable) void api.resize(session.id, host.term.cols, host.term.rows).catch(() => {});
       } catch {
         // Fit can throw while the panel is mid-collapse.
       }
@@ -280,7 +284,7 @@ function XtermScreen({
       cancelAnimationFrame(resizeFrame);
       ro.disconnect();
     };
-  }, [active, api, hosts, session.id]);
+  }, [active, api, hosts, session.id, writable]);
 
   return <><div className="term-xterm" ref={containerRef} hidden={!active} onContextMenu={event => { if (hoveredLink.current) { event.preventDefault(); setLinkMenu({ url: hoveredLink.current, x: event.clientX, y: event.clientY }); } }} />{linkMenu ? <BrowserLinkMenu url={linkMenu.url} point={linkMenu} onClose={() => setLinkMenu(undefined)} /> : null}</>;
 }

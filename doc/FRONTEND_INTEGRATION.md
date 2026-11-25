@@ -80,6 +80,8 @@
 
 ### 3.3 WebUI 定义
 
+> 本节保留初期集成基线。当前共享 Host、六平台独立运行环境和局域网 HTTPS 交付以 [Web 工作台](../docs/web-ui.md) 与[现行架构](../docs/architecture.md)为准。
+
 本期 WebUI 是“本机 WebUI”：
 
 - 仅在用户显式执行 serve/enable 操作后启动；

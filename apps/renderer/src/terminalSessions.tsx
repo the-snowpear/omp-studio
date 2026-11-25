@@ -22,6 +22,7 @@ export interface TerminalSession {
 }
 export interface TerminalScreenHost { readonly term: Terminal; readonly fit?: FitAddon; }
 interface TerminalState {
+  restoring: boolean;
   sessions: readonly TerminalSession[];
   graphics: Readonly<Record<string, TerminalGraphic[]>>;
   graphicsErrors: Readonly<Record<string, string>>;
@@ -157,12 +158,42 @@ export class TerminalSessions {
   readonly #removing = new Set<string>();
   readonly #forgettingTmux = new Set<string>();
   #ackScheduled = false;
-  #state: TerminalState = { sessions: [], graphics: {}, graphicsErrors: {}, notices: {}, controlMode: {}, tmux: {}, tmuxOwners: {}, hiddenWindows: {} };
+  #state: TerminalState = { restoring: false, sessions: [], graphics: {}, graphicsErrors: {}, notices: {}, controlMode: {}, tmux: {}, tmuxOwners: {}, hiddenWindows: {} };
   #off: (() => void) | undefined;
   #creating = 0;
   #closed = false;
+  readonly #sharedSequences = new Map<string, number>();
 
-  constructor(readonly api: Api | undefined) {}
+  constructor(readonly api: Api | undefined) { this.#state.restoring = Boolean(api?.list); }
+  restore(): () => void {
+    if (!this.api?.list) return () => {};
+    this.#listen();
+    const apply = (rows: import("../../desktop/src/web/terminals").SharedTerminal[]) => {
+      if (this.#closed) return;
+      for (const row of rows) {
+        const previous = this.#sharedSequences.get(row.id);
+        if (previous !== undefined && previous >= row.sequence) continue;
+        this.#sessionIds.add(row.id);
+        this.#sharedSequences.set(row.id, row.sequence);
+        this.#queue(row.id).clear();
+        this.hosts.get(row.id)?.term.reset();
+        this.#queue(row.id).append(row.output, 0, PENDING_MAX_BYTES);
+        if (row.truncated) this.#state = { ...this.#state, notices: { ...this.#state.notices, [row.id]: "host-replay-truncated" } };
+      }
+      const known = new Set(rows.map(row => row.id));
+      const remote = this.#state.sessions.filter(row => row.targetId !== null);
+      const local = rows.map(row => {
+        const existing = this.#state.sessions.find(item => item.id === row.id);
+        return { ...existing, id: row.id, name: row.name, cwd: row.cwd, status: row.status, targetId: null, ...(row.workspaceId ? { workspaceId: row.workspaceId } : {}), ...(row.sessionId ? { sessionId: row.sessionId } : {}) };
+      });
+      for (const previous of this.#state.sessions) if (previous.targetId === null && !known.has(previous.id)) this.#releaseScreen(previous.id);
+      this.#publish({ ...this.#state, restoring: false, sessions: [...remote, ...local] });
+      for (const row of rows) this.#drain(row.id);
+    };
+    const off = this.api.onSessions?.(apply);
+    void this.api.list().then(apply).catch(() => { if (!this.#closed) this.#publish({ ...this.#state, restoring: false }); });
+    return () => off?.();
+  }
   snapshot = (): TerminalState => this.#state;
   subscribe = (listener: () => void): (() => void) => { this.#listeners.add(listener); return () => { this.#listeners.delete(listener); }; };
 
@@ -173,11 +204,11 @@ export class TerminalSessions {
     try {
       // `flowControl: true` is the opt-in handshake: Main then pauses the PTY
       // when this store falls behind, and resumes on our ACKs below.
-      const info = await this.api.create({ cols: 80, rows: 24, ...(this.api.ack ? { flowControl: true } : {}), ...(workspaceId ? { workspaceId } : {}), ...(targetId ? { targetId } : {}), ...(command ? { command } : {}) });
+      const info = await this.api.create({ cols: 80, rows: 24, ...(this.api.ack ? { flowControl: true } : {}), ...(workspaceId ? { workspaceId } : {}), ...(this.api.persistent && !targetId && sessionId ? { sessionId } : {}), ...(targetId ? { targetId } : {}), ...(command ? { command } : {}) });
       if (this.#closed) { await this.api.dispose(info.id); throw new Error("Terminal window has closed"); }
       const session: TerminalSession = { ...info, targetId, ...(conversationId ? { conversationId } : {}), status: this.#earlyExits.delete(info.id) ? "ended" : "running", ...(workspaceId ? { workspaceId } : {}), ...(sessionId ? { sessionId } : {}) };
       this.activeIds.set(terminalOwnerKey(targetId, workspaceId, conversationId ?? sessionId), info.id);
-      this.#publish({ ...this.#state, sessions: [...this.#state.sessions, session] });
+      this.#publish({ ...this.#state, sessions: [...this.#state.sessions.filter(row => row.id !== session.id), session] });
       return info.id;
     } finally {
       this.#creating--;
@@ -280,7 +311,7 @@ export class TerminalSessions {
     if (this.#closed) return;
     this.#closed = true;
     this.#off?.();
-    for (const session of this.#state.sessions) if (session.kind !== "tmux-pane") void this.api?.dispose(session.id).catch(() => {});
+    for (const session of this.#state.sessions) if (session.kind !== "tmux-pane" && (!this.api?.persistent || session.targetId !== null)) void this.api?.dispose(session.id).catch(() => {});
     for (const id of Object.keys(this.#state.tmux)) void this.api?.tmuxDetach?.(id).catch(() => {});
     for (const id of this.hosts.keys()) this.#releaseScreen(id);
     this.activeIds.clear();
@@ -288,6 +319,7 @@ export class TerminalSessions {
     this.#acked.clear();
     this.#creditsClosed.clear();
     this.#sessionIds.clear();
+    this.#sharedSequences.clear();
     this.#decoders.clear();
     this.#listeners.clear();
   }
@@ -322,6 +354,10 @@ export class TerminalSessions {
     const offData = this.api.onData(event => {
       if (this.#removing.has(event.id)) return;
       if (!this.#creating && !this.#sessionIds.has(event.id)) return;
+      if (event.sequence !== undefined) {
+        if ((this.#sharedSequences.get(event.id) ?? -1) >= event.sequence) return;
+        this.#sharedSequences.set(event.id, event.sequence);
+      }
       // An ended terminal still accepts output: Main keeps the batcher open for
       // one window after the exit notification because ConPTY can hand over the
       // shell's last line afterwards. Those bytes are shown (or queued, still
@@ -497,6 +533,7 @@ export const terminalOwnerKey = (targetId: string | null, workspaceId?: string, 
 export function TerminalSessionsProvider({ children }: { children: ReactNode }) {
   const store = useMemo(() => new TerminalSessions(globalThis.ompStudioTerminal), []);
   useEffect(() => () => store.close(), [store]);
+  useEffect(() => store.restore(), [store]);
   return <Context.Provider value={store}>{children}</Context.Provider>;
 }
 export function useTerminalStore() {

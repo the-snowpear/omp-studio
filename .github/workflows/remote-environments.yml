@@ -86,8 +86,8 @@ jobs:
           pattern: runtime-${{ matrix.target }}-*
           merge-multiple: true
           path: packages/runtime-installer/dist/artifacts/${{ matrix.target }}/
-      - name: Build remote Host without desktop renderer
-        run: npm run build:remote
+      - name: Build Host and Web workbench
+        run: npm run build:remote && npm run build -w @omp-studio/renderer && node scripts/bundle-web-host.mjs
       - name: Package and verify remote environment
         env:
           OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}

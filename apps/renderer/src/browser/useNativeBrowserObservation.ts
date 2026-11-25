@@ -88,7 +88,10 @@ export function useNativeBrowserObservation(options: { client?: StudioClient | u
     const view: Window = document.defaultView ?? window;
     setState(undefined); frames.publish(undefined); setInspection(undefined); setError(""); setConnecting(false); setViewer(false);
     if (!active || !descriptor || !options.page || !options.session) return;
-    if (!preview && (!options.client || !chrome?.attachBrowserObservation || !chrome?.onBrowserObservation)) return;
+    if (!preview && (!options.client || !chrome?.attachBrowserObservation || !chrome?.onBrowserObservation)) {
+      setError(zhRef.current ? "同页画面和人工接管需要桌面版的浏览器通道。" : "Same-page viewing and manual control require the desktop browser channel.");
+      return;
+    }
     let disposed = false, handle: ObservationHandle | undefined, unbind: (() => void) | undefined;
     let heartbeat: number | undefined;
     const stop = async () => {

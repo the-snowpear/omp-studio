@@ -260,6 +260,7 @@ Clearly categorized, searchable settings; Runtime config saves across global, pr
 | **SSH Workspaces** | Open a remote project and deploy a signed environment on demand. Run agents, edit files, and use Git and terminals on the remote machine. Studio attempts to reattach to the original Host after a brief disconnection | [ssh-workspaces.md](docs/ssh-workspaces.md) |
 | **WSL 2 Workspaces** | Pick a Linux distribution and folder from the Windows desktop to run agents, Git, and terminals there | [wsl-workspaces.md](docs/wsl-workspaces.md) |
 | **Mobile Access** | Pair a phone on the local network and continue chats from a selected local project | [mobile-access.md](docs/mobile-access.md) |
+| **Web Workbench** | Standalone Host, LAN HTTPS, device control, file and Git changes, shared terminals | [web-ui.md](docs/web-ui.md) |
 | **BTW Aside** | Ask side questions without interrupting the main thread; supports images, branching, and subagent reuse | [btw.md](docs/btw.md) |
 | **Voice Dictation** | Click or hold Space to dictate at the cursor; recovers audio from memory if transcription fails | [dictation.md](docs/dictation.md) |
 | **Evaluation Workspace** | Native benchmarks, instruction-following evals, background runs, history comparison, and Ratchet best-run diff export | [evaluation.md](docs/evaluation.md) |

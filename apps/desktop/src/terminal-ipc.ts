@@ -42,6 +42,7 @@ export interface TerminalIpcMain {
 }
 
 export interface TerminalIpcOptions {
+  readonly shared?: () => Promise<import("./web/client.js").SharedHostConnection>;
   readonly ipcMain: TerminalIpcMain;
   readonly isTrustedSender: (sender: TerminalSender) => boolean;
   readonly manager: TerminalSessionManager;
@@ -70,6 +71,45 @@ function listenersFor(sender: TerminalSender, active: () => boolean = () => true
 export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHandle {
   const ipc = options.ipcMain;
   const tracked = new Map<number, { teardown(): void }>();
+  const sharedIds = new Set<string>();
+  const sharedSenders = new Set<TerminalSender>();
+  let sharedConnection: import("./web/client.js").SharedHostConnection | undefined;
+  let offShared: (() => void) | undefined;
+  let disposed = false;
+  const bindShared = async (): Promise<import("./web/client.js").SharedHostConnection> => {
+    if (!options.shared) throw new Error("Shared terminal Host is unavailable");
+    const connection = await options.shared();
+    if (disposed) return connection;
+    if (sharedConnection === connection) return connection;
+    offShared?.();
+    sharedConnection = connection;
+    offShared = connection.onEvent(event => {
+      const send = (channel: string, payload: unknown) => { for (const sender of sharedSenders) if (!sender.isDestroyed()) sender.send(channel, payload); };
+      if (event.kind === "terminal.data") send(TERMINAL_IPC_CHANNELS.data, event);
+      if (event.kind === "terminal.exit") send(TERMINAL_IPC_CHANNELS.exit, event);
+      if (event.kind === "terminal.snapshot") {
+        const rows = event.rows as import("./web/terminals.js").SharedTerminal[];
+        const current = new Set(rows.map(row => row.id));
+        for (const id of sharedIds) if (!current.has(id)) sharedIds.delete(id);
+        rows.forEach(row => sharedIds.add(row.id));
+        send("omp-studio:shared-terminals", rows);
+      }
+    });
+    return connection;
+  };
+  if (options.shared) void bindShared().catch(() => {});
+  if (options.shared) ipc.handle("omp-studio:shared-terminals:list", async ({ sender }) => {
+    assertTrusted(sender);
+    if (!sharedSenders.has(sender)) {
+      sharedSenders.add(sender);
+      sender.once("destroyed", () => { sharedSenders.delete(sender); });
+    }
+    const rows = await (await bindShared()).call<import("./web/terminals.js").SharedTerminal[]>("terminals.list");
+    const current = new Set(rows.map(row => row.id));
+    for (const id of sharedIds) if (!current.has(id)) sharedIds.delete(id);
+    rows.forEach(row => sharedIds.add(row.id));
+    return rows;
+  });
 
   function assertTrusted(sender: TerminalSender): void {
     if (sender.isDestroyed() || !options.isTrustedSender(sender)) {
@@ -130,6 +170,7 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
   ipc.handle(TERMINAL_IPC_CHANNELS.recordingStart, (event, payload) => {
     assertTrusted(event.sender); track(event.sender);
     const input = parseRecordingInput(payload);
+    if (sharedIds.has(input.id)) return bindShared().then(connection => connection.call("terminals.recordingStart", input));
     if (options.tmux?.owns(event.sender.id, input.id)) throw new Error(desktopText("tmux 窗格暂不支持录制", "tmux pane recording is not supported"));
     if (!options.recordings) throw new Error("Terminal recording is unavailable");
     if (options.remote?.owns(event.sender.id, input.id)) throw new Error("SSH terminal recording is not supported");
@@ -138,12 +179,14 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
   });
   ipc.handle(TERMINAL_IPC_CHANNELS.recordingStop, (event, payload) => {
     assertTrusted(event.sender); const input = parseDisposeInput(payload);
+    if (sharedIds.has(input.id)) return bindShared().then(connection => connection.call("terminals.recordingStop", input));
     if (!options.recordings) throw new Error("Terminal recording is unavailable");
     options.manager.flushOutput(event.sender.id, input.id);
     return options.recordings.stop(event.sender.id, input.id);
   });
   ipc.handle(TERMINAL_IPC_CHANNELS.recordingStatus, (event, payload) => {
     assertTrusted(event.sender); const input = parseDisposeInput(payload);
+    if (sharedIds.has(input.id)) return bindShared().then(connection => connection.call("terminals.recordingStatus", input));
     if (!options.recordings) throw new Error("Terminal recording is unavailable");
     return options.recordings.status(event.sender.id, input.id);
   });
@@ -157,6 +200,10 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
       if (!options.remote || !size.workspaceId) throw new Error("SSH terminal requires a remote workspace");
       return options.remote.create(event.sender.id, size.targetId, size.workspaceId, size, listeners);
     }
+    if (options.shared) return bindShared().then(async connection => {
+      const info = await connection.call<import("./terminal-shared.js").TerminalSessionInfo>("terminals.create", size);
+      sharedIds.add(info.id); return info;
+    });
     if (size.workspaceId && options.resolveWorkspaceCwd) return options.resolveWorkspaceCwd(size.workspaceId).then(cwd => {
       if (event.sender.isDestroyed() || tracked.get(event.sender.id) !== document) throw new Error("Terminal window has closed");
       return options.manager.create(event.sender.id, size, listeners, cwd);
@@ -168,6 +215,7 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
   ipc.handle(TERMINAL_IPC_CHANNELS.write, (event, payload) => {
     assertTrusted(event.sender);
     const input = parseWriteInput(payload);
+    if (sharedIds.has(input.id)) return bindShared().then(connection => connection.call("terminals.write", input));
     if (options.tmux?.owns(event.sender.id, input.id)) options.tmux.write(event.sender.id, input.id, input.data);
     else if (options.remote?.owns(event.sender.id, input.id)) options.remote.write(event.sender.id, input.id, input.data);
     else options.manager.write(event.sender.id, input.id, input.data);
@@ -176,6 +224,7 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
   ipc.handle(TERMINAL_IPC_CHANNELS.resize, (event, payload) => {
     assertTrusted(event.sender);
     const input = parseResizeInput(payload);
+    if (sharedIds.has(input.id)) return bindShared().then(connection => connection.call("terminals.resize", input));
     if (options.tmux?.owns(event.sender.id, input.id)) return;
     if (options.remote?.owns(event.sender.id, input.id)) options.remote.resize(event.sender.id, input.id, input.cols, input.rows);
     else options.manager.resize(event.sender.id, input.id, input.cols, input.rows);
@@ -196,6 +245,7 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
   ipc.handle(TERMINAL_IPC_CHANNELS.dispose, (event, payload) => {
     assertTrusted(event.sender);
     const input = parseDisposeInput(payload);
+    if (sharedIds.has(input.id)) return bindShared().then(connection => connection.call("terminals.dispose", input));
     if (options.tmux?.owns(event.sender.id, input.id)) return;
     if (options.remote?.owns(event.sender.id, input.id)) options.remote.dispose(event.sender.id, input.id);
     else options.manager.dispose(event.sender.id, input.id, listenersFor(event.sender));
@@ -203,6 +253,8 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
 
   return Object.freeze({
     dispose(): void {
+      disposed = true;
+      offShared?.(); sharedConnection = undefined; sharedSenders.clear(); ipc.removeHandler("omp-studio:shared-terminals:list");
       for (const document of [...tracked.values()]) document.teardown();
       for (const channel of tmuxHandlers) ipc.removeHandler(channel);
       ipc.removeHandler(TERMINAL_IPC_CHANNELS.create);
