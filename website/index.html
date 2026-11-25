@@ -141,19 +141,53 @@
 </script>
 
 <script>
-  // Before first paint, so a returning dark-theme visitor never sees a light flash.
-  document.documentElement.classList.add("js");
-  try {
-    const saved = localStorage.getItem("omp-site-theme");
-    if (saved === "dark" || (!saved && matchMedia("(prefers-color-scheme: dark)").matches)) document.documentElement.dataset.theme = "dark";
-  } catch {}
-  // The side panel plays an entrance. Hold it back until the script takes over, and give up waiting after a while.
-  if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    document.documentElement.dataset.intro = "pending";
-    setTimeout(() => {
-      if (document.documentElement.dataset.intro === "pending") delete document.documentElement.dataset.intro;
-    }, 3500);
-  }
+  (() => {
+    // Route first-time non-Chinese visitors at / to /en/ before first paint, skipping bots, embeds, and saved preferences.
+    try {
+      const qp = new URLSearchParams(location.search);
+      if (window.self === window.top && qp.get("embed") !== "1") {
+        let saved = "";
+        try { saved = localStorage.getItem("omp-site-lang") || ""; } catch {}
+        let fromEn = false;
+        try {
+          if (document.referrer) {
+            const ref = new URL(document.referrer);
+            fromEn = ref.origin === location.origin && /\/en(?:\/(?:index\.html)?)?$/.test(ref.pathname);
+          }
+        } catch {}
+        if (fromEn) {
+          saved = "zh";
+          try { localStorage.setItem("omp-site-lang", "zh"); } catch {}
+        }
+        const navEntry = performance.getEntriesByType && performance.getEntriesByType("navigation")[0];
+        const isBack = navEntry && navEntry.type === "back_forward";
+        const ua = navigator.userAgent || "";
+        const isBot = /bot|crawl|spider|slurp|mediapartners|adsbot|bingpreview|duckduck|baidu|yandex|sogou|bytespider|petalbot|gptbot|claudebot|anthropic|perplexity|oai-searchbot|google-inspectiontool|lighthouse|facebookexternalhit|twitterbot|linkedinbot|slackbot|discordbot|telegrambot|whatsapp|applebot/i.test(ua);
+        const primary = ((navigator.languages && navigator.languages[0]) || navigator.language || "").trim().toLowerCase();
+        if (!isBack && (saved === "en" || (!saved && !isBot && primary && !/^zh(?:-|$)/.test(primary)))) {
+          const target = new URL("./en/", location.href);
+          target.search = location.search;
+          target.hash = location.hash;
+          location.replace(target.href);
+          return;
+        }
+      }
+    } catch {}
+
+    // Before first paint, so a returning dark-theme visitor never sees a light flash.
+    document.documentElement.classList.add("js");
+    try {
+      const savedTheme = localStorage.getItem("omp-site-theme");
+      if (savedTheme === "dark" || (!savedTheme && matchMedia("(prefers-color-scheme: dark)").matches)) document.documentElement.dataset.theme = "dark";
+    } catch {}
+    // The side panel plays an entrance. Hold it back until the script takes over, and give up waiting after a while.
+    if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      document.documentElement.dataset.intro = "pending";
+      setTimeout(() => {
+        if (document.documentElement.dataset.intro === "pending") delete document.documentElement.dataset.intro;
+      }, 3500);
+    }
+  })();
 </script>
 <script type="module" src="./src/main.ts"></script>
 </head>
@@ -171,7 +205,7 @@
     <a href="#faq">问答</a>
   </nav>
   <span class="top-grow"></span>
-  <a class="top-lang" href="./en/" hreflang="en" lang="en" aria-label="Switch to English page">EN</a>
+  <a class="top-lang" href="./en/" hreflang="en" lang="en" data-set-lang="en" aria-label="Switch to English page">EN</a>
   <button class="top-icon" id="theme" type="button" aria-label="切换深色主题" aria-pressed="false"></button>
   <a class="top-icon" id="gh" href="https://github.com/the-snowpear/omp-studio" aria-label="GitHub 仓库"></a>
   <a class="btn btn-primary top-dl" href="#download" data-dl-primary><span data-dl-label>下载</span></a>
@@ -361,7 +395,7 @@
     <a href="https://github.com/the-snowpear/omp-studio/blob/main/CHANGELOG.md">更新日志</a>
     <a href="https://github.com/the-snowpear/omp-studio/tree/main/docs">文档</a>
     <a href="https://github.com/the-snowpear/omp-studio/issues">反馈问题</a>
-    <a href="./en/" hreflang="en" lang="en">English</a>
+    <a href="./en/" hreflang="en" lang="en" data-set-lang="en">English</a>
   </nav>
 </footer>
 

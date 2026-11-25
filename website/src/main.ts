@@ -91,6 +91,18 @@ function boot() {
   mountNav($("#top"), $("#top-mark"), $("#top-nav"));
   mountReveal();
 
+  $$<HTMLAnchorElement>("[data-set-lang]").forEach((link) => {
+    const saveLang = () => {
+      try {
+        if (link.dataset.setLang) localStorage.setItem("omp-site-lang", link.dataset.setLang);
+      } catch {}
+    };
+    link.addEventListener("click", saveLang);
+    link.addEventListener("auxclick", (e) => {
+      if (e.button === 1) saveLang();
+    });
+  });
+
   // ---------------- theme ----------------
   function remember(theme: Theme) {
     try {
