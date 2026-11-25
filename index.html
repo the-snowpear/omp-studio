@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light" data-root=".">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OMP Studio：把 Agent 装进随你摆放的桌面工作台 · oh-my-pi GUI</title>
+<meta name="description" content="OMP Studio 是 oh-my-pi (omp) AI Coding Agent 的开源跨平台桌面 GUI 工作台。多窗口对话、子 Agent 编排（Agent Hub）、Git / Worktree、终端、托管浏览器（WebMCP）、Time Travel、Computer Use、MCP / Skills 与 SSH / WSL 2 全部放进同一张工作台，支持 Windows、macOS 与 Linux。">
+<meta name="keywords" content="OMP Studio, oh-my-pi, omp, oh-my-pi GUI, AI Coding Agent, AI 编程工作台, AI 编程助手, 桌面工作台, Electron, MCP, WebMCP, Computer Use, Time Travel, Agent Hub, Git Worktree, SSH 工作区, WSL 2, 开源 AI 工具">
+<meta name="author" content="the-snowpear">
+<meta name="application-name" content="OMP Studio">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+<meta name="theme-color" content="#f4f4f7">
+
+<link rel="canonical" href="https://the-snowpear.github.io/omp-studio/">
+<link rel="alternate" hreflang="zh-CN" href="https://the-snowpear.github.io/omp-studio/">
+<link rel="alternate" hreflang="en" href="https://the-snowpear.github.io/omp-studio/en/">
+<link rel="alternate" hreflang="x-default" href="https://the-snowpear.github.io/omp-studio/">
+
+<link rel="icon" href="./favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png">
+<link rel="manifest" href="./site.webmanifest">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="OMP Studio">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:locale:alternate" content="en_US">
+<meta property="og:url" content="https://the-snowpear.github.io/omp-studio/">
+<meta property="og:title" content="OMP Studio：把 Agent 装进一张随你摆放的工作台">
+<meta property="og:description" content="oh-my-pi (omp) 的跨平台桌面工作台。对话、Git、终端、浏览器、Agent Hub、Time Travel 与电脑操作都是可分屏停靠的窗口。支持 Windows、macOS 与 Linux。">
+<meta property="og:image" content="https://the-snowpear.github.io/omp-studio/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="OMP Studio 跨平台 AI 编程工作台界面展示">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="OMP Studio：把 Agent 装进一张随你摆放的工作台">
+<meta name="twitter:description" content="oh-my-pi (omp) 的跨平台桌面工作台：多窗口对话、Git、终端、托管浏览器、Agent Hub、MCP、SSH 与 WSL 2。">
+<meta name="twitter:image" content="https://the-snowpear.github.io/omp-studio/og-image.png">
+<meta name="twitter:image:alt" content="OMP Studio 跨平台 AI 编程工作台界面展示">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://the-snowpear.github.io/omp-studio/#website",
+      "url": "https://the-snowpear.github.io/omp-studio/",
+      "name": "OMP Studio",
+      "alternateName": ["OMP Studio 官网", "oh-my-pi Desktop Workbench"],
+      "inLanguage": "zh-CN"
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://the-snowpear.github.io/omp-studio/#app",
+      "name": "OMP Studio",
+      "alternateName": ["omp-studio", "oh-my-pi GUI", "oh-my-pi Desktop"],
+      "description": "OMP Studio 是 oh-my-pi (omp) AI Coding Agent 的开源跨平台桌面 GUI 工作台，通过类型化 Studio Bridge 对接 Runtime，将多会话对话、Plan 审批、子 Agent、Git / Worktree、终端、托管浏览器、电脑操作、Time Travel 与 MCP / Skills 整合在可自由拖放布局的桌面窗口中。",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "Windows 10, Windows 11, macOS 13+, Linux",
+      "softwareVersion": "0.2.11",
+      "url": "https://the-snowpear.github.io/omp-studio/",
+      "downloadUrl": "https://github.com/the-snowpear/omp-studio/releases",
+      "installUrl": "https://the-snowpear.github.io/omp-studio/#download",
+      "codeRepository": "https://github.com/the-snowpear/omp-studio",
+      "license": "https://opensource.org/licenses/MIT",
+      "image": "https://the-snowpear.github.io/omp-studio/og-image.png",
+      "screenshot": "https://the-snowpear.github.io/omp-studio/og-image.png",
+      "featureList": [
+        "多对话浮窗与吸附分屏（6 种预设布局模板与 8 向缩放）",
+        "工具 5 处自由停靠与独立系统窗口",
+        "类型化 Studio Bridge 通信（不解析 TUI/ANSI 文本）",
+        "Agent Hub 多子代理状态、Token 与花费监控",
+        "会话历史与按回合 Time Travel 代码/对话恢复",
+        "Anthropic、OpenAI、OpenRouter、本地 LM Studio 统一模型配置",
+        "Skills、Plugins、MCP 与 Slash Commands 能力中心",
+        "托管浏览器、元素引用、WebMCP 与 Computer Use 电脑操作回放",
+        "SSH 远程工作区、Windows WSL 2 工作区与局域网手机访问"
+      ],
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "author": {
+        "@type": "Person",
+        "name": "the-snowpear",
+        "url": "https://github.com/the-snowpear"
+      },
+      "inLanguage": ["zh-CN", "en"]
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://the-snowpear.github.io/omp-studio/#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "OMP Studio 和 oh-my-pi (omp) CLI 是什么关系？",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "OMP Studio 是 oh-my-pi (omp) 的跨平台桌面工作台外壳，沿用 OMP 自身的 models.yml、omp login、Skills 和会话格式，并通过类型化的 Studio Bridge 直接调用 Runtime 语义能力，而不是终端文本包装或按键模拟。"
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "OMP Studio 支持哪些模型供应商？需要内置或提供密钥吗？",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "支持 Anthropic、OpenAI、OpenRouter、本地 LM Studio 等 OMP 可连接的全部模型供应商，并可为 @default、@plan、@task 角色分别指定模型与思考强度。应用与仓库不内置任何供应商密钥。"
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "OMP Studio 支持哪些操作系统与安装包？",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "支持 Windows x64（Windows 10+）与 Windows ARM64 安装器、macOS Apple Silicon（macOS 13+ DMG），以及 Linux x64（AppImage 与 deb，需支持 AVX2 与 glibc 2.39+），也可以从源码直接运行。"
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "支持 SSH 远程项目、WSL 2 和手机访问吗？",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "支持。Windows 桌面版可直接选择 WSL 2 发行版和目录运行 Agent；SSH 工作区支持按需部署签名远端环境并断线重连；同一局域网内还可以扫码配对手机或通过独立 Web 工作台继续对话与工具审批。"
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "什么是 Time Travel、Agent Hub、Computer Use 和 WebMCP？",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Time Travel 按回合记录工作区快照，可只恢复代码、只恢复对话或同时恢复；Agent Hub 可集中查看主 Agent 与所有子 Agent 状态与花费；Computer Use 为每个动作留存截图并支持历史回放与随时叫停；聊天浏览器支持元素引用与原生 WebMCP。"
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+
+<script>
+  (() => {
+    // Route first-time non-Chinese visitors at / to /en/ before first paint, skipping bots, embeds, and saved preferences.
+    try {
+      const qp = new URLSearchParams(location.search);
+      if (window.self === window.top && qp.get("embed") !== "1") {
+        let saved = "";
+        try { saved = localStorage.getItem("omp-site-lang") || ""; } catch {}
+        let fromEn = false;
+        try {
+          if (document.referrer) {
+            const ref = new URL(document.referrer);
+            fromEn = ref.origin === location.origin && /\/en(?:\/(?:index\.html)?)?$/.test(ref.pathname);
+          }
+        } catch {}
+        if (fromEn) {
+          saved = "zh";
+          try { localStorage.setItem("omp-site-lang", "zh"); } catch {}
+        }
+        const navEntry = performance.getEntriesByType && performance.getEntriesByType("navigation")[0];
+        const isBack = navEntry && navEntry.type === "back_forward";
+        const ua = navigator.userAgent || "";
+        const isBot = /bot|crawl|spider|slurp|mediapartners|adsbot|bingpreview|duckduck|baidu|yandex|sogou|bytespider|petalbot|gptbot|claudebot|anthropic|perplexity|oai-searchbot|google-inspectiontool|lighthouse|facebookexternalhit|twitterbot|linkedinbot|slackbot|discordbot|telegrambot|whatsapp|applebot/i.test(ua);
+        const primary = ((navigator.languages && navigator.languages[0]) || navigator.language || "").trim().toLowerCase();
+        if (!isBack && (saved === "en" || (!saved && !isBot && primary && !/^zh(?:-|$)/.test(primary)))) {
+          const target = new URL("./en/", location.href);
+          target.search = location.search;
+          target.hash = location.hash;
+          location.replace(target.href);
+          return;
+        }
+      }
+    } catch {}
+
+    // Before first paint, so a returning dark-theme visitor never sees a light flash.
+    document.documentElement.classList.add("js");
+    try {
+      const savedTheme = localStorage.getItem("omp-site-theme");
+      if (savedTheme === "dark" || (!savedTheme && matchMedia("(prefers-color-scheme: dark)").matches)) document.documentElement.dataset.theme = "dark";
+    } catch {}
+    // The side panel plays an entrance. Hold it back until the script takes over, and give up waiting after a while.
+    if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      document.documentElement.dataset.intro = "pending";
+      setTimeout(() => {
+        if (document.documentElement.dataset.intro === "pending") delete document.documentElement.dataset.intro;
+      }, 3500);
+    }
+  })();
+</script>
+  <script type="module" crossorigin src="./assets/main-DZbyox7o.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/main-019rX84F.css">
+</head>
+<body>
+<a class="skip" href="#windows">跳过演示，直接看介绍</a>
+<i class="top-mark" id="top-mark" aria-hidden="true"></i>
+
+<header class="top" id="top">
+  <a class="brand" href="#desk" aria-label="OMP Studio 首页"><span data-pi></span><b>OMP Studio</b></a>
+  <nav class="top-nav" id="top-nav" aria-label="页面导航">
+    <a href="#desk">工作台</a>
+    <a href="#windows">窗口</a>
+    <a href="#features">功能</a>
+    <a href="#download">下载</a>
+    <a href="#faq">问答</a>
+  </nav>
+  <span class="top-grow"></span>
+  <a class="top-lang" href="./en/" hreflang="en" lang="en" data-set-lang="en" aria-label="Switch to English page">EN</a>
+  <button class="top-icon" id="theme" type="button" aria-label="切换深色主题" aria-pressed="false"></button>
+  <a class="top-icon" id="gh" href="https://github.com/the-snowpear/omp-studio" aria-label="GitHub 仓库"></a>
+  <a class="btn btn-primary top-dl" href="#download" data-dl-primary><span data-dl-label>下载</span></a>
+</header>
+
+<main>
+  <!-- The hero is laid out like the app itself: a side panel and a workspace. -->
+  <section class="hero" id="desk">
+    <div class="pitch" id="pitch">
+      <div class="pitch-top">
+        <!-- The headline is read from the first span; the second is the same sentence set as movable type. -->
+        <h1>
+          <span class="sr-only">把 Agent 装进一张随你摆放的工作台</span>
+          <span class="h-vis" aria-hidden="true">
+            <span class="h-line">把 Agent 装进</span>
+            <span class="h-line">一张<span class="h-move" id="h-move"><span class="h-slot"></span><span class="h-piece"><span class="h-frame"><i></i><i></i><i></i><i></i></span><span class="h-ink">随你摆放</span></span><span class="h-cursor"><svg viewBox="0 0 20 20" width="20" height="20"><path d="M3.3 2.4 16.7 8.7 10.8 10.7 8.8 16.6z"/></svg><b>你</b></span></span>的</span>
+            <span class="h-line">工作台</span>
+          </span>
+        </h1>
+        <p class="lede">OMP Studio 是 <a href="https://github.com/can1357/oh-my-pi">oh-my-pi</a> 的桌面工作台。<button type="button" class="tw" data-open="chat">对话</button>、<button type="button" class="tw" data-open="git">Git</button>、<button type="button" class="tw" data-open="terminal">终端</button>和<button type="button" class="tw" data-open="browser">浏览器</button>都是窗口：拖出来，吸附分屏，或钉成独立窗口。</p>
+      </div>
+
+      <div class="cta">
+        <a class="dl-btn" href="#download" data-dl-primary><span class="dl-btn-os" data-dl-icon></span><span data-dl-label>下载 OMP Studio</span></a>
+        <p class="cta-meta"><span id="cta-meta">Windows、macOS 与 Linux</span><a href="#download">其他平台</a></p>
+      </div>
+
+      <div class="pitch-gap" aria-hidden="true"></div>
+
+      <section class="quests" id="quests-card" aria-labelledby="quests-h">
+        <header class="quests-head">
+          <h2 id="quests-h"><span class="wide-only">右边</span><span class="narrow-only">下面</span>这张桌面是真的能用的</h2>
+          <span class="q-meter" id="q-meter" role="img" aria-label="已完成 0 项，共 6 项"></span>
+        </header>
+        <p class="quests-tip">自己动手，或点一项看示范。</p>
+        <ol id="quests">
+          <li data-quest="snap"><button type="button"><span class="q-box"></span><span class="q-text">拖窗口顶栏到左右边缘，吸附成半屏</span><span class="q-play"></span></button></li>
+          <li data-quest="merge"><button type="button"><span class="q-box"></span><span class="q-text">拖到另一个窗口的标题栏，合成标签组</span><span class="q-play"></span></button></li>
+          <li data-quest="layout"><button type="button"><span class="q-box"></span><span class="q-text"><span class="hover-only">鼠标停在最大化按钮上</span><span class="touch-only">点一下最大化按钮</span>，选一个布局</span><span class="q-play"></span></button></li>
+          <li data-quest="open"><button type="button"><span class="q-box"></span><span class="q-text">从底部工具架再打开一个工具</span><span class="q-play"></span></button></li>
+          <li data-quest="pin"><button type="button"><span class="q-box"></span><span class="q-text">点图钉选「固定在应用」，再往下滚动</span><span class="q-play"></span></button></li>
+          <li data-quest="theme"><button type="button"><span class="q-box"></span><span class="q-text">点右上角的图标，换一种主题</span><span class="q-play"></span></button></li>
+        </ol>
+        <p class="quests-done" id="quests-done" hidden>六项都做完了，真实的 OMP Studio 就是这样用的。<a href="#download">去下载</a></p>
+      </section>
+    </div>
+
+    <div class="desk omp" id="canvas" data-theme="light" aria-label="可操作的工作台演示。窗口可以拖动、吸附、合并成标签、缩放和钉住。">
+      <div class="desk-wall" id="wall" aria-hidden="true"></div>
+      <div class="wm-preview" id="wm-preview" aria-hidden="true"></div>
+      <p class="desk-hint" id="desk-hint">按住这里拖动</p>
+      <div class="dock" id="dock" role="toolbar" aria-label="工具架"></div>
+    </div>
+  </section>
+
+  <section class="sec windows" id="windows" aria-labelledby="windows-h">
+    <div class="rules" id="rules">
+      <div class="seo-fallback">
+        <h2 id="windows-h">四件事，就是整个工作台</h2>
+        <ol>
+          <li><h3>拖出来就是一个窗口</h3><p>从侧栏拖一场会话到列表外，松手就是一个浮窗。移动、最小化、收回都不会重建对话，草稿、阅读位置和终端状态全部保留。</p></li>
+          <li><h3>贴边吸附，六种模板</h3><p>左右边缘是半屏，四角是四分之一，顶部是最大化。新窗口吸附进来时，原来的窗口自动移到剩下最大的空位。</p></li>
+          <li><h3>工具停在哪都行</h3><p>Explorer、Git、Browser、Terminal、Agents 等工具都能在左侧栏、对话工具区、右侧栏、底栏和浮窗五个位置之间移动。</p></li>
+          <li><h3>钉住，或者干脆独立出去</h3><p>图钉有五档，决定窗口跟着谁走。独立窗口在任务栏有自己的图标，可以拖到另一块显示器，重启后恢复位置。</p></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec features" id="features" aria-labelledby="features-h">
+    <header class="sec-head rv">
+      <h2 id="features-h">窗口之外，也在同一个应用里</h2>
+      <p class="viewer-text" id="viewer-text" aria-live="polite">最近项目一键回到工作台，集中管理 Token 用量、Time Travel 快照、Agent Hub、多模型供应商与 MCP 能力中心。</p>
+    </header>
+    <div class="viewer rv" id="viewer">
+      <div class="seo-fallback">
+        <ul>
+          <li><h3>首页与用量</h3><p>最近项目一键回到工作台。Token 折线图和热力图按年、月、周、日切换。</p></li>
+          <li><h3>会话历史与 Time Travel</h3><p>按回合保存工作区快照。可以只恢复代码、只恢复对话，或两者都恢复，恢复前会留备份。</p></li>
+          <li><h3>Agent Hub</h3><p>集中查看主对话和全部子 Agent 的状态、请求数、Token 用量和花费。</p></li>
+          <li><h3>模型配置</h3><p>Anthropic、OpenAI、OpenRouter、本地 LM Studio 在同一页管理，并为不同角色指定模型和思考强度。</p></li>
+          <li><h3>能力中心</h3><p>Skills、Plugins、MCP 和 Slash Commands 在同一页开关和探测。</p></li>
+          <li><h3>设置与更新</h3><p>设置可搜索，配置按全局、项目、会话分层。应用内更新会验证签名。</p></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec more" id="more" aria-labelledby="more-h">
+    <header class="sec-head rv">
+      <h2 id="more-h">日常会用到的，都试得到</h2>
+    </header>
+    <div class="bento" id="bento">
+      <article class="tile-card"><h3>电脑操作</h3><p>Agent 的每个动作都配一张画面，可以拖回去看它点了哪里，随时叫停，再决定要不要继续。</p></article>
+      <article class="tile-card"><h3>聊天浏览器</h3><p>点一个页面元素，引用就进了输入框，支持多标签、人工与 Agent 接管切换及原生 WebMCP。</p></article>
+      <article class="tile-card"><h3>文件查看器</h3><p>代码、Markdown、PDF、表格、图片和音视频都在窗口里打开。</p></article>
+      <article class="tile-card"><h3>语音输入</h3><p>按住空格听写，文字落在光标处。</p></article>
+      <article class="tile-card"><h3>本机、SSH 与 WSL</h3><p>支持本机工作区、SSH 远程签名环境和 Windows WSL 2 发行版，换一台机器工作台不变。</p></article>
+      <article class="tile-card"><h3>手机访问</h3><p>同一局域网里扫码配对，在手机上继续对话和审批。</p></article>
+      <article class="tile-card"><h3>BTW 旁路追问</h3><p>不打断主线程，单独问一句。</p></article>
+      <article class="tile-card"><h3>键盘可达</h3><p>切换区域、微调布局，都不用鼠标。</p></article>
+    </div>
+  </section>
+
+  <section class="sec download" id="download" aria-labelledby="dl-h">
+    <div class="dl-stage omp" data-theme="light">
+      <div class="desk-wall" id="dl-wall" aria-hidden="true"></div>
+      <div class="dl-win rv">
+        <div class="dl-main">
+          <img class="dl-icon" id="dl-icon" alt="" width="112" height="112">
+          <h2 id="dl-h">下载 OMP Studio</h2>
+          <p class="dl-ver" id="dl-ver" aria-live="polite">最新版本 v0.2.11 · 支持 Windows、macOS 与 Linux</p>
+          <a class="dl-btn" id="dl-main" data-dl-primary href="https://github.com/the-snowpear/omp-studio/releases"><span class="dl-btn-os" data-dl-icon></span><span data-dl-label>前往下载页</span></a>
+          <p class="dl-req" id="dl-req">前往 GitHub Releases 获取对应架构安装包，或从源码构建运行。</p>
+        </div>
+        <div class="dl-list" id="dl-list">
+          <section class="dl-os"><h3>Windows</h3><ul>
+            <li><a href="https://github.com/the-snowpear/omp-studio/releases/download/v0.2.11/OMP-Studio-Setup-0.2.11-windows-x64.exe"><b>x64</b><span>Windows 10 或更新</span><em>229 MB</em></a></li>
+            <li><a href="https://github.com/the-snowpear/omp-studio/releases/download/v0.2.11/OMP-Studio-Setup-0.2.11-windows-arm64.exe"><b>ARM64</b><span>Windows 11，骁龙等 ARM 机型</span><em>215 MB</em></a></li>
+          </ul></section>
+          <section class="dl-os"><h3>macOS</h3><ul>
+            <li><a href="https://github.com/the-snowpear/omp-studio/releases/download/v0.2.11/OMP-Studio-0.2.11-macos-arm64.dmg"><b>Apple Silicon</b><span>macOS 13 或更新</span><em>253 MB</em></a></li>
+          </ul></section>
+          <section class="dl-os"><h3>Linux</h3><ul>
+            <li><a href="https://github.com/the-snowpear/omp-studio/releases/download/v0.2.11/OMP-Studio-0.2.11-linux-x64.AppImage"><b>AppImage</b><span>x64（AVX2），glibc 2.39+，FUSE 2</span><em>316 MB</em></a></li>
+            <li><a href="https://github.com/the-snowpear/omp-studio/releases/download/v0.2.11/OMP-Studio-0.2.11-linux-x64.deb"><b>deb</b><span>Ubuntu 24.04+ / Debian 13+，x64（AVX2）</span><em>269 MB</em></a></li>
+          </ul></section>
+        </div>
+      </div>
+    </div>
+    <div class="dl-notes">
+      <div class="dl-note rv">
+        <h3>从源码运行</h3>
+        <p>需要 Node.js 22+、Git 和 Bun。</p>
+        <div class="code" id="src-cmd"><pre tabindex="0"><code><span>git clone --recurse-submodules https://github.com/the-snowpear/omp-studio.git</span><span>cd omp-studio</span><span>npm install</span><span>npm run omp:overlay:apply</span><span>npm run preview</span></code></pre></div>
+      </div>
+      <div class="dl-note rv">
+        <h3>macOS 首次打开被拦截</h3>
+        <p>当前版本是 ad hoc 签名，尚未公证。打开「系统设置 › 隐私与安全性」点「仍要打开」，或在终端执行：</p>
+        <div class="code" id="mac-cmd"><pre tabindex="0"><code><span>xattr -dr com.apple.quarantine "/Applications/OMP Studio.app"</span></code></pre></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec faq" id="faq" aria-labelledby="faq-h">
+    <header class="sec-head rv">
+      <h2 id="faq-h">常见问题</h2>
+    </header>
+    <div class="faq-list rv">
+      <details>
+        <summary>OMP Studio 和 oh-my-pi (omp) CLI 是什么关系？</summary>
+        <p>OMP Studio 是 <a href="https://github.com/can1357/oh-my-pi">oh-my-pi</a>（<code>omp</code>）的跨平台桌面工作台外壳。模型、登录状态、Skills 与会话记录都直接沿用 OMP 自身的配置和格式，并通过类型化的 Studio Bridge（<code>query</code> / <code>command</code> / <code>event</code>）调用 Runtime 能力，不解析终端文本，也不模拟按键。</p>
+      </details>
+      <details>
+        <summary>支持哪些 AI 模型供应商？应用内需要预置或购买 API 密钥吗？</summary>
+        <p>支持 Anthropic、OpenAI、OpenRouter、本地 LM Studio 等 OMP 可连接的全部供应商，并可在模型配置页为 <code>@default</code>、<code>@plan</code>、<code>@task</code> 角色分别指定模型和思考强度。密钥与登录完全沿用你本机的 <code>models.yml</code> 或 <code>omp login</code>，本应用与仓库不内置任何供应商密钥。</p>
+      </details>
+      <details>
+        <summary>支持哪些桌面平台与 Linux 发行版？</summary>
+        <p>桌面端提供 Windows x64 / ARM64 安装包（支持应用内自动更新）、macOS Apple Silicon（macOS 13+ DMG），以及 Linux x64（AppImage 与 deb，面向 Ubuntu 24.04+ / Debian 13+ 与 glibc 2.39+、支持 AVX2 的处理器）。Linux 沙箱与环境细节可查阅仓库中的 <code>docs/linux.md</code>。</p>
+      </details>
+      <details>
+        <summary>如何连接远程 SSH 服务器、WSL 2 或在手机上继续会话？</summary>
+        <p>Windows 桌面版可直接从工作区选择器进入 WSL 2 发行版目录运行 Agent、Git 和终端；SSH 工作区支持按需向远端部署经过 Ed25519 签名的运行环境，并在短时断线后自动尝试重连；在设置中开启手机访问或独立 Web 工作台后，可在局域网 HTTPS 下扫码配对手机审批工具调用或继续对话。</p>
+      </details>
+      <details>
+        <summary>Time Travel、Agent Hub、Computer Use 和 WebMCP 分别有什么作用？</summary>
+        <p>Time Travel 可按回合保存工作区快照并对比文件变化，支持只恢复代码、只恢复对话或两者都恢复（恢复前自动留存备份）；Agent Hub 集中展示主 Agent 与全部子 Agent 的派生关系、请求次数、Token 用量及花费；Computer Use 为每个动作留存画面并支持随时叫停与回看；聊天浏览器支持直接圈选网页元素引用进输入框及原生 WebMCP 能力。</p>
+      </details>
+      <details>
+        <summary>遇到问题去哪里查看日志或反馈 Bug？</summary>
+        <p>可以在应用内的「诊断中心」直接查看运行状态，或检查本机 Host 日志（Windows 位于 <code>%APPDATA%\omp-studio\logs\</code>，macOS 位于 <code>~/Library/Application Support/omp-studio/logs/</code>）。欢迎前往 <a href="https://github.com/the-snowpear/omp-studio/issues">GitHub Issues</a> 提交反馈。</p>
+      </details>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="foot-brand">
+    <p><span data-pi></span><b>OMP Studio</b></p>
+    <p>MIT 许可。Runtime 来自 <a href="https://github.com/can1357/oh-my-pi">oh-my-pi</a>（Pi by Mario Zechner，omp by Can Bölük）。</p>
+  </div>
+  <p class="foot-note">本页的界面均为预览模式下的演示数据。模型与登录沿用 OMP 的 models.yml 和 omp login，应用不内置任何供应商密钥。</p>
+  <nav aria-label="页脚链接">
+    <a href="https://github.com/the-snowpear/omp-studio">GitHub</a>
+    <a href="https://github.com/the-snowpear/omp-studio/releases">下载 Releases</a>
+    <a href="https://github.com/the-snowpear/omp-studio/blob/main/CHANGELOG.md">更新日志</a>
+    <a href="https://github.com/the-snowpear/omp-studio/tree/main/docs">文档</a>
+    <a href="https://github.com/the-snowpear/omp-studio/issues">反馈问题</a>
+    <a href="./en/" hreflang="en" lang="en" data-set-lang="en">English</a>
+  </nav>
+</footer>
+
+<div class="pip omp" id="pip" data-theme="light"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
