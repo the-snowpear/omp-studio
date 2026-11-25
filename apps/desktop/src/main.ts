@@ -295,7 +295,10 @@ export async function main(): Promise<void> {
       await shell.openExternal(url);
     },
     revealDirectory: async path => { const error = await shell.openPath(path); if (error) throw new Error(error); },
-    systemFiles: { trash: path => shell.trashItem(path) },
+    systemFiles: {
+      knownFolders: { home: app.getPath("home"), desktop: app.getPath("desktop"), downloads: app.getPath("downloads"), documents: app.getPath("documents"), pictures: app.getPath("pictures") },
+      trash: path => shell.trashItem(path),
+    },
     beforeCreate: async () => { await updateCoordinator?.initialize(); },
     afterCreate: async (composition, workspaceSelected) => {
       if (!updateCoordinator?.hasRuntimeTrial || !workspaceSelected) return false;

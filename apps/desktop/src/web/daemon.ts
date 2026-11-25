@@ -48,7 +48,10 @@ export async function startSharedHost(
       if (desktop) await desktopCall("openUrl", url);
     },
     revealDirectory: (path) => desktopCall("revealDirectory", path),
-    systemFiles: { trash: (path) => desktopCall("trash", path) },
+    systemFiles: {
+      knownFolders: () => desktop ? desktopCall("knownFolders") : Promise.resolve(undefined),
+      trash: (path) => desktopCall("trash", path),
+    },
   });
   const composition = await factory.create();
   const terminals = new SharedTerminals((id) =>

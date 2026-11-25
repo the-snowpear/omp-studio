@@ -33,7 +33,7 @@ test("Linux pipe fallback remains interactive without forcing a login shell", ()
   assert.deepEqual(shellArgs("/usr/bin/pwsh", { platform: "linux", backend: "pipes" }), ["-NoLogo"]);
 });
 
-for (const platform of ["darwin", "linux"] as const) test(`${platform} shells get a terminal name and none of Electron's switches; Windows keeps its environment`, () => {
+for (const platform of ["darwin", "linux"] as const) test(`${platform} shells get a terminal name and none of Electron's switches`, () => {
   const source = { PATH: "/opt/homebrew/bin:/usr/bin", LANG: "zh_CN.UTF-8", ELECTRON_RUN_AS_NODE: "1", ELECTRON_NO_ATTACH_CONSOLE: "1" };
   const mac = terminalEnvironment(source, platform);
   assert.equal(mac.ELECTRON_RUN_AS_NODE, undefined);
@@ -42,5 +42,6 @@ for (const platform of ["darwin", "linux"] as const) test(`${platform} shells ge
   assert.equal(mac.LANG, "zh_CN.UTF-8");
   assert.equal(mac.TERM, "xterm-256color");
   const windows = terminalEnvironment(source, "win32");
-  assert.deepEqual(windows, { ...source, TERM: "xterm-256color", COLORTERM: "truecolor" });
+  assert.deepEqual(windows, { PATH: source.PATH, LANG: source.LANG, TERM: "xterm-256color", COLORTERM: "truecolor" });
+  assert.equal(source.ELECTRON_RUN_AS_NODE, "1");
 });

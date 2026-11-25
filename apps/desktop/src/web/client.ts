@@ -273,6 +273,10 @@ export function createSharedDesktopHostFactory(
             return hooks.revealDirectory?.(call.input);
           case "trash":
             return hooks.systemFiles?.trash?.(call.input);
+          case "knownFolders": {
+            const folders = hooks.systemFiles?.knownFolders;
+            return typeof folders === "function" ? folders() : folders;
+          }
           default:
             throw new Error("Unsupported desktop callback");
         }

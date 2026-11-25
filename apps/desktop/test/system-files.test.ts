@@ -45,6 +45,17 @@ test("system browser lists metadata, hidden files and the containing workspace",
   await assert.rejects(service.list({ workspaceId: workspace.workspaceId as WorkspaceId, path: ".." }), /escapes/);
 });
 
+test("system places follow the attached desktop's redirected folders", async t => {
+  const { root, registry } = await fixture(t);
+  const first = join(root, "redirected-downloads"), second = join(root, "another-downloads");
+  await mkdir(first); await mkdir(second);
+  let downloads = first;
+  const service = createSystemFileService({ registry, knownFolders: async () => ({ downloads }) });
+  assert.equal((await service.places()).quick.find(place => place.kind === "downloads")?.path, first);
+  downloads = second;
+  assert.equal((await service.places()).quick.find(place => place.kind === "downloads")?.path, second);
+});
+
 test("system probes and opens use the same home and Windows drive paths", async t => {
   const { root, registry } = await fixture(t);
   const folder = await realpath(root);
