@@ -3151,6 +3151,7 @@ export const en: LocaleDictionary = {
     "waitingApproval": "Pending Approval",
     "waitingPlan": "Pending Review",
     "waitingAsk": "Pending Answer",
+    "completed": "Completed",
     "draftTag": "Draft"
   },
   "tests": {

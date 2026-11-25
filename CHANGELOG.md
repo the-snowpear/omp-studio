@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - 侧栏项目会话列表中，正在运行（含压缩中）的会话始终置顶显示，跑完后回到原位置；置顶条目与其余会话的相对顺序保持不变。
+- 刚完成的会话（回合从运行转入空闲后 10 分钟内）同样置顶在运行会话之下，并在行尾显示「已完成」标记；开始新回合或窗口到期后标记摘除、恢复原排序。
 
 ### Fixed
 

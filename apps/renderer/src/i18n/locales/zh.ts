@@ -3151,6 +3151,7 @@ const zhRaw = {
     "waitingApproval": "待确认",
     "waitingPlan": "待审核",
     "waitingAsk": "待回答",
+    "completed": "已完成",
     "draftTag": "草稿"
   },
   "tests": {
