@@ -4,11 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OMP Studio：把 Agent 装进一张随你摆放的工作台</title>
-<meta name="description" content="OMP Studio 是 oh-my-pi 的桌面工作台。对话、Git、终端和浏览器都是窗口：拖出来，吸附分屏，停到任意一侧，或钉成独立窗口。支持 Windows 与 macOS。">
-<meta name="theme-color" content="#f6f5fb">
+<meta name="description" content="OMP Studio 是 oh-my-pi 的桌面工作台。对话、Git、终端和浏览器都是窗口：拖出来，吸附分屏，停到任意一侧，或钉成独立窗口。支持 Windows、macOS 与 Linux。">
+<meta name="theme-color" content="#f4f4f7">
+<meta property="og:type" content="website">
+<meta property="og:title" content="OMP Studio：把 Agent 装进一张随你摆放的工作台">
+<meta property="og:description" content="oh-my-pi 的桌面工作台。对话、Git、终端和浏览器都是窗口。支持 Windows、macOS 与 Linux。">
 <link rel="icon" href="./favicon.ico">
 <script>
   // Before first paint, so a returning dark-theme visitor never sees a light flash.
+  document.documentElement.classList.add("js");
   try {
     const saved = localStorage.getItem("omp-site-theme");
     if (saved === "dark" || (!saved && matchMedia("(prefers-color-scheme: dark)").matches)) document.documentElement.dataset.theme = "dark";
@@ -25,10 +29,11 @@
 </head>
 <body>
 <a class="skip" href="#windows">跳过演示，直接看介绍</a>
+<i class="top-mark" id="top-mark" aria-hidden="true"></i>
 
-<header class="top">
+<header class="top" id="top">
   <a class="brand" href="#desk" aria-label="OMP Studio 首页"><span data-pi></span><b>OMP Studio</b></a>
-  <nav class="top-nav" aria-label="页面导航">
+  <nav class="top-nav" id="top-nav" aria-label="页面导航">
     <a href="#desk">工作台</a>
     <a href="#windows">窗口</a>
     <a href="#features">功能</a>
@@ -66,74 +71,84 @@
 
       <section class="quests" id="quests-card" aria-labelledby="quests-h">
         <header class="quests-head">
-          <h2 id="quests-h"><span class="wide-only">右边</span><span class="narrow-only">下面</span>这张是真的能用的，试试看</h2>
-          <span class="q-meter" id="q-meter" role="img" aria-label="已完成 0 项，共 5 项"><span aria-hidden="true"><b id="q-count">0</b> / 5</span></span>
+          <h2 id="quests-h"><span class="wide-only">右边</span><span class="narrow-only">下面</span>这张桌面是真的能用的</h2>
+          <span class="q-meter" id="q-meter" role="img" aria-label="已完成 0 项，共 6 项"></span>
         </header>
+        <p class="quests-tip">自己动手，或点一项看示范。</p>
         <ol id="quests">
-          <li data-quest="snap"><span class="q-box"></span><span class="q-text">拖住窗口顶栏，贴到左右边缘，吸附成半屏</span></li>
-          <li data-quest="layout"><span class="q-box"></span><span class="q-text"><span class="hover-only">鼠标停在最大化按钮上</span><span class="touch-only">点一下最大化按钮</span>，选一个布局模板</span></li>
-          <li data-quest="open"><span class="q-box"></span><span class="q-text">从底部工具架再打开一个工具</span></li>
-          <li data-quest="pin"><span class="q-box"></span><span class="q-text">点图钉钉住一个窗口，然后往下滚动</span></li>
-          <li data-quest="theme"><span class="q-box"></span><span class="q-text">点右上角的月亮，换成深色</span></li>
+          <li data-quest="snap"><button type="button"><span class="q-box"></span><span class="q-text">拖窗口顶栏到左右边缘，吸附成半屏</span><span class="q-play"></span></button></li>
+          <li data-quest="merge"><button type="button"><span class="q-box"></span><span class="q-text">拖到另一个窗口的标题栏，合成标签组</span><span class="q-play"></span></button></li>
+          <li data-quest="layout"><button type="button"><span class="q-box"></span><span class="q-text"><span class="hover-only">鼠标停在最大化按钮上</span><span class="touch-only">点一下最大化按钮</span>，选一个布局</span><span class="q-play"></span></button></li>
+          <li data-quest="open"><button type="button"><span class="q-box"></span><span class="q-text">从底部工具架再打开一个工具</span><span class="q-play"></span></button></li>
+          <li data-quest="pin"><button type="button"><span class="q-box"></span><span class="q-text">点图钉选「固定在应用」，再往下滚动</span><span class="q-play"></span></button></li>
+          <li data-quest="theme"><button type="button"><span class="q-box"></span><span class="q-text">点右上角的图标，换一种主题</span><span class="q-play"></span></button></li>
         </ol>
-        <p class="quests-done" id="quests-done" hidden>五项都做完了，真实的 OMP Studio 就是这样用的。<a href="#download">去下载</a></p>
+        <p class="quests-done" id="quests-done" hidden>六项都做完了，真实的 OMP Studio 就是这样用的。<a href="#download">去下载</a></p>
       </section>
     </div>
 
-    <div class="desk omp" id="canvas" data-theme="light" aria-label="可操作的工作台演示。窗口可以拖动、吸附、缩放和钉住。">
-      <div class="desk-wall" aria-hidden="true"></div>
+    <div class="desk omp" id="canvas" data-theme="light" aria-label="可操作的工作台演示。窗口可以拖动、吸附、合并成标签、缩放和钉住。">
+      <div class="desk-wall" id="wall" aria-hidden="true"></div>
       <div class="wm-preview" id="wm-preview" aria-hidden="true"></div>
       <p class="desk-hint" id="desk-hint">按住这里拖动</p>
       <div class="dock" id="dock" role="toolbar" aria-label="工具架"></div>
     </div>
   </section>
 
-  <section class="sec windows" id="windows">
-    <header class="sec-head">
-      <h2>四件事，就是整个工作台</h2>
-      <p>0.2.0 重做了工作台。对话和工具用同一套窗口，下面每张图都可以动手。</p>
-    </header>
+  <section class="sec windows" id="windows" aria-labelledby="windows-h">
     <div class="rules" id="rules"></div>
   </section>
 
-  <section class="sec features" id="features">
-    <header class="sec-head">
-      <h2>窗口之外，一个应用里办完</h2>
-      <p>不必在终端界面和一堆网页之间来回切换。下面是应用里的真实页面，数据为演示数据。</p>
+  <section class="sec features" id="features" aria-labelledby="features-h">
+    <header class="sec-head rv">
+      <h2 id="features-h">窗口之外，也在同一个应用里</h2>
+      <p class="viewer-text" id="viewer-text" aria-live="polite"></p>
     </header>
-    <div class="viewer" id="viewer"></div>
-    <ul class="extras" id="extras"></ul>
+    <div class="viewer rv" id="viewer"></div>
   </section>
 
-  <section class="sec download" id="download">
-    <div class="dl-card">
-      <div class="dl-main">
-        <img class="dl-icon" id="dl-icon" alt="" width="112" height="112">
-        <h2>下载 OMP Studio</h2>
-        <p class="dl-ver" id="dl-ver" aria-live="polite">正在读取最新版本…</p>
-        <a class="btn btn-primary btn-xl" id="dl-main" data-dl-primary href="https://github.com/the-snowpear/omp-studio/releases"><span data-dl-icon></span><span data-dl-label>前往下载页</span></a>
-        <p class="dl-req" id="dl-req"></p>
-        <p class="dl-pending" id="dl-pending" hidden></p>
+  <section class="sec more" id="more" aria-labelledby="more-h">
+    <header class="sec-head rv">
+      <h2 id="more-h">日常会用到的，都试得到</h2>
+    </header>
+    <div class="bento" id="bento"></div>
+  </section>
+
+  <section class="sec download" id="download" aria-labelledby="dl-h">
+    <div class="dl-stage omp" data-theme="light">
+      <div class="desk-wall" id="dl-wall" aria-hidden="true"></div>
+      <div class="dl-win rv">
+        <div class="dl-main">
+          <img class="dl-icon" id="dl-icon" alt="" width="112" height="112">
+          <h2 id="dl-h">下载 OMP Studio</h2>
+          <p class="dl-ver" id="dl-ver" aria-live="polite">正在读取最新版本…</p>
+          <a class="dl-btn" id="dl-main" data-dl-primary href="https://github.com/the-snowpear/omp-studio/releases"><span class="dl-btn-os" data-dl-icon></span><span data-dl-label>前往下载页</span></a>
+          <p class="dl-req" id="dl-req"></p>
+        </div>
+        <div class="dl-list" id="dl-list"></div>
       </div>
-      <div class="dl-side">
-        <h3>全部安装包</h3>
-        <ul class="dl-list" id="dl-list"></ul>
-        <details class="dl-details">
-          <summary>macOS 首次打开被拦截？</summary>
-          <p>当前版本是 ad hoc 签名，尚未公证。打开「系统设置 › 隐私与安全性」点「仍要打开」，或在终端执行：</p>
-          <div class="code" data-copy-block id="mac-cmd"></div>
-        </details>
+    </div>
+    <div class="dl-notes">
+      <div class="dl-note rv">
         <h3>从源码运行</h3>
-        <p class="dl-src-note">需要 Node.js 22+、Git 和 Bun。</p>
-        <div class="code" data-copy-block id="src-cmd"></div>
+        <p>需要 Node.js 22+、Git 和 Bun。</p>
+        <div class="code" id="src-cmd"></div>
+      </div>
+      <div class="dl-note rv">
+        <h3>macOS 首次打开被拦截</h3>
+        <p>当前版本是 ad hoc 签名，尚未公证。打开「系统设置 › 隐私与安全性」点「仍要打开」，或在终端执行：</p>
+        <div class="code" id="mac-cmd"></div>
       </div>
     </div>
   </section>
 </main>
 
 <footer class="foot">
-  <p><span data-pi></span><b>OMP Studio</b>　MIT 许可。Runtime 来自 <a href="https://github.com/can1357/oh-my-pi">oh-my-pi</a>（Pi by Mario Zechner，omp by Can Bölük）。</p>
-  <p>本页的界面均为预览模式下的演示数据。模型与登录沿用 OMP 的 models.yml 和 omp login，应用不内置任何供应商密钥。</p>
+  <div class="foot-brand">
+    <p><span data-pi></span><b>OMP Studio</b></p>
+    <p>MIT 许可。Runtime 来自 <a href="https://github.com/can1357/oh-my-pi">oh-my-pi</a>（Pi by Mario Zechner，omp by Can Bölük）。</p>
+  </div>
+  <p class="foot-note">本页的界面均为预览模式下的演示数据。模型与登录沿用 OMP 的 models.yml 和 omp login，应用不内置任何供应商密钥。</p>
   <nav aria-label="页脚链接">
     <a href="https://github.com/the-snowpear/omp-studio">GitHub</a>
     <a href="https://github.com/the-snowpear/omp-studio/blob/main/CHANGELOG.md">更新日志</a>

@@ -4,9 +4,10 @@
 // named in the lede open their windows on the desk, and each thing-to-try is
 // ticked by a spark that flies in from wherever on the page it was done.
 import gsap from "gsap";
+import { i } from "../shared/icons";
 import { KINDS, type Kind } from "../shared/ui";
 
-export type Quest = "snap" | "layout" | "open" | "pin" | "theme";
+export type Quest = "snap" | "merge" | "layout" | "open" | "pin" | "theme";
 interface Point { x: number; y: number }
 
 export interface Pitch {
@@ -22,7 +23,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), h
 const centre = (r: DOMRect): Point => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
 const rand = (lo: number, hi: number) => lo + Math.random() * (hi - lo);
 
-export function mountPitch(pitch: HTMLElement, openTool: (kind: Kind) => void): Pitch {
+export function mountPitch(pitch: HTMLElement, openTool: (kind: Kind) => void, demo: (quest: Quest) => Promise<void>): Pitch {
   const $ = <T extends HTMLElement = HTMLElement>(sel: string) => pitch.querySelector<T>(sel)!;
   const $$ = <T extends HTMLElement = HTMLElement>(sel: string) => [...pitch.querySelectorAll<T>(sel)];
 
@@ -199,31 +200,37 @@ export function mountPitch(pitch: HTMLElement, openTool: (kind: Kind) => void): 
 
   // ---------------- things to try ----------------
   const meter = $("#q-meter");
-  const count = $("#q-count");
   const rows = new Map<Quest, HTMLElement>();
   for (const row of $$("[data-quest]")) {
     const quest = row.dataset.quest as Quest;
     rows.set(quest, row);
     row.querySelector(".q-box")!.innerHTML = CHECK;
+    row.querySelector(".q-play")!.innerHTML = `${i("play")}示范`;
+    meter.append(document.createElement("i"));
+    // Pressing a row has a hand do it on the desk. One at a time.
+    row.querySelector("button")!.addEventListener("click", () => {
+      if (pitch.querySelector("[data-playing]")) return;
+      delete root.dataset.cue;
+      row.dataset.playing = "";
+      demo(quest).finally(() => delete row.dataset.playing);
+    });
     // Pointing at a task lights up the control it is about (styles in desk.css).
     row.addEventListener("pointerenter", (e) => {
-      if (e.pointerType === "mouse") root.dataset.cue = quest;
+      if (e.pointerType === "mouse" && !pitch.querySelector("[data-playing]")) root.dataset.cue = quest;
     });
     row.addEventListener("pointerleave", () => delete root.dataset.cue);
   }
-  meter.addEventListener("animationend", () => meter.removeAttribute("data-bump"));
 
   const started = new Set<Quest>();
   let ticked = 0;
   const tick = (quest: Quest) => {
     const row = rows.get(quest)!;
     row.dataset.done = "";
-    row.setAttribute("aria-label", `已完成：${row.querySelector(".q-text")!.textContent}`);
-    ticked++;
-    count.textContent = String(ticked);
+    row.querySelector("button")!.setAttribute("aria-label", `已完成：${row.querySelector(".q-text")!.textContent}`);
+    const bar = meter.children[ticked++] as HTMLElement;
+    bar.dataset.on = "";
+    bar.dataset.bump = "";
     meter.setAttribute("aria-label", `已完成 ${ticked} 项，共 ${rows.size} 项`);
-    meter.dataset.some = "";
-    meter.dataset.bump = "";
     if (ticked < rows.size) return;
     $("#quests-done").hidden = false;
     if (!reduced()) confetti(centre(meter.getBoundingClientRect()));

@@ -1,0 +1,37 @@
+{
+  "version": "0.2.10",
+  "published": "2026-11-23T06:59:41Z",
+  "page": "https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.10",
+  "assets": [
+    {
+      "platform": "win-x64",
+      "file": "OMP-Studio-Setup-0.2.10-windows-x64.exe",
+      "url": "https://github.com/the-snowpear/omp-studio/releases/download/v0.2.10/OMP-Studio-Setup-0.2.10-windows-x64.exe",
+      "bytes": 239153542
+    },
+    {
+      "platform": "win-arm64",
+      "file": "OMP-Studio-Setup-0.2.10-windows-arm64.exe",
+      "url": "https://github.com/the-snowpear/omp-studio/releases/download/v0.2.10/OMP-Studio-Setup-0.2.10-windows-arm64.exe",
+      "bytes": 225206334
+    },
+    {
+      "platform": "mac-arm64",
+      "file": "OMP-Studio-0.2.10-macos-arm64.dmg",
+      "url": "https://github.com/the-snowpear/omp-studio/releases/download/v0.2.10/OMP-Studio-0.2.10-macos-arm64.dmg",
+      "bytes": 264165998
+    },
+    {
+      "platform": "linux-x64",
+      "file": "OMP-Studio-0.2.10-linux-x64.AppImage",
+      "url": "https://github.com/the-snowpear/omp-studio/releases/download/v0.2.10/OMP-Studio-0.2.10-linux-x64.AppImage",
+      "bytes": 330134785
+    },
+    {
+      "platform": "linux-x64-deb",
+      "file": "OMP-Studio-0.2.10-linux-x64.deb",
+      "url": "https://github.com/the-snowpear/omp-studio/releases/download/v0.2.10/OMP-Studio-0.2.10-linux-x64.deb",
+      "bytes": 281395040
+    }
+  ]
+}

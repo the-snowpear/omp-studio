@@ -6,9 +6,7 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: clamp(24px, 4vh, 48px) clamp(24px, 2.8vw, 46px) clamp(20px, 3.2vh, 34px);
-  border-right: 1px solid var(--line);
-  background: radial-gradient(90% 48% at 0% 0%, color-mix(in srgb, var(--wall-a) 70%, transparent), transparent 70%), var(--panel);
+  padding: clamp(20px, 3vh, 40px) clamp(24px, 2.8vw, 46px) clamp(8px, 1.6vh, 18px);
   overflow: hidden auto;
   container-type: inline-size;
 }
@@ -118,7 +116,7 @@ html[data-intro] .ch {
   height: 7px;
   border: 1.5px solid var(--accent);
   border-radius: 2px;
-  background: var(--panel);
+  background: var(--page);
 }
 .h-frame i:nth-child(1) { top: -4px; left: -4px; }
 .h-frame i:nth-child(2) { top: -4px; right: -4px; }
@@ -238,56 +236,6 @@ html[data-intro] .ch {
   gap: 14px;
   margin-top: clamp(24px, 3.8vh, 40px);
 }
-.dl-btn {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  height: 48px;
-  padding: 0 22px 0 18px;
-  border-radius: 12px;
-  background: var(--accent);
-  color: var(--on-accent);
-  font-size: 1rem;
-  font-weight: 600;
-  text-decoration: none;
-  white-space: nowrap;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 1px 2px rgba(40, 24, 110, 0.18), 0 10px 22px -14px var(--accent);
-  overflow: hidden;
-  -webkit-tap-highlight-color: transparent;
-  transition: translate 0.3s var(--ease-out), scale 0.15s var(--ease-out), box-shadow 0.3s;
-}
-/* One pass of light when the pointer arrives; nothing moves until then. */
-.dl-btn::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, 0.26) 50%, transparent 62%);
-  translate: -101% 0;
-  pointer-events: none;
-}
-@media (hover: hover) {
-  .dl-btn:hover {
-    translate: 0 -2px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 1px 2px rgba(40, 24, 110, 0.18), 0 18px 28px -14px var(--accent);
-  }
-  .dl-btn:hover::after {
-    translate: 101% 0;
-    transition: translate 0.75s var(--ease-out);
-  }
-}
-.dl-btn:active {
-  translate: 0;
-  scale: 0.98;
-}
-.dl-btn-os {
-  display: inline-flex;
-  width: 1.1em;
-  height: 1.1em;
-}
-.dl-btn-os:empty {
-  display: none;
-}
 .cta-meta {
   display: flex;
   flex-wrap: wrap;
@@ -320,65 +268,106 @@ html[data-intro] .ch {
   text-decoration-color: var(--accent);
 }
 
-/* ---------- things to try: a short list under a rule, no box ---------- */
-.quests {
-  padding-top: clamp(14px, 2.2vh, 20px);
-  border-top: 1px solid var(--line);
-}
+/* ---------- things to try: a short list, no box. Each row can also be pressed to watch it done ---------- */
 .quests-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 6px;
 }
 .quests h2 {
   font-family: var(--text);
-  font-size: var(--step--1);
+  font-size: var(--step-0);
   font-weight: 600;
   line-height: 1.6;
   letter-spacing: 0;
-  color: var(--ink);
 }
-.q-meter {
-  flex: none;
+.quests-tip {
+  margin-bottom: 6px;
   color: var(--ink-3);
-  font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--step--1);
 }
-.q-meter b {
-  display: inline-block;
-  font-weight: inherit;
-  transition: color 0.3s;
+/* One short bar per task; a bar fills when its spark lands. */
+.q-meter {
+  display: flex;
+  flex: none;
+  gap: 4px;
 }
-.q-meter[data-some] b {
-  color: var(--accent-ink);
-  font-weight: 600;
+.q-meter i {
+  width: 16px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-2);
+  transition: background 0.3s, scale 0.5s var(--ease-spring);
 }
-.q-meter[data-bump] b {
-  animation: q-bump 0.5s var(--ease-out);
+.q-meter i[data-on] {
+  background: var(--accent);
+}
+.q-meter i[data-bump] {
+  animation: q-bump 0.6s var(--ease-out);
 }
 @keyframes q-bump {
-  35% { scale: 1.5; }
+  35% { scale: 1.15 2.4; }
 }
 .quests ol {
-  margin: 0;
+  margin: 0 -10px;
   padding: 0;
   list-style: none;
 }
-.quests li {
+.quests li button {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 5px 0;
+  width: 100%;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
   color: var(--ink-2);
   font-size: var(--step--1);
   line-height: 1.6;
-  transition: color 0.2s;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.2s, background 0.2s;
 }
 .q-text {
   flex: 1;
   min-width: 0;
+}
+.q-play {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent-ink);
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0;
+  translate: -6px 0;
+  transition: opacity 0.2s, translate 0.35s var(--ease-out);
+}
+.q-play .i {
+  width: 10px;
+  height: 10px;
+}
+.q-play .i svg {
+  fill: currentColor;
+}
+@media (hover: none) {
+  .q-play {
+    opacity: 1;
+    translate: 0;
+  }
+}
+.quests li button:focus-visible .q-play,
+.quests li[data-playing] .q-play {
+  opacity: 1;
+  translate: 0;
+}
+.quests li[data-playing] button {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--ink);
 }
 .q-box {
   position: relative;
@@ -404,14 +393,19 @@ html[data-intro] .ch {
   transition: stroke-dashoffset 0.35s 0.1s var(--ease-out);
 }
 @media (hover: hover) {
-  .quests li:not([data-done]):hover {
+  .quests li button:hover {
+    background: var(--fill);
     color: var(--ink);
   }
-  .quests li:not([data-done]):hover .q-box {
+  .quests li button:hover .q-play {
+    opacity: 1;
+    translate: 0;
+  }
+  .quests li:not([data-done]) button:hover .q-box {
     box-shadow: inset 0 0 0 1.5px var(--accent);
   }
 }
-.quests li[data-done] {
+.quests li[data-done] button {
   color: var(--ink-3);
 }
 .quests li[data-done] .q-box {
@@ -430,6 +424,28 @@ html[data-intro] .ch {
   color: var(--ink-2);
   font-size: var(--step--1);
   animation: rise-in 0.6s var(--ease-out) backwards;
+}
+/* The hand that shows how a task is done. */
+.demo-hand {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+}
+.demo-hand svg {
+  overflow: visible;
+  filter: drop-shadow(0 3px 5px rgba(20, 12, 60, 0.4));
+  transition: scale 0.15s var(--ease-out);
+  transform-origin: 3px 2px;
+}
+.demo-hand[data-down] svg {
+  scale: 0.82;
+}
+.demo-hand path {
+  fill: var(--accent);
+  stroke: #fff;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
 }
 @keyframes rise-in {
   from {
@@ -485,4 +501,24 @@ html[data-intro] .ch {
   border-radius: 2.5px;
   background: linear-gradient(var(--c) 0 3px, color-mix(in srgb, var(--c) 34%, var(--panel)) 3px);
   box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--c) 60%, transparent);
+}
+
+/* Short screens: the list keeps all five rows, the spacing gives way. */
+@media (min-width: 961px) and (max-height: 780px) {
+  .quests-tip {
+    display: none;
+  }
+  .quests li button {
+    padding-block: 3px;
+  }
+  .pitch-gap {
+    min-height: 14px;
+  }
+  .lede {
+    line-height: 1.65;
+  }
+  .cta {
+    margin-top: 20px;
+    gap: 10px;
+  }
 }

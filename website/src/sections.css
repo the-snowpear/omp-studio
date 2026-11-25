@@ -1,88 +1,110 @@
-/* Sections below the hero. Rules miniature, feature viewer, download, footer. */
-.sec {
-  padding: clamp(72px, 11vh, 128px) clamp(20px, 4vw, 64px) 0;
+/* "Four things": a pinned pair, the list on the left and a miniature of the app on the right. */
+.windows {
+  padding-top: clamp(40px, 8vh, 96px);
 }
-.sec-head {
-  max-width: 44rem;
-  margin-bottom: clamp(32px, 5vh, 56px);
-}
-.sec-head h2 {
-  font-size: var(--step-3);
-  font-weight: 800;
-  letter-spacing: -0.03em;
-}
-.sec-head p {
-  margin-top: 12px;
-  color: var(--ink-2);
-  font-size: var(--step-1);
-}
-
-/* ---------- rules: sticky miniature + four texts ---------- */
-.rules {
+.rules-pin {
   display: grid;
-  grid-template-columns: minmax(300px, 0.8fr) minmax(0, 1.6fr);
-  gap: clamp(24px, 4vw, 72px);
-  align-items: start;
+  gap: 28px;
+}
+.rules-text {
+  min-width: 0;
 }
 .rules-steps {
-  display: grid;
-  gap: 4px;
-  padding-bottom: 12vh;
+  margin: clamp(20px, 3.4vh, 36px) 0 0;
+  padding: 0;
+  list-style: none;
 }
 .rule {
-  min-height: 62vh;
-  padding: 22px 0 22px 22px;
-  border-left: 2px solid var(--line);
-  transition: border-color 0.3s;
-}
-.rule[data-active] {
-  border-left-color: var(--accent);
+  position: relative;
+  border-top: 1px solid var(--line);
 }
 .rule h3 {
   font-size: var(--step-2);
-  letter-spacing: -0.02em;
+}
+.rule h3 button {
+  width: 100%;
+  padding: clamp(12px, 1.9vh, 18px) 0;
+  border: 0;
+  background: none;
   color: var(--ink-3);
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
   transition: color 0.3s;
 }
-.rule[data-active] h3 {
+.rule h3 button:hover,
+.rule[data-active] h3 button {
   color: var(--ink);
+}
+/* The open item's height is animated by its grid row, so it needs no measuring. */
+.rule-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 0.55s var(--ease-out), opacity 0.3s;
+}
+.rule-body > div {
+  min-height: 0;
+  overflow: hidden;
+}
+.rule[data-active] .rule-body {
+  grid-template-rows: 1fr;
+  opacity: 1;
 }
 .rule p {
   max-width: 30em;
-  margin-top: 10px;
   color: var(--ink-2);
 }
 .rule-ctl {
-  margin-top: 18px;
+  padding: 16px 2px clamp(18px, 2.6vh, 26px);
 }
+/* How far the scroll is through this item. */
+.rule-bar {
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--ink);
+  transform: scaleX(var(--p, 0));
+  transform-origin: 0 0;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.rule[data-active] .rule-bar {
+  opacity: 1;
+}
+
 .seg {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 .seg-btn {
-  padding: 5px 12px;
-  border: 1px solid var(--line-2);
-  border-radius: 999px;
-  background: var(--panel);
+  padding: 5px 13px;
+  border: 0;
+  border-radius: var(--r-ctl);
+  background: var(--fill);
   color: var(--ink-2);
   font-size: var(--step--1);
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: background 0.2s, color 0.2s, scale 0.2s var(--ease-out);
 }
 .seg-btn:hover {
-  border-color: var(--accent);
+  background: var(--line-2);
   color: var(--ink);
 }
+.seg-btn:active {
+  scale: 0.95;
+}
 .seg-btn[aria-pressed="true"] {
-  border-color: var(--accent);
   background: var(--accent);
   color: var(--on-accent);
   font-weight: 600;
 }
 .tiles {
   display: grid;
-  grid-template-columns: repeat(6, 44px);
-  gap: 8px;
+  grid-template-columns: repeat(6, minmax(0, 52px));
+  gap: 10px;
 }
 .tile {
   position: relative;
@@ -97,7 +119,7 @@
   border: 1.5px solid var(--page);
   border-radius: 5px;
   background: var(--line-2);
-  transition: background 0.15s;
+  transition: background 0.2s;
 }
 .tile:hover i {
   background: color-mix(in srgb, var(--accent) 45%, var(--line-2));
@@ -107,30 +129,75 @@
 }
 
 .rules-stage {
-  position: sticky;
-  top: calc(var(--top-h) + max(16px, (100svh - var(--top-h) - 62vw * 0.4) / 2 - 40px));
   min-width: 0;
 }
 .mini {
   position: relative;
   width: 100%;
-  border: 1px solid var(--line-2);
-  border-radius: 14px;
+  border-radius: var(--r-card);
   background: var(--o-bg);
-  box-shadow: var(--lift);
+  box-shadow: 0 0 0 1px var(--line-2), var(--lift);
   overflow: hidden;
 }
 .mini-inner {
   position: relative;
-  width: 1280px;
-  height: 800px;
   overflow: hidden;
 }
 .mini-note {
-  min-height: 3.4em;
+  min-height: 2em;
   margin-top: 14px;
-  color: var(--ink-2);
+  color: var(--ink-3);
   font-size: var(--step--1);
+}
+
+@media (min-width: 961px) {
+  /* Every item opens to the same height, so the list never moves under the pointer. */
+  .rule[data-active] .rule-body > div {
+    min-height: 11.4rem;
+  }
+  .rules-pin {
+    grid-template-columns: minmax(300px, 0.54fr) minmax(0, 1.46fr);
+    gap: clamp(32px, 4vw, 84px);
+    align-content: center;
+    max-width: 1640px;
+    margin-inline: auto;
+  }
+}
+@media (min-width: 961px) and (min-height: 620px) {
+  .rules {
+    height: calc(100svh + 250vh);
+  }
+  .rules-pin {
+    position: sticky;
+    top: var(--top-h);
+    height: calc(100svh - var(--top-h));
+  }
+  /* The miniature is as large as the screen's height lets it be. */
+  .rules-stage {
+    width: min(100%, (100svh - var(--top-h) - 130px) * 1.6);
+    justify-self: end;
+  }
+}
+@media (max-width: 960px) {
+  .rules-pin {
+    display: flex;
+    flex-direction: column;
+  }
+  .rules-text {
+    display: contents;
+  }
+  .rules-text h2 {
+    order: 0;
+  }
+  .rules-stage {
+    order: 1;
+    width: 100%;
+  }
+  .rules-steps {
+    order: 2;
+    width: 100%;
+    margin-top: 0;
+  }
 }
 
 .mini-desktop {
@@ -147,7 +214,7 @@
   display: flex;
   justify-content: center;
   gap: 10px;
-  height: 52px;
+  height: 50px;
   padding: 8px;
   background: color-mix(in srgb, var(--o-surface) 70%, transparent);
   border-top: 1px solid var(--o-border);
@@ -176,116 +243,205 @@
   inset: 0;
   transform-origin: 0 0;
   background: var(--o-bg);
+  overflow: hidden;
   transition: border-radius 0.5s, box-shadow 0.5s;
 }
 .mini[data-standalone] .mini-app {
-  border-radius: 18px;
+  border-radius: 16px;
   box-shadow: 0 0 0 1.5px var(--o-border-strong), 0 40px 90px -30px rgba(20, 12, 60, 0.6);
-  overflow: hidden;
 }
+/* ---- the app's frame, at the app's own measures ---- */
 .mini-top {
   position: absolute;
   inset: 0 0 auto;
   display: flex;
   align-items: center;
-  height: 44px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--o-border);
-  background: var(--o-surface);
+  gap: 17px;
+  height: var(--m-top);
+  padding: 0 14px 0 17px;
+  color: var(--o-text-2);
+  font-size: 12.5px;
 }
-.mini-brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13.5px;
-  font-weight: 600;
+.mini-top > i,
+.mini-side i:not(.os-add),
+.mini-sec > i,
+.mini-strip > i {
+  flex: 1;
+}
+.mini-top > .i:nth-last-child(-n + 3) {
+  color: var(--o-text-3);
+  font-size: 11px;
 }
 .mini-rail {
   position: absolute;
-  inset: 44px auto 0 0;
-  display: grid;
-  align-content: start;
-  justify-items: center;
-  gap: 6px;
-  width: 56px;
-  padding-top: 12px;
+  inset: var(--m-top) auto 0 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  width: var(--m-rail);
+  padding: 7px 0 12px;
   border-right: 1px solid var(--o-border);
   background: var(--o-surface);
-  color: var(--o-glyph);
-  font-size: 18px;
+  color: var(--o-text-2);
+  font-size: 14.5px;
 }
-.mini-rail span {
+.mini-rail > i {
+  flex: 1;
+}
+.mini-rail > span {
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
+  width: 35px;
+  height: 35px;
+  border-radius: 10px;
 }
-.mini-rail span[data-on] {
-  background: var(--o-accent-soft);
+.mini-rail > span[data-on] {
+  background: var(--o-surface-2);
+  color: var(--o-text);
+}
+.mini-rail > .mini-up {
   color: var(--o-accent);
+}
+.mini-rail > .mini-face {
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: var(--o-accent);
+  color: var(--o-on-accent);
+  font-size: 11.5px;
+  font-weight: 600;
 }
 .mini-side {
   position: absolute;
-  inset: 44px auto 0 56px;
-  display: grid;
-  align-content: start;
-  gap: 2px;
-  width: 240px;
-  padding: 14px 8px;
+  inset: var(--m-top) auto 0 var(--m-rail);
+  display: flex;
+  flex-direction: column;
+  width: var(--m-side);
   border-right: 1px solid var(--o-border);
-  background: var(--o-inset);
+  border-top: 1px solid var(--o-border);
+  border-radius: 0 14px 0 0;
+  background: var(--o-surface);
 }
-.mini-side p {
-  padding: 0 8px 6px;
-  color: var(--o-faint);
-  font-size: 12px;
+.mini-side > * {
+  flex: none;
+}
+.mini-side > header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 46px;
+  padding: 0 16px 0 18px;
+  color: var(--o-text-2);
+  font-size: 13.5px;
+}
+.mini-side > header .pi {
+  flex: none;
+}
+.mini-side > header b {
+  white-space: nowrap;
+  color: var(--o-text);
+  font-weight: 600;
+}
+.mini-new {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 29px;
+  padding: 0 16px 0 18px;
+  color: var(--o-text);
+}
+.mini-new .i:first-child {
+  color: var(--o-accent);
+}
+.mini-new small {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--o-accent-soft);
+  color: var(--o-accent);
+  font-size: 10.5px;
+}
+.mini-cap {
+  padding: 8px 12px 4px;
+  color: var(--o-text-2);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.mini-proj {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 27px;
+  padding: 0 14px;
+  color: var(--o-text-2);
+  font-size: 11.5px;
+}
+.mini-proj b {
+  color: var(--o-text);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.mini-proj u {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--o-green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--o-green) 18%, transparent);
 }
 .mini-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 7px 8px;
+  gap: 7px;
+  width: calc(100% - 12px);
+  height: 29px;
+  margin: 0 6px;
+  padding: 0 7px 0 26px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 9px;
   background: none;
-  color: var(--o-text-2);
+  color: var(--o-text);
   font: inherit;
-  font-size: 13px;
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
 }
+.mini-row .os-spin {
+  margin-left: -19px;
+}
 .mini-row[data-on] {
   background: var(--o-accent-soft);
   color: var(--o-accent);
+  font-weight: 500;
 }
 .mini-row em {
   margin-left: auto;
-  padding: 0 7px;
+  padding: 0 8px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--o-amber) 14%, transparent);
-  color: var(--o-amber);
   font-size: 11px;
   font-style: normal;
+  line-height: 18px;
+  background: color-mix(in srgb, var(--c) 13%, var(--o-surface));
+  color: var(--c);
 }
+.mini [data-tone="blue"] { --c: var(--o-blue); }
+.mini [data-tone="violet"] { --c: var(--o-accent); }
+.mini [data-tone="amber"] { --c: var(--o-amber); }
+.mini [data-tone="green"] { --c: var(--o-green); }
+.mini [data-tone="red"] { --c: var(--o-red); }
 button.mini-row {
   cursor: grab;
   touch-action: none;
   outline: 1.5px dashed transparent;
-  transition: outline-color 0.3s, opacity 0.3s;
+  outline-offset: -1.5px;
+  transition: outline-color 0.3s, background 0.2s;
 }
 .mini[data-step="0"] button.mini-row:not([data-out]) {
   outline-color: var(--o-accent-border);
   animation: row-nudge 2.4s var(--ease-out) infinite;
 }
-button.mini-row[data-out] {
-  opacity: 0.45;
-}
 @keyframes row-nudge {
   0%, 60%, 100% { translate: 0; }
-  30% { translate: 10px 0; }
+  30% { translate: 8px 0; }
 }
 .mini-ghost {
   position: absolute;
@@ -299,54 +455,537 @@ button.mini-row[data-out] {
   animation: none !important;
   pointer-events: none;
 }
+.mini-explorer {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0 !important;
+  min-height: 0;
+  margin-top: 10px;
+  border-top: 1px solid var(--o-border);
+  overflow: hidden;
+}
+.mini-explorer header,
+.mini-sec {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  height: 34px;
+  padding: 0 14px 0 12px;
+  color: var(--o-text-2);
+}
+.mini-explorer header .i:first-child {
+  font-size: 11px;
+}
+.mini-explorer .os-tree {
+  padding-top: 0;
+}
+.mini-explorer .os-tree * {
+  pointer-events: none;
+}
+.mini-bar {
+  position: absolute;
+  inset: var(--m-top) 0 auto calc(var(--m-rail) + var(--m-side));
+  display: flex;
+  align-items: center;
+  height: var(--m-bar);
+  padding: 0 14px 0 12px;
+  border-bottom: 1px solid var(--o-border);
+  background: var(--o-bg);
+  white-space: nowrap;
+}
+.mini-crumb,
+.mini-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--o-text-2);
+}
+.mini-crumb > i {
+  color: var(--o-faint);
+  font-style: normal;
+}
+.mini-crumb b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--o-text);
+  font-weight: 600;
+}
+.mini-crumb .i:nth-last-child(-n + 2) {
+  margin-left: 8px;
+  font-size: 13px;
+}
+.mini-tabs {
+  display: none;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  margin-left: -6px;
+  color: var(--o-text-2);
+  pointer-events: none;
+}
+.mini-tabs > .i {
+  margin-left: 8px;
+}
+.mini[data-windowed] .mini-crumb {
+  display: none;
+}
+.mini[data-windowed] .mini-tabs {
+  display: flex;
+}
+.mini-grow {
+  flex: 1;
+}
+.mini-tools {
+  flex: none;
+  gap: 15px;
+  padding-left: 12px;
+  font-size: 13.5px;
+}
+.mini-tools > .i {
+  position: relative;
+}
+.mini-t-cards,
+.mini-t-right {
+  isolation: isolate;
+}
+.mini-t-cards::before,
+.mini-t-right::before {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  z-index: -1;
+  border-radius: 8px;
+  background: var(--o-accent-soft);
+  opacity: 0;
+}
+.mini-t-cards,
+.mini[data-zone="2"] .mini-t-right {
+  color: var(--o-accent);
+}
+.mini-t-cards::before,
+.mini[data-zone="2"] .mini-t-right::before {
+  opacity: 1;
+}
+.mini-meter {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: conic-gradient(var(--o-accent) 22%, var(--o-surface-3) 0);
+  mask: radial-gradient(closest-side, transparent 62%, #000 66%);
+}
+
+/* ---- the conversation's own tool cards ---- */
+.mini-cards,
+.mini-rings {
+  position: absolute;
+  top: calc(var(--m-top) + var(--m-bar));
+  right: 0;
+  z-index: 2;
+  transition: opacity 0.25s;
+}
+.mini-cards {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  bottom: 0;
+  width: var(--m-cards);
+  padding: 14px 12px 0 0;
+  overflow: hidden;
+}
+.mini-card {
+  border: 1px solid var(--o-border);
+  border-radius: 15px;
+  background: var(--o-surface);
+  overflow: hidden;
+  transition: height 0.5s var(--ease-out);
+}
+.mini-card > header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 12px;
+  color: var(--o-text-2);
+  white-space: nowrap;
+}
+.mini-card > header b {
+  font-weight: 500;
+}
+.mini-fold {
+  font-size: 10px;
+}
+.mini-card > header > span:last-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  font-size: 11px;
+}
+.mini-card header i,
+.mini-card li > i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--c);
+}
+.mini-card u {
+  width: 28px;
+  height: 5px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--t-blue) var(--v), var(--o-surface-3) 0);
+}
+.mini-env,
+.mini-card ul {
+  margin: 0 12px;
+  padding: 5px 0 9px;
+  border-top: 1px solid var(--o-border);
+}
+.mini-env p,
+.mini-card li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 25px;
+  color: var(--o-text-2);
+  white-space: nowrap;
+}
+.mini-env p b {
+  color: var(--o-text);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.mini-env small,
+.mini-card li span.mono {
+  margin-left: auto;
+  color: var(--o-text-3);
+  font-size: 11px;
+}
+.mini-card li b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--o-text);
+  font-weight: 500;
+}
+.mini-card li > i {
+  margin-left: auto;
+}
+.mini-card li span.mono {
+  margin-left: 0;
+}
+/* Git takes its card's place and pushes the rest down; anywhere else, its card is gone. */
+.mini[data-zone="1"] .mini-card[data-card="git"] {
+  height: 264px;
+}
+.mini:is([data-zone="0"], [data-zone="2"], [data-zone="3"], [data-zone="4"]) .mini-card[data-card="git"] {
+  display: none;
+}
+.mini-rings {
+  display: grid;
+  gap: 8px;
+  padding: 14px 12px 0 0;
+  opacity: 0;
+  translate: 0;
+}
+.mini-rings span:not(.i) {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: linear-gradient(var(--o-surface), var(--o-surface)) padding-box, var(--o-surface);
+  color: var(--o-text-2);
+  font-size: 13px;
+}
+.mini-rings span:not(.i)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--c);
+  mask: radial-gradient(closest-side, transparent 88%, #000 90%);
+}
+.mini-rings b {
+  position: absolute;
+  right: -4px;
+  bottom: -3px;
+  width: 15px;
+  border-radius: 50%;
+  background: var(--o-surface);
+  box-shadow: 0 0 0 1px var(--o-border);
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 15px;
+  text-align: center;
+}
+.mini:is([data-narrow], [data-windowed]) .mini-cards {
+  opacity: 0;
+  visibility: hidden;
+}
+/* With the right panel open the cards fold into a column of icons. */
+.mini[data-narrow] .mini-rings {
+  opacity: 1;
+  right: calc((100% - var(--m-rail) - var(--m-side)) * 0.4);
+}
+.mini[data-small] :is(.mini-rail, .mini-cards, .mini-rings, .mini-top > span:not(.i), .mini-tools > :nth-child(-n + 3), .mini-cap, .mini-more) {
+  display: none;
+}
+.mini[data-small] .mini-row {
+  padding: 0 5px 0 22px;
+}
+.mini[data-small] .mini-row em {
+  display: none;
+}
+
+/* ---- windows ---- */
 .mini-win {
   position: absolute;
   top: 0;
   left: 0;
+  container: desk-win / inline-size;
   transform-origin: 0 0;
-  border-radius: 10px;
   box-shadow: none;
+  transition: border-color 0.3s, border-radius 0.3s, box-shadow 0.3s;
 }
-.mini-win[data-kind="plan"],
-.mini-win[data-float] {
-  box-shadow: var(--o-shadow);
+.mini-win > .ow-bar {
+  transition: height 0.4s var(--ease-out), opacity 0.2s;
 }
-.mini-win[data-float] {
-  border-color: var(--o-accent-border);
+.mini-win[data-focused] {
+  border-color: var(--tint);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tint) 45%, transparent), 0 0 18px color-mix(in srgb, var(--tint) 18%, transparent);
 }
-.mini[data-ontop] .mini-win[data-kind="git"]::after {
-  content: "置顶";
-  position: absolute;
-  top: 7px;
-  right: 112px;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: var(--o-accent);
-  color: var(--o-on-accent);
+.mini:not([data-windowed]) .mini-win:is([data-kind="plan"], [data-dock="float"]) {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tint) 45%, transparent), 0 0 18px color-mix(in srgb, var(--tint) 18%, transparent), var(--o-shadow);
+}
+/* The main conversation has no frame. */
+.mini-win[data-plain] {
+  border-color: transparent;
+  border-radius: 0;
+  background: none;
+}
+.mini-win[data-plain] > .ow-bar {
+  height: 0;
+  border-bottom-width: 0;
+  opacity: 0;
+  overflow: hidden;
+}
+.mini-win[data-plain] .ow-body {
+  padding-right: var(--m-cards);
+  background: var(--o-bg);
+}
+.mini[data-narrow] .mini-win[data-plain] .ow-body {
+  padding-right: 52px;
+}
+.mini[data-small] .mini-win[data-plain] .ow-body {
+  padding-right: 0;
+}
+.mini-sec,
+.mini-strip {
+  display: none;
+}
+.mini-sec b {
+  font-weight: 500;
+}
+.mini-sec .i:first-child {
   font-size: 11px;
-  font-weight: 600;
-  line-height: 20px;
 }
-.mini-scope {
+.mini-strip {
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 36px;
+  padding: 2px 10px 2px 5px;
+  border-bottom: 1px solid var(--o-border);
+  background: var(--o-surface-2);
+  color: var(--o-text-2);
+  --tint: var(--o-border-strong);
+}
+.mini-strip .ow-tab[data-on] {
+  background: var(--o-inset);
+  border-color: var(--o-border-strong);
+}
+.mini-strip .ow-tab-l .i {
+  color: inherit;
+}
+.mini-strip > .i {
+  margin-left: 8px;
+}
+.mini-strip button {
+  pointer-events: none;
+}
+.mini-win:is([data-dock="left"], [data-dock="card"], [data-dock="right"], [data-dock="bottom"]) > .ow-bar {
+  display: none;
+}
+.mini-win:is([data-dock="left"], [data-dock="card"]) > .mini-sec,
+.mini-win[data-dock="right"] > .mini-strip[data-for="right"],
+.mini-win[data-dock="bottom"] > .mini-strip[data-for="bottom"] {
+  display: flex;
+}
+.mini-win:is([data-dock="left"], [data-dock="right"], [data-dock="bottom"]) {
+  border-color: var(--o-border);
+  border-radius: 0;
+}
+.mini-win[data-dock="right"] { border-width: 0 0 0 1px; }
+.mini-win[data-dock="bottom"] { border-width: 1px 0 0; }
+.mini-win[data-dock="left"] { border-width: 1px 1px 0 0; background: var(--o-surface); }
+.mini-win[data-dock="card"] {
+  border-color: var(--o-border);
+  border-radius: 15px;
+  background: var(--o-surface);
+}
+.mini[data-step="2"] .mini-win[data-dock] > :is(.ow-bar, .mini-sec, .mini-strip) {
+  cursor: grab;
+  touch-action: none;
+}
+/* Never typed in, so spared the larger type touch screens need. */
+.mini input:is(.os-field, .os-composer-input) {
+  font-size: 12.5px !important;
+}
+.mini-win > .ow-bar button {
+  pointer-events: none;
+}
+.mini[data-carrying] .mini-win[data-dock] {
+  box-shadow: 0 30px 70px -20px rgba(30, 10, 90, 0.5);
+  opacity: 0.92 !important;
+}
+/* Where the carried tool would land. */
+.mini-drop {
   position: absolute;
   top: 0;
   left: 0;
-  z-index: 6;
-  border: 2px dashed var(--o-accent);
-  border-radius: 14px;
+  z-index: 5;
+  border: 2px solid var(--o-accent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--o-accent) 9%, transparent);
   opacity: 0;
   pointer-events: none;
+  transition: transform 0.24s var(--ease-out), width 0.24s var(--ease-out), height 0.24s var(--ease-out), opacity 0.15s;
 }
-.mini-scope span {
+.mini-drop span {
   position: absolute;
-  top: -13px;
-  left: 50%;
-  translate: -50% 0;
+  left: 8px;
+  bottom: 8px;
+  padding: 2px 9px;
+  border: 1px solid var(--o-border-strong);
+  border-radius: 8px;
+  background: var(--o-surface);
+  color: var(--o-text);
   white-space: nowrap;
-  padding: 1px 10px;
+}
+.mini[data-carrying] .mini-drop {
+  opacity: 1;
+}
+.mini[data-carrying][data-over="4"] .mini-drop {
+  opacity: 0;
+}
+/* The pin menu, open on the Git window through the fourth step. */
+.mini-menu {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 7;
+  width: 216px;
+  padding: 5px;
+  border: 1px solid var(--o-border-strong);
+  border-radius: 12px;
+  background: var(--o-surface);
+  box-shadow: var(--o-shadow);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s, visibility 0s 0.2s;
+}
+.mini[data-menu] .mini-menu {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.25s 0.25s;
+}
+.mini-menu p {
+  padding: 3px 9px 4px;
+  color: var(--o-text-3);
+  font-size: 11.5px;
+}
+.mini-menu button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 29px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--o-text);
+  font: inherit;
+  text-align: left;
+}
+.mini-menu button span:first-child {
+  flex: 1;
+}
+.mini-menu button:hover {
+  background: var(--o-hover);
+}
+.mini-menu button:focus-visible {
+  outline: 2px solid var(--o-accent);
+  outline-offset: -2px;
+}
+.mini-menu .i {
+  opacity: 0;
+}
+.mini-menu [aria-pressed="true"] .i {
+  opacity: 1;
+}
+.mini[data-menu] .mini-win[data-dock] [data-act="pin"] {
+  background: color-mix(in srgb, var(--tint) 14%, transparent);
+  color: var(--tint);
+}
+.mini-doc {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 20px 22px;
+}
+.mini-doc i {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--o-surface-3);
+}
+.mini-doc i:nth-child(3n) {
+  width: 62%;
+}
+.mini-doc i:first-child {
+  width: 38%;
+  height: 13px;
+  margin-bottom: 6px;
+}
+/* The home page, a real screenshot of it, over the workbench. */
+.mini-page {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 0 0;
+  opacity: 0;
+  transition: opacity 0.35s;
+}
+.mini[data-page] .mini-page {
+  opacity: 1;
+}
+.mini[data-ontop] .mini-win[data-kind="git"] .ow-title::after {
+  content: "置顶";
+  margin-left: 8px;
+  padding: 1px 7px;
   border-radius: 999px;
-  background: var(--o-accent);
-  color: var(--o-on-accent);
-  font-size: 13px;
+  background: var(--tint);
+  color: var(--o-surface);
+  font-size: 10.5px;
   font-weight: 600;
+}
+
+.keep {
+  display: inline-block;
 }
