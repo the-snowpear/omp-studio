@@ -310,6 +310,11 @@ export function createDesktopRuntimeSessionPort(
       phase,
       pendingMessages: snapshot?.pendingMessages ?? 0,
       ...(waitKind === undefined ? {} : { waitKind }),
+      // The resident roster is the only live channel for non-selected
+      // sessions: surface their in-memory title so sidebar rows refresh
+      // without a re-selection.
+      ...(snapshot?.sessionTitle === undefined ? {} : { title: snapshot.sessionTitle }),
+      ...(snapshot?.sessionTitleSource === undefined ? {} : { titleSource: snapshot.sessionTitleSource }),
       lastActivityAt: resident.lastActivityAt,
     };
   };

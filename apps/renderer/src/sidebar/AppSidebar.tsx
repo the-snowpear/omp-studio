@@ -848,9 +848,12 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                       })}
                       {orderedEntries.map((entry) => {
                         const provisional = provisionalThreadForHistoryEntry(chrome.provisionalThreads, entry);
+                        // Live snapshot covers the selected session; the resident
+                        // roster carries the freshest title for background ones
+                        // (their snapshot is not delivered until re-selection).
                         const entryLiveTitle = entry.sessionId !== undefined && entry.sessionId === liveSnapshot?.sessionId
                           ? liveSnapshotTitle
-                          : undefined;
+                          : residentForSession(residentRows, entry.sessionId)?.title;
                         const resolvedEntryTitle = sidebarThreadTitle(entry, provisional, t("conversation.untitledSession"), entryLiveTitle);
                         const wait = threadWaitForSession(entry.sessionId);
                         const running = entryRunning(entry);
