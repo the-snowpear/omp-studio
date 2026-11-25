@@ -29,6 +29,7 @@
   &nbsp;·&nbsp; <a href="#窗口化工作台">窗口化工作台</a>
   &nbsp;·&nbsp; <a href="#能力全景">能力全景</a>
   &nbsp;·&nbsp; <a href="#下载安装">下载安装</a>
+  &nbsp;·&nbsp; <a href="#独立-web-工作台">Web 工作台</a>
   &nbsp;·&nbsp; <a href="#从源码运行">从源码运行</a>
   &nbsp;·&nbsp; <a href="#架构">架构</a>
   &nbsp;·&nbsp; <a href="docs/README.md">文档</a>
@@ -305,6 +306,72 @@ xattr -dr com.apple.quarantine "/Applications/OMP Studio.app"
 
 <br>
 
+<a id="独立-web-工作台"></a>
+
+## 独立 Web 工作台
+
+<details>
+<summary><b>展开教程：独立启动、浏览器配对与局域网访问</b></summary>
+
+无需启动桌面程序，就能在浏览器里使用工作台。Web 与桌面共用 Host 所在系统账户的项目、会话、模型配置和终端；关闭浏览器页面或退出桌面程序后，Host 继续运行。
+
+### 1 · 下载并启动
+
+从 **[GitHub Releases](https://github.com/the-snowpear/omp-studio/releases/latest)** 下载匹配系统与架构的 `omp-studio-remote-<版本>-<平台>` 运行环境包并解压。Windows、macOS、Linux 均提供 x64 / ARM64 包，内含 Node、Runtime、Web 页面与终端模块。
+
+在解压目录打开终端，执行对应命令。
+
+**Windows（PowerShell）：**
+
+```powershell
+.\omp-studio-web.cmd start
+.\omp-studio-web.cmd pair
+```
+
+**macOS / Linux：**
+
+```bash
+./omp-studio-web start
+./omp-studio-web pair
+```
+
+默认本机地址为 `http://127.0.0.1:8560`。打开 `pair` 输出的链接，确认授权范围并点击配对；链接有效期为 **60 秒**，过期后重新运行 `pair`。后续命令以 macOS / Linux 为例，Windows 将 `./omp-studio-web` 换成 `.\omp-studio-web.cmd`。
+
+### 2 · 打开项目并开始使用
+
+配对后点击 **接管**，即可发送消息、处理审批、编辑文件、执行 Git 操作和使用终端。点击 **打开本地文件夹** 时，填写的是 **Host 机器上的绝对目录路径**。模型与账号在工作台的模型配置中设置。
+
+已配对浏览器可在刷新和 Host 重启后继续连接。切换设备时，再次点击 **接管**；原设备保留草稿，已有任务继续执行。关闭网页不会结束 Shell，关闭终端或停止 Host 才会结束它。
+
+### 3 · 从局域网其他设备访问
+
+将示例 IP 换成 Host 机器实际的局域网地址：
+
+```bash
+./omp-studio-web listen --ip 192.168.1.20
+./omp-studio-web certificate OMP-Studio-CA.cer
+./omp-studio-web pair
+```
+
+通过可信方式把导出的 CA 证书传到自己的电脑、平板或手机，安装并信任后，再打开 `pair` 输出的 **HTTPS 链接**。使用桌面程序时，也可以从右下角的 **Web 访问** 完成地址选择、证书导出与配对，并核对证书 SHA-256 指纹。
+
+用 `./omp-studio-web devices` 查看设备，`./omp-studio-web revoke <device-id>` 撤销授权。运行不带 `--ip` 的 `./omp-studio-web listen` 可关闭局域网访问。本功能面向本机或局域网内同一系统账户的工作台共享。
+
+### 4 · 查看状态、停止与升级
+
+```bash
+./omp-studio-web status
+./omp-studio-web stop
+```
+
+停止前先结束正在运行的任务和终端；明确需要强制终止时使用 `stop --force`。升级时停止旧 Host，再替换运行环境包并重新启动，项目与会话数据仍保留在 Studio 配置目录中。
+
+源码启动、设备授权、日志与功能范围详见 **[Web 工作台完整教程](docs/web-ui.md#中文)**。
+
+</details>
+
+<br>
+
 <a id="从源码运行"></a>
 
 ## 从源码运行
@@ -328,7 +395,7 @@ npm run preview
 
 Windows 也可以直接双击仓库根目录的 `preview.cmd`；macOS 需要先安装 Xcode Command Line Tools。
 
-Linux 支持源码运行与 `npm run pack:linux` 原生打包；环境、安装、更新与沙箱说明见 [Linux 客户端](docs/linux.md)。正式桌面附件为 AppImage / deb；Release 中的 Linux remote 压缩包用于 SSH Host。
+Linux 支持源码运行与 `npm run pack:linux` 原生打包；环境、安装、更新与沙箱说明见 [Linux 客户端](docs/linux.md)。正式桌面附件为 AppImage / deb；Release 中的 Linux remote 压缩包用于 SSH Host 与独立 Web 工作台。
 
 <details>
 <summary><b>接上真实的托管 Runtime</b>（首次较慢）</summary>

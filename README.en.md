@@ -29,6 +29,7 @@
   &nbsp;·&nbsp; <a href="#windowed-workbench">Windowed Workbench</a>
   &nbsp;·&nbsp; <a href="#capabilities">Capabilities</a>
   &nbsp;·&nbsp; <a href="#download--install">Download &amp; Install</a>
+  &nbsp;·&nbsp; <a href="#standalone-web-workbench">Web Workbench</a>
   &nbsp;·&nbsp; <a href="#run-from-source">Run from Source</a>
   &nbsp;·&nbsp; <a href="#architecture">Architecture</a>
   &nbsp;·&nbsp; <a href="docs/README.md">Docs</a>
@@ -305,6 +306,72 @@ You can also run from source following [getting-started.md](docs/getting-started
 
 <br>
 
+<a id="standalone-web-workbench"></a>
+
+## Standalone Web Workbench
+
+<details>
+<summary><b>Expand the guide: standalone startup, browser pairing, and LAN access</b></summary>
+
+Use the workbench in a browser without starting the desktop app. Web and desktop share the Host system account's projects, conversations, model configuration, and terminals. The Host keeps running after you close the browser page or exit the desktop app.
+
+### 1 · Download and start
+
+Download and extract the `omp-studio-remote-<version>-<platform>` environment matching your system and architecture from **[GitHub Releases](https://github.com/the-snowpear/omp-studio/releases/latest)**. Windows, macOS, and Linux each have x64 / ARM64 packages containing Node, the Runtime, Web assets, and the terminal module.
+
+Open a terminal in the extracted directory and run the commands for your platform.
+
+**Windows (PowerShell):**
+
+```powershell
+.\omp-studio-web.cmd start
+.\omp-studio-web.cmd pair
+```
+
+**macOS / Linux:**
+
+```bash
+./omp-studio-web start
+./omp-studio-web pair
+```
+
+The default local address is `http://127.0.0.1:8560`. Open the link printed by `pair`, review the authorization scope, and confirm pairing. The link expires after **60 seconds**; run `pair` again if needed. The remaining examples use macOS / Linux commands; on Windows, replace `./omp-studio-web` with `.\omp-studio-web.cmd`.
+
+### 2 · Open a project and start working
+
+After pairing, click **Take control** to send messages, handle approvals, edit files, perform Git operations, and use terminals. **Open local folder** asks for an **absolute directory path on the Host machine**. Configure models and accounts in the workbench's model settings.
+
+A paired browser can reconnect after a refresh or Host restart. To switch devices, click **Take control** on the other device. Drafts stay on the previous device and running tasks continue. Closing the page keeps the Shell running; closing the terminal or stopping the Host ends it.
+
+### 3 · Connect from other devices on your LAN
+
+Replace the example IP with the Host machine's actual LAN address:
+
+```bash
+./omp-studio-web listen --ip 192.168.1.20
+./omp-studio-web certificate OMP-Studio-CA.cer
+./omp-studio-web pair
+```
+
+Transfer the exported CA certificate to your computer, tablet, or phone through a trusted channel. Install and trust it, then open the **HTTPS link** printed by `pair`. In the desktop app, **Web access** at the bottom right also provides address selection, certificate export, and pairing, along with the certificate's SHA-256 fingerprint for verification.
+
+Run `./omp-studio-web devices` to list devices and `./omp-studio-web revoke <device-id>` to revoke access. Run `./omp-studio-web listen` without `--ip` to disable LAN access. This feature shares a single system account's workbench locally or over a LAN.
+
+### 4 · Check status, stop, and upgrade
+
+```bash
+./omp-studio-web status
+./omp-studio-web stop
+```
+
+Finish active tasks and terminals before stopping. Use `stop --force` when you intend to terminate them. To upgrade, stop the old Host, replace the environment package, and start it again. Project and conversation data stays in Studio's configuration directory.
+
+See the **[full Web workbench guide](docs/web-ui.md#english)** for running from source, device authorization, logs, and feature scope.
+
+</details>
+
+<br>
+
 <a id="run-from-source"></a>
 
 ## Run from Source
@@ -328,7 +395,7 @@ npm run preview
 
 On Windows you can also double-click `preview.cmd` at the repository root; macOS requires Xcode Command Line Tools first.
 
-Linux supports running from source and native packaging via `npm run pack:linux`; see [Linux Client](docs/linux.md) for environment setup, installation, updates, and sandbox notes. Official desktop assets are AppImage / deb; Linux remote archives in Releases are for SSH Hosts.
+Linux supports running from source and native packaging via `npm run pack:linux`; see [Linux Client](docs/linux.md) for environment setup, installation, updates, and sandbox notes. Official desktop assets are AppImage / deb; Linux remote archives in Releases support SSH Hosts and the standalone Web workbench.
 
 <details>
 <summary><b>Attach a real managed Runtime</b> (slower the first time)</summary>
