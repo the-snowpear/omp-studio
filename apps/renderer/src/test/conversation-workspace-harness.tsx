@@ -25,6 +25,10 @@ function transport(scope?: ClientContextScope): ClientTransport {
     bootstrap: async () => {
       const value = structuredClone(contractFixtures.bootstrap);
       if (scope?.sessionId && value.snapshot) return { ...value, snapshot: { ...value.snapshot, sessionId: scope.sessionId }, selected: { ...value.selected, workspaceId: scope.workspaceId, sessionId: scope.sessionId } };
+      if (scope) {
+        const { snapshot, stateVersion, selected, ...fresh } = value;
+        return { ...fresh, selected: { workspaceId: scope.workspaceId } };
+      }
       return value;
     },
     query: async request => structuredClone((contractFixtures.queryResponses as Record<string, unknown>)[request.queryName]) as never,

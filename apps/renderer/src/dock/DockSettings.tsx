@@ -53,8 +53,8 @@ function DockSettingsContent({ dock }: { dock: NonNullable<ReturnType<typeof use
           <option value="">{copy("跟随应用默认", "Follow application default")}</option>{options}
         </AppSelect>
       </SettingRow>
-      <SettingRow label={copy("新会话沿用本项目上次布局", "Inherit this project's last layout")} desc={copy("仅复制新会话的起点，之后各会话独立保存；已有会话不受影响。", "Copies a starting layout for new sessions only. Sessions remain independent; existing sessions are unchanged.")} source={preferences.inherit ? "user" : "default"}>
-        <Switch label={copy("新会话沿用本项目上次布局", "Inherit this project's last layout")} checked={preferences.inherit} onChange={inherit => store.updatePreferences({ inherit })} />
+      <SettingRow label={copy("新会话沿用最近布局", "Inherit the last layout for new sessions")} desc={copy("原窗新会话保留工具状态；新开窗口沿用本项目上次布局，无项目时使用当前连接最近布局。各会话独立保存。", "New sessions in the current window keep its tools. New windows inherit this project's last layout, or the connection's last layout when no project is selected. Layouts remain independent.")} source={preferences.inherit ? "default" : "user"}>
+        <Switch label={copy("新会话沿用最近布局", "Inherit the last layout for new sessions")} checked={preferences.inherit} onChange={inherit => store.updatePreferences({ inherit })} />
       </SettingRow>
       <SettingRow label={copy("启用停靠吸附", "Enable dock snapping")} desc={PLATFORM === "darwin" ? copy("拖动时按住 Command 可临时暂停吸附并浮动放置。", "Hold Command while dragging to suspend snapping and float the tool.") : copy("拖动时按住 Ctrl 可临时暂停吸附并浮动放置。", "Hold Ctrl while dragging to suspend snapping and float the tool.")} source={preferences.snap ? "default" : "user"}>
         <Switch label={copy("启用停靠吸附", "Enable dock snapping")} checked={preferences.snap} onChange={snap => store.updatePreferences({ snap })} />

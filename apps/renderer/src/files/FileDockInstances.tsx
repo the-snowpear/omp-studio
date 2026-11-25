@@ -91,8 +91,9 @@ export function FileDockInstances({ workspaceId, targetId, client, onSettings, a
   };
   for (const [, descriptor] of descriptors) sessionFor(descriptor);
 
+  // Register the replacement before the old view's passive cleanup can release its buffer.
+  useLayoutEffect(() => { catalogs.add(catalog); }, [catalog]);
   useEffect(() => {
-    catalogs.add(catalog);
     return () => {
       catalogs.delete(catalog);
       const uniqueSessions = new Set(catalog.documents.values());

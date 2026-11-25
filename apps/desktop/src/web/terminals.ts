@@ -9,7 +9,7 @@ import {
   parseResizeInput,
   parseDisposeInput,
 } from "../terminal-shared.js";
-import type { TerminalSessionInfo } from "../terminal-shared.js";
+import { TerminalIpcError, type TerminalRebindInput, type TerminalSessionInfo } from "../terminal-shared.js";
 import { TerminalRecordingManager } from "../terminal-recording.js";
 import { activeArtifactLibrary } from "../artifact-library.js";
 import { parseRecordingInput } from "../terminal-shared.js";
@@ -114,6 +114,22 @@ export class SharedTerminals {
   resize(raw: unknown): void {
     const { id, cols, rows } = parseResizeInput(raw);
     this.#manager.resize(0, id, cols, rows);
+  }
+  rebind(raw: unknown): void {
+    const input = raw as TerminalRebindInput;
+    if (!input || !Array.isArray(input.ids) || (input.sessionId !== undefined && (typeof input.sessionId !== "string" || !input.sessionId))) {
+      throw new TerminalIpcError(desktopText("终端会话归属参数无效", "Invalid terminal conversation scope"));
+    }
+    const rows = input.ids.map(id => {
+      const row = this.#terminals.get(parseDisposeInput({ id }).id);
+      if (!row) throw new TerminalIpcError(desktopText("终端已关闭", "Terminal has closed"));
+      return row;
+    });
+    for (const row of rows) {
+      if (input.sessionId === undefined) delete row.sessionId;
+      else row.sessionId = input.sessionId;
+    }
+    if (rows.length) this.publish({ kind: "terminal.changed" });
   }
   remove(raw: unknown): void {
     const { id } = parseDisposeInput(raw);

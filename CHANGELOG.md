@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- 窗口化模式下 `/new`、新会话快捷键和菜单在当前窗口开始新会话，保留窗口布局、正在运行的终端和打开文件的未保存编辑。新窗口的布局继承默认开启，并支持无项目时沿用当前连接最近布局；已有保存的开关值保持。 [#73](https://github.com/the-snowpear/omp-studio/issues/73)
+- `/new`, the new-session shortcut and menu now start a conversation in the current window while preserving its layout, running terminals and unsaved file edits. New windows inherit layouts by default, including the connection's last layout when no project is selected; saved preferences are preserved. [#73](https://github.com/the-snowpear/omp-studio/issues/73)
 - 输入框命令菜单在确认、Tab 补全、ESC 或点击外部后保持关闭；输入空格、换行或移出命令 token 也会关闭，继续输入和重新聚焦不再反复弹出。 [#74](https://github.com/the-snowpear/omp-studio/issues/74)
 - Composer command completion stays dismissed after selection, Tab, Escape or an outside click. Spaces, newlines and moving the caret outside the command token close it; continued typing and refocusing no longer reopen it. [#74](https://github.com/the-snowpear/omp-studio/issues/74)
 

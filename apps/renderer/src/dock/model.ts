@@ -1,5 +1,5 @@
 import { pickLocale } from "../i18n";
-import { isFilePanelId, isRepeatablePanelId, isScopedPanelId, panelBaseId, scopedPanelId, type FilePanelId, type FilePanelDescriptor, PANEL_IDS, agentPanelId, browserPagePanelId, isAgentPanelId, isBrowserPagePanelId, isConversationPanelId, type AgentPanelId, type AgentPanelTarget, type BrowserPagePanelId, type DockAction, type DockFloat, type DockGroup, type DockLayout, type DockLocation, type DockPreset, type DockRect, type DockTarget, type PanelId, type ScopedPanelId } from "./types";
+import { isFilePanelId, isFocusWindowPanel, isRepeatablePanelId, isScopedPanelId, panelBaseId, scopedPanelId, type FilePanelId, type FilePanelDescriptor, PANEL_IDS, agentPanelId, browserPagePanelId, isAgentPanelId, isBrowserPagePanelId, isConversationPanelId, type AgentPanelId, type AgentPanelTarget, type BrowserPagePanelId, type DockAction, type DockFloat, type DockGroup, type DockLayout, type DockLocation, type DockPreset, type DockRect, type DockTarget, type PanelId, type ScopedPanelId } from "./types";
 
 const FLOAT_RECT: DockRect = { x: 80, y: 60, width: 560, height: 400 };
 const isPanel = (value: unknown): value is PanelId => typeof value === "string" && (PANEL_IDS as readonly string[]).includes(value);
@@ -633,6 +633,24 @@ export function preserveFileViews(layout: DockLayout, current: DockLayout): Dock
     if (!locatePanel(current, id as FilePanelId)) result = dockReducer(result, { type: "hide", panels: [id as FilePanelId] });
   }
   return result;
+}
+
+/** /new copies the current workspace, including file buffers, with fresh view identities. */
+export function newConversationLayout(layout: DockLayout): DockLayout {
+  const pinned = new Set(layout.floats.filter(group => group.pin).flatMap(group => group.panels));
+  const current = removePanels(copy(layout), [...pinned]);
+  current.fileViews = Object.fromEntries(Object.entries(current.fileViews).filter(([id]) => !pinned.has(id as PanelId)));
+  let next = preserveFileViews(instancePresetLayout(current), current);
+  next = dockReducer(next, { type: "hide", panels: PANEL_IDS.filter(isFocusWindowPanel) });
+  for (const [oldId, descriptor] of Object.entries(next.fileViews)) {
+    const previous = oldId as FilePanelId, id: FilePanelId = `file-view:${crypto.randomUUID()}`;
+    replaceInPlace(next, previous, id);
+    next.fileViews[id] = { ...descriptor };
+    next.cards[id] = { ...next.cards[previous]! };
+    if (next.hidden[previous]) next.hidden[id] = next.hidden[previous];
+    delete next.fileViews[previous]; delete next.cards[previous]; delete next.hidden[previous];
+  }
+  return next;
 }
 
 export const applyInstancePreset = (preset: DockLayout, current: DockLayout): DockLayout => {

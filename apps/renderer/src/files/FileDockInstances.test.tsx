@@ -1,4 +1,4 @@
-import { createContext, useContext, type ContextType, type ReactNode } from "react";
+import { createContext, useContext, useSyncExternalStore, type ContextType, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ClientEvent, StudioClient, WorkspaceFileInfo } from "@omp-studio/client-contract";
@@ -9,6 +9,7 @@ import type { FilePanelDescriptor, FilePanelId } from "../dock/types";
 import { FileDockInstances } from "./FileDockInstances";
 import type { FileViewerActions } from "./fileActions";
 import { PreviewSurface } from "../preview/PreviewContext";
+import type { FileDocument } from "./fileDocuments";
 
 const engine = createContext<DockStore | null>(null);
 const targets = vi.hoisted(() => ({ readyClient: vi.fn(), definitions: vi.fn() }));
@@ -20,9 +21,11 @@ vi.mock("../dock/DockContext", () => ({
 vi.mock("./FilePane", async () => {
   const { FileDocumentContext, FileLink, useOpenFile } = await import("./fileLinks");
   const { usePreviewMode } = await import("../preview/PreviewContext");
-  return { default: ({ descriptor, actions }: { descriptor: FilePanelDescriptor; actions?: FileViewerActions }) => {
+  return { default: ({ descriptor, session, actions }: { descriptor: FilePanelDescriptor; session: FileDocument; actions?: FileViewerActions }) => {
     const open = useOpenFile(), { preview } = usePreviewMode();
+    const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot);
     return <section data-testid={descriptor.fileId}>
+      <textarea aria-label="File text" value={snapshot.text} onChange={event => session.edit(event.target.value)} />
       <button onClick={() => actions?.addContext({ path: descriptor.path, label: descriptor.title })}>添加到对话</button>
       <button onClick={() => open({ path: "gone.txt", workspaceId: descriptor.workspaceId, targetId: descriptor.targetId })}>打开已删除文件</button>
       <FileDocumentContext.Provider value={{ basePath: descriptor.path, workspaceId: descriptor.workspaceId, targetId: descriptor.targetId, preview }}>
@@ -59,6 +62,24 @@ function setup() {
   const emit = (event: ClientEvent) => { for (const listener of listeners) listener(event); };
   return { source, panel, metadata, sourceActions, activeActions, query, subscribe, emit, ui, listeners };
 }
+
+it("keeps unsaved file text when a new conversation replaces the old file host", async () => {
+  const source = setup(), mounted = render(source.ui());
+  const editor = await screen.findByRole("textbox", { name: "File text" });
+  fireEvent.change(editor, { target: { value: "unsaved changes stay here" } });
+  const next = new DockStore(null); stores.push(next);
+  next.dispatch({ type: "apply", layout: source.source.newDraftLayout() });
+  const context = { document: { id: "next", ref: { workspaceId: "workspace", targetId: null } },
+    store: { getSnapshot: () => ({ activeDocumentId: "next", documents: [{ id: "next", ref: { workspaceId: "workspace", targetId: null } }] }) } } as NonNullable<ContextType<typeof ConversationViewContext>>;
+  mounted.rerender(<PreviewSurface preview={false}><engine.Provider key="next" value={next}>
+    <ConversationViewContext.Provider value={context}><FileDockInstances workspaceId="workspace" targetId={null} onSettings={() => {}} actions={source.activeActions} /></ConversationViewContext.Provider>
+  </engine.Provider></PreviewSurface>);
+  const replacement = await screen.findByRole("textbox", { name: "File text" });
+  expect((replacement as HTMLTextAreaElement).value).toBe("unsaved changes stay here");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(Object.keys(next.getSnapshot().layout.fileViews)).not.toContain(source.panel);
+  fireEvent.change(replacement, { target: { value: "" } });
+});
 
 it("adds workspace-owned file context to the current conversation, then follows a changed owner", async () => {
   const source = setup(); render(source.ui());

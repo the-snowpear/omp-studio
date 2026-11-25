@@ -1,4 +1,4 @@
-import type { DockPinMode, DockRect } from "../dock/types";
+import type { DockPinMode, DockRect, DockScope } from "../dock/types";
 import type { ConversationSnapLayout, SnapTemplate } from "./snap";
 export type WorkspaceRoute = "home" | "workbench" | "history" | "agent-hub" | "capabilities" | "model-config" | "settings" | "diagnostics" | "media" | "evaluation" | "statistics";
 export type ConversationRef = { targetId: string | null; workspaceId?: string | undefined; sessionId?: string | undefined; draftId?: string | undefined; threadId?: string | undefined; historyId?: string | undefined; previewThreadId?: string | undefined; previewProjectId?: string | undefined };
@@ -10,7 +10,7 @@ export type ConversationView = {
   nativeRect?: Rect;
   restoreSnap?: { template: SnapTemplate; cell: number } | undefined;
 };
-export type ConversationDocument = { id: string; ref: ConversationRef; title: string; projectName?: string | undefined; route?: WorkspaceRoute | undefined; page?: boolean; pagePhase?: "in" | "out" };
+export type ConversationDocument = { id: string; ref: ConversationRef; title: string; projectName?: string | undefined; route?: WorkspaceRoute | undefined; page?: boolean; pagePhase?: "in" | "out"; toolsTransferred?: boolean };
 export type ConversationWorkspaceLayout = {
   version: 4; coordinateVersion: 0 | 1; views: ConversationView[]; documents: ConversationDocument[];
   snap: ConversationSnapLayout | null; snapAssistCell: number | null;
@@ -18,6 +18,16 @@ export type ConversationWorkspaceLayout = {
 };
 export const MIN_VIEW = { width: 360, height: 280 };
 export const conversationKey = (ref: ConversationRef) => JSON.stringify([ref.targetId, ref.workspaceId, ref.previewThreadId ? ref.draftId && ref.draftId !== "initial" ? ref.draftId : ref.previewThreadId : ref.sessionId ?? ref.historyId ?? ref.draftId ?? "initial"]);
+
+export function conversationDockScope(ref: ConversationRef, documentId: string, preview: boolean): DockScope {
+  const previewDraft = preview && !!ref.draftId && ref.draftId !== "initial";
+  return {
+    target: preview ? "preview" : ref.targetId ?? "local",
+    project: (preview ? ref.previewProjectId : undefined) ?? ref.workspaceId ?? null,
+    session: preview ? (previewDraft ? ref.draftId! : ref.previewThreadId ?? ref.draftId ?? documentId) : ref.sessionId ?? ref.draftId ?? documentId,
+    ...((preview ? previewDraft || !ref.previewThreadId : !ref.sessionId) ? { draft: true } : {}),
+  };
+}
 
 export function conversationVisible(view: ConversationView, state: ConversationWorkspaceLayout): boolean {
   if (view.minimized) return false;

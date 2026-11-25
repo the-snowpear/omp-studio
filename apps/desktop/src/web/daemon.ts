@@ -343,6 +343,8 @@ export async function startSharedHost(
           return terminals.write(input);
         case "terminals.resize":
           return terminals.resize(input);
+        case "terminals.rebind":
+          return terminals.rebind(input);
         case "terminals.dispose":
           return terminals.remove(input);
         case "terminals.recordingStart":

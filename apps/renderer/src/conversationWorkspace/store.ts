@@ -1,4 +1,4 @@
-import { conversationKey, conversationVisible, type ConversationDocument, type ConversationRef, type ConversationView, type ConversationWorkspaceLayout, type Rect } from "./model";
+import { conversationDockScope, conversationKey, conversationVisible, type ConversationDocument, type ConversationRef, type ConversationView, type ConversationWorkspaceLayout, type Rect } from "./model";
 import { conversationPanelId, type DockPinMode, type DockTarget } from "../dock/types";
 import type { SessionHistoryEntry, WorkspaceListReadModel } from "@omp-studio/client-contract";
 import { ProjectHistoryStore } from "../sidebar/useProjectHistories";
@@ -24,13 +24,14 @@ const conversationRefEqual = (first: ConversationRef, second: ConversationRef): 
   && first.historyId === second.historyId
   && first.previewThreadId === second.previewThreadId
   && first.previewProjectId === second.previewProjectId;
-const documentPatchChanged = (current: ConversationDocument, patch: Partial<Pick<ConversationDocument, "ref" | "title" | "projectName" | "route" | "page" | "pagePhase">>): boolean =>
+const documentPatchChanged = (current: ConversationDocument, patch: Partial<Pick<ConversationDocument, "ref" | "title" | "projectName" | "route" | "page" | "pagePhase" | "toolsTransferred">>): boolean =>
   (patch.ref !== undefined && !conversationRefEqual(current.ref, patch.ref))
   || ("title" in patch && patch.title !== current.title)
   || ("projectName" in patch && patch.projectName !== current.projectName)
   || ("route" in patch && patch.route !== current.route)
   || ("page" in patch && patch.page !== current.page)
-  || ("pagePhase" in patch && patch.pagePhase !== current.pagePhase);
+  || ("pagePhase" in patch && patch.pagePhase !== current.pagePhase)
+  || ("toolsTransferred" in patch && patch.toolsTransferred !== current.toolsTransferred);
 
 const cleanSnap = (snap: WindowSnapLayout | null | undefined, recordIds: ReadonlySet<string>): WindowSnapLayout | null => {
   if (!snap) return null;
@@ -326,6 +327,21 @@ export class ConversationWorkspaceStore {
   openNewWindow(owner = this.state.documents.find(doc => doc.id === this.state.activeDocumentId)) {
     return this.open({ targetId: owner?.ref.targetId ?? null, workspaceId: owner?.ref.workspaceId, previewProjectId: owner?.ref.previewProjectId, draftId: crypto.randomUUID() }, "float", this.nextWindowRect());
   }
+  /** /new changes this view's conversation, retaining its window and workspace tools. */
+  startDraftInView(viewId: string, transfer?: (previousDocumentId: string, documentId: string) => void, title?: string): string {
+    return this.batch(() => {
+      const owner = this.documentFor(viewId)!;
+      const tools = this.hosts.existing(owner.id)?.tools?.store;
+      const ref: ConversationRef = { targetId: owner.ref.targetId, workspaceId: owner.ref.workspaceId ?? tools?.getSnapshot().scope.project ?? undefined,
+        draftId: crypto.randomUUID(), ...(this.demo ? { previewProjectId: owner.ref.previewProjectId } : {}) };
+      tools?.prepareDraft(conversationDockScope(ref, ref.draftId!, this.demo), tools.newDraftLayout());
+      this.updateDocument(owner.id, { toolsTransferred: true });
+      this.activate(viewId);
+      const id = this.open(ref, "current", undefined, title);
+      transfer?.(owner.id, this.manager.get(id)!.content.documentId);
+      return id;
+    });
+  }
   nextWindowRect(size = { width: 720, height: 620 }): Rect {
     const { canvas, workbench } = this.geometry;
     const width = Math.min(size.width, canvas.width), height = Math.min(size.height, canvas.height);
@@ -382,7 +398,7 @@ export class ConversationWorkspaceStore {
       return id;
     });
   }
-  updateDocument(id: string, patch: Partial<Pick<ConversationDocument, "ref" | "title" | "projectName" | "route" | "page" | "pagePhase">>) {
+  updateDocument(id: string, patch: Partial<Pick<ConversationDocument, "ref" | "title" | "projectName" | "route" | "page" | "pagePhase" | "toolsTransferred">>) {
     const current = this.metadata.documents.find(doc => doc.id === id);
     if (!current || !documentPatchChanged(current, patch)) return;
     this.batch(() => {

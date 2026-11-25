@@ -382,6 +382,9 @@ export async function startWebServer(options: WebServerOptions) {
         case "/api/web/terminals/resize":
           options.terminals.resize(input);
           break;
+        case "/api/web/terminals/rebind":
+          options.terminals.rebind(input);
+          break;
         case "/api/web/terminals/dispose":
           options.terminals.remove(input);
           break;

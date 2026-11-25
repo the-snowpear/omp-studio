@@ -44,7 +44,9 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; w
   const hostControl = useHostControl();
   const { store, sessions: allSessions, restoring, graphics, graphicsErrors, notices, controlMode } = useTerminalSessions();
   const ownerKey = JSON.stringify([targetId, workspaceId ?? null, conversationId ?? sessionId ?? null]);
-  const sessions = allSessions.filter(session => session.kind !== "tmux-pane" && session.targetId === targetId && (api?.persistent && !targetId ? session.workspaceId === workspaceId && session.sessionId === sessionId : conversationId ? session.conversationId === conversationId : session.workspaceId === workspaceId && session.sessionId === sessionId));
+  const sessions = allSessions.filter(session => session.kind !== "tmux-pane" && session.targetId === targetId && (conversationId
+    ? session.conversationId === conversationId || !session.conversationId && !!api?.persistent && session.workspaceId === workspaceId && session.sessionId === sessionId
+    : session.workspaceId === workspaceId && session.sessionId === sessionId));
   const [activeId, setActiveId] = useState<string | null>(() => store.activeIds.get(ownerKey) ?? null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);

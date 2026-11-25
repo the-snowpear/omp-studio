@@ -3,6 +3,8 @@ import { pickProject as chooseHostProject } from "../web/chooseProject";
 import { useWorkspaceFileActions } from "../files/useWorkspaceFileActions";
 import { ConversationTitleSurface, SharedSurface, useConversationView, useConversationDom } from "../conversationWorkspace/Context";
 import { invalidateProjectHistoryReads } from "../conversationWorkspace/projectReads";
+import { conversationDockScope } from "../conversationWorkspace/model";
+import { useTerminalStore } from "../terminalSessions";
 import { EvaluationActivity } from "../evaluation/EvaluationActivity";
 import { agentSwarmScope } from "../agents/deck/swarmScope";
 import { useDock } from "../dock/DockContext";
@@ -154,6 +156,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
 }) {
   const { document, window } = useConversationDom();
   const mdi = useConversationView();
+  const terminalStore = useTerminalStore();
   const [evaluationIntent, setEvaluationIntent] = useState<{id: string; kind: import("@omp-studio/studio-protocol").EvaluationKind}>();
   const { t, resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
@@ -201,6 +204,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   const clearComposerInsertion = useCallback(() => setComposerInsertion(undefined), []);
   const [selectedProvisionalSessionId, setSelectedProvisionalSessionId] = useTargetMemory<string | undefined>("provisional-session", () => undefined);
   const [dockSelection, setDockSelection] = useTargetMemory<DockScope>("dock-selection", () => {
+    if (mdi && mdi.document.ref.draftId !== "initial") return dock.store.getSnapshot().scope;
     const selected = state.bootstrap?.selected ?? mdi?.document.ref;
     return { target: executionTarget.id ?? "local", project: selected?.workspaceId ?? state.model.workspaces?.activeWorkspaceId ?? null, session: selected?.sessionId ?? "draft:initial", ...(!selected?.sessionId ? { draft: true } : {}) };
   });
@@ -621,7 +625,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   useLayoutEffect(() => {
     if (state.loading && !previewMode.preview) return;
     if (previewMode.preview) {
-      dock.store.switchScope({ target: "preview", project: previewProjectId, session: previewThreadId }, true);
+      dock.store.switchScope(mdi ? conversationDockScope({ ...mdi.document.ref, previewProjectId, previewThreadId }, mdi.document.id, true) : { target: "preview", project: previewProjectId, session: previewThreadId }, true);
       return;
     }
     let scope = dockSelectionRef.current;
@@ -629,6 +633,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       const session = state.clientState?.connection.selected?.sessionId ?? state.bootstrap?.selected.sessionId ?? snapshot?.sessionId;
       const project = state.model.workspaces?.activeWorkspaceId ?? state.bootstrap?.selected.workspaceId ?? scope.project;
       if (session && (scope.session !== session || scope.project !== project)) {
+        if (scope.draft) dock.store.adoptDraft({ target: scope.target, project, session }, { scope, preview: false });
         scope = { target: executionTarget.id ?? "local", project, session };
         dockSelectionRef.current = scope;
         setDockSelection(scope);
@@ -636,12 +641,14 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       if (session && project) initialDockSelection.current = false;
     }
     if (!creatingSession && selected?.sessionId && selected.sessionId !== scope.session) {
-      scope = { target: executionTarget.id ?? "local", project: residentRows.find(row => row.sessionId === selected.sessionId)?.workspaceId ?? selectedProject?.id ?? scope.project, session: selected.sessionId };
+      const formal = { target: executionTarget.id ?? "local", project: residentRows.find(row => row.sessionId === selected.sessionId)?.workspaceId ?? selectedProject?.id ?? scope.project, session: selected.sessionId };
+      if (scope.draft) dock.store.adoptDraft(formal, { scope, preview: false });
+      scope = formal;
       dockSelectionRef.current = scope;
       setDockSelection(scope);
     }
     dock.store.switchScope(scope, false);
-  }, [dock.store, dockSelection, previewMode.preview, previewProjectId, previewThreadId, selected?.sessionId, creatingSession, executionTarget.id, snapshot?.sessionId, state.model.workspaces?.activeWorkspaceId, state.clientState?.connection.selected?.sessionId, state.loading]);
+  }, [dock.store, dockSelection, previewMode.preview, previewProjectId, previewThreadId, mdi?.document.ref.draftId, selected?.sessionId, creatingSession, executionTarget.id, snapshot?.sessionId, state.model.workspaces?.activeWorkspaceId, state.clientState?.connection.selected?.sessionId, state.loading]);
 
   const { agents: viewedAgents, ready: persistedAgentsReady } = usePersistedSessionAgents({
     preview: previewMode.preview,
@@ -1792,7 +1799,13 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   }, [client, previewMode.preview, runSessionCreate, refreshSessionTitles, workspaceActionQueue]);
 
   const startNewChat = useCallback((noContextFiles?: boolean) => {
-    if (mdi && !noContextFiles) { mdi.store.openFromDirectory({ targetId: executionTarget.id, workspaceId: mdi.document.ref.workspaceId, draftId: crypto.randomUUID() }); return; }
+    if (mdi && !noContextFiles) {
+      if (mdi.view) {
+        const pinnedTerminal = dock.store.getSnapshot().layout.floats.some(group => group.pin && group.panels.includes("terminal"));
+        mdi.store.startDraftInView(mdi.view.id, pinnedTerminal ? undefined : (from, to) => terminalStore.transferConversation(from, to), t("menu.newThread"));
+      } else mdi.store.openNewWindow(mdi.document);
+      return;
+    }
     if (previewMode.preview) {
       go("workbench");
       return;
@@ -1809,7 +1822,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       refreshSessionTitles();
       return created;
     }));
-  }, [client, go, navigationGate, onNewThread, previewMode.preview, runSessionCreate, refreshSessionTitles, workspaceActionQueue, beginDockDraft, selectedProject?.id, state.model.workspaces?.activeWorkspaceId]);
+  }, [client, go, navigationGate, onNewThread, previewMode.preview, runSessionCreate, refreshSessionTitles, workspaceActionQueue, beginDockDraft, selectedProject?.id, state.model.workspaces?.activeWorkspaceId, mdi?.store, mdi?.view?.id, mdi?.document.id, dock.store, terminalStore, t]);
 
   const applySlashUi = (ui: SlashNativeUi): void => {
     if (ui === "settings") { go("settings"); return; }

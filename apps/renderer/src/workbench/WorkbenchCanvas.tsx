@@ -8,6 +8,7 @@ import { DisassemblerDock } from "../capabilities/DisassemblerPane";
 import { useWorkbenchResizers } from "../layout/useWorkbenchResizers";
 import { useWorkbenchBranches } from "../git/useWorkbenchBranches";
 import { FileDockInstances } from "../files/FileDockInstances";
+import { useTerminalStore } from "../terminalSessions";
 import { SharedSurface, useConversationWorkspace, useConversationView, useConversationDom } from "../conversationWorkspace/Context";
 import { browserReferenceSnapshot } from "../composer/browserReference";
 import type { BrowserElementReference } from "@omp-studio/studio-protocol";
@@ -39,7 +40,7 @@ import { SelectiveCommitPane, selectiveCommitHandoff, type SelectiveCommitIntent
 import { SelectiveCommitLauncherProvider } from "../commit/SelectiveCommitLauncher";
 import { setHubIntent, setModelConfigIntent, setSettingsIntent } from "../pageIntents";
 import { conversationViewLeases } from "../conversation/conversationViews";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useConversationWidth } from "../settings/ConversationWidthContext";
 import { useReadingColumn } from "../layout/useReadingColumn";
 import type { ClientInteraction, CommandName, CommandState, CommandInput, InteractionResponseValue, OperatorInvokeOutcome, SessionHistoryEntry, SessionId, SessionTreeCommandOutcome, ThreadId, StudioPlanSaveAndQuitResult, Unsubscribe, WorkspaceId, WorkspaceListReadModel, PromptImageInput, ContinueTurnOutcome } from "@omp-studio/client-contract";
@@ -307,6 +308,8 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   const zhRef = useRef(zh);
   zhRef.current = zh;
   const executionTarget = useExecutionTarget();
+  const terminalStore = useTerminalStore();
+  const [terminalBindingError, setTerminalBindingError] = useState<unknown>();
   const hostWritable = executionTarget.id !== null || localHostWritable;
   const [draft, setDraft] = useTargetMemory<ComposerSnapshot>("composer-current-draft", () => composerDraft ?? emptySnapshot());
   const composerDraftRef = useRef<ComposerSnapshot | undefined>(composerDraft);
@@ -478,6 +481,16 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
   const snapshot = snapshotFrom(state);
   const terminalConversationId = mdi?.view && mdi.view.placement !== "main" ? mdi.document.id : undefined;
   const terminalSessionId = terminalConversationId || !mdi ? snapshot?.sessionId : undefined;
+  const terminalTarget = preview ? null : executionTarget.id;
+  const terminalWorkspace = preview ? state.bootstrap?.selected?.workspaceId : workspaceId;
+  const terminalBindings = useSyncExternalStore(terminalStore.subscribe, () => terminalStore.snapshot().sessions
+    .filter(session => session.kind !== "tmux-pane" && session.targetId === terminalTarget && session.workspaceId === terminalWorkspace
+      && (session.conversationId === terminalConversationId || !session.conversationId && session.sessionId === terminalSessionId))
+    .map(session => session.id).join(","));
+  useEffect(() => {
+    if (state.loading || !terminalConversationId || !terminalSessionId) return;
+    void terminalStore.rebindConversation(terminalConversationId, terminalSessionId, terminalTarget, terminalWorkspace).catch(setTerminalBindingError);
+  }, [terminalStore, terminalConversationId, terminalSessionId, terminalTarget, terminalWorkspace, terminalBindings, state.loading]);
   const submittedPromptTitle = submittedPrompt !== undefined
     && (
       submittedPrompt.sessionId === undefined
@@ -3265,6 +3278,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       <FileBrowserDock workspaceId={workspaceId ? String(workspaceId) : undefined} targetId={executionTarget.id} targetName={executionTarget.name} actions={fileViewerActions} />
       <BrowserDockInstances client={client} sessionId={browserChatId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} capabilities={capabilities} remote={!!executionTarget.id} onReferences={insertBrowserReferences} />
       <ToastHost message={statusToast} icon="info" onDismiss={() => setStatusToast(null)} />
+      <ToastHost message={terminalBindingError ? hostErrorMessage(terminalBindingError, zh ? "无法更新终端所属会话，原进程仍保留" : "Could not update the terminal's conversation; its process is preserved") : null} icon="terminal" onDismiss={() => setTerminalBindingError(undefined)} />
       {treeConfirm.dialog}
     </SubagentHoverProvider>
     </SelectiveCommitLauncherProvider>

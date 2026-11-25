@@ -170,13 +170,22 @@ test("shared terminal survives a view detach and another view can continue the s
   const terminals = new SharedTerminals(async () => tmpdir(), {
     spawn: () => proc,
   });
-  const terminal = await terminals.create({ cols: 80, rows: 24 });
+  const terminal = await terminals.create({ cols: 80, rows: 24, sessionId: "previous-conversation" });
   const first = terminals.subscribe(() => {});
   onData("before detach\r\n");
   first();
   await new Promise((done) => setTimeout(done, 30));
   assert.equal(killed, 0);
   assert.match(terminals.list()[0]!.output, /before detach/);
+  const before = terminals.list()[0]!;
+  terminals.rebind({ ids: [terminal.id], sessionId: "next-conversation" });
+  const rebound = terminals.list()[0]!;
+  assert.equal(rebound.sessionId, "next-conversation");
+  assert.equal(rebound.id, before.id);
+  assert.equal(rebound.sequence, before.sequence);
+  assert.equal(rebound.output, before.output);
+  assert.equal(rebound.cwd, before.cwd);
+  assert.equal(killed, 0);
   terminals.write({ id: terminal.id, data: "echo resumed\r" });
   assert.deepEqual(writes, ["echo resumed\r"]);
   terminals.close();

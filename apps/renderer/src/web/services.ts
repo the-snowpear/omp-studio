@@ -138,6 +138,7 @@ export async function installBrowserServices(
     create: (input) => request("terminals/create", input ?? {}),
     write: (id, data) => request("terminals/write", { id, data }),
     resize: (id, cols, rows) => request("terminals/resize", { id, cols, rows }),
+    rebind: (input) => request("terminals/rebind", input),
     dispose: (id) => request("terminals/dispose", { id }),
     recordingStart: (input) => request("terminals/recordingStart", input),
     recordingStop: (id) => request("terminals/recordingStop", { id }),

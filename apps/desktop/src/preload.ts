@@ -146,6 +146,9 @@ const terminalApi: OmpStudioTerminalApi = {
   resize(id, cols, rows) {
     return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.resize, { id, cols, rows }) as Promise<void>;
   },
+  rebind(input) {
+    return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.rebind, input) as Promise<void>;
+  },
   dispose(id) {
     return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.dispose, { id }) as Promise<void>;
   },

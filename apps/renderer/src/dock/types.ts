@@ -33,6 +33,8 @@ export const isAgentPanelId = (id: string): id is AgentPanelId => id.startsWith(
 export const isBrowserPagePanelId = (id: string): id is BrowserPagePanelId => id.startsWith("browser-page:");
 /** Panels created per Agent or per web page rather than registered once. */
 export const isInstancePanelId = (id: string): id is AgentPanelId | BrowserPagePanelId | ConversationPanelId | FilePanelId => isAgentPanelId(id) || isBrowserPagePanelId(id) || isConversationPanelId(id) || isFilePanelId(id);
+/** These windows keep the conversation whose content they display during /new. */
+export const isSessionWindowPanel = (id: PanelId): boolean => isFocusWindowPanel(id) || id === "agent-detail" || isAgentPanelId(id) || isBrowserPagePanelId(id) || isConversationPanelId(id);
 export type AgentPanelTarget = {
   agentId: string;
   displayName?: string;

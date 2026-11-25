@@ -98,6 +98,10 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
     return connection;
   };
   if (options.shared) void bindShared().catch(() => {});
+  ipc.handle(TERMINAL_IPC_CHANNELS.rebind, (event, payload) => {
+    assertTrusted(event.sender);
+    return bindShared().then(connection => connection.call("terminals.rebind", payload));
+  });
   if (options.shared) ipc.handle("omp-studio:shared-terminals:list", async ({ sender }) => {
     assertTrusted(sender);
     if (!sharedSenders.has(sender)) {
@@ -260,6 +264,7 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
       ipc.removeHandler(TERMINAL_IPC_CHANNELS.create);
       ipc.removeHandler(TERMINAL_IPC_CHANNELS.write);
       ipc.removeHandler(TERMINAL_IPC_CHANNELS.resize);
+      ipc.removeHandler(TERMINAL_IPC_CHANNELS.rebind);
       ipc.removeHandler(TERMINAL_IPC_CHANNELS.dispose);
       ipc.removeHandler(TERMINAL_IPC_CHANNELS.ack);
       for (const channel of [TERMINAL_IPC_CHANNELS.recordingStart, TERMINAL_IPC_CHANNELS.recordingStop, TERMINAL_IPC_CHANNELS.recordingStatus]) ipc.removeHandler(channel);

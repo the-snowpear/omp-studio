@@ -11,6 +11,7 @@ export const TERMINAL_IPC_CHANNELS = {
   create: "omp-studio:desktop:terminal-create",
   write: "omp-studio:desktop:terminal-write",
   resize: "omp-studio:desktop:terminal-resize",
+  rebind: "omp-studio:desktop:terminal-rebind",
   dispose: "omp-studio:desktop:terminal-dispose",
   recordingStart: "omp-studio:desktop:terminal-recording-start",
   recordingStop: "omp-studio:desktop:terminal-recording-stop",
@@ -43,6 +44,12 @@ export interface TerminalCreateInput {
    * without it the terminal still works, batched but unpaused.
    */
   readonly flowControl?: boolean;
+}
+
+/** Reassigns existing shared PTYs to a conversation without restarting them. */
+export interface TerminalRebindInput {
+  readonly ids: readonly string[];
+  readonly sessionId?: string;
 }
 
 /** A whole fenced shell script, started as its own terminal process. */
@@ -229,6 +236,7 @@ export interface OmpStudioTerminalApi {
   create(size?: TerminalCreateInput): Promise<TerminalSessionInfo>;
   write(id: string, data: string): Promise<void>;
   resize(id: string, cols: number, rows: number): Promise<void>;
+  rebind?(input: TerminalRebindInput): Promise<void>;
   dispose(id: string): Promise<void>;
   recordingStart(input: TerminalRecordingInput): Promise<TerminalRecordingStatus>;
   recordingStop(id: string): Promise<TerminalRecordingStatus>;
