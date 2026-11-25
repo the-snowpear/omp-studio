@@ -25,7 +25,8 @@
 </p>
 
 <p align="center">
-  <b><a href="#窗口化工作台">窗口化工作台</a></b>
+  <b><a href="https://the-snowpear.github.io/omp-studio/">官方网站</a></b>
+  &nbsp;·&nbsp; <a href="#窗口化工作台">窗口化工作台</a>
   &nbsp;·&nbsp; <a href="#能力全景">能力全景</a>
   &nbsp;·&nbsp; <a href="#下载安装">下载安装</a>
   &nbsp;·&nbsp; <a href="#从源码运行">从源码运行</a>
@@ -281,7 +282,7 @@ Anthropic、OpenAI、OpenRouter、本地 LM Studio 等供应商在同一页管�
 | **macOS Apple Silicon** | `OMP-Studio-<版本>-macos-arm64.dmg` | macOS 13+；ad hoc 签名，尚未公证 |
 | **Linux x64** | `OMP-Studio-<版本>-linux-x64.deb` / `.AppImage` | Ubuntu 24.04 / glibc 2.39+；[安装与沙箱说明](docs/linux.md) |
 
-前往 **[GitHub Releases](https://github.com/the-snowpear/omp-studio/releases)** 下载。具体文件名以 Release 页为准。Runtime 与更新目录使用 Ed25519 签名；Windows 安装包没有 Authenticode 签名。
+前往 **[官方网站下载页](https://the-snowpear.github.io/omp-studio/#download)** 或 **[GitHub Releases](https://github.com/the-snowpear/omp-studio/releases)** 下载。具体文件名以 Release 页为准。Runtime 与更新目录使用 Ed25519 签名；Windows 安装包没有 Authenticode 签名。
 
 <details>
 <summary><b>macOS 首次打开被拦截？</b></summary>
