@@ -90,20 +90,81 @@
   cursor: default;
 }
 .web-access-strip {
-  position: fixed;
-  bottom: 10px;
-  right: 18px;
-  z-index: 120;
+  flex: none;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 5px 8px 5px 12px;
+  justify-content: flex-end;
+  padding: 5px 12px;
   background: var(--surface-1);
   color: var(--text-muted);
-  border: 1px solid var(--border);
-  border-radius: var(--r-full);
-  box-shadow: 0 2px 12px #0001;
+  border-top: 1px solid var(--border);
   font-size: 11px;
+}
+.web-control-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+.web-control-label {
+  min-width: 0;
+  max-width: min(240px, calc(100vw - 90px));
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.web-access-strip.is-floating {
+  position: fixed;
+  z-index: 200;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-10);
+  box-shadow: 0 4px 18px #0002;
+}
+.web-access-strip .web-control-drag {
+  cursor: grab;
+  touch-action: none;
+}
+.web-access-strip .web-control-drag:active {
+  cursor: grabbing;
+}
+.web-access-strip .web-control-dock {
+  display: none;
+}
+.web-access-strip.is-floating .web-control-dock {
+  display: inline-flex;
+}
+.web-access-strip button:has(> .icon) {
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+}
+/* Docking reserves space for Composer and approvals; floating is an explicit
+   user choice, with a persistent way back to the non-overlapping layout. */
+#root:has(> .web-access-strip:not(.is-floating)) {
+  display: flex;
+  flex-direction: column;
+}
+#root:has(> .web-access-strip:not(.is-floating)) > .conversation-workspace,
+#root:has(> .web-access-strip:not(.is-floating)) > .app,
+#root:has(> .web-access-strip:not(.is-floating)) > .page {
+  flex: 1;
+  height: 0;
+  min-height: 0;
+}
+.web-dialog-control {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  font-size: 12px;
 }
 .web-access-strip button,
 .web-dialog button:not(.web-primary) {
@@ -115,6 +176,7 @@
   cursor: pointer;
 }
 .web-control-dot {
+  flex-shrink: 0;
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -246,10 +308,6 @@
   padding: 12px;
 }
 @media (max-width: 680px) {
-  html[data-web-workbench] #root > .conversation-workspace,
-  html[data-web-workbench] #root > .app {
-    height: calc(100dvh - 48px);
-  }
   html[data-web-workbench] .cw-sidebar-slot:not([hidden]) {
     position: absolute;
     left: 48px;
@@ -300,9 +358,8 @@
     margin: 14px 0;
   }
   .web-access-strip {
-    right: 8px;
-    bottom: 8px;
-    max-width: calc(100% - 16px);
+    justify-content: flex-start;
+    gap: 8px;
   }
   .web-dialog {
     padding: 20px;
