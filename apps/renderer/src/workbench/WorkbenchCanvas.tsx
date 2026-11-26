@@ -124,6 +124,7 @@ import { previewTailInterrupted } from "../preview/conversationFixtures";
 import { BtwPanel } from "../btw/BtwPanel";
 import { type BtwSessionApi } from "../btw/useBtwSession";
 import { InteractionDeck } from "../InteractionDeck";
+import { respondToInteraction } from "../deck/interactionResponse";
 import { InlineBtwContext, InlineBtwNotes, type BtwAnchor } from "../btw/InlineBtwNote";
 import { partialFormResponse, useFormInteractionLifecycle } from "../deck/FormSession";
 import { ASK_GENIE_HOLD_MS, isAskDeckInteraction } from "../deck/askGenie";
@@ -863,17 +864,21 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       if (!concurrent) setBusy(false);
     }
   }, [busy, client]);
-  const respond = useCallback((decision: "submit" | "cancel", value?: InteractionResponseValue): Promise<boolean> => {
+  const respondInDeck = useCallback((decision: "submit" | "cancel", value?: InteractionResponseValue): Promise<boolean> => {
     if (!pendingInteraction) return Promise.resolve(false);
-    // run() waits for the receipt and reports failure through the return
-    // value; the pending card stays until the Runtime resolves it.
-    return run("interaction.respond", {
-      interactionId: pendingInteraction.interactionId,
-      leaseGeneration: pendingInteraction.leaseGeneration,
-      decision,
-      ...(value === undefined ? {} : { value }),
-    });
-  }, [pendingInteraction, run]);
+    return respondToInteraction(client, pendingInteraction, decision, value);
+  }, [pendingInteraction, client]);
+  // Composer actions use a boolean outcome; the card receives the original
+  // Host error so it can show the cause and offer a fresh snapshot.
+  const respond = useCallback(async (decision: "submit" | "cancel", value?: InteractionResponseValue): Promise<boolean> => {
+    try {
+      return await respondInDeck(decision, value);
+    } catch (error) {
+      setComposerError(hostErrorMessage(error, zhRef.current ? "响应失败" : "Response failed"));
+      return false;
+    }
+  }, [respondInDeck]);
+  const refreshInteraction = useCallback(() => client.bootstrap(), [client]);
   const nativePlanEnabled = !preview && runtimeConnected && can("mode.plan.review.details") && can("mode.plan.review.resolve");
   const planExecution = useNativePlanReview(client, snapshot?.sessionId, nativePlanEnabled, snapshot?.plan?.status === "review", snapshot?.stateVersion);
   const submitPlanDecision = useCallback((decision: "execute" | "compact" | "keep" | "refine" | "dismiss", feedback?: string): Promise<boolean> => {
@@ -2401,7 +2406,8 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
             {deckInteraction ? (
               <InteractionDeck partialAsk={partialAsk}
                 interaction={deckInteraction}
-                onRespond={respond}
+                onRespond={respondInDeck}
+                onRefresh={refreshInteraction}
                 readForm={readForm}
                 disabled={interactionDisabled}
                 {...(askDeckLeaving ? { leaving: true } : {})}

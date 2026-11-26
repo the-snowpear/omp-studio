@@ -4661,6 +4661,20 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   font-size: var(--fs-11);
   margin: var(--sp-4) var(--sp-8) 0;
 }
+.interaction-failure {
+  padding: var(--sp-8);
+  border: 1px solid color-mix(in srgb, var(--red) 24%, var(--border));
+  border-radius: var(--r-6);
+  background: color-mix(in srgb, var(--red) 4%, var(--surface));
+  overflow-wrap: anywhere;
+  max-height: 10em;
+  overflow-y: auto;
+}
+.interaction-failure p { margin: var(--sp-4) 0; white-space: pre-wrap; }
+.interaction-failure code { font-family: var(--font-mono); }
+.interaction-recovery { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-8); color: var(--text-muted); }
+.interaction-recovery span { flex: 1; min-width: 140px; }
+.interaction-recovery button { flex: none; }
 .send-btn {
   width: 30px; height: 30px;
   border-radius: var(--r-8);

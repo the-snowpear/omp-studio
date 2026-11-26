@@ -3,15 +3,21 @@ import { test } from "node:test";
 
 import type { HostInteractionRespondInput } from "@omp-studio/host-client-api";
 import type { StudioInteractionForward, StudioRuntimeSessionController } from "@omp-studio/studio-host";
-import type { StudioOperation } from "@omp-studio/studio-protocol";
+import type { ApprovalGrantChoice, StudioOperation } from "@omp-studio/studio-protocol";
 import type { DesktopRuntimeSession } from "../src/host-composition.js";
 import { DesktopInteractionHost } from "../src/interaction-host.js";
 
-function fixture({ reconnect = false, configuration = true, failOnce = false } = {}) {
+function fixture({ reconnect = false, configuration = true, failOnce = false, session, grants }: {
+  reconnect?: boolean;
+  configuration?: boolean;
+  failOnce?: boolean;
+  session?: string;
+  grants?: ApprovalGrantChoice[];
+} = {}) {
   let listener: ((event: StudioInteractionForward) => void) | undefined;
   const calls: StudioOperation[] = [];
   const pending = {
-    request: { kind: "approval", approvalType: configuration ? "configuration" : "tool", interactionId: "test-approval", commandId: "test-command", title: "Test approval", details: {} },
+    request: { kind: "approval", approvalType: configuration ? "configuration" : "tool", interactionId: "test-approval", commandId: "test-command", title: "Test approval", details: {}, ...(session === undefined ? {} : { session }), ...(grants === undefined ? {} : { grants }) },
     owner: "gui", leaseGeneration: 1,
   };
   const controller = {
@@ -65,4 +71,57 @@ test("rejecting configuration still cancels and ordinary tool approval still acc
     await tool.respond(true);
     assert.deepEqual(tool.calls[0], { kind: "interaction.respond", interactionId: "test-approval", commandId: "test-command", decision: "submit", value: true, leaseGeneration: 1 });
   } finally { config.host.clear(); tool.host.clear(); }
+});
+
+const grants: ApprovalGrantChoice[] = [
+  { scope: "folder", label: "This folder", alwaysLabel: "Always this folder" },
+  { scope: "target", label: "This target", alwaysLabel: "Always this target" },
+];
+
+for (const reconnect of [false, true]) {
+  test(`a Runtime-offered tool session approval reaches Runtime after ${reconnect ? "reattachment" : "a live event"}`, async () => {
+    const f = fixture({ reconnect, configuration: false, session: "Allow for this session" });
+    try {
+      await f.respond("session");
+      assert.deepEqual(f.calls, [{ kind: "interaction.respond", interactionId: "test-approval", commandId: "test-command", decision: "submit", value: "session", leaseGeneration: 1 }]);
+    } finally { f.host.clear(); }
+  });
+
+  for (const { scope } of grants) {
+    for (const always of [false, true]) {
+      test(`remember ${scope} (${always ? "across sessions" : "this session"}) reaches Runtime after ${reconnect ? "reattachment" : "a live event"}`, async () => {
+        const f = fixture({ reconnect, configuration: false, grants });
+        try {
+          // IPC creates a fresh object, and property order does not identify a choice.
+          const value = { always, grant: scope };
+          await f.respond(value);
+          assert.deepEqual(f.calls, [{ kind: "interaction.respond", interactionId: "test-approval", commandId: "test-command", decision: "submit", value, leaseGeneration: 1 }]);
+          await assert.rejects(f.respond({ grant: scope, always }), { code: "INTERACTION_STALE" });
+          assert.equal(f.calls.length, 1);
+        } finally { f.host.clear(); }
+      });
+    }
+  }
+}
+
+test("a failed remembered approval can be retried with a fresh response object", async () => {
+  const f = fixture({ configuration: false, grants, failOnce: true });
+  try {
+    await assert.rejects(f.respond({ grant: "folder", always: false }), /Test transport failure/);
+    await f.respond({ always: true, grant: "target" });
+    assert.deepEqual(f.calls.map(operation => "value" in operation ? operation.value : undefined), [
+      { grant: "folder", always: false }, { always: true, grant: "target" },
+    ]);
+  } finally { f.host.clear(); }
+});
+
+test("tool approvals keep unoffered session and remembered scopes unavailable", async () => {
+  const f = fixture({ configuration: false, grants: [grants[0]!] });
+  try {
+    await assert.rejects(f.respond("session"), { code: "INVALID_ARGUMENT" });
+    await assert.rejects(f.respond({ grant: "target", always: true }), { code: "INVALID_ARGUMENT" });
+    assert.equal(f.calls.length, 0);
+    await f.respond({ grant: "folder", always: false });
+    assert.equal(f.calls.length, 1);
+  } finally { f.host.clear(); }
 });

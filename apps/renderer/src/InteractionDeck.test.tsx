@@ -1,8 +1,10 @@
 import { setAskText } from "./test/askEditor";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ClientInteraction, InteractionId, SessionId } from "@omp-studio/client-contract";
 import { InteractionDeck, InteractionPrompt } from "./InteractionDeck";
+import { I18nProvider } from "./i18n";
+import { PreviewSurface } from "./preview/PreviewContext";
 
 afterEach(cleanup);
 
@@ -187,6 +189,68 @@ describe("InteractionDeck real cards", () => {
     expect(onRespond).toHaveBeenCalledWith("submit", "session");
   });
 
+  it("a Runtime-offered tool session allowance submits the session choice", () => {
+    const onRespond = vi.fn();
+    const interaction = { ...approval("Allow Bash?"), session: "Allow Bash in this workspace" } as ClientInteraction;
+    render(<InteractionPrompt interaction={interaction} onRespond={onRespond} />);
+    fireEvent.click(screen.getByRole("button", { name: "本会话允许" }));
+    expect(onRespond).toHaveBeenCalledWith("submit", "session");
+  });
+
+  it.each([false, true])("shows the Host failure and code, preserves the approval, and switches language live (preview=%s)", async (preview) => {
+    const cause = { code: "INVALID_ARGUMENT", message: "No matching interaction is pending" };
+    const onRespond = vi.fn(() => Promise.reject(cause));
+    const onRefresh = vi.fn(() => Promise.resolve());
+    const interaction = approval("Allow Bash?");
+    const view = (language: "zh" | "en") => <I18nProvider forcedLanguage={language}><PreviewSurface preview={preview}>
+      <InteractionDeck interaction={interaction} onRespond={onRespond} onRefresh={onRefresh} disabled={false} />
+    </PreviewSurface></I18nProvider>;
+    const { rerender } = render(view("zh"));
+    fireEvent.click(screen.getByRole("button", { name: "允许一次" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain(cause.message));
+    expect(screen.getByRole("alert").textContent).toContain(cause.code);
+    expect(screen.getByRole("button", { name: "重新同步" })).toBeTruthy();
+    rerender(view("en"));
+    expect(screen.getByRole("alert").textContent).toContain("Submission failed");
+    expect(screen.getByRole("button", { name: "Sync again" })).toBeTruthy();
+    rerender(view("zh"));
+    fireEvent.click(screen.getByRole("button", { name: "重新同步" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(onRefresh).toHaveBeenCalledOnce();
+    expect(onRespond).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "允许一次" })).toBeTruthy();
+  });
+
+  it("keeps the approval and exposes a failed refresh even while response buttons are offline", async () => {
+    const onRespond = vi.fn(() => { throw { code: "TRANSPORT_ERROR", message: "Connection interrupted" }; });
+    const onRefresh = vi.fn(() => Promise.reject({ code: "UNAVAILABLE", message: "Host disconnected" }));
+    const interaction = approval("Allow Bash?");
+    const { rerender } = render(<InteractionDeck interaction={interaction} onRespond={onRespond} onRefresh={onRefresh} disabled={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "允许一次" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Connection interrupted"));
+    rerender(<InteractionDeck interaction={interaction} onRespond={onRespond} onRefresh={onRefresh} disabled />);
+    fireEvent.click(screen.getByRole("button", { name: "重新同步" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Host disconnected"));
+    expect(screen.getByRole("alert").textContent).toContain("UNAVAILABLE");
+    expect((screen.getByRole("button", { name: "允许一次" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "重新同步" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(onRespond).toHaveBeenCalledOnce();
+  });
+
+  it("a late failure from an old approval lease does not lock or mark the refreshed card", async () => {
+    let fail!: (cause: unknown) => void;
+    const onRespond = vi.fn(() => new Promise<boolean>((_resolve, reject) => { fail = reject; }));
+    const interaction = approval("Allow Bash?");
+    const { rerender } = render(<InteractionDeck interaction={interaction} onRespond={onRespond} disabled={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "允许一次" }));
+    rerender(<InteractionDeck interaction={{ ...interaction, leaseGeneration: 2 }} onRespond={onRespond} disabled={false} />);
+    await act(async () => { fail(new Error("Old lease expired")); });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect((screen.getByRole("button", { name: "允许一次" }) as HTMLButtonElement).disabled).toBe(false);
+    rerender(<InteractionDeck interaction={null} onRespond={onRespond} disabled={false} />);
+    expect(screen.queryByRole("button", { name: "允许一次" })).toBeNull();
+  });
+
   it("failed respond keeps the card and shows Retry; resolved clears it", async () => {
     const failing = vi.fn(() => Promise.resolve(false));
     const { rerender } = render(<InteractionPrompt interaction={select("Pick", ["A"])} onRespond={failing} />);
@@ -207,6 +271,18 @@ describe("InteractionDeck real cards", () => {
     await waitFor(() => expect(failing).toHaveBeenCalledWith("cancel"));
     expect(screen.getByText(/提交失败/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "取消" })).toBeTruthy();
+  });
+
+  it("a rejected Host response keeps the queued select answer available for retry", async () => {
+    const onRespond = vi.fn().mockRejectedValueOnce({ code: "UNAVAILABLE", message: "Host disconnected" }).mockResolvedValue(true);
+    render(<InteractionDeck interaction={select("Pick", ["A"])} onRespond={onRespond} disabled={false} />);
+    fireEvent.click(screen.getByRole("radio", { name: /^A$/ }));
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("提交失败"));
+    expect(screen.getByRole("radio", { name: /^A$/ }).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+    await waitFor(() => expect(onRespond).toHaveBeenCalledTimes(2));
+    expect(onRespond).toHaveBeenLastCalledWith("submit", "option:0");
   });
 
   it("parent disabled still lets the user pick an option; only 取消/提交 stay locked", () => {
