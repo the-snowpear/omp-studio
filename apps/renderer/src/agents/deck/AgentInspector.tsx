@@ -8,6 +8,8 @@ import type { DeckAgent, DeckGroup, DeckTotals } from "./deckModel";
 import { formatClock, formatCost, formatTokens, formatTps } from "./deckModel";
 import type { Caps } from "../hub/types";
 import { concurrency, tickLabel, type Lane } from "./timelineModel";
+import { AgentModelDetails } from "../../models/AgentModelDetails";
+import type { DeckCommandContext } from "./deckActions";
 
 type D = (key: string, params?: Record<string, string | number>) => string;
 
@@ -24,7 +26,8 @@ export type InspectorActions = {
   readonly notice: DeckNotice | null;
 };
 
-export function AgentInspector({ row, rows, lane, now, actions, marks = true, onSelect, onClose, d }: {
+export function AgentInspector({ row, rows, lane, now, actions, marks = true, onSelect, onClose, d, modelContext }: {
+  modelContext?: DeckCommandContext;
   row: DeckAgent;
   rows: readonly DeckAgent[];
   lane: Lane | undefined;
@@ -116,6 +119,7 @@ export function AgentInspector({ row, rows, lane, now, actions, marks = true, on
       {notice ? <p className="ad-ins-note" data-kind={notice.kind} role="status">{notice.detail || d(notice.key, notice.params)}</p> : null}
     </div>
 
+    {!row.main && modelContext ? <section className="ad-ins-section"><AgentModelDetails client={modelContext.client} sessionId={modelContext.sessionId} agentId={row.id} available={modelContext.online && modelContext.viewingLive} capabilities={modelContext.capabilities} running={row.tone === "running"} previewModel={row.model} previewSaved={row.agent.status === "parked"} /></section> : null}
     <section className="ad-ins-section">
       <h4>{d("inspector.stage")}</h4>
       <div className="ad-ins-now" data-running={row.tone === "running" || undefined}>

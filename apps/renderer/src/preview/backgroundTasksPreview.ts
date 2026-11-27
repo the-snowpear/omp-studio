@@ -2,6 +2,10 @@ import type { JobInspection, StudioJobAgentLink, StudioJobSnapshot, StudioServic
 import { buildPreviewHub, previewJobInspections } from "../hubPreview";
 import { PREVIEW_SERVICES } from "./servicesPreview";
 
+export function previewJobStreamOutput(consumer: string, zh: boolean): string {
+  return `${consumer}\n${zh ? "构建完成，正在等待文件更改…" : "Build complete. Watching for file changes…"}`;
+}
+
 // Reuse the command stories, but this surface demonstrates work run by the main conversation.
 const now = Date.now();
 const hub = buildPreviewHub(now);
@@ -40,4 +44,12 @@ export const PREVIEW_BACKGROUND_DETAILS: Record<string, JobInspection> = {
     jobId: String(job.jobId), purpose: job.label, pids: [], ...(job.summary ? { output: job.summary } : {}),
   } satisfies JobInspection])),
   ...previewJobInspections(now),
+  "job-82": {
+    ...previewJobInspections(now)["job-82"]!,
+    jobId: "job-82", pids: [],
+    streams: [
+      { id: "pipe:1", kind: "pipe", producer: "npm run build", consumer: "tee build.log", bytes: 2048, open: true, modified: now },
+      { id: "file:2", kind: "file", producer: "tee build.log", consumer: "build.log", bytes: 2048, open: true, modified: now },
+    ],
+  },
 };

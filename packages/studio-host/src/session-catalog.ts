@@ -1,5 +1,5 @@
 import { open, readdir, lstat } from "node:fs/promises";
-import type { Dirent } from "node:fs";
+import { createReadStream, type Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -27,6 +27,7 @@ export interface SessionCatalogEntry {
   archived: boolean;
   /** True when OMP's global session pin set contains this session id. */
   pinned: boolean;
+  waitingForApproval?: boolean;
   title?: string;
   createdAt?: string;
   modifiedAt: string;
@@ -76,6 +77,7 @@ interface ParsedHeader {
   id: string;
   /** Runtime metadata alone is not a conversation; at least one message must exist. */
   hasConversationMessage: boolean;
+  waitingForApproval?: boolean;
   timestamp?: string;
   title?: string;
   studioOrigin?: string;
@@ -158,6 +160,7 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
         origin,
         archived,
         pinned: pinnedSessionIds.has(header.id),
+        ...(header.waitingForApproval ? { waitingForApproval: true } : {}),
         modifiedAt: metadata.mtime.toISOString(),
         sizeBytes: metadata.size,
         ...(title === undefined ? {} : { title }),
@@ -240,6 +243,7 @@ async function cachedSessionHeader(
   let header: ParsedHeader | undefined;
   try {
     header = await readSessionHeader(file, byteLimit, maxSessionBytes);
+    if (header && !file.endsWith(".gz")) header.waitingForApproval = await readPendingToolApproval(file, metadata.size, metadata.mtimeMs);
   } catch {
     // The file vanished or became unreadable between lstat and open.
     return undefined;
@@ -484,6 +488,87 @@ async function readSessionHeader(
     if (hasConversationMessage && sanitizeTitle(titleSlot) !== undefined) return buildParsedHeader();
   }
   return buildParsedHeader();
+}
+
+interface ApprovalNode {
+  parentId: string | null;
+  request?: { toolCallId: string; parentToolCallId?: string };
+  resolved?: string;
+  result?: string;
+}
+interface ApprovalScan {
+  bytes: number;
+  size: number;
+  mtime: number;
+  nodes: Map<string, ApprovalNode>;
+  leaf: string | null;
+  lastSelfSelected: string | null;
+  waiting: boolean;
+}
+const approvalCache = new Map<string, ApprovalScan>();
+
+function branchWaitingForApproval(nodes: ReadonlyMap<string, ApprovalNode>, leaf: string | null): boolean {
+  const resolved = new Set<string>();
+  const results = new Set<string>();
+  const seen = new Set<string>();
+  for (let id = leaf; id !== null && !seen.has(id);) {
+    seen.add(id);
+    const row = nodes.get(id);
+    if (!row) break;
+    if (row.resolved) resolved.add(row.resolved);
+    if (row.result) results.add(row.result);
+    if (row.request && !resolved.has(row.request.toolCallId) && !results.has(row.request.toolCallId) &&
+        (!row.request.parentToolCallId || !results.has(row.request.parentToolCallId))) return true;
+    id = row.parentId;
+  }
+  return false;
+}
+
+/** Read appended approval records once; polling a growing transcript must not replay its whole body. */
+async function readPendingToolApproval(file: string, size: number, mtime: number): Promise<boolean> {
+  const cached = approvalCache.get(file);
+  if (cached?.size === size && cached.mtime === mtime) return cached.waiting;
+  const append = cached !== undefined && size > cached.size;
+  const nodes = new Map(append ? cached.nodes : []);
+  let leaf = append ? cached.leaf : null;
+  let lastSelfSelected = append ? cached.lastSelfSelected : null;
+  let bytes = append ? cached.bytes : 0;
+  if (size === 0) return false;
+  const input = createReadStream(file, { start: bytes, end: size - 1 });
+  let parts: Buffer[] = [];
+  let partBytes = 0;
+  try {
+    for await (const chunk of input) {
+      const buffer = chunk as Buffer;
+      let start = 0;
+      for (let end = buffer.indexOf(10); end >= 0; end = buffer.indexOf(10, start)) {
+        const tail = buffer.subarray(start, end);
+        const line = (parts.length ? Buffer.concat([...parts, tail], partBytes + tail.length) : tail).toString("utf8");
+        bytes += partBytes + tail.length + 1;
+        parts = []; partBytes = 0;
+        start = end + 1;
+        let row: unknown;
+        try { row = JSON.parse(line); } catch { continue; }
+        if (!isRecord(row) || row.type === "session" || row.type === "title" || typeof row.id !== "string") continue;
+        const node: ApprovalNode = { parentId: typeof row.parentId === "string" ? row.parentId : null };
+        if (row.type === "custom" && isRecord(row.data) && typeof row.data.toolCallId === "string") {
+          if (row.customType === "tool_approval_requested") node.request = { toolCallId: row.data.toolCallId, ...(typeof row.data.parentToolCallId === "string" ? { parentToolCallId: row.data.parentToolCallId } : {}) };
+          else if (row.customType === "tool_approval_resolved") node.resolved = row.data.toolCallId;
+        } else if (row.type === "message" && isRecord(row.message) && row.message.role === "toolResult" && typeof row.message.toolCallId === "string") {
+          node.result = row.message.toolCallId;
+        }
+        nodes.set(row.id, node);
+        leaf = row.activeLeafId === null ? null : typeof row.activeLeafId === "string" ? row.activeLeafId : row.id;
+        if (leaf === row.id) lastSelfSelected = row.id;
+      }
+      if (start < buffer.length) { const remaining = buffer.subarray(start); parts.push(remaining); partBytes += remaining.length; }
+    }
+  } finally { input.destroy(); }
+  if (leaf !== null && !nodes.has(leaf)) leaf = lastSelfSelected;
+  const waiting = branchWaitingForApproval(nodes, leaf);
+  if (approvalCache.size >= HEADER_CACHE_MAX) approvalCache.clear();
+  approvalCache.set(file, { bytes, size, mtime, nodes, leaf, lastSelfSelected, waiting });
+  return waiting;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

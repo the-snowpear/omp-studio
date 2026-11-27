@@ -51,6 +51,7 @@ type FakePublication = {
 };
 
 function createHarness(options: {
+  onPtyInputWait?: DesktopRuntimeSessionPortOptions["onPtyInputWait"];
   maxResidentSessions?: number;
   idleWorkerTtlMs?: number;
   requiresModelFor?: string;
@@ -127,6 +128,7 @@ function createHarness(options: {
     ...(options.maxResidentSessions === undefined ? {} : { maxResidentSessions: options.maxResidentSessions }),
     ...(options.idleWorkerTtlMs === undefined ? {} : { idleWorkerTtlMs: options.idleWorkerTtlMs }),
     workerPortFactory,
+    ...(options.onPtyInputWait ? { onPtyInputWait: options.onPtyInputWait } : {}),
   });
   const publish = (
     sessionId: string,
@@ -295,4 +297,23 @@ test("missing-model recovery preserves the current worker and forwards only the 
   assert.equal(harness.stopped.includes("fresh-1"), false);
   await assert.rejects(() => port.switchSession!({ kind: "resume", sessionId: "saved", model: "provider/another" }), /already active/);
  } finally { await port.stop(); }
+});
+
+
+test("native PTY demand notifies once per wait and respects the runtime notification setting", async () => {
+  const notifications: string[] = [];
+  const harness = createHarness({ onPtyInputWait: wait => notifications.push(wait.toolCallId) });
+  const wait = { sessionId: "fresh-1", toolCallId: "console-input", command: "python -i", waiting: true, notify: true };
+  try {
+    await harness.port.start(context);
+    harness.publish("fresh-1", { ptyInputWaits: [wait] });
+    harness.publish("fresh-1", { ptyInputWaits: [wait], isStreaming: true });
+    assert.deepEqual(notifications, ["console-input"]);
+    harness.publish("fresh-1", { ptyInputWaits: [] });
+    harness.publish("fresh-1", { ptyInputWaits: [{ ...wait, notify: false }] });
+    assert.deepEqual(notifications, ["console-input"]);
+    harness.publish("fresh-1", { ptyInputWaits: [] });
+    harness.publish("fresh-1", { ptyInputWaits: [wait] });
+    assert.deepEqual(notifications, ["console-input", "console-input"]);
+  } finally { await harness.port.stop(); }
 });

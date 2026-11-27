@@ -1,3 +1,5 @@
+import { type ChromeRelayHostOperation, type ChromeRelayHostStatus } from "./chrome-relay-host-protocol";
+import { ARCHIVE_QUERY_KINDS, type ArchiveQueryOperation, type ArchiveQueryResultMap } from "./archive-protocol";
 import type { WebMcpListOptions, StudioWebMcpCatalog } from "./webmcp-protocol";
 import {
 	SELECTIVE_COMMIT_QUERY_KINDS,
@@ -64,6 +66,8 @@ export interface StudioAgentMessages {
 
 /** Transient reads, reversible close checks and media negotiation: no payload is persisted in the command ledger. */
 export type RuntimeViewOperation =
+	| Extract<ChromeRelayHostOperation, { kind: "browser.relayHost.status" }>
+	| ArchiveQueryOperation
 	| Extract<SelectiveCommitOperation, { kind: keyof SelectiveCommitQueryInputMap }>
 	| PromptHistoryQueryOperation
 	| Extract<ModelServicesOperation, { kind: keyof ModelServicesQueryInputMap }>
@@ -89,7 +93,12 @@ export type RuntimeViewOperation =
 	| { kind: "live.webrtc.mute"; sessionId: string; audioId: string; muted: boolean }
 	| { kind: "live.webrtc.release"; sessionId: string; audioId: string };
 export interface RuntimeViewResultMap
-	extends ModelServicesQueryResultMap, SelectiveCommitQueryResultMap, PromptHistoryQueryResultMap {
+	extends
+		ArchiveQueryResultMap,
+		ModelServicesQueryResultMap,
+		SelectiveCommitQueryResultMap,
+		PromptHistoryQueryResultMap {
+	"browser.relayHost.status": ChromeRelayHostStatus;
 	"runtime.close.confirm": { allowed: boolean };
 	"interaction.form.read": { form: InteractionForm };
 	"agent.spawn.options.read": RuntimeFeatureResultMap["agent.spawn.options"];
@@ -106,6 +115,8 @@ export interface RuntimeViewResultMap
 	"live.webrtc.release": LiveAudioState;
 }
 export const RUNTIME_VIEW_KINDS = [
+	"browser.relayHost.status",
+	...ARCHIVE_QUERY_KINDS,
 	...SELECTIVE_COMMIT_QUERY_KINDS,
 	...PROMPT_HISTORY_QUERY_KINDS,
 	...MODEL_SERVICES_QUERY_KINDS,

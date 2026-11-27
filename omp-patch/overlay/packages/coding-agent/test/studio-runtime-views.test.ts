@@ -1,6 +1,6 @@
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import { RunTrace } from "@oh-my-pi/pi-natives";
-import { defaultShellVizPreferences } from "@oh-my-pi/pi-tui/tools/shell-viz";
+import { defaultShellVizPreferences } from "../src/tools/shell-viz";
 import { randomUUID } from "node:crypto";
 import { unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";

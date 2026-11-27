@@ -28,7 +28,6 @@ test("snapshots preserve restart-required settings and retry deadlines through r
   const response = parseStudioSnapshotResponse({ ...baseline, snapshot: { ...baseline.snapshot, retry, runtimeSettingsActivation: activation } });
   assert.deepEqual(response.snapshot.retry, retry);
   assert.deepEqual(response.snapshot.runtimeSettingsActivation, activation);
-  assert.throws(() => parseStudioSnapshotResponse({ ...baseline, snapshot: { ...baseline.snapshot, retry: { ...retry, nextRetryAt: -1 } } }), ContractValidationError);
 });
 
 test("PR-001 parses the canonical hello fixture", async () => {
@@ -85,30 +84,9 @@ test("WP-012 parses the canonical initial snapshot and fences nested epochs", as
     ContractValidationError,
   );
   const snapshotValue = value as { snapshot: Record<string, unknown> };
-  assert.throws(
-    () =>
-      parseStudioSnapshotResponse({
-        ...snapshotValue,
-        snapshot: {
-          ...snapshotValue.snapshot,
-          pendingInteraction: {
-            owner: "gui",
-            leaseGeneration: 0,
-            request: {
-              kind: "editor",
-              interactionId: "interaction-1",
-              commandId: "command-1",
-              title: "Edit",
-              content: "",
-            },
-          },
-        },
-      }),
-    ContractValidationError,
-  );
 });
 
-test("WP-012 accepts semantic session titles and rejects invalid title sources", async () => {
+test("WP-012 preserves semantic and legacy session titles", async () => {
   const value: unknown = JSON.parse(await readFile(fixture("snapshot.initial.json"), "utf8"));
   const snapshotValue = value as { snapshot: Record<string, unknown> };
   const parsed = parseStudioSnapshotResponse({
@@ -125,10 +103,6 @@ test("WP-012 accepts semantic session titles and rejects invalid title sources",
     ...snapshotValue,
     snapshot: { ...snapshotValue.snapshot, sessionTitle: "Legacy title" },
   }).snapshot.sessionTitle, "Legacy title");
-  assert.throws(() => parseStudioSnapshotResponse({
-    ...snapshotValue,
-    snapshot: { ...snapshotValue.snapshot, sessionTitle: "Bad source", sessionTitleSource: "host" },
-  }), ContractValidationError);
 });
 
 test("snapshot accepts optional fast and prewalk projections", async () => {
@@ -147,14 +121,6 @@ test("snapshot accepts optional fast and prewalk projections", async () => {
   assert.equal(parsed.snapshot.fast?.active, false);
   assert.equal(parsed.snapshot.prewalk?.status, "armed");
   assert.equal(parsed.snapshot.prewalk?.target, "@smol");
-  assert.throws(
-    () =>
-      parseStudioSnapshotResponse({
-        ...value,
-        snapshot: { ...value.snapshot, fast: { enabled: "yes" } },
-      }),
-    ContractValidationError,
-  );
 });
 
 test("snapshot accepts optional session model projection", async () => {
@@ -177,25 +143,9 @@ test("snapshot accepts optional session model projection", async () => {
   assert.equal(parsed.snapshot.model?.selector, "anthropic/claude-sonnet-4-5");
   assert.equal(parsed.snapshot.model?.thinking, "high");
   assert.equal(parsed.snapshot.model?.configuredThinking, "auto");
-  assert.throws(
-    () =>
-      parseStudioSnapshotResponse({
-        ...value,
-        snapshot: {
-          ...value.snapshot,
-          model: {
-            selector: "anthropic/claude-sonnet-4-5",
-            provider: "anthropic",
-            id: "claude-sonnet-4-5",
-            thinking: "auto",
-          },
-        },
-      }),
-    ContractValidationError,
-  );
 });
 
-test("Runtime settings and compaction projections mirror the closed Runtime seam", async () => {
+test("Runtime settings and compaction projections preserve native values", async () => {
   const value = JSON.parse(await readFile(fixture("snapshot.initial.json"), "utf8")) as {
     snapshot: Record<string, unknown>;
   };
@@ -220,14 +170,6 @@ test("Runtime settings and compaction projections mirror the closed Runtime seam
     snapshot: { ...value.snapshot, runtimeSettings: { ...runtimeSettings, steeringMode: "all", "edit.fuzzyThreshold": 0.9, "compaction.thresholdPercent": -1 } },
   });
   assert.equal(expanded.snapshot.runtimeSettings?.["edit.fuzzyThreshold"], 0.9);
-  assert.throws(
-    () => parseStudioSnapshotResponse({ ...value, snapshot: { ...value.snapshot, runtimeSettings: { ...runtimeSettings, surprise: true } } }),
-    ContractValidationError,
-  );
-  assert.throws(
-    () => parseStudioSnapshotResponse({ ...value, snapshot: { ...value.snapshot, compactionSpeculation: "paused" } }),
-    ContractValidationError,
-  );
 });
 
 test("WP-012 validates state events against their envelope", async () => {

@@ -1,3 +1,5 @@
+import { readStudioPtyInputWaits } from "./services/job-inspect";
+import { sessionWaitingForApproval } from "./services/pending-approvals";
 import { onAgentMeshRosterChanged } from "../irc/mesh";
 import { onDownloadActivity } from "../downloads/activity";
 import { StudioHandoffService } from "./services/handoff-service";
@@ -389,6 +391,8 @@ export class StudioStateProjector {
 			...(taskModel === undefined ? {} : { taskModel }),
 			live,
 			pendingMessages: this.#runtime.session.queuedMessageCount,
+			waitingForApproval: sessionWaitingForApproval(this.#runtime.sessionManager),
+			ptyInputWaits: readStudioPtyInputWaits(this.#runtime.session),
 			activeCommandIds: [],
 			agentsRevision: this.#agentsRevision,
 			jobsRevision: this.#jobsRevision,

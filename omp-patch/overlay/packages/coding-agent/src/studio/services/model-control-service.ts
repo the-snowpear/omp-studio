@@ -2,7 +2,9 @@ import { cfgTaskAgentModelOverrides } from "../../task/settings";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import type { AgentSession } from "../../session/agent-session";
-import { AUTO_THINKING, type ConfiguredThinkingLevel, parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
+import { errorMessage } from "@oh-my-pi/pi-utils/type-guards";
+import { AUTO_THINKING, parseConfiguredThinkingLevel } from "../../thinking/levels";
+import type { ConfiguredThinkingLevel } from "../../utils/render-utils";
 
 export class StudioModelControlError extends Error {
 	constructor(
@@ -262,8 +264,4 @@ export class StudioModelControlService {
 		}
 		return state;
 	}
-}
-
-function errorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
 }

@@ -32,6 +32,15 @@ import {
 const fixture = (name: string) => fileURLToPath(new URL(`../../fixtures/${name}`, import.meta.url));
 const requestBase = { type: "studio.request", requestId: "req-transcript", runtimeEpoch: 1 };
 
+test("Host preserves nested tool identity and AgentLoopError provenance from Runtime events", () => {
+  const started = parseConversationRuntimeEvent({ kind: "conversation.tool.started", sessionId: "session", turnId: "turn", messageId: "message", toolCallId: "nested", parentToolCallId: "parent", toolName: "bash", startedAt: "2026-11-27T00:00:00Z" });
+  assert.equal(started.kind, "conversation.tool.started");
+  if (started.kind === "conversation.tool.started") assert.equal(started.parentToolCallId, "parent");
+  const completed = parseConversationRuntimeEvent({ kind: "conversation.message.completed", sessionId: "session", turnId: "turn", messageId: "message", item: { kind: "message", itemId: "message", parentId: null, createdAt: "2026-11-27T00:00:00Z", role: "assistant", content: [] }, error: { message: "Tool requirement failed", source: "agentLoop" } });
+  assert.equal(completed.kind, "conversation.message.completed");
+  if (completed.kind === "conversation.message.completed") assert.equal(completed.error?.source, "agentLoop");
+});
+
 function envelope(event: unknown, stateVersion = 0) {
   return {
     type: "studio.event",
@@ -429,10 +438,8 @@ test("live conversation events parse every kind and reject inner occurredAt", ()
     },
   };
   assert.deepEqual(parseConversationRuntimeEvent(withError), withError);
-  assert.throws(
-    () => parseConversationRuntimeEvent({ ...withError, error: { message: "" } }),
-    ContractValidationError,
-  );
+  // Runtime owns error payloads; Host preserves them without a second validation pass.
+  assert.deepEqual(parseConversationRuntimeEvent({ ...withError, error: { message: "" } }), { ...withError, error: { message: "" } });
 
   assert.throws(
     () => parseConversationRuntimeEvent({ ...started, occurredAt: "2026-08-15T12:00:00.000Z" }),

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { StudioClient } from "@omp-studio/client-contract";
-import type { McpAuthResult } from "@omp-studio/studio-protocol";
+import type { McpAuthResult, McpAuthChallengeState } from "@omp-studio/studio-protocol";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { Icon } from "../icons";
@@ -20,6 +20,7 @@ export function McpAuthActions({
   authSupported = true,
   previewScope = "user",
   onComplete,
+  challenge,
 }: {
   client: StudioClient;
   sessionId?: string | undefined;
@@ -30,6 +31,7 @@ export function McpAuthActions({
   authSupported?: boolean;
   previewScope?: "user" | "project";
   onComplete?: (result: McpAuthResult) => void;
+  challenge?: McpAuthChallengeState | undefined;
 }) {
   const { marks } = usePreviewMode();
   const [busy, setBusy] = useState<Action>();
@@ -68,7 +70,7 @@ export function McpAuthActions({
         return;
       }
       // Re-authorization waits for the browser flow (Runtime timeout 5 minutes); no client-side deadline.
-      const handle = await client.command(KIND[action], { sessionId: sessionId!, name });
+      const handle = await client.command(action === "reauth" && challenge?.status !== "authorized" && challenge ? "mcp.auth.stepUp" : KIND[action], { sessionId: sessionId!, name });
       const receipt = await waitReceipt<{ result: McpAuthResult }>(client, handle.requestId, action === "reauth" ? null : undefined);
       if (epoch === generation.current) { setResult(receipt.result); onComplete?.(receipt.result); }
     } catch (cause) {
@@ -84,6 +86,7 @@ export function McpAuthActions({
   const disabled = !enabled || busy !== undefined;
   return (
     <div className="mcp-auth-actions">
+      {challenge && challenge.status !== "authorized" ? <p className="mcp-auth-error" role="status"><Icon name="lock" extra="xs" /><span>{challenge.authChallenge.kind === "insufficient_scope" ? (zh ? "需要补充授权范围" : "Additional scopes required") : (zh ? "凭据需要重新授权" : "Credential requires re-authorization")}{challenge.requiredScopes.length ? <code> {challenge.requiredScopes.join(" · ")}</code> : null}</span></p> : null}
       <div className="mcp-auth-buttons">
         {authSupported ? <><button type="button" className="mcp-auth-secondary" disabled={disabled} onClick={() => void run("reauth")} aria-label={(zh ? "重新授权 " : "Re-authorize ") + name}>
           <Icon name="lock" extra="xs" />{busy === "reauth" ? (zh ? "授权中…" : "Authorizing…") : zh ? "重新授权" : "Re-authorize"}

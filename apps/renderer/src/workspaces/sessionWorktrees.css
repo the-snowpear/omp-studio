@@ -19,3 +19,8 @@
 .worktree-empty p { color:var(--text-muted); font-size:var(--fs-12); }
 .worktree-launcher { margin:var(--sp-12); }
 @media(max-width:600px) { .worktree-modal-backdrop { padding:12px; } .worktree-manager-dialog { width:calc(100vw - 24px); } .worktree-modal { padding:20px; max-height:calc(100vh - 24px); } }
+.worktree-hook { display: grid; gap: var(--sp-8); padding: var(--sp-12) 0; border-block: 1px solid var(--border); }
+.worktree-hook progress { width: 100%; accent-color: var(--accent); }
+.worktree-hook p { margin: 0; }
+.worktree-hook-items { display: flex; flex-wrap: wrap; gap: var(--sp-6); }
+.worktree-hook-warning { color: var(--amber); font-size: var(--fs-12); overflow-wrap: anywhere; }

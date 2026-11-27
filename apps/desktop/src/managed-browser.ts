@@ -60,6 +60,7 @@ export class DesktopManagedBrowser {
   readonly #notifications = new Map<string, Notification>();
   readonly #controlChanges = new Map<string, Promise<void>>();
   readonly #windowStops = new Map<BrowserWindow, () => void>();
+  readonly #suppressedChanged = new Set<string>();
   #parking: BrowserWindow | undefined;
   #runtime?: ManagedBrowserRuntime;
   #disposed = false;
@@ -86,7 +87,7 @@ export class DesktopManagedBrowser {
   pages(sessionId: string): ManagedBrowserPage[] { return this.store.state(sessionId).pages; }
   #emit(event: ManagedBrowserEvent): void { for (const listener of this.#listeners) listener(event); }
   #changed(sessionId: string): void {
-    if (this.#disposed) return;
+    if (this.#disposed || this.#suppressedChanged.has(sessionId)) return;
     this.#emit({ kind: "state", state: this.store.state(sessionId) });
     this.#runtime?.changed(sessionId);
     for (const live of this.#pages.values()) if (live.page.sessionId === sessionId) this.#inputState(live);
@@ -146,7 +147,7 @@ export class DesktopManagedBrowser {
     this.#spaces.set(spaceId, { space, download });
     return space;
   }
-  async create(sessionId: string, address: string, source: "human" | "agent", spaceId = "shared", opener: Omit<ManagedBrowserPageOpener, "source"> = {}): Promise<ManagedBrowserPage> {
+  async create(sessionId: string, address: string, source: "human" | "agent", spaceId = "shared", opener: Omit<ManagedBrowserPageOpener, "source"> = {}, options?: { active?: boolean }): Promise<ManagedBrowserPage> {
     await this.ready;
     const previous = this.store.state(sessionId);
     await mkdir(previous.settings.downloadDirectory || this.options.downloadsDirectory, { recursive: true });
@@ -154,7 +155,20 @@ export class DesktopManagedBrowser {
     if (source === "human" && !previous.pages.length && previous.connection === "connected") await this.#control(sessionId, "human");
     if (previous.pages.length && (source === "human" ? previous.control !== "human" : previous.control === "human")) throw new Error(source === "human" ? "Take browser control before opening a page." : "The user controls this chat's browser. Wait for control to be returned.");
     this.#space(spaceId);
-    const page = this.store.create(sessionId, normalizeBrowserAddress(address), source, spaceId, opener);
+    const beforeCreate = this.store.state(sessionId);
+    const keepActive = options?.active === false && beforeCreate.activePageId && beforeCreate.pages.some(existing => existing.id === beforeCreate.activePageId) ? beforeCreate.activePageId : undefined;
+    let page: ManagedBrowserPage;
+    if (keepActive) {
+      this.#suppressedChanged.add(sessionId);
+      try {
+        page = this.store.create(sessionId, normalizeBrowserAddress(address), source, spaceId, opener);
+      } finally {
+        this.#suppressedChanged.delete(sessionId);
+      }
+      this.store.select(sessionId, keepActive);
+    } else {
+      page = this.store.create(sessionId, normalizeBrowserAddress(address), source, spaceId, opener);
+    }
     await this.ensure(page.id);
     return page;
   }

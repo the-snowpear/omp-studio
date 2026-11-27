@@ -30,6 +30,7 @@ export interface AccountRoutingPolicy { priority: number; reservePct: number; re
 export interface StudioAccountStatus {
   policy?: AccountRoutingPolicy;
   subscriptionPlan?: string;
+  fastEligibility?: { model: string; tier: "priority" | "ultrafast"; state: "eligible" | "unavailable" | "unknown" };
   credentialId?: number;
   activeCredential?: boolean;
   resetPolicies?: AccountResetPolicy[];

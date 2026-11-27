@@ -1055,6 +1055,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     try {
       const result = await runProbe(client, {
         providerId,
+        ...(editorState ? { api: editorState.api, transport: editorState.transport || "direct" } : {}),
         ...(endpointUrl !== undefined ? { endpointUrl } : {}),
         ...(apiKey ? { apiKey } : {}),
         ...(discoveryType ? { discoveryType } : {}),

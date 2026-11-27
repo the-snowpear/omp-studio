@@ -1,3 +1,5 @@
+import { oauthAccountKey } from "@oh-my-pi/pi-ai";
+import { serviceTierOffersByAccount } from "@oh-my-pi/pi-ai/types";
 import { computePolicyDiagnostics } from "../../cli/usage-cli";
 import { cfgRetryUsageReservePct, resetWindowSettings } from "../../session/settings";
 import { logoutCredential } from "../../slash-commands/helpers/logout";
@@ -206,6 +208,9 @@ export class StudioAccountStatusService {
 		const assigned = new Set<UsageReport>();
 		for (const provider of providers) {
 			const native = auth.oauth.accounts(provider, this.session.sessionId);
+			const model = this.session.model?.provider === provider ? this.session.model : undefined;
+			const tier = this.session.isUltrafastModeEnabled?.() ? ("ultrafast" as const) : ("priority" as const);
+			const fastOffers = model ? serviceTierOffersByAccount(model, tier) : undefined;
 			const stickyId = auth.sessions?.sticky?.(provider, this.session.sessionId)?.credentialId;
 			for (const account of native) {
 				const matches = this.#reports.filter(
@@ -226,6 +231,20 @@ export class StudioAccountStatusService {
 					label: clean(account.email ?? account.accountId ?? "Account " + (account.position + 1)),
 					...(account.orgName ? { organization: clean(account.orgName) } : {}),
 					source: "oauth",
+					...(model
+						? {
+								fastEligibility: {
+									model: model.provider + "/" + model.id,
+									tier,
+									state:
+										fastOffers?.[oauthAccountKey(account) ?? ""] === true
+											? ("eligible" as const)
+											: fastOffers?.[oauthAccountKey(account) ?? ""] === false
+												? ("unavailable" as const)
+												: ("unknown" as const),
+								},
+							}
+						: {}),
 					active: account.active,
 					activeCredential: account.active,
 					credentialId: account.credentialId,

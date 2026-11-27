@@ -284,7 +284,7 @@ export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, 
         if (event.shiftKey && index <= 0) { event.preventDefault(); (items.at(-1) ?? event.currentTarget).focus(); }
         else if (!event.shiftKey && (index < 0 || index === items.length - 1)) { event.preventDefault(); (items[0] ?? event.currentTarget).focus(); }
       }}>
-      <AgentInspector row={selected} rows={rows} lane={shownLanes.find(lane => lane.row.id === selected.id)} now={replay ?? now} actions={actions} marks={marks}
+      <AgentInspector modelContext={commandContext} row={selected} rows={rows} lane={shownLanes.find(lane => lane.row.id === selected.id)} now={replay ?? now} actions={actions} marks={marks}
         onSelect={id => update({ selected: id, sheet: id !== null })} onClose={() => update({ sheet: false })} d={d} />
     </div> : null;
 
@@ -311,7 +311,7 @@ export function AgentDeck({ instanceKey, scope, agents, ready, source, visible, 
         {short || embedded ? null : <aside className="ad-side" aria-label={selected ? selected.name : d("summary.title")}>
           <div className="ad-side-body" key={selected?.id ?? "summary"}>
             {selected
-              ? <AgentInspector row={selected} rows={rows} lane={shownLanes.find(lane => lane.row.id === selected.id)} now={replay ?? now} actions={actions} marks={marks} onSelect={select} d={d} />
+              ? <AgentInspector modelContext={commandContext} row={selected} rows={rows} lane={shownLanes.find(lane => lane.row.id === selected.id)} now={replay ?? now} actions={actions} marks={marks} onSelect={select} d={d} />
               : <SwarmSummary rows={rows} totals={totals} lanes={shownLanes} range={replay === null ? range : { ...range, end: replay }} now={replay ?? now} onSelect={id => update({ selected: id })} d={d} />}
           </div>
         </aside>}

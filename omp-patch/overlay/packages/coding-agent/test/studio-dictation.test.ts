@@ -20,7 +20,7 @@ import type {
 	DictationInputMode,
 } from "../src/studio/dictation-protocol";
 import { StudioLiveAudioService } from "../src/studio/services/live-audio-service";
-import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
+import { KeybindingsManager } from "../src/config/keybindings/keybindings";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {

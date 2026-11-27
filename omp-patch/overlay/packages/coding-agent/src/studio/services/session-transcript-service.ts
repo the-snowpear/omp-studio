@@ -1,6 +1,6 @@
-import { isReplyWrite } from "@oh-my-pi/pi-tui/chat/reply-write";
+import { isReplyWrite } from "../../session/transcript/reply-write";
 import { readModelMentions } from "../../session/model-mentions";
-import { expandModelMentionTags } from "@oh-my-pi/pi-tui/prompt/model-mention-syntax";
+import { expandModelMentionTags } from "../../session/model-mention-syntax";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { SessionEntry } from "../../session/session-entries";
 import {

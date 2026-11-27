@@ -3,6 +3,8 @@ import * as path from "node:path";
 import { createHash } from "node:crypto";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import { getAgentDir, withFileLock, logger } from "@oh-my-pi/pi-utils";
+import { loadSkills, type Skill } from "../../extensibility/skills";
+import { loadSlashCommands, type FileSlashCommand } from "../../extensibility/slash-commands";
 import type { AgentSession } from "../../session/agent-session";
 import type { SessionWorktree } from "../../worktree/backend";
 import { readOvnfsRecords } from "../../worktree/ovnfs-records";
@@ -17,12 +19,17 @@ import {
 	inspectSessionWorktree,
 	planWorktreeExit,
 	removeExitWorktrees,
+	runSessionWorktreeHook,
 	type WorktreeExitPlan,
 } from "../../session/session-worktree";
 import { cfgWorktreeOnStart, cfgWorktreeOnExit } from "../../task/settings";
 import type {
 	SessionWorktreeRow,
 	SessionWorktreeOperation,
+	WorktreeHookExecutionSummary,
+	WorktreeHookStatus,
+	WorktreeRefreshedItem,
+	WorktreeRefreshedSummary,
 	WorktreeRemovalPreview,
 } from "../session-worktrees-protocol";
 import type { SessionResumePreparation } from "../session-lifecycle-protocol";
@@ -34,6 +41,10 @@ interface OwnedWorktree {
 	id: string;
 	sessionId: string;
 	worktree: SessionWorktree;
+}
+interface RefreshedItemKeyed {
+	key: string;
+	item: WorktreeRefreshedItem;
 }
 const clean = (cause: unknown) =>
 	String(cause instanceof Error ? cause.message : cause)
@@ -56,6 +67,125 @@ const equalPath = async (a: string, b: string): Promise<boolean> => {
 		return false;
 	}
 };
+function snapshotSessionSkills(session: AgentSession): RefreshedItemKeyed[] {
+	const skills: readonly Skill[] = Array.isArray(session.skills) ? session.skills : [];
+	return skills.map(skill => ({
+		key: `${skill.name}\0${skill.source ?? ""}`,
+		item: {
+			name: clean(skill.name),
+			description: clean(skill.description ?? ""),
+			source: clean(skill.source ?? ""),
+			location: "session",
+		},
+	}));
+}
+function snapshotSessionCommands(session: AgentSession): RefreshedItemKeyed[] {
+	const slash: readonly FileSlashCommand[] = Array.isArray(session.slashCommands) ? session.slashCommands : [];
+	const custom = Array.isArray(session.customCommands) ? session.customCommands : [];
+	const items: RefreshedItemKeyed[] = slash.map(cmd => ({
+		key: `${cmd.name}\0${cmd.source ?? ""}`,
+		item: {
+			name: clean(cmd.name),
+			description: clean(cmd.description ?? ""),
+			source: clean(cmd.source ?? ""),
+			location: "session",
+		},
+	}));
+	for (const cmd of custom) {
+		const name = cmd.command?.name;
+		if (!name) continue;
+		const source = cmd.extensionPath ?? "";
+		items.push({
+			key: `${name}\0${source}`,
+			item: {
+				name: clean(name),
+				description: clean(cmd.command.description ?? ""),
+				source: clean(source),
+				location: "session",
+			},
+		});
+	}
+	return items;
+}
+async function snapshotProjectDirItems(
+	session: AgentSession,
+	cwd: string,
+	location: "session" | "worktree",
+): Promise<{ skills: RefreshedItemKeyed[]; commands: RefreshedItemKeyed[] }> {
+	try {
+		const skillSettings = session.skillsSettings;
+		const [loadedSkills, loadedCommands] = await Promise.all([
+			loadSkills({
+				cwd,
+				enabled: skillSettings?.enabled,
+				enableCodexUser: false,
+				enableClaudeUser: false,
+				enableClaudeProject: skillSettings?.enableClaudeProject,
+				enablePiUser: false,
+				enablePiProject: skillSettings?.enablePiProject,
+				enableAgentsUser: false,
+				enableAgentsProject: skillSettings?.enableAgentsProject,
+				customDirectories: [],
+				ignoredSkills: skillSettings?.ignoredSkills,
+				includeSkills: skillSettings?.includeSkills,
+				extensionRoots: session.effectiveExtensionRoots,
+			}),
+			loadSlashCommands({ cwd, extensionRoots: session.effectiveExtensionRoots }),
+		]);
+		const skills = loadedSkills.skills
+			.filter(skill => skill._source?.level === "project")
+			.map(skill => ({
+				key: `${skill.name}\0${skill.source ?? ""}`,
+				item: {
+					name: clean(skill.name),
+					description: clean(skill.description ?? ""),
+					source: clean(skill.source ?? ""),
+					location,
+				},
+			}));
+		const commands = loadedCommands
+			.filter(cmd => cmd._source?.level === "project")
+			.map(cmd => ({
+				key: `${cmd.name}\0${cmd.source ?? ""}`,
+				item: {
+					name: clean(cmd.name),
+					description: clean(cmd.description ?? ""),
+					source: clean(cmd.source ?? ""),
+					location,
+				},
+			}));
+		return { skills, commands };
+	} catch {
+		return { skills: [], commands: [] };
+	}
+}
+function diffRefreshedItems(
+	before: readonly RefreshedItemKeyed[],
+	after: readonly RefreshedItemKeyed[],
+): {
+	added: WorktreeRefreshedItem[];
+	removed: string[];
+} {
+	const beforeKeys = new Set(before.map(entry => entry.key));
+	const afterKeys = new Set(after.map(entry => entry.key));
+	const added: WorktreeRefreshedItem[] = [];
+	const seenAdded = new Set<string>();
+	for (const entry of after) {
+		if (!beforeKeys.has(entry.key) && !seenAdded.has(entry.key)) {
+			seenAdded.add(entry.key);
+			added.push(entry.item);
+		}
+	}
+	const removed: string[] = [];
+	const seenRemoved = new Set<string>();
+	for (const entry of before) {
+		if (!afterKeys.has(entry.key) && !seenRemoved.has(entry.item.name)) {
+			seenRemoved.add(entry.item.name);
+			removed.push(entry.item.name);
+		}
+	}
+	return { added: added.slice(0, 100), removed: removed.slice(0, 100) };
+}
 export class StudioSessionWorktreesService {
 	#pending:
 		| { owner: string; preview: WorktreeRemovalPreview; plan: WorktreeExitPlan[]; owned: OwnedWorktree }
@@ -63,14 +193,31 @@ export class StudioSessionWorktreesService {
 	#busy = false;
 	#disposed = false;
 	#startDecisionSession: string | undefined;
+	#hookStatus: WorktreeHookStatus = { state: "idle", warnings: [] };
+	#hookListeners = new Set<(status: WorktreeHookStatus) => void>();
 	interaction: StudioInteractionGateway | undefined;
 	constructor(readonly session: AgentSession) {}
 	get running(): boolean {
 		return this.#busy;
 	}
+	hookStatus(): WorktreeHookStatus {
+		return structuredClone(this.#hookStatus);
+	}
+	onHookStatusChange(listener: (status: WorktreeHookStatus) => void): () => void {
+		this.#hookListeners.add(listener);
+		return () => {
+			this.#hookListeners.delete(listener);
+		};
+	}
+	#setHookStatus(status: WorktreeHookStatus): void {
+		this.#hookStatus = status;
+		const copy = structuredClone(status);
+		for (const listener of this.#hookListeners) listener(copy);
+	}
 	dispose(): void {
 		this.#disposed = true;
 		this.#pending = undefined;
+		this.#hookListeners.clear();
 	}
 	async ensureStartResolved(): Promise<void> {
 		if (
@@ -186,6 +333,7 @@ export class StudioSessionWorktreesService {
 	}
 	async execute(operation: SessionWorktreeOperation): Promise<unknown> {
 		this.#check(operation.sessionId);
+		if (operation.kind === "worktrees.session.hookStatus") return this.hookStatus();
 		if (operation.kind === "worktrees.session.resume.list" || operation.kind === "worktrees.session.resume.prepare") {
 			const cwd = this.session.sessionManager.getCwd();
 			const scope = operation.scope ?? cfgSessionWorktreeScope.get(this.session.settings);
@@ -315,8 +463,47 @@ export class StudioSessionWorktreesService {
 					const owned = { id: crypto.randomUUID(), sessionId: operation.sessionId, worktree };
 					rows.unshift(owned);
 					await this.#save(file, rows);
+					const startedAt = Date.now();
+					this.#setHookStatus({
+						state: "running",
+						worktreeId: owned.id,
+						branch: worktree.branch,
+						worktreePath: worktree.path,
+						startedAt,
+						warnings: [],
+					});
+					const beforeSkills = snapshotSessionSkills(this.session);
+					const beforeCommands = snapshotSessionCommands(this.session);
+					const warnings = await runSessionWorktreeHook(worktree, this.session);
+					const loaded = await snapshotProjectDirItems(this.session, worktree.path, "worktree");
+					const skillChanges = diffRefreshedItems(beforeSkills, [
+						...snapshotSessionSkills(this.session),
+						...loaded.skills,
+					]);
+					const commandChanges = diffRefreshedItems(beforeCommands, [
+						...snapshotSessionCommands(this.session),
+						...loaded.commands,
+					]);
+					const refreshed: WorktreeRefreshedSummary = {
+						skillsCount: loaded.skills.length,
+						commandsCount: loaded.commands.length,
+						addedSkills: skillChanges.added,
+						addedCommands: commandChanges.added,
+						removedSkills: skillChanges.removed,
+						removedCommands: commandChanges.removed,
+					};
+					const finishedAt = Date.now();
+					const hook: WorktreeHookExecutionSummary = {
+						state: warnings.length ? "warning" : "succeeded",
+						startedAt,
+						finishedAt,
+						durationMs: finishedAt - startedAt,
+						warnings,
+						refreshed,
+					};
+					this.#setHookStatus({ ...this.#hookStatus, ...hook });
 					if (operation.freshOnly) this.#startDecisionSession = operation.sessionId;
-					return { worktree: await this.#row(owned), cwd: worktree.path };
+					return { worktree: await this.#row(owned), cwd: worktree.path, hook };
 				}
 				if (operation.kind === "worktrees.session.remove.apply") {
 					const pending = this.#pending;

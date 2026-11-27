@@ -38,7 +38,7 @@ store.switchScope(scope("browser-qa-a"), true);
 store.dispatch({ type: "region", region: "right", visible: true });
 store.dispatch({ type: "activate", groupId: "right-main", panel: "browser" });
 
-function Surface() {
+function Surface({ language, onLanguage }: { language: "zh" | "en"; onLanguage(): void }) {
   const { layout, store: dock, scope: current } = useDock();
   const [width, setWidth] = useState(Number(params.get("width")) || 760);
   const [dark, setDark] = useState(params.get("theme") === "dark");
@@ -58,6 +58,7 @@ function Surface() {
       <strong style={{ marginRight: 8 }}>Browser 验收</strong>
       {[760, 520, 380].map(value => <button key={value} className={`btn small${width === value ? " primary" : " outline"}`} onClick={() => setWidth(value)}>{value}px</button>)}
       <button className="btn small outline" onClick={() => setDark(value => !value)}>深浅主题</button>
+      <button className="btn small outline" onClick={onLanguage}>{language === "zh" ? "English" : "中文"}</button>
       <button className="btn small outline" onClick={() => { const next = chat.endsWith("a") ? "browser-qa-b" : "browser-qa-a"; dock.switchScope(scope(next), true); setChat(next); }}>切换对话（{chat.slice(-1)}）</button>
       <button className="btn small outline" onClick={() => {
         (browserHub(true)!.backend as ReturnType<typeof createPreviewBrowserBackend>).agentOpen(chat, "http://localhost:6006/?path=/story/badge");
@@ -77,4 +78,8 @@ function Surface() {
     <DockFloatingLayer />
   </>;
 }
-createRoot(document.getElementById("root")!).render(<PreviewModeProvider switchEnabled><I18nProvider forcedLanguage="zh"><DockProvider definitions={WORKBENCH_PANELS} store={store}><Surface /></DockProvider></I18nProvider></PreviewModeProvider>);
+function Harness() {
+  const [language, setLanguage] = useState<"zh" | "en">(params.get("lang") === "en" ? "en" : "zh");
+  return <PreviewModeProvider switchEnabled><I18nProvider forcedLanguage={language}><DockProvider definitions={WORKBENCH_PANELS} store={store}><Surface language={language} onLanguage={() => setLanguage(value => value === "zh" ? "en" : "zh")} /></DockProvider></I18nProvider></PreviewModeProvider>;
+}
+createRoot(document.getElementById("root")!).render(<Harness />);

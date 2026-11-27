@@ -241,7 +241,7 @@ const presetGroups = (): ReadonlyArray<ModelPresetGroup> => [
     items: [
       { id: "modular", name: "Modular Cloud", desc: hostText("Modular Cloud 模型与原生推理参数", "Modular Cloud models and native reasoning parameters"), api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.modular.com/v1" },
       { id: "commandcode", name: "Command Code", desc: hostText("原生 OpenAI / Anthropic 路由、模型发现与价格", "Native OpenAI / Anthropic routing, discovery, and pricing"), api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.commandcode.ai/provider/v1" },
-      { id: "openrouter", name: "OpenRouter", desc: hostText("一个 Key 访问多家模型", "Access multiple providers with one key"), api: "openai-completions", auth: ["api-key"], popular: true, endpoint: "https://openrouter.ai/api/v1" },
+      { id: "openrouter", name: "OpenRouter", desc: hostText("账号授权目录与多供应商路由", "Account-authorized catalog and multi-provider routing"), api: "openrouter", auth: ["api-key"], popular: true, endpoint: "https://openrouter.ai/api/v1" },
       { id: "github-copilot", name: "GitHub Copilot", desc: hostText("Copilot 订阅额度", "Copilot subscription quota"), api: "openai-responses", auth: ["oauth"], oauth: true },
       { id: "litellm", name: "LiteLLM", desc: hostText("自托管统一模型代理", "Self-hosted unified model proxy"), api: "openai-completions", auth: ["api-key", "env"], endpoint: "http://localhost:4000/v1", discovery: "litellm" },
     ],
@@ -309,7 +309,7 @@ export function authProbeUrl(base: string, api: string): string | undefined {
   if (api === "anthropic-messages") {
     return trimmed.endsWith("/v1") ? `${trimmed}/models` : `${trimmed}/v1/models`;
   }
-  if (["openai-completions", "openai-responses", "openai-codex-responses", "azure-openai-responses", "google-generative-ai", "google-vertex"].includes(api)) return `${trimmed}/models`;
+  if (["openrouter", "openai-completions", "openai-responses", "openai-codex-responses", "azure-openai-responses", "google-generative-ai", "google-vertex"].includes(api)) return `${trimmed}/models`;
   // Judge/managed transports and unknown APIs do not inherit an OpenAI /models endpoint.
   return undefined;
 }
@@ -485,6 +485,7 @@ function probeModelMeta(row: Record<string, unknown>): Omit<ModelDiscoveryModel,
   row = { ...row, ...(probeRecord(row.metadata) ?? {}), ...(probeRecord(row.model_info) ?? {}) };
   const topProvider = probeRecord(row.top_provider);
   const contextWindow =
+    probePositiveInt(row.contextWindow) ??
     probePositiveInt(row.context_length) ??
     probePositiveInt(row.max_model_len) ??
     probePositiveInt(row.context_window) ??
@@ -492,6 +493,7 @@ function probeModelMeta(row: Record<string, unknown>): Omit<ModelDiscoveryModel,
     probePositiveInt(row.inputTokenLimit) ??
     probePositiveInt(topProvider?.context_length);
   const maxTokens =
+    probePositiveInt(row.maxTokens) ??
     probePositiveInt(topProvider?.max_completion_tokens) ??
     probePositiveInt(row.max_output_tokens) ??
     probePositiveInt(row.outputTokenLimit) ??
@@ -499,11 +501,12 @@ function probeModelMeta(row: Record<string, unknown>): Omit<ModelDiscoveryModel,
   const reasoning = probeReasoning(row);
   const levels = Array.isArray(row.supported_reasoning_levels) ? row.supported_reasoning_levels.map(value => typeof value === "string" ? value.toLowerCase() : typeof probeRecord(value)?.effort === "string" ? String(probeRecord(value)?.effort).toLowerCase() : "").filter(value => ["minimal", "low", "medium", "high", "xhigh", "max"].includes(value)) : [];
   const defaultLevel = typeof row.default_reasoning_level === "string" ? row.default_reasoning_level.toLowerCase() : undefined;
-  const thinkingConfig = reasoning === false ? undefined : parseModelThinkingConfig({ mode: "effort", efforts: levels, defaultLevel, effortMap: row.reasoning_effort_map, ...(typeof row.reasoning_required === "boolean" ? { requiresEffort: row.reasoning_required } : {}) });
+  const thinkingConfig = reasoning === false ? undefined : parseModelThinkingConfig(row.thinking) ?? parseModelThinkingConfig({ mode: "effort", efforts: levels, defaultLevel, effortMap: row.reasoning_effort_map, ...(typeof row.reasoning_required === "boolean" ? { requiresEffort: row.reasoning_required } : {}) });
   const image = probeImageInput(row) ?? (typeof probeRecord(row.capabilities)?.vision === "boolean" ? probeRecord(row.capabilities)!.vision as boolean : undefined);
   const nativeInfo = probeRecord(row.model_info);
   const judge = row.type === "decision" || row.mode === "decisions" || nativeInfo?.mode === "decisions";
   return {
+    ...(typeof row.api === "string" ? { api: row.api } : {}),
     ...(thinkingConfig ? { thinkingConfig, reasoning: true } : {}),
     ...(judge ? { kind: "judge" as const, api: "openai-decisions" } : parseModelKind(row.kind) === undefined ? {} : { kind: parseModelKind(row.kind)! }),
     ...(typeof row.webSearch === "string" && row.webSearch.trim() ? { webSearch: row.webSearch } : {}),
@@ -545,7 +548,7 @@ export function parseDiscoveryModels(payload: unknown, advertisedReasoning = tru
         // Google Generative AI names models `models/<id>` and carries the
         // human label in `displayName`; Ollama's `name` already is the id.
         const googleId = rawName?.startsWith("models/") === true ? rawName.slice("models/".length) : undefined;
-        const id = googleId ?? rawName ?? (typeof row.model === "string" ? row.model : typeof row.id === "string" ? row.id : "");
+        const id = googleId ?? (typeof row.id === "string" ? row.id : rawName ?? (typeof row.model === "string" ? row.model : ""));
         const label = typeof row.displayName === "string"
           ? row.displayName
           : googleId ?? rawName ?? (typeof row.id === "string" ? row.id : undefined);
@@ -2629,6 +2632,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       let apiKey = input.apiKey;
       let api = input.api;
       let discoveryType = input.discoveryType;
+      let transport = input.transport;
       let advertisedReasoning = input.advertisedReasoning !== false;
       let timeoutMs = input.timeoutMs ?? TEST_TIMEOUT_MS;
       if (apiKey) {
@@ -2645,6 +2649,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           const file = await readModelsFile(paths.modelsPath);
           const raw = asRecord((asRecord(file.root.providers) ?? {})[input.providerId]) ?? {};
           if (!endpointUrl) endpointUrl = stringOf(raw.baseUrl);
+          if (transport === undefined && raw.transport === "pi-native") transport = "pi-native";
           if (!api) api = stringOf(raw.api);
           if (!apiKey) {
             const yamlAuth = stringOf(raw.auth);
@@ -2680,8 +2685,12 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       // With a discovery type the runtime protocol dictates the endpoint
       // (Ollama tags, LiteLLM model info); without one the wire API does, which
       // is what the editor's model fetch uses for ordinary providers.
-      const listRequest = modelListRequest(endpointUrl, api ?? "openai-completions", apiKey);
-      const urls = discoveryType === "ollama"
+      const listRequest = transport === "pi-native"
+        ? { urls: [`${endpointUrl.replace(/\/+$/, "")}/v1/pi/models`], headers: { Accept: "application/json", ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) } }
+        : modelListRequest(endpointUrl, api ?? "openai-completions", apiKey);
+      const urls = transport === "pi-native"
+        ? listRequest.urls
+        : discoveryType === "ollama"
         ? [ollamaTagsUrl(endpointUrl)]
         : discoveryType === "litellm"
           ? litellmInfoUrls(endpointUrl)
@@ -2701,8 +2710,10 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           lastStatus = response.status;
           if (response.status < 200 || response.status >= 300) continue;
           const payload = await response.json().catch(() => null);
-          let models = parseDiscoveryModels(payload, advertisedReasoning);
-          if (discoveryType === "lm-studio") {
+          const gatewayRows = probeRecord(payload)?.models;
+          const scopedPayload = transport === "pi-native" && Array.isArray(gatewayRows) ? { models: gatewayRows.filter(row => probeRecord(row)?.provider === input.providerId) } : payload;
+          let models = parseDiscoveryModels(scopedPayload, advertisedReasoning);
+          if (transport !== "pi-native" && discoveryType === "lm-studio") {
             const nativeBase = endpointUrl.replace(/\/$/, "").replace(/\/v1$/, "");
             const metadata = new Map<string, Record<string, unknown>>();
             for (const nativePath of ["/api/v0/models", "/api/v1/models"]) {

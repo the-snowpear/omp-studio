@@ -227,6 +227,7 @@ export interface SessionHistoryEntry {
   readonly status: SessionHistoryStatus;
   /** OMP v18 global session pin state; optional for older Hosts. */
   readonly pinned?: boolean;
+  readonly waitingForApproval?: boolean;
 }
 
 export interface SessionHistoryMatch {

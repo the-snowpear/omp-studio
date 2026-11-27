@@ -67,6 +67,7 @@ export type ConversationResetBoundaryItem = {
  */
 export type ConversationMessageError = {
   message: string;
+  source?: "provider" | "agentLoop";
   /** Provider HTTP status when the failure came from a request. */
   status?: number;
   provider?: string;
@@ -334,6 +335,7 @@ export type ConversationRuntimeEvent =
     }
   | {
       kind: "conversation.tool.started";
+      parentToolCallId?: string;
       presentation?: "reply";
       sessionId: SessionId;
       turnId: string;

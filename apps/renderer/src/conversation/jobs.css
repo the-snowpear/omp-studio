@@ -164,3 +164,12 @@
   .step-rail.ji-steps, .ji-steps-empty { padding-left: var(--sp-12); }
   .ji-actions-log { margin-left: var(--sp-12); }
 }
+.ji-streams { padding: var(--sp-8) var(--sp-12); }
+.ji-streams label { display: flex; align-items: center; gap: var(--sp-8); font-size: var(--fs-11); color: var(--text-3); }
+.ji-streams .select { flex: 1; min-width: 0; }
+.ji-waiting { color: var(--amber); padding: var(--sp-8) var(--sp-12); margin: 0; font-size: var(--fs-12); }
+
+.ji-input { display: grid; gap: var(--sp-8); padding: var(--sp-12); border-top: 1px solid var(--border); }
+.ji-input label { display: grid; gap: var(--sp-6); font-size: var(--fs-12); }
+.ji-input-actions { display: flex; gap: var(--sp-8); }
+.ji-input .ji-note, .ji-input .ji-error { margin: 0; }

@@ -133,7 +133,7 @@ export class EvaluationRatchetRunner {
 	async prepare(): Promise<void> {
 		if (this.spec.assist) {
 			await this.#agent(
-				`Prepare the evaluation described below in the isolated workspace. Read xd://eval/ratchet and use its native API. Prepare inputs, runner, grader, split and plan; ask the user for missing requirements through the native ask tool. Stop before baseline execution or hillclimbing. Do not approve on the user's behalf.\n${JSON.stringify(this.spec)}`,
+				`Prepare the evaluation described below in the isolated workspace. Read help://eval/ratchet and use its native API. Prepare inputs, runner, grader, split and plan; ask the user for missing requirements through the native ask tool. Stop before baseline execution or hillclimbing. Do not approve on the user's behalf.\n${JSON.stringify(this.spec)}`,
 				true,
 			);
 		} else await this.configure(this.spec);
@@ -241,7 +241,7 @@ export class EvaluationRatchetRunner {
 		if (this.spec.costLimit !== undefined && this.saved.cost >= this.spec.costLimit)
 			throw new Error("The configured cost threshold was reached");
 		const assignment = pilot
-			? `Read xd://eval/ratchet. For flow ${JSON.stringify(this.spec.flow)}, execute only the next baseline or outstanding variant using check(), the resolved runner command, and gate(). Repair no material without a new user review. Report the native result and stop after this one variant.`
+			? `Read help://eval/ratchet. For flow ${JSON.stringify(this.spec.flow)}, execute only the next baseline or outstanding variant using check(), the resolved runner command, and gate(). Repair no material without a new user review. Report the native result and stop after this one variant.`
 			: prompt.render(ratchetKickoff, {
 					request: `Continue existing approved flow ${this.spec.flow}. ${this.spec.objective}`,
 					tools: ["eval", "task", "ask"],

@@ -75,3 +75,15 @@ export function previewArchiveDetail(id: string, zh = isZh()): NativeArchiveDeta
     truncated: false,
   };
 }
+
+export function previewArchiveTranscript(id: string, zh: boolean): import("@omp-studio/studio-protocol").NativeArchiveTranscript {
+ const row = previewArchiveDetail(id, zh);
+ return { turns: 3, records: 12, omitted: 0, detail: { user: "full", assistant: "normal", thinking: "brief", call: "normal", result: "brief" },
+ text: zh ? `#1 · 用户\n${row.prompts[0]?.text ?? "检查会话状态"}\n\n助手\n已检查会话状态与图片身份。\n\n#2 · bash\nnpm run check -- --only renderer\n\n结果：检查通过。` : `#1 · User\n${row.prompts[0]?.text ?? "Check session state"}\n\nAssistant\nVerified session state and image identities.\n\n#2 · bash\nnpm run check -- --only renderer\n\nResult: checks passed.` };
+}
+export function previewArchiveActivity(view: "calls" | "grep" | "stats", zh: boolean): import("@omp-studio/studio-protocol").NativeArchiveCall[] | import("@omp-studio/studio-protocol").NativeArchiveGrepHit[] | import("@omp-studio/studio-protocol").ArchiveQueryResultMap["archive.stats.read"]["rows"] {
+ if (view === "stats") return [{ key: "read", calls: 18, errors: 0 }, { key: "bash", calls: 6, errors: 1 }, { key: "edit", calls: 4, errors: 0 }];
+ const origin = { session: "sess-7c2e91", agent: "Reviewer", project: "omp-studio", at: "2026-10-08T00:40:00.000Z", tool: "bash" };
+ if (view === "grep") return [{ ...origin, source: "result", text: zh ? "队列图片恢复检查通过。" : "Queue image recovery checks passed.", match: zh ? "通过" : "passed" }];
+ return [{ ...origin, callId: "archive-call-1", args: { command: "npm run check -- --only renderer" }, result: zh ? "检查通过" : "Checks passed", isError: false, model: "default" }];
+}

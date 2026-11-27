@@ -237,6 +237,7 @@ export function createSharedDesktopHostFactory(
   launch: SharedHostLaunch,
   hooks: Pick<
     ProductionHostOptions,
+    | "onPtyInputWait"
     | "beforeCreate"
     | "afterCreate"
     | "loginEnvironment"
@@ -265,6 +266,8 @@ export function createSharedDesktopHostFactory(
         if (method !== "host.call")
           throw new Error("Unsupported desktop callback");
         switch (call.action) {
+          case "ptyInputWait":
+            return hooks.onPtyInputWait?.(call.input);
           case "pickDirectory":
             return hooks.pickDirectory?.();
           case "openUrl":

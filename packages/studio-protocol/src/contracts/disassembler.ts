@@ -1,6 +1,6 @@
 export const DISASSEMBLER_VIEWS = ["overview", "pseudocode", "asm", "functions", "strings", "imports", "exports", "xrefs"] as const;
 export type DisassemblerView = (typeof DISASSEMBLER_VIEWS)[number];
-export type DisassemblerEngine = "ida" | "ghidra";
+export type DisassemblerEngine = "ida" | "ghidra" | "binja";
 export type DisassemblerBackend = DisassemblerEngine | "auto" | "none";
 
 export interface DisassemblerBackendStatus {
@@ -31,6 +31,8 @@ export interface DisassemblerStatus {
   backend: DisassemblerBackend;
   maxOpen: number;
   idleCloseSec: number;
+  binjaInstallDir?: string;
+  binjaPython?: string;
   activeBackend?: DisassemblerEngine;
   backends: Record<DisassemblerEngine, DisassemblerBackendStatus>;
   available: boolean;
@@ -56,7 +58,7 @@ export type DisassemblerEdit =
 
 export type DisassemblerOperation = { sessionId: string } & (
   | { kind: "disassembler.status" }
-  | { kind: "disassembler.configure"; backend: DisassemblerBackend; maxOpen: number; idleCloseSec: number }
+  | { kind: "disassembler.configure"; backend: DisassemblerBackend; maxOpen: number; idleCloseSec: number; binjaInstallDir?: string; binjaPython?: string }
   | { kind: "disassembler.metadata.read"; path: string; arch?: string }
   | { kind: "disassembler.open"; path: string; arch?: string }
   | { kind: "disassembler.close"; id: string; save?: boolean }

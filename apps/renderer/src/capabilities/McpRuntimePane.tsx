@@ -76,7 +76,7 @@ function ServerRow({ server, paneId, zh, props, preview, authAvailable, onComple
         <strong>{server.tools}</strong><span>{zh ? "个工具" : "tools"}</span>{hasTools ? <Icon name="chevron-d" extra="xs" /> : null}
       </button>
       {preview || authAvailable ? <McpAuthActions client={props.client} sessionId={props.sessionId} name={server.name}
-        available={authAvailable} preview={preview} zh={zh} authSupported={server.transport !== "stdio"} previewScope={server.source?.level === "project" ? "project" : "user"} onComplete={onComplete} /> : <span className="runtime-mcp-actions-unavailable">{zh ? "连接操作不可用" : "Connection actions unavailable"}</span>}
+        available={authAvailable} preview={preview} zh={zh} authSupported={server.transport !== "stdio"} previewScope={server.source?.level === "project" ? "project" : "user"} challenge={server.authChallenge} onComplete={onComplete} /> : <span className="runtime-mcp-actions-unavailable">{zh ? "连接操作不可用" : "Connection actions unavailable"}</span>}
       {server.replacedByBuiltin || server.evalNamespaceUri ? <div className="runtime-mcp-notes">
         {server.replacedByBuiltin ? <div className="runtime-mcp-note is-replaced">
           <Icon name="layers" extra="sm" />
@@ -92,6 +92,7 @@ function ServerRow({ server, paneId, zh, props, preview, authAvailable, onComple
           <code className="runtime-mcp-note-uri">{server.evalNamespaceUri}</code>
         </div> : null}
       </div> : null}
+      {server.runtime ? <div className="runtime-mcp-notes"><div className="runtime-mcp-note"><Icon name="server" extra="sm" /><span className="runtime-mcp-note-copy"><b>{server.runtime.era === "modern" ? (zh ? "支持共享的连接" : "Shareable connection") : (zh ? "会话独立连接" : "Session-bound connection")}</b><small>{server.runtime.pid === undefined ? "" : `PID ${server.runtime.pid} · `}{zh ? `${server.runtime.links} 个会话绑定` : `${server.runtime.links} session bindings`} · {({ idle: zh ? "空闲" : "Idle", starting: zh ? "启动中" : "Starting", running: zh ? "运行中" : "Running", failed: zh ? "失败" : "Failed" })[server.runtime.state]}</small></span></div>{server.runtime.exit?.stderr ? <p className="runtime-mcp-failure">{server.runtime.exit.stderr}</p> : null}</div> : null}
       {server.error ? <p className="runtime-mcp-failure"><Icon name="alert-c" extra="xs" /><span>{server.error}</span></p> : null}
       {open && hasTools ? <div id={toolsId} className="runtime-mcp-tools-region"><ServerTools server={server} zh={zh} /></div> : null}
     </article>
@@ -126,7 +127,15 @@ export function McpRuntimePane(props: RuntimeCatalogProps & { authAvailable?: bo
   }, [preview, sessionId, available, client]);
 
   useEffect(() => {
-    if (preview) setStatus(getPreviewMcpRuntime(zh));
+    if (preview) setStatus(current => {
+      const localized = getPreviewMcpRuntime(zh);
+      if (!current) return localized;
+      return { ...current, servers: current.servers.map(server => {
+        const fixture = localized.servers.find(row => row.name === server.name);
+        if (!fixture) return server;
+        return { ...server, ...(server.error && fixture.error ? { error: fixture.error } : {}), ...(server.tools === fixture.tools && fixture.toolInfo ? { toolInfo: fixture.toolInfo } : {}) };
+      }) };
+    });
   }, [preview, zh]);
 
   useEffect(() => {
@@ -153,7 +162,7 @@ export function McpRuntimePane(props: RuntimeCatalogProps & { authAvailable?: bo
           hasLoadedRef.current = true;
           setStatus(value);
           setError("");
-          keepPolling = !value.available || !value.settled || value.servers.some((server) => server.state === "pending");
+          keepPolling = true;
         }
       } catch (cause) {
         if (active) setError(hostErrorMessage(cause, zhRef.current ? "读取会话连接失败" : "Could not read session connections"));
@@ -178,7 +187,7 @@ export function McpRuntimePane(props: RuntimeCatalogProps & { authAvailable?: bo
       clearTimer();
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [invoke, preview, sessionId, available, visible, refreshRevision]);
+  }, [invoke, preview, sessionId, available, visible, refreshRevision, zh]);
 
   const onComplete = (result: McpAuthResult) => {
     if (preview) setStatus((current) => current ? applyPreviewMcpAction(current, result, zh) : current);
@@ -207,6 +216,7 @@ export function McpRuntimePane(props: RuntimeCatalogProps & { authAvailable?: bo
       {status?.available ? <>
         <div className="runtime-mcp-overview">
           <div className="runtime-mcp-overview-title"><span className={`runtime-mcp-state ${error ? "state-disconnected" : status.ready ? "state-ready" : status.settled ? "state-failed" : "state-pending"}`}><span aria-hidden="true" />{error ? (zh ? "等待刷新" : "Awaiting refresh") : overall}</span><span className="runtime-mcp-startup"><Icon name="clock" extra="xs" />{zh ? "启动等待" : "Startup wait"}<code>{status.startupTimeoutMs === 0 ? (zh ? "等待全部连接" : "Wait for all") : `${status.startupTimeoutMs} ms`}</code></span></div>
+          <p className="runtime-mcp-startup">{status.shared === undefined ? (zh ? "共享策略未知" : "Sharing policy unknown") : status.shared ? (zh ? "已启用共享 MCP" : "Shared MCP enabled") : (zh ? "使用私有 MCP 连接" : "Private MCP connections")}{status.idleStopMinutes === undefined ? "" : zh ? ` · 空闲 ${status.idleStopMinutes} 分钟后停止` : ` · Stop after ${status.idleStopMinutes} idle minutes`}</p>
           <div className="runtime-mcp-metrics">
             <div className="runtime-mcp-metric"><strong>{ready}<small> / {servers.length}</small></strong><span>{zh ? "已就绪服务器" : "Servers ready"}</span></div>
             <div className="runtime-mcp-metric"><strong>{toolCount}</strong><span>{zh ? "已加载工具" : "Loaded tools"}</span></div>

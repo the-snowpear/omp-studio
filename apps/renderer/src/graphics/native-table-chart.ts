@@ -1,10 +1,10 @@
-import { analyzeTable } from "../../../../omp-patch/vendor/oh-my-pi/packages/tui/src/charts/table-data";
+import { analyzeTable } from "../../../../omp-patch/vendor/oh-my-pi/packages/coding-agent/src/auto-graph/table-data";
 import {
   buildChart,
   planChart,
   worthCharting,
-} from "../../../../omp-patch/vendor/oh-my-pi/packages/tui/src/charts/chart-plan";
-import { renderChartSvg } from "../../../../omp-patch/vendor/oh-my-pi/packages/tui/src/charts/chart-svg";
+} from "../../../../omp-patch/vendor/oh-my-pi/packages/coding-agent/src/auto-graph/chart-plan";
+import { renderChartSvg } from "../../../../omp-patch/vendor/oh-my-pi/packages/coding-agent/src/auto-graph/chart-svg";
 export interface NumericTableData {
   header: string[];
   rows: string[][];

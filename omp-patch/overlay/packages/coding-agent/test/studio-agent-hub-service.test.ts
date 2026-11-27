@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentRef, AgentStatus, RegistryEvent } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import type { TaskStepState } from "@oh-my-pi/pi-tui/tools/task";
+import type { TaskStepState } from "@oh-my-pi/pi-coding-agent/task/task-details";
 import {
 	StudioAgentHubError,
 	StudioAgentHubService,

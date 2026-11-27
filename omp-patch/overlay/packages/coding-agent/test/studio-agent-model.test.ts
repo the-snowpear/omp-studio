@@ -23,6 +23,7 @@ test("agent model details use native routing and only inspect descendants of the
 		activeToolExecutionUpdates: () => [],
 		sessionManager: manager,
 		model: getBundledModel("anthropic", "claude-sonnet-4-5")!,
+		modelRegistry: { getAvailable: () => [getBundledModel("anthropic", "claude-sonnet-4-5")!] },
 		servingModel: { selector: "backup/model:medium", modelIdentity: "backup/model", isFallback: true },
 		configuredThinkingLevel: () => "auto",
 		thinkingLevel: "medium",

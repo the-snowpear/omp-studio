@@ -5,7 +5,7 @@ export function previewShellPresentation(preferences: ShellVizPreferences): Shel
   const cursor = preferences.cursor ?? 4;
   const lines = preferences.view === "raw" ? ["cd ./workspace", "FILES=$(rg --files src)", "npm run check -- --only renderer"] : ["with directory('./workspace'):", "    FILES = run('rg --files src')", "    run('npm run check -- --only renderer')"];
   const rows: ShellVizPresentation["rows"] = lines.map((text, index) => ({ id: String(index), depth: 0, node: `0:0:${index}`, segments: [{ text, state: cursor > index ? "ok" : "pending" }], effects: [], ...(index === 1 && preferences.layers.inline ? { annotations: [{ name: "FILES", value: "src/App.tsx …" }] } : {}) }));
-  return { preferences, rows, original: preferences.split ? [{ id: "raw", depth: 0, segments: [{ text: "npm run check -- --only renderer" }], effects: [] }] : [], output: cursor >= 4 ? "All renderer checks passed.\n" : "Checking renderer…\n", executing: false, watches: [], timeline: { length: 4, cursor, elapsedNs: cursor * 1000000000, durationNs: 4000000000 } };
+  return { streams: [{ id: "file:1", kind: "file", producer: "npm run check", consumer: "checks.log", bytes: 2048, open: false, modified: Date.now() }], ...(preferences.streamId ? { selectedStreamId: preferences.streamId } : {}), preferences, rows, original: preferences.split ? [{ id: "raw", depth: 0, segments: [{ text: "npm run check -- --only renderer" }], effects: [] }] : [], output: cursor >= 4 ? "All renderer checks passed.\n" : "Checking renderer…\n", executing: false, watches: [], timeline: { length: 4, cursor, elapsedNs: cursor * 1000000000, durationNs: 4000000000 } };
 }
 
 export const PREVIEW_EXTENSION_SCHEMES = ["studio-demo"] as const;

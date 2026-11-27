@@ -310,15 +310,14 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
   const residentModel = state.clientState?.entities.residents;
   const residentRows = residentRowsOf(residentModel);
   const hasResidentModel = residentModel !== undefined && residentModel !== null;
-  const threadWaitForSession = (sessionId: SessionId | undefined) => waitKindFromLive({
+  const threadWaitForSession = (sessionId: SessionId | undefined, persistedWaitingForApproval?: boolean) => waitKindFromLive({
     ...(sessionId === undefined ? {} : { sessionId }),
-    ...(hasResidentModel
-      ? { residents: residentRows }
-      : {
-        pending: pendingInteraction,
-        ...(liveSnapshot?.sessionId === undefined ? {} : { snapshotSessionId: liveSnapshot.sessionId }),
-        ...(liveSnapshot?.plan?.status === undefined ? {} : { planStatus: liveSnapshot.plan.status }),
-      }),
+    ...(hasResidentModel ? { residents: residentRows } : {}),
+    pending: pendingInteraction,
+    ...(liveSnapshot?.sessionId === undefined ? {} : { snapshotSessionId: liveSnapshot.sessionId }),
+    ...(liveSnapshot?.plan?.status === undefined ? {} : { planStatus: liveSnapshot.plan.status }),
+    ...(liveSnapshot?.waitingForApproval === undefined ? {} : { snapshotWaitingForApproval: liveSnapshot.waitingForApproval }),
+    ...(persistedWaitingForApproval === undefined ? {} : { persistedWaitingForApproval }),
   });
   // Explorer git 徽章：真实模式读取选中项目的仓库状态；预览模式的徽章来自 fixtures，不查 Host。
   const gitWorkspaceId = preview || !chrome.selectedProject ? undefined : (chrome.selectedProject.id as WorkspaceId);
@@ -812,7 +811,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                           ? liveSnapshotTitle
                           : undefined;
                         const resolvedEntryTitle = sidebarThreadTitle(entry, provisional, t("conversation.untitledSession"), entryLiveTitle);
-                        const wait = threadWaitForSession(entry.sessionId);
+                        const wait = threadWaitForSession(entry.sessionId, entry.waitingForApproval);
                         const running = threadRunningFromLive({
                           ...(entry.sessionId === undefined ? {} : { sessionId: entry.sessionId }),
                           ...(hasResidentModel

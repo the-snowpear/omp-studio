@@ -141,3 +141,10 @@
 .service-scope .seg button.active .service-scope-count { color: var(--accent); }
 .service-name-line { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--sp-6); min-width: 0; }
 .service-name-line .chip { gap: var(--sp-4); }
+.leftover-processes { border-top: 1px solid var(--border); padding-top: var(--sp-12); }
+.leftover-processes h4 { margin: 0; flex: 1; }
+.leftover-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-12); padding-block: var(--sp-12); border-bottom: 1px solid var(--border); }
+.leftover-command { display: grid; gap: var(--sp-4); flex: 1 1 180px; min-width: 0; }
+.leftover-command code { overflow-wrap: anywhere; font-size: var(--fs-12); }
+.leftover-row form { display: flex; flex-wrap: wrap; gap: var(--sp-6); flex: 1 1 200px; }
+.leftover-row input { min-width: 100px; flex: 1; }

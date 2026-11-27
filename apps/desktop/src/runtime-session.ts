@@ -94,6 +94,7 @@ import { UpdateRestartBlockedError, updateRestartBlockerForSnapshot } from "./up
 import { desktopText, getDesktopLanguage, onDesktopLanguageChange } from "./desktop-language-shared.js";
 
 export interface DesktopRuntimeSessionPortOptions {
+  readonly onPtyInputWait?: (wait: NonNullable<OperatorStateSnapshot["ptyInputWaits"]>[number]) => void;
   readonly managedBrowser?: boolean;
   readonly memoryCredentials?: MemoryCredentialProvider;
   /** Bridge token state lives under `<profile>/<bridgeDirectoryName>`; defaults to `bridge`. */
@@ -400,9 +401,15 @@ export function createDesktopRuntimeSessionPort(
     const current = session.controller.publication();
     resident.lastCommitSeq = current?.commitSeq ?? resident.lastCommitSeq;
     resident.lastActivityAt = current?.publishedAt ?? new Date().toISOString();
+    const waiting = new Set<string>();
     resident.unsubscribePublication = session.onPublication((publication) => {
       if (publication.commitSeq <= resident.lastCommitSeq) return;
       resident.lastCommitSeq = publication.commitSeq;
+      const waits = publication.snapshot.ptyInputWaits ?? [];
+      const nextWaiting = new Set(waits.filter(wait => wait.waiting).map(wait => wait.toolCallId));
+      for (const wait of waits) if (wait.waiting && wait.notify && !waiting.has(wait.toolCallId)) options.onPtyInputWait?.(wait);
+      waiting.clear();
+      for (const id of nextWaiting) waiting.add(id);
       resident.lastActivityAt = publication.publishedAt;
       if (publication.snapshot.sessionId !== resident.sessionId) {
         void serialized(async () => {

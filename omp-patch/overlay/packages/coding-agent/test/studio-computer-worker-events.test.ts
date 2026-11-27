@@ -114,7 +114,7 @@ test("worker emits native method and generated screenshot evidence even when the
 			captureMaxWidth: 1280,
 			captureMaxHeight: 896,
 			readOnly: true,
-			backgroundFallback: "refuse",
+			takeover: "refuse",
 			activity: { runId: "real-run", sessionId: "s", toolCallId: "outer-eval" },
 		},
 	});
@@ -148,7 +148,7 @@ test("worker projects nested typing and drag reports plus direct focus reports w
 			captureMaxWidth: 1280,
 			captureMaxHeight: 896,
 			readOnly: false,
-			backgroundFallback: "takeover",
+			takeover: "fallback",
 			activity: { runId: "metadata", sessionId: "s" },
 		},
 	});

@@ -94,6 +94,36 @@ function kinds(events: ConversationRuntimeEvent[]): string[] {
 	return events.map(event => event.kind);
 }
 
+test("distinguishes agent-loop failures and preserves a nested tool's parent identity", () => {
+	const { projector, events } = createProjector();
+	const message = assistant([{ type: "toolCall", id: "eval-parent", name: "eval", arguments: {} }]);
+	projector.project({ type: "message_start", message });
+	projector.project({ type: "message_end", message });
+	projector.project({ type: "tool_execution_start", toolCallId: "eval-parent", toolName: "eval", args: {} });
+	projector.project({
+		type: "tool_execution_start",
+		toolCallId: "nested",
+		parentToolCallId: "eval-parent",
+		toolName: "bash",
+		args: { command: "pwd" },
+	});
+	expect(
+		events.find(event => event.kind === "conversation.tool.started" && event.toolCallId === "nested"),
+	).toMatchObject({ parentToolCallId: "eval-parent", messageId: "msg-1" });
+	const failure = assistant([], {
+		stopReason: "error",
+		errorMessage: "Tool execution requirement was not fulfilled",
+		errorFromAgentLoop: true,
+		timestamp: TS + 1,
+	});
+	projector.project({ type: "message_start", message: failure });
+	projector.project({ type: "message_end", message: failure });
+	expect(events.findLast(event => event.kind === "conversation.message.completed")).toMatchObject({
+		error: { source: "agentLoop" },
+	});
+	projector.dispose();
+});
+
 test("background output remains bound to its original turn and retains cancellation for reconnect", () => {
 	const { projector, events } = createProjector();
 	try {

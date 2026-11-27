@@ -1,4 +1,4 @@
-import type { LoopConditionConfig, LoopLimitRuntime } from "@oh-my-pi/pi-tui/status-line/loop";
+import type { LoopConditionConfig, LoopLimitRuntime } from "../../modes/view-model/status-line/loop";
 import type { LoopConditionVerdict } from "../../modes/loop-condition";
 import {
 	consumeLoopLimitIteration,

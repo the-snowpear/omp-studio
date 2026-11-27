@@ -1,11 +1,11 @@
-import { expandModelMentionTags, type ModelMention } from "@oh-my-pi/pi-tui/prompt/model-mention-syntax";
-import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
+import { expandModelMentionTags, type ModelMention } from "../../session/model-mention-syntax";
+import { parseHtmlForm } from "../../tools/html-form/parse";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { AgentSession } from "../../session/agent-session";
 import type { SessionTreeNode } from "../../session/session-entries";
 import { createAskFormResult, recoverAskHtml } from "../../tools/ask";
 import { isRecord } from "@oh-my-pi/pi-utils";
-import type { AskToolDetails } from "@oh-my-pi/pi-tui/tools/ask";
+import type { AskToolDetails } from "../../tools/details/ask";
 import type { StudioInteractionPort } from "./interaction-port";
 import { presentHtmlForm } from "./form-presentation";
 import { runtimeText } from "../locale";

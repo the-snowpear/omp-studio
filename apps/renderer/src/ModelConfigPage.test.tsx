@@ -454,6 +454,17 @@ function plainText(value: string): string {
 }
 
 describe("ModelConfigPage 自动获取模型", () => {
+  it("probes an unsaved Auth Gateway transport without persisting the provider", async () => {
+    const { client, container } = await openEditor();
+    const advanced = container.querySelector<HTMLDetailsElement>("details.mp-advanced")!;
+    advanced.open = true;
+    const transport = Array.from(advanced.querySelectorAll(".field")).find(field => field.textContent?.includes("Transport"))!;
+    selectOption(within(transport as HTMLElement).getByRole("combobox"), "pi-native");
+    fireEvent.click(screen.getByRole("button", { name: /自动获取模型/ }));
+    await waitFor(() => expect(client.command).toHaveBeenCalledWith("models.provider.probe", expect.objectContaining({ providerId: "gateway", transport: "pi-native" })));
+    expect(client.command.mock.calls.some(([kind]) => kind === "models.yml.write")).toBe(false);
+  });
+
   it("applies gray recommendations to the model draft and the provider YAML save, including provenance", async () => {
     const { client, container } = await openEditor();
     fireEvent.click(screen.getByRole("button", { name: "添加模型" }));
@@ -485,6 +496,7 @@ describe("ModelConfigPage 自动获取模型", () => {
       providerId: "gateway",
       endpointUrl: "https://gw.example.com/v1",
       api: "openai-completions",
+      transport: "direct",
       apiKey: "sk-live",
       headers: { "X-Org-Id": "org-1" },
       advertisedReasoning: true,

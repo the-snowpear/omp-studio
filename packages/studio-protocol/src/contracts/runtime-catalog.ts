@@ -1,6 +1,21 @@
+import type { McpAuthChallengeState } from "./mcp-auth.js";
 export interface PromptTemplateRow { id: string; name: string; description: string; source: string; version: string }
+export interface McpUpstreamRuntimeExit {
+  code?: number;
+  signal?: number;
+  stderr: string;
+}
+export interface McpServerRuntimeStatus {
+  era: "legacy" | "modern";
+  state: "idle" | "starting" | "running" | "failed";
+  pid?: number;
+  links: number;
+  exit?: McpUpstreamRuntimeExit;
+}
 export interface McpRuntimeStatus {
   available: boolean; startupTimeoutMs: number; ready: boolean; settled: boolean;
+  shared?: boolean;
+  idleStopMinutes?: number;
   servers: Array<{
     name: string;
     replacedByBuiltin?: string;
@@ -10,6 +25,8 @@ export interface McpRuntimeStatus {
     transport?: "stdio" | "http" | "sse";
     source?: { providerName: string; level: "user" | "project" | "native" };
     error?: string;
+    runtime?: McpServerRuntimeStatus;
+    authChallenge?: McpAuthChallengeState;
     toolInfo?: Array<{ name: string; mcpServerName: string; mcpToolName: string; description?: string; readOnlyHint?: boolean }>;
   }>;
   total: number;

@@ -1,7 +1,7 @@
 import * as crypto from "node:crypto";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import type { ToolCallContext } from "@oh-my-pi/pi-agent-core";
-import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
+import { parseHtmlForm } from "../tools/html-form/parse";
 import { presentHtmlForm } from "./services/form-presentation";
 import { validateAskAnswerPayload } from "./ask-attachments-protocol";
 import { runtimeText } from "./locale";
@@ -13,20 +13,25 @@ import type {
 	ExtensionApprovalAnswer,
 	ExtensionApprovalGrant,
 	ExtensionApprovalPrompt,
+	ExtensionCustomFactory,
+	ExtensionCustomOptions,
 	ExtensionFormDialogOptions,
 	ExtensionFormDialogResult,
+	ExtensionTheme,
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
 	ExtensionUISelectItem,
-	ExtensionUiComponentFactory,
+	ExtensionUiFactory,
 	ExtensionWidgetContent,
 	ExtensionWidgetOptions,
 	TerminalInputHandler,
 } from "../extensibility/extensions/types";
 import { getExtensionUISelectOptionLabel } from "../extensibility/extensions/types";
-import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-tui/theme/loader";
+import { builtinThemes } from "@oh-my-pi/pi-tui/theme/loader";
+import type { Theme } from "@oh-my-pi/pi-tui/theme/contract";
 import type { ThemeJson } from "@oh-my-pi/pi-tui/theme/schema";
-import type { Theme } from "@oh-my-pi/pi-tui/theme/theme";
+import { createTheme } from "@oh-my-pi/pi-tui/theme/theme";
+import { extensionTheme } from "../ui/extensions/render-output";
 import type { ToolUiFactory } from "../tools/context";
 import { ignoreSettle } from "../thread/services/support";
 import { StudioInteractionError, type StudioInteractionGateway } from "./services/interaction-port";
@@ -152,13 +157,14 @@ export function mapAskDialogValue(
  * never touch the Bridge.
  */
 export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
+	readonly ptyMode = "headless" as const;
 	// Stock React rendering keeps the original transcript; TUI component redraws have no effect.
 	rerenderMessage(_timestamp: number): void {}
 	refreshTranscript(_ids: readonly string[]): void {}
 	getLinkClicksAvailable(): boolean {
 		return true;
 	}
-	#fallbackTheme: Theme | undefined;
+	#fallbackTheme: ExtensionTheme | undefined;
 	readonly #gatewayGeneration: number | undefined;
 
 	constructor(
@@ -371,11 +377,11 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 		// Widgets are not supported on the Remote surface.
 	}
 
-	setFooter(_factory: ExtensionUiComponentFactory | undefined): void {
+	setFooter(_factory: ExtensionUiFactory | undefined): void {
 		// Custom footer components are not supported on the Remote surface.
 	}
 
-	setHeader(_factory: ExtensionUiComponentFactory | undefined): void {
+	setHeader(_factory: ExtensionUiFactory | undefined): void {
 		// Custom header components are not supported on the Remote surface.
 	}
 
@@ -383,8 +389,11 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 		// Title control is not supported on the Remote surface.
 	}
 
-	custom<T>(): Promise<T> {
-		throw new Error("custom UI is not supported by the Studio remote UI");
+	custom<T>(_factory?: ExtensionCustomFactory<T>, options?: ExtensionCustomOptions): Promise<T> {
+		options?.signal?.throwIfAborted();
+		throw new Error(
+			runtimeText("Studio 暂不支持扩展自定义终端界面。", "Studio does not support custom terminal extension UI."),
+		);
 	}
 
 	setEditorText(_text: string): void {
@@ -403,22 +412,14 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 		// Autocomplete composition is not supported on the Remote surface.
 	}
 
-	setEditorComponent(): void {
-		// Custom editor components are not supported on the Remote surface.
-	}
-
-	getEditorComponent(): undefined {
-		return undefined;
-	}
-
-	get theme(): Theme {
+	get theme(): ExtensionTheme {
 		// The module-level `theme` singleton is only assigned after TUI theme
 		// initialization; headless Studio contexts fall back to a static
 		// default so Ask helpers (e.g. the "Done selecting" label) never
 		// dereference an uninitialized global.
 		if (this.#fallbackTheme === undefined) {
-			const firstDefault = Object.values(getBuiltinThemes())[0];
-			this.#fallbackTheme = createTheme(firstDefault as ThemeJson);
+			const firstDefault = Object.values(builtinThemes())[0];
+			this.#fallbackTheme = extensionTheme(createTheme(firstDefault as ThemeJson));
 		}
 		return this.#fallbackTheme;
 	}
@@ -427,7 +428,7 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 		return Promise.resolve([]);
 	}
 
-	getTheme(_name: string): Promise<Theme | undefined> {
+	getTheme(_name: string): Promise<ExtensionTheme | undefined> {
 		return Promise.resolve(undefined);
 	}
 

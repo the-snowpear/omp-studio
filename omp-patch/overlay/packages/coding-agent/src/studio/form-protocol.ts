@@ -1,5 +1,5 @@
-import type { HtmlFormData, OptionNote } from "@oh-my-pi/pi-tui/html-form/data";
-import type { FormBlock, FormField, FormSpan } from "@oh-my-pi/pi-tui/html-form/parse";
+import type { HtmlFormData, OptionNote } from "../tools/html-form/data";
+import type { FormBlock, FormField, FormSpan } from "../tools/html-form/parse";
 
 /** Minimal Runtime wire mirror of the canonical Studio forms contract, using native field/data types. */
 export type InteractionFormField = FormField & { id: string; question: string };

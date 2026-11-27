@@ -6,7 +6,7 @@ import type { MCPManager } from "../../mcp/manager";
 import type { AgentSession } from "../../session/agent-session";
 import { clearApprovalGrants } from "../../tools/approval-cache";
 import { type RuntimeFeatureOperation } from "../runtime-features-protocol";
-import { inspectStudioJob } from "./job-inspect";
+import { inputStudioJob, inspectStudioJob } from "./job-inspect";
 import { StudioMcpAuthService } from "./mcp-auth-service";
 import { SessionControlError } from "./session-control-service";
 import { ownedStudioSessions } from "./owned-sessions";
@@ -66,8 +66,10 @@ export class StudioRuntimeFeatureService {
 				// Same effect as `/forget-approvals`: the approval-cache DB and every session's store.
 				clearApprovalGrants(this.session.settings.getAgentDir());
 				return { cleared: true };
+			case "jobs.input":
+				return inputStudioJob(this.session, operation.jobId, operation.expectedGeneration, operation.data);
 			case "jobs.inspect":
-				return inspectStudioJob(this.session, operation.jobId);
+				return inspectStudioJob(this.session, operation.jobId, operation.streamId);
 			case "mcp.auth.reauth":
 				return this.mcpAuth.reauth(operation.name);
 			case "mcp.auth.unauth":

@@ -90,6 +90,8 @@ import { useActivityRetry, useAwaitingTurn, useRunStreaming, useRunWindow } from
 import { deriveActivityStatus, hasLiveActivityProgress, isAbortEligible } from "../conversation/activityStatus";
 import { ConversationEmpty } from "../conversation/ConversationEmpty";
 import { ConversationPane } from "../conversation/ConversationPane";
+import { PtyWaitNotice } from "../conversation/PtyWaitNotice";
+import { previewPtyInputWaits } from "../preview/ptyWaitPreview";
 import { CommandBlockProvider } from "../conversation/CommandBlock";
 import { SubagentHoverProvider } from "../conversation/SubagentHoverPreview";
 import { AgentsDock } from "../agents/deck/AgentsDock";
@@ -2402,6 +2404,9 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
           </CommandBlockProvider>
           </InlineBtwContext.Provider></SpillViewer.Provider>
           <div className="composer-region" ref={computerApprovalRef}>
+            <PtyWaitNotice client={client} available={runtimeConnected && executionMatches && !connection?.resyncRequired} sessionId={preview ? "preview-session" : snapshot?.sessionId}
+              waits={preview ? previewPtyInputWaits(previewThreadId) : runtimeConnected && executionMatches && !connection?.resyncRequired ? snapshot?.ptyInputWaits : undefined}
+              onReveal={(toolCallId, wait) => preview ? revealConversationTarget(convoScrollerRef.current, { toolCallId }) : revealComputerAction({ sessionId: wait.sourceSessionId ?? wait.sessionId, toolCallId, ...(wait.sourceSessionId && wait.sourceSessionId !== wait.sessionId && wait.ownerAgentId ? { agentId: wait.ownerAgentId } : {}) })} />
             {/* 真实 pending Interaction 永远优先；预览关时 Plan Review 走 snapshot；预览开才用演示 Deck。 */}
             {deckInteraction ? (
               <InteractionDeck partialAsk={partialAsk}
@@ -3192,7 +3197,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
               ...(activeWorkspace === undefined ? {} : { project: { name: activeWorkspace.name, ...(activeWorkspace.root === undefined ? {} : { root: activeWorkspace.root }) } }),
               repository: realGit,
             })} />,
-        browser: visibility => <BrowserPane client={client} sessionId={snapshot?.sessionId} chatId={browserChatId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} visible={visibility.visible} capabilities={capabilities} />,
+        browser: visibility => <BrowserPane client={client} sessionId={snapshot?.sessionId} chatId={browserChatId} remote={executionTarget.id !== null} available={runtimeConnected && executionMatches && !connection?.resyncRequired} visible={visibility.visible} capabilities={capabilities} />,
         computer: visibility => <ComputerDockPane client={client} sessionId={computerSessionId} sessionName={viewedSessionName}
           scopeKey={computerScopeKey} available={runtimeConnected && executionMatches && !connection?.resyncRequired}
           visible={visibility.visible} width={visibility.width} height={visibility.height} capabilities={capabilities}

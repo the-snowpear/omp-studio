@@ -165,7 +165,7 @@ export function DisassemblerDatabaseTools({ client, sessionId, available, initia
 
   return <section className={`disassembler-browser ${databaseId ? "is-embedded" : ""}`} aria-label={zh ? "数据库视图与编辑" : "Database views and edits"}>
     {!databaseId ? <div className="disassembler-standalone-head">
-      <div><h3>{zh ? "数据库视图与编辑" : "Database views and edits"}</h3><p>{zh ? "由当前分析引擎（IDA Pro 或 Ghidra）提供。所有修改均先核对再执行。" : "Served by the active analysis engine (IDA Pro or Ghidra). Review every edit before execution."}</p></div>
+      <div><h3>{zh ? "数据库视图与编辑" : "Database views and edits"}</h3><p>{zh ? "由当前分析引擎（IDA Pro、Ghidra 或 Binary Ninja）提供。所有修改均先核对再执行。" : "Served by the active analysis engine (IDA Pro, Ghidra or Binary Ninja). Review every edit before execution."}</p></div>
       <div className="disassembler-browser-toolbar"><AppSelect className="select" aria-label={zh ? "IDA 数据库" : "IDA database"} value={selected} disabled={busy} onChange={event => setSelected(event.target.value)}>
         <option value="">{zh ? "选择数据库" : "Select database"}</option>{state?.databases.map(row => <option key={row.id} value={row.id}>{row.label} · {row.state}</option>)}
       </AppSelect><button className="btn outline small" disabled={!can("disassembler.status") || busy} onClick={() => void run(refresh)}><Icon name="refresh" />{zh ? "检测 / 刷新" : "Detect / refresh"}</button></div>
