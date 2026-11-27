@@ -23,7 +23,7 @@ npm run web -- pair
 
 在 **设置 → 常规与通知 → Web 访问** 中点击 **管理 Web 访问**，选择主机的局域网地址，导出 CA 证书。通过可信方式将证书传到自己的设备，核对界面中的 SHA-256 指纹，在系统或浏览器中安装并信任。之后使用界面生成的 HTTPS 配对链接。
 
-**显示 Web 控制条** 默认关闭；开启后，控制条默认停靠在工作台下方并保留独立空间，不遮挡审批或输入区。拖动左侧手柄可在窗口内自由移动，位置保存在当前设备上；缩小窗口时会保持在可见范围内。点击控制条的停靠按钮，或在设置中选择「回到底部」，可恢复底部停靠。手柄也支持方向键移动（Shift 加速）和 Home 键回到底部。可直接点击关闭按钮隐藏，设备管理和接管入口仍可从设置中打开。
+**显示 Web 控制条** 默认关闭；开启后，控制条默认停靠在工作台下方并保留独立空间，不遮挡审批或输入区。拖动左侧手柄或状态文字可在窗口内自由移动，位置保存在当前设备上；缩小窗口时会保持在可见范围内。点击控制条的停靠按钮，或在设置中选择「回到底部」，可恢复底部停靠。手柄也支持方向键移动（Shift 加速）和 Home 键回到底部。可直接点击关闭按钮隐藏，设备管理和接管入口仍可从设置中打开。
 
 无桌面环境可以通过命令行完成同一流程。
 
@@ -77,7 +77,7 @@ For source development, run `npm ci`, `npm run omp:overlay:apply`, and `npm run 
 
 For LAN access, open **Settings → General and notifications → Web access → Manage Web access**, select a local network address, and export the CA certificate. Transfer it through a trusted channel, verify its SHA-256 fingerprint, and trust it on the other device. Open the HTTPS pairing link to authorize that browser. The CLI equivalents are `listen --ip <address>`, `certificate <output.cer>` and `pair`. Run `listen` without an IP to disable LAN access. An address change requires exporting and trusting the updated certificate.
 
-**Show Web control bar** is off by default. When enabled, the bar docks below the workbench with its own space, keeping approvals and message input accessible. Drag the left handle to move it freely within the window; its position is saved on this device and kept in view when the window shrinks. Use the bar’s dock button or **Dock at bottom** in Settings to restore the docked layout. The handle also supports arrow keys to move (Shift for larger steps) and Home to dock. Its close button hides the bar; device management and takeover remain available in Settings.
+**Show Web control bar** is off by default. When enabled, the bar docks below the workbench with its own space, keeping approvals and message input accessible. Drag the left handle or the status text to move it freely within the window; its position is saved on this device and kept in view when the window shrinks. Use the bar’s dock button or **Dock at bottom** in Settings to restore the docked layout. The handle also supports arrow keys to move (Shift for larger steps) and Home to dock. Its close button hides the bar; device management and takeover remain available in Settings.
 
 Browser authorization uses an HttpOnly Cookie, survives refresh and Host restart, and lasts up to 400 days. Clearing browser site data requires pairing again. List devices with `devices`, rename them in the workbench, or run `revoke <device-id>` to disconnect a device. Each device can view registered projects. **Take control** transfers message sending, approvals, file and Git changes, and terminal input to that device. Existing tasks continue and drafts stay on the previous device.
 

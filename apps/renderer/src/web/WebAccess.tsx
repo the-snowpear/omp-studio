@@ -5,7 +5,7 @@ import type { WebStatus } from "../../../desktop/src/web/shared";
 import { webAccessPreview } from "../preview/webAccessPreview";
 import { updateControlState } from "./controlState";
 import { useWebAccessUi } from "./WebAccessContext";
-import { WebControlBar } from "./WebControlBar";
+import { WebControlBar, type WebControlHolder } from "./WebControlBar";
 import "./web.css";
 
 export function WebAccess() {
@@ -68,6 +68,9 @@ export function WebAccess() {
     : model?.control.owner
       ? zh ? `${model.control.owner.name} 正在控制` : `${model.control.owner.name} has control`
       : zh ? "可接管工作台" : "Workbench available";
+  const holder: WebControlHolder = controlling
+    ? { kind: "self" }
+    : model?.control.owner ? { kind: "other", name: model.control.owner.name } : { kind: "free" };
   const run = async (action: () => Promise<unknown>) => {
     setError("");
     setBusy(true);
@@ -84,43 +87,20 @@ export function WebAccess() {
       setBusy(false);
     }
   };
+  const takeControl = () => {
+    void run(() => preview ? Promise.resolve(setPreviewControl(true)) : api!.takeControl());
+  };
   return (
     <>
-      {visible && <WebControlBar>
-        <span className={`web-control-dot ${controlling ? "is-owner" : ""}`} />
-        <span className="web-control-label" title={controlLabel}>{controlLabel}</span>
-        {preview && marks && <span>{zh ? "演示" : "Demo"}</span>}
-        {!controlling && (
-          <button
-            onClick={() => {
-              void run(() =>
-                preview
-                  ? Promise.resolve(setPreviewControl(true))
-                  : api!.takeControl(),
-              );
-            }}
-            disabled={busy}
-          >
-            {zh ? "接管" : "Take control"}
-          </button>
-        )}
-        <button
-          className="web-manage"
-          onClick={() => setOpen(!open)}
-          aria-expanded={open}
-        >
-          {zh ? "Web 访问" : "Web access"}
-        </button>
-        {model?.control.authorizationUrl && (
-          <a
-            href={model.control.authorizationUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {zh ? "完成登录" : "Complete sign-in"}
-          </a>
-        )}
-      </WebControlBar>}
+      {visible && <WebControlBar
+        holder={holder}
+        demo={preview && marks}
+        busy={busy}
+        onTakeControl={takeControl}
+        manageOpen={open}
+        onManage={() => setOpen(!open)}
+        authorizationUrl={model?.control.authorizationUrl}
+      />}
       {open && (
         <div className="web-dialog-backdrop" onClick={() => setOpen(false)}>
           <section
@@ -147,11 +127,9 @@ export function WebAccess() {
                 : "Paired devices share projects and conversations. One device controls changes and terminal input at a time."}
             </p>
             <div className="web-dialog-control">
-              <span className={`web-control-dot ${controlling ? "is-owner" : ""}`} />
+              <span className="web-control-dot" data-state={holder.kind} aria-hidden="true" />
               <span>{controlLabel}</span>
-              {!controlling && <button disabled={busy} onClick={() => {
-                void run(() => preview ? Promise.resolve(setPreviewControl(true)) : api!.takeControl());
-              }}>{zh ? "接管" : "Take control"}</button>}
+              {!controlling && <button disabled={busy} onClick={takeControl}>{zh ? "接管" : "Take control"}</button>}
               {model?.control.authorizationUrl && <a href={model.control.authorizationUrl} target="_blank" rel="noopener noreferrer">{zh ? "完成登录" : "Complete sign-in"}</a>}
             </div>
             {!globalThis.OMP_STUDIO_WEB_ENTRY && (

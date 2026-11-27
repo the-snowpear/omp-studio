@@ -191,7 +191,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | 图片预览 | `composer/ImagePreview.tsx`；桌面 `chrome-image.ts` | 缩略图点击预览；复制/保存走 `ompStudioChrome`，不是 Host |
 | slash 命令菜单 | `composer/commands.ts`、`CommandMenu.tsx` | 解析后走语义 command；typed 名必须在 `operations.ts` / IPC `COMMAND_NAMES`。`/clear` → `session.clearContext` → facade `#commandP4` → overlay `clearContext`；`/drop` 补当前 `threadId` 后走 Host `session.drop` |
 | @ 提及 | `composer/mentions.ts` | `workspace.fileTree`、`agents.definitions.get`、查询非空时 `skills.get` |
-| 模型 / 模式选择 | `ComposerModelPicker.tsx`、`ComposerModePicker.tsx`；`WorkbenchCanvas.tsx` 准备目标会话 | `session.model.set`、`session.thinking.set`、plan/vibe；冷会话选择模型先通过 `session.create` / `session.resume` 携带启动模型，再执行切换 |
+| 模型 / 模式选择 | `ComposerModelPicker.tsx`、`ComposerModePicker.tsx`；思考强度滑条（Composer 弹层与模型菜单「切换时的思考档位」共用）`composer/ThinkingSlider.tsx` / `thinkingSlider.css`；`WorkbenchCanvas.tsx` 准备目标会话 | `session.model.set`、`session.thinking.set`、plan/vibe；冷会话选择模型先通过 `session.create` / `session.resume` 携带启动模型，再执行切换 |
 | 消息队列条 | `MessageQueueBar.tsx`、`composer/queueEdit.ts`、`composer/dispatch.ts`（`composerOwnerSessionId` / `composerRunningForTarget`） | 流式 Enter 本地排队（按 session 隔离），idle 后 `core.prompt`；会话归属由 `composer/dispatch.ts` 判定：新建会话 `session.create` 回执落地前快照仍指向旧会话，此时 Enter 不进排队，而是等新会话创建后发送；第一条等待创建期间再次 Enter 保留输入框草稿，同步 dispatch 锁阻止同帧重复发送。草稿与侧栏当前行也不归到旧会话；「插入纠偏」`core.steer`；`/queue` 为 `queue.enqueue`，带图片时改 `core.followUp`。编辑在 Composer 内进行，条目留队；编辑队首时暂停 flush |
 | Runtime 已提交队列 | `composer/RuntimeQueueBar.tsx`、`preview/runtimeQueuePreview.ts` | `session.queue.get/remove/promote/edit/restore`；原生对象 ID 区分重复正文；编辑保留图片及隐藏上下文；Studio 中止后保留原生组，显式恢复才排队；真实模式不回填演示 |
 | 历史会话模型恢复 | `models/SessionModelRecovery.tsx` | 原生 `session.restore.inspect` 只读检查；显式选择后 Host `session.resume` 携带 model，Desktop 将 `--model` 传给目标 Worker；失败保留已有 Worker |
@@ -358,7 +358,7 @@ macOS host 日志：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-
 
 | 主题 | 文件 |
 |---|---|
-| 共享 Host / 独立 Web 工作台 | Desktop `web/{main,daemon,client,local-channel,server,control,terminals,artifacts,ipc}.ts`；Renderer `web/{WebAccess,WebAccessSettings,WebAccessContext,WebControlBar}.tsx`（设置内设备管理、接管与可选控制条，默认页脚停靠，可自由拖动并记住位置）；预览 `preview/webAccessPreview.ts`；`transport-web` 会话持久化与重连；`scripts/{bundle-web-host,stage-web-environment}.mjs`；使用说明 `docs/web-ui.md` |
+| 共享 Host / 独立 Web 工作台 | Desktop `web/{main,daemon,client,local-channel,server,control,terminals,artifacts,ipc}.ts`；Renderer `web/{WebAccess,WebAccessSettings,WebAccessContext,WebControlBar}.tsx`（设置内设备管理、接管与可选控制条，默认页脚停靠，可自由拖动并记住位置）；预览 `preview/webAccessPreview.ts`；控制条验收 `web-control-bar-harness.html`（`src/test/web-control-bar-harness.tsx`）；`transport-web` 会话持久化与重连；`scripts/{bundle-web-host,stage-web-environment}.mjs`；使用说明 `docs/web-ui.md` |
 | 局域网手机访问 | Desktop `mobile-access{,-ipc}.ts`、`mobile-certificate.ts`、`mobile-scope.ts`；`transport-web` HTTP/WS 传输；Renderer `mobile/`、`settings/MobileAccessSettings.tsx`；配对、会话与证书说明见 `docs/mobile-access.md` |
 | WSL 工作位置 | Desktop `apps/desktop/src/remote/{wsl,channel,wsl-paths,manager,environment-installer}.ts`；Renderer `apps/renderer/src/workspaces/{ExecutionTargets,ExecutionTargetPicker,SshPreparationDialog}.tsx`；用法见 [WSL 工作区](../docs/wsl-workspaces.md) |
 | SSH 工作位置与连接管理 | `apps/renderer/src/workspaces/{ExecutionTargets,ExecutionTargetPicker,RemoteScopeNotice,SshPasswordDialog}.tsx`、`{remoteTransport,remoteStatus}.ts`；`apps/desktop/src/remote/{manager,ipc,shared,errors}.ts`；有界重连、健康检查、目标代次同步；用法见 `docs/ssh-workspaces.md` |

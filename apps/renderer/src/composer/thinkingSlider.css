@@ -1,0 +1,387 @@
+/* ============================================================
+   思考强度滑条（composer/ThinkingSlider.tsx）
+   ------------------------------------------------------------
+   A thick capsule. The filled part is the whole level spectrum clipped at the
+   handle, so every level keeps its own colour along the way: cool grey for
+   Off, blue for Low, the accent for High, a furnace orange for Max. Inside
+   the fill a texture streams toward the handle, faster the higher the level;
+   a highlight sweeps across it and the leading edge glows. The handle is a
+   lit bar inside the capsule.
+
+   Everything reads `--think-heat` (the colour of the level under the handle)
+   and `--think-k` (its heat, 0..1). Both are registered, so changing level is
+   a colour sweep rather than a snap.
+
+   Light is additive (styles/light.css): the outer glow, the sweep, the edge
+   light and the embers are multiplied by `--lux-k` and leave with 光效「关」.
+   Motion follows styles/motion.css: the handle settles on --ease-spring (it
+   is a thumb), the readout swaps sideways like any sibling, loops are stilled
+   by the one reduced-motion policy and removed from L2 (perf/tiers.css).
+   ============================================================ */
+
+@property --think-heat { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --think-k { syntax: "<number>"; inherits: true; initial-value: 0; }
+@property --think-pos { syntax: "<number>"; inherits: true; initial-value: 0; }
+@property --think-stretch { syntax: "<number>"; inherits: true; initial-value: 0; }
+@property --think-thumb-s { syntax: "<number>"; inherits: false; initial-value: 1; }
+
+/* ---------- Palette ---------- */
+.think-pop,
+.think-track {
+  --think-c-keep: color-mix(in oklab, var(--text-faint) 45%, var(--surface-3));
+  --think-c-off: color-mix(in oklab, var(--text-faint) 60%, var(--surface-3));
+  --think-c-auto: color-mix(in oklab, var(--green) 55%, var(--blue));
+  --think-c-minimal: color-mix(in oklab, var(--blue) 55%, var(--green));
+  --think-c-low: var(--blue);
+  --think-c-medium: color-mix(in oklab, var(--blue) 40%, var(--accent));
+  --think-c-high: var(--accent);
+  --think-c-xhigh: color-mix(in oklab, var(--accent) 50%, var(--tint-pink));
+  --think-c-max: color-mix(in oklab, var(--red) 50%, var(--amber));
+  /* Glow strength: the level's heat, scaled by the light setting. */
+  --think-glow: calc(var(--think-k) * var(--lux-k));
+}
+
+/* ==========================================================
+   Popover (Composer pill)
+   ========================================================== */
+.cmp-menu.think-pop {
+  width: min(340px, calc(100vw - 32px));
+  min-width: 0;
+  padding: var(--sp-12) var(--sp-14) var(--sp-12);
+  gap: var(--sp-8);
+  overflow: hidden;
+  isolation: isolate;
+  border-color: color-mix(in srgb, var(--think-heat) calc(34% * var(--think-glow)), var(--border-float));
+  transition:
+    --think-heat var(--dur-slow) var(--ease),
+    --think-k var(--dur-slow) var(--ease);
+}
+.think-aura {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--think-heat) calc(18% * var(--think-glow)), transparent), transparent 62%),
+    radial-gradient(90% 80% at 100% 100%, color-mix(in srgb, var(--think-heat) calc(12% * var(--think-glow)), transparent), transparent 70%);
+}
+
+.think-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  color: var(--text-2);
+}
+.think-head-ic {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-4);
+  color: var(--think-heat);
+  background: color-mix(in srgb, var(--think-heat) 14%, transparent);
+  box-shadow: 0 0 calc(16px * var(--think-glow)) color-mix(in srgb, var(--think-heat) calc(50% * var(--lux-k)), transparent);
+}
+.think-head-ic .icon { width: 13px; height: 13px; }
+.think-head-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  font-weight: var(--fw-regular);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.think-head-state.is-syncing { color: var(--text-3); }
+.think-head-state.is-syncing > i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--think-heat);
+  box-shadow: 0 0 calc(6px * var(--lux-k)) var(--think-heat);
+  animation: omp-pulse var(--loop-pulse) var(--ease-loop) infinite;
+}
+
+/* Swapped in place like any sibling: a higher level arrives from the right,
+   a lower one from the left (motion.css "Space"). */
+.think-readout {
+  display: grid;
+  gap: var(--sp-2);
+  padding-top: var(--sp-4);
+  min-width: 0;
+}
+.think-value,
+.think-desc {
+  --enter-x: var(--shift-sm);
+  animation: omp-enter var(--dur-slow) var(--ease-nav) backwards;
+}
+.think-value[data-dir="back"],
+.think-desc[data-dir="back"] { --enter-x: calc(var(--shift-sm) * -1); }
+.think-desc { animation-delay: var(--stagger); }
+.think-value {
+  justify-self: start;
+  font-size: var(--fs-22);
+  font-weight: var(--fw-semibold);
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: transparent;
+  background: linear-gradient(100deg, var(--text) 0%, color-mix(in srgb, var(--think-heat) 60%, var(--text)) 45%, var(--think-heat) 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  filter: drop-shadow(0 0 calc(12px * var(--think-glow)) color-mix(in srgb, var(--think-heat) calc(45% * var(--lux-k)), transparent));
+}
+.think-desc {
+  font-size: var(--fs-12);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ==========================================================
+   Track
+   ========================================================== */
+.think-track {
+  --think-h: 30px;
+  display: grid;
+  gap: var(--sp-6);
+  padding-top: var(--sp-4);
+  transition:
+    --think-pos var(--dur-slow) var(--ease-spring),
+    --think-heat var(--dur-slow) var(--ease),
+    --think-k var(--dur-slow) var(--ease),
+    --think-stretch var(--dur) var(--ease-out);
+}
+.think-track[data-compact] { --think-h: 20px; padding-top: 0; }
+/* Under the pointer the handle follows the hand exactly; it springs only when let go. */
+.think-track[data-dragging] {
+  transition:
+    --think-heat var(--dur-fast) var(--ease),
+    --think-k var(--dur-fast) var(--ease),
+    --think-stretch var(--dur-fast) var(--ease-out);
+}
+
+.think-slider {
+  position: relative;
+  border-radius: var(--r-full);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+}
+.think-track[data-dragging] .think-slider { cursor: grabbing; }
+.think-slider[aria-disabled] { cursor: default; opacity: 0.6; }
+.think-slider:focus-visible { outline: none; }
+.think-slider:focus-visible .think-rail {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* The groove: a recessed capsule. */
+.think-rail {
+  position: relative;
+  height: var(--think-h);
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+  box-shadow:
+    inset 0 1px 3px rgb(0 0 0 / 0.16),
+    inset 0 0 0 1px var(--border);
+}
+:root[data-theme="dark"] .think-rail {
+  background: color-mix(in srgb, var(--surface-3) 70%, #000);
+  box-shadow:
+    inset 0 2px 5px rgb(0 0 0 / 0.55),
+    inset 0 0 0 1px rgb(255 255 255 / 0.05);
+}
+
+/* The fill is the whole spectrum clipped just past the handle: at the lowest
+   level it is a single round cap, never empty. */
+.think-fill,
+.think-glow > i {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--think-spectrum);
+  clip-path: inset(0 calc((1 - var(--think-pos)) * (100% - var(--think-h))) 0 0 round var(--r-full));
+}
+.think-fill {
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14);
+}
+
+/* Outer glow: a blurred copy of the fill under the groove. */
+.think-glow {
+  position: absolute;
+  inset: -6px -4px;
+  border-radius: var(--r-full);
+  pointer-events: none;
+  filter: blur(calc(6px + 8px * var(--think-k)));
+  opacity: calc(var(--think-glow) * 0.85);
+}
+.think-glow > i { inset: 6px 4px; }
+:root:not([data-theme="dark"]) .think-glow { opacity: calc(var(--think-glow) * 0.5); }
+
+/* Streaming texture: diagonal light bands moving toward the handle by exactly
+   one period per loop (20px across at 45deg), faster the hotter the level. */
+.think-flow {
+  position: absolute;
+  inset: 0 0 0 -20px;
+  background: repeating-linear-gradient(
+    45deg,
+    rgb(255 255 255 / 0) 0 7.071px,
+    rgb(255 255 255 / 0.17) 7.071px 14.142px
+  );
+  opacity: calc(0.45 + 0.55 * var(--think-k));
+  animation: omp-flow var(--loop-orbit) linear infinite;
+}
+.think-track:is([data-level="off"], [data-level="keep"]) .think-flow { animation: none; opacity: 0; }
+.think-track[data-level="medium"] .think-flow { animation-duration: var(--loop-drift); }
+.think-track[data-level="high"] .think-flow { animation-duration: var(--loop-pulse); }
+.think-track[data-level="xhigh"] .think-flow { animation-duration: var(--loop-spin); }
+.think-track[data-level="max"] .think-flow { animation-duration: calc(var(--loop-spin) * 0.6); }
+
+/* A highlight sweeping along the fill, brighter as the level climbs. */
+.think-shine {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 38%, rgb(255 255 255 / 0.55) 50%, transparent 62%);
+  opacity: calc(var(--think-glow) * 0.9);
+  animation: omp-sweep var(--loop-drift) var(--ease-loop) infinite;
+}
+.think-track:is([data-level="off"], [data-level="keep"]) .think-shine { animation: none; opacity: 0; }
+
+/* The leading edge burns: light gathered just behind the handle. */
+.think-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--think-h) / 2 + var(--think-pos) * (100% - var(--think-h)));
+  width: calc(var(--think-h) * 3);
+  translate: -100% 0;
+  background: radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, #fff calc(55% * var(--think-glow)), transparent), transparent);
+}
+.think-track[data-hot] .think-edge { animation: omp-pulse var(--loop-pulse) var(--ease-loop) infinite; }
+
+/* Glass: a lit top edge and a shaded bottom, so the fill reads as a tube. */
+.think-gloss {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(to bottom, rgb(255 255 255 / 0.3), rgb(255 255 255 / 0.04) 46%, rgb(0 0 0 / 0) 54%, rgb(0 0 0 / 0.14));
+}
+
+/* Notches inside the groove; the one under the handle steps aside. */
+.think-tick {
+  position: absolute;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text-faint) 50%, transparent);
+  transition:
+    background-color var(--dur) var(--ease),
+    opacity var(--dur-fast) var(--ease),
+    scale var(--dur) var(--ease-spring);
+}
+.think-tick[data-on] { background: rgb(255 255 255 / 0.75); }
+.think-tick[data-current] { opacity: 0; scale: 0.4; }
+.think-track[data-compact] .think-tick { width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px; }
+
+/* ---------- Handle ----------
+   A lit bar inside the capsule. It thickens under the hand and with the
+   speed of the drag (`--think-stretch`, written by the component), then
+   springs back. */
+.think-handle {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--think-h) / 2 + var(--think-pos) * (100% - var(--think-h)));
+  width: 0;
+  height: 0;
+}
+.think-handle-core {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 5px;
+  height: calc(var(--think-h) - 10px);
+  translate: -50% -50%;
+  border-radius: var(--r-full);
+  background: linear-gradient(to bottom, #fff, color-mix(in srgb, var(--think-heat) 18%, #fff));
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.08),
+    0 1px 3px rgb(0 0 0 / 0.35),
+    0 0 calc(6px * var(--lux-k)) rgb(255 255 255 / calc(0.7 * var(--lux-k))),
+    0 0 calc(14px + 12px * var(--think-k)) calc(2px * var(--think-k)) color-mix(in srgb, var(--think-heat) calc(85% * var(--lux-k)), transparent);
+  scale: calc(var(--think-thumb-s) + var(--think-stretch)) 1;
+  transition: --think-thumb-s var(--dur) var(--ease-spring);
+}
+.think-track[data-compact] .think-handle-core { width: 4px; height: calc(var(--think-h) - 8px); }
+.think-slider:hover .think-handle-core { --think-thumb-s: 1.25; }
+.think-track[data-pressed] .think-handle-core { --think-thumb-s: 1.6; }
+
+/* A flash leaving the handle each time it lands on a notch. */
+.think-ping {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--think-h);
+  height: var(--think-h);
+  translate: -50% -50%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, #fff 65%, var(--think-heat)), transparent);
+  opacity: 0;
+  pointer-events: none;
+  animation: omp-ping var(--dur-hero) var(--ease-out);
+}
+
+/* Max: embers lift off the handle. */
+.think-ember {
+  --ember-x: calc((var(--i) - 2.5) * 4px);
+  position: absolute;
+  left: 0;
+  top: calc(var(--think-h) / -2 + 4px);
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
+  border-radius: 50%;
+  opacity: 0;
+  background: color-mix(in srgb, var(--think-heat) 55%, #fff);
+  box-shadow: 0 0 6px 1px color-mix(in srgb, var(--think-heat) 85%, transparent);
+  animation: omp-ember var(--loop-pulse) var(--ease-out) infinite;
+  animation-delay: calc(var(--loop-pulse) * var(--i) / -6);
+}
+
+/* With light off the bar is flat: no light, no loops for light that is not there. */
+:root:not([data-light~="soft"]) :is(.think-ember, .think-shine, .think-glow, .think-edge) { display: none; }
+
+/* ---------- Notch labels ---------- */
+.think-labels {
+  position: relative;
+  height: 18px;
+}
+.think-label {
+  position: absolute;
+  top: 0;
+  translate: -50% 0;
+  padding: 1px var(--sp-4);
+  border: 0;
+  border-radius: var(--r-4);
+  background: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  color: var(--text-faint);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
+}
+.think-label:hover { color: var(--text-2); background: var(--surface-hover); }
+.think-label[data-on] {
+  color: var(--think-tick-c);
+  font-weight: var(--fw-semibold);
+  text-shadow: 0 0 calc(8px * var(--lux-k)) color-mix(in srgb, var(--think-tick-c) calc(55% * var(--lux-k)), transparent);
+}

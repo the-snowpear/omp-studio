@@ -12,7 +12,7 @@
  * Runtime 把选择记到下一轮用户对话，当前请求和自动重试仍用原模型。
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type {
   CommandInput,
@@ -31,6 +31,7 @@ import { hostErrorMessage } from "./hostError";
 import { MODEL_THINKING, createPreviewModelConfig } from "./preview/modelConfigFixtures";
 import { usePreviewMode } from "./preview/PreviewContext";
 import { ModelPickCaps, ModelPickCopy, ModelThinkingBadge, ProviderGlyph, ROLE_ICONS, ROLE_TINTS, groupModelsByProvider } from "./models/modelPresentation";
+import { ThinkingSliderPopover, ThinkingTrack } from "./composer/ThinkingSlider";
 
 type MenuKind = "none" | "model" | "thinking";
 
@@ -156,13 +157,23 @@ export function ComposerModelMenu({
   const [search, setSearch] = useState("");
   const [scope, setScope] = useState<string | undefined>();
   const [effortIndex, setEffortIndex] = useState(0);
+  const [effortScrub, setEffortScrub] = useState<number | null>(null);
+  // 「保留当前」在最左，Auto 次之，其后按强度从 Off 到 Max：光谱从冷到热。
+  const effortItems = useMemo(() => [
+    { id: "keep", label: zh ? "保留当前" : "Keep current" },
+    { id: "auto", label: "Auto" },
+    ...SESSION_THINKING_SELECTORS.filter((id) => id !== "auto")
+      .map((id) => ({ id, label: MODEL_THINKING.find((item) => item.id === id)?.label ?? id })),
+  ], [zh]);
   const query = search.trim().toLowerCase();
   const slash = query.indexOf("/");
   const groupQuery = slash < 0 ? scope : query.slice(0, slash);
   const modelQuery = slash < 0 ? query : query.slice(slash + 1);
   const filtered = groups.filter(group => !groupQuery || group.providerId.toLowerCase() === groupQuery)
     .map(group => ({ ...group, models: group.models.filter(model => (model.name + " " + model.id).toLowerCase().includes(modelQuery)) })).filter(group => group.models.length);
-  const effort = SESSION_THINKING_SELECTORS[effortIndex - 1];
+  const effortId = effortItems[effortIndex]?.id;
+  const effort = effortId === undefined || effortId === "keep" ? undefined : effortId as SessionThinkingSelector;
+  const effortShown = effortItems[effortScrub ?? effortIndex];
   const scheduleFlyoutClose = () => {
     window.clearTimeout(flyoutTimer.current);
     flyoutTimer.current = window.setTimeout(() => setMoreOpen(false), FLYOUT_CLOSE_GRACE_MS);
@@ -285,15 +296,15 @@ export function ComposerModelMenu({
                   <ProviderGlyph id={group.providerId} local={group.local} />{group.providerName}
                 </button>)}
               </div> : null}
-              {chooseEffort && <label className="cmp-model-effort">
+              {chooseEffort && <div className="cmp-model-effort">
                 <span className="cmp-model-effort-head">
                   <Icon name="brain" extra="sm" />{zh ? "切换时的思考档位" : "Thinking on switch"}
-                  <b className={effort ? "" : "is-keep"}>{effort ? MODEL_THINKING.find(item => item.id === effort)?.label ?? effort : (zh ? "保留当前" : "Keep current")}</b>
+                  <b className={effortShown?.id === "keep" ? "is-keep" : ""}>{effortShown?.label}</b>
                 </span>
-                <input type="range" min={0} max={SESSION_THINKING_SELECTORS.length} step={1} value={effortIndex}
-                  style={{ "--effort-fill": `${(effortIndex / SESSION_THINKING_SELECTORS.length) * 100}%`, "--effort-steps": SESSION_THINKING_SELECTORS.length } as CSSProperties}
-                  aria-valuetext={effort ?? (zh ? "保留当前" : "Keep current")} onChange={event => setEffortIndex(Number(event.target.value))} />
-              </label>}
+                <ThinkingTrack compact items={effortItems} index={effortIndex}
+                  label={zh ? "切换时的思考档位" : "Thinking on switch"}
+                  onPick={setEffortIndex} onScrub={setEffortScrub} />
+              </div>}
             </div>
             <div className="rms-scroll">
             {filtered.length === 0 ? (
@@ -526,16 +537,17 @@ export function ComposerModelPicker({
     apply("session.model.set", { selector, ...(effort ? { thinking: effort } : {}) });
   };
 
-  const chooseThinking = (id: string) => {
-    closeAll();
-    if (!thinkingReady) return;
+  /** 滑动条提交一档：弹层保持打开，失败由父级 onRun 报错，滑块回到 Runtime 真值。 */
+  const commitThinking = (id: string): Promise<boolean> => {
+    if (!thinkingReady) return Promise.resolve(false);
     if (preview) {
       setPreviewPick((prev) => (prev ? pickWith(prev.roleId, prev.selector, id === "off" ? undefined : id) : prev));
-      return;
+      return Promise.resolve(true);
     }
     const level = asThinkingSelector(id);
-    if (level === undefined) return;
-    apply("session.thinking.set", { level });
+    if (level === undefined) return Promise.resolve(false);
+    setSelecting(true);
+    return onRun("session.thinking.set", { level }).finally(() => setSelecting(false));
   };
 
   /** Task 模式下选模型：会话级 override，选完退出 Task 模式并收起菜单。 */
@@ -649,8 +661,8 @@ export function ComposerModelPicker({
         <button
           type="button"
           className="pill-btn cmp-responsive-pill"
-          disabled={selecting || !pick || thinking.disabled || !thinkingReady}
-          aria-haspopup="menu"
+          disabled={(selecting && menu !== "thinking") || !pick || thinking.disabled || !thinkingReady}
+          aria-haspopup="dialog"
           aria-expanded={menu === "thinking"}
           aria-label={t("composer.reasoningEffort")}
           aria-description={thinkingLabel}
@@ -668,27 +680,13 @@ export function ComposerModelPicker({
           <Icon name="chevron-d" extra="sm cmp-pill-caret" />
         </button>
         {menu === "thinking" ? (
-          <>
-            <div className="approval-menu-backdrop" onClick={closeAll} />
-            <div className="cmp-menu cmp-think-menu" role="menu" aria-label={t("composer.reasoningEffort")}>
-              {thinking.items.map((item) => {
-                const on = thinking.value === item.id;
-                return (
-                  <button
-                    type="button"
-                    key={item.id}
-                    role="menuitemradio"
-                    aria-checked={on}
-                    className={`menu-item cmp-think-item${on ? " selected" : ""}`}
-                    onClick={() => chooseThinking(item.id)}
-                  >
-                    <span>{item.label}</span>
-                    {on ? <Icon name="check" extra="sm" /> : null}
-                  </button>
-                );
-              })}
-            </div>
-          </>
+          <ThinkingSliderPopover
+            items={thinking.items}
+            value={thinking.value}
+            unverified={selectedModel?.thinkingConfig?.unverified === true}
+            onCommit={commitThinking}
+            onClose={closeAll}
+          />
         ) : null}
       </span>
     </>
