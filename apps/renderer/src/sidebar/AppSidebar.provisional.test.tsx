@@ -109,6 +109,8 @@ describe("AppSidebar provisional session row", () => {
 
     const row = sessionButton.closest(".thread-row");
     expect(row).not.toBeNull();
+    // 已发送的行不挂草稿 tag（等待胶囊也走 role=status，此处无等待态）。
+    expect(within(row as HTMLElement).queryByRole("status")).toBeNull();
     // ⋯ 已接入顶栏同款菜单：按钮可点（弹层交互另测），不再是被禁用的占位。
     expect((within(row as HTMLElement).getByRole("button", { name: "更多操作" }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "归档会话" }));
@@ -121,5 +123,7 @@ describe("AppSidebar provisional session row", () => {
     fireEvent.click(screen.getByRole("button", { name: thread.title }));
     expect(onSelectProvisionalThread).toHaveBeenCalledWith(thread);
     expect(screen.queryByRole("button", { name: "归档会话" })).toBeNull();
+    // 未发送的草稿行挂「草稿」tag，进入历史目录后（submitted）消失。
+    expect(within(screen.getByRole("button", { name: thread.title }).closest(".thread-row") as HTMLElement).getByRole("status", { name: "草稿" })).not.toBeNull();
   });
 });

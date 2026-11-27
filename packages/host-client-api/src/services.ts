@@ -366,6 +366,12 @@ export interface HostSessionCatalogProvider {
     readonly workspaceName: string;
     readonly entry: HostCatalogEntry;
   }[]>;
+  /**
+   * Resolve a thread id to its session when the session is not in any list
+   * view — a fresh session without a conversation message yet. Returns
+   * undefined when no catalog session derives the given thread id.
+   */
+  resolveThreadId?(threadId: string): Promise<string | undefined>;
 }
 
 /** Runtime-independent persistent transcript reader owned by the Host/Broker. */

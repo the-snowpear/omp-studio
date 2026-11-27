@@ -3168,7 +3168,8 @@ const zhRaw = {
   "sidebar": {
     "waitingApproval": "待确认",
     "waitingPlan": "待审核",
-    "waitingAsk": "待回答"
+    "waitingAsk": "待回答",
+    "draftTag": "草稿"
   },
   "tests": {
     "notice": "当前会话里 Agent 跑过的测试命令。点一行可对上对话里的 Bash 卡片。失败时直接展示 runner 原文，不解析成套件树。",

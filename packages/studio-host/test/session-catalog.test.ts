@@ -98,6 +98,25 @@ test("locates exact session IDs in registered workspaces, including the cold arc
   assert.ok(!JSON.stringify(result).includes("unregistered"));
 });
 
+test("single-session locate reaches a metadata-only session the list views hide", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-studio-catalog-locate-empty-"));
+  const project = join(root, "project");
+  await mkdir(project);
+  const metadata = [
+    JSON.stringify({ type: "title", v: 1, title: "", pad: "" }),
+    JSON.stringify({ type: "session", id: "fresh-id", timestamp: "2026-08-24T00:00:00.000Z", cwd: project, studioOrigin: "studio-host" }),
+    JSON.stringify({ type: "model_change", provider: "test", modelId: "test" }),
+  ];
+  await writeFile(join(project, "fresh.jsonl"), `${metadata.join("\n")}\n`);
+  const hidden = await scanSessionCatalog({ sessionsRoot: root, includeCliSessions: true });
+  assert.deepEqual(hidden.sessions, []);
+  const located = await scanSessionCatalog({
+    sessionsRoot: root, includeCliSessions: true,
+    locate: { sessionId: "fresh-id", workspaces: [{ workspaceId: "ws-one", canonicalPath: project }] },
+  });
+  assert.deepEqual(located.sessions.map(entry => [entry.sessionId, entry.workspaceId, entry.archived]), [["fresh-id", "ws-one", false]]);
+});
+
 test("session catalog handles title slots, unknown origins, duplicates, corruption, oversize, and symlinks", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "omp-studio-catalog-edge-"));
   const project = join(root, "project");
