@@ -38,11 +38,12 @@ export default defineConfig({
     alias: [
       { find: "@oh-my-pi/pi-tui/html-form/data", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/coding-agent/src/tools/html-form/data.ts", import.meta.url)) },
       { find: "@oh-my-pi/pi-tui/html-form/model", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/coding-agent/src/tools/html-form/parse.ts", import.meta.url)) },
-      { find: "@oh-my-pi/pi-tui/text/sanitize", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/tui/src/text/sanitize.ts", import.meta.url)) },
+      { find: "@oh-my-pi/pi-tui/text/sanitize", replacement: fileURLToPath(new URL("./vendor/pi-tui-text-sanitize.browser.ts", import.meta.url)) },
       { find: "@oh-my-pi/pi-tui/native/blobs", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/tui/src/native/blobs.ts", import.meta.url)) },
-      { find: "@oh-my-pi/pi-tui/theme/contract", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/tui/src/theme/contract.ts", import.meta.url)) },
       { find: "@oh-my-pi/pi-utils/dom", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/utils/src/dom.ts", import.meta.url)) },
-      { find: "@oh-my-pi/pi-natives", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/natives", import.meta.url)) },
+      // The vendored packages are not installed on CI; every bare specifier the
+      // browser reaches is mapped one by one instead of relying on resolution.
+      { find: "@oh-my-pi/pi-natives", replacement: fileURLToPath(new URL("./vendor/pi-natives.browser.ts", import.meta.url)) },
     ],
   },
   server: { cors: { origin: ["null", /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/] } },
