@@ -998,6 +998,7 @@ export const en: LocaleDictionary = {
     "moreModels": "More Models",
     "allModels": "All Models",
     "noAvailableModels": "No available models",
+    "noMatchingModels": "No matching models",
     "previewModelNote": "Demo data, does not write to local config",
     "model": "Model",
     "thinkingNotSupported": "Not supported",
@@ -1773,7 +1774,14 @@ export const en: LocaleDictionary = {
     "cannotSaveRoleNoPrimary": "Cannot save: role {labels} has no primary model after cancellation, please set another model first",
     "localOauthCredential": "Local OAuth credential",
     "noWorkspaceTip": "No workspace",
-    "statusDemoNoHost": "Demo · Not written to Host"
+    "statusDemoNoHost": "Demo · Not written to Host",
+    "statusOmpResolved": "Available models resolved by OMP",
+    "statusReadFromModelsYml": "Read from models.yml",
+    "statusDisabledInConfig": "Disabled in disabledProviders",
+    "statusDisabled": "Disabled",
+    "statusNoCredentials": "Credentials not configured",
+    "statusApiKeySaved": "API key saved",
+    "statusLocalServiceNotRunning": "Local service not running"
   },
   "settings": {
     "title": "Settings",
