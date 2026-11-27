@@ -47,6 +47,8 @@ export type SessionOperation =
    */
   | { kind: "session.model.set"; selector: string; thinking?: SessionThinkingSelector }
   | { kind: "session.thinking.set"; level: SessionThinkingSelector }
+  /** Regenerate the live session's automatic title right now (e.g. after a title-language change). */
+  | { kind: "session.retitle" }
   /**
    * Pin the session-scoped Task subagent model (the `task` entry of the
    * runtime-only `task.agentModelOverrides` layer — same semantics as the TUI

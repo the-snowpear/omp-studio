@@ -73,6 +73,14 @@ export const nativePreferenceDescriptions: Record<NativePreferenceKey, [string, 
     "重新规划时刷新标题",
     "待办计划重新初始化时更新自动标题；手动命名不受影响。",
   ],
+  "title.language": [
+    "会话标题语言",
+    "自动生成的会话标题使用哪种语言；更改后会重新生成当前会话的自动标题，手动命名的标题不变。",
+  ],
+  "think.language": [
+    "思考过程语言",
+    "模型内部思考（Think 过程）使用哪种语言；跟随输入 = 与你的输入语言保持一致。更改后从下一轮回复生效（会话范围只影响当前会话）。",
+  ],
   "telemetry.otlpExportEnabled": [
     "OTLP 导出",
     "控制是否向已配置的 OTEL 目标导出追踪、日志和指标；保存后下次启动生效。",
@@ -128,6 +136,14 @@ export const nativePreferenceEnglishDescriptions: Record<NativePreferenceKey, [s
     "Refresh title on replan",
     "Update automatic titles when a plan is reinitialized. Manual titles are preserved.",
   ],
+  "title.language": [
+    "Title language",
+    "Language for generated session titles; changing it re-generates this session's automatic title. Manual titles are kept.",
+  ],
+  "think.language": [
+    "Thinking language",
+    "Language of the model's internal thinking; follow input keeps it in your input language. Applies from the next reply (session scope affects only this session).",
+  ],
   "telemetry.otlpExportEnabled": [
     "OTLP export",
     "Export to configured OTEL destinations. Takes effect on the next launch.",
@@ -148,6 +164,8 @@ const demo = (): NativePreference[] =>
     ["title.icons", "emoji", ["nf+emoji", "emoji", "boring"]],
     ["title.generator", "fork", ["fork", "tiny"]],
     ["title.refreshOnReplan", true, undefined],
+    ["title.language", "auto", ["auto", "zh", "en"]],
+    ["think.language", "auto", ["auto", "zh", "en"]],
     ["telemetry.otlpExportEnabled", true, undefined],
   ].map(([key, value, choices]) => ({
     key: key as NativePreferenceKey,
@@ -155,9 +173,11 @@ const demo = (): NativePreference[] =>
       ? "advisor"
       : String(key).startsWith("title.")
         ? "titles"
-        : String(key).startsWith("telemetry.")
-          ? "diagnostics"
-          : "tools",
+        : String(key).startsWith("think.")
+          ? "thinking"
+          : String(key).startsWith("telemetry.")
+            ? "diagnostics"
+            : "tools",
     label: nativePreferenceEnglishDescriptions[key as NativePreferenceKey][0],
     description: nativePreferenceEnglishDescriptions[key as NativePreferenceKey][1],
     value: value as NativePreferenceValue,
@@ -310,6 +330,11 @@ export function NativePreferencesPane({
           values.map((value) => (value.key === row.key ? row : value)),
         );
         setDrafts((values) => ({ ...values, [row.key]: row.value }));
+        // A title-language change (or clearing its override) re-generates the
+        // current session's automatic title in the new language.
+        if (pending.row.key === "title.language" && !preview && client) {
+          void client.command("session.retitle", {}).catch(() => undefined);
+        }
         if (!preview || marks) setNotice(
           preview && marks
             ? zh
@@ -319,9 +344,13 @@ export function NativePreferencesPane({
               ? zh
                 ? "已保存，下次启动生效。"
                 : "Saved for the next launch."
-              : zh
-                ? "已处理，当前生效值与来源已更新。"
-                : "Updated. Effective value and source are shown below.",
+              : pending.row.key === "title.language"
+                ? zh
+                  ? "已保存，正在按新语言重新生成当前会话的自动标题（手动命名的标题不变）。"
+                  : "Saved; re-generating this session's automatic title in the new language (manual titles are kept)."
+                : zh
+                  ? "已处理，当前生效值与来源已更新。"
+                  : "Updated. Effective value and source are shown below.",
         );
       }
     } catch (cause) {
@@ -357,6 +386,9 @@ export function NativePreferencesPane({
           boring: "仅标题",
           fork: "当前模型的旁路调用",
           tiny: "标题角色模型",
+          auto: "跟随输入",
+          zh: "中文",
+          en: "英文",
           nit: "细节（nit）",
           concern: "关注（concern）",
           blocker: "阻断（blocker）",
@@ -371,6 +403,9 @@ export function NativePreferencesPane({
           boring: "Title only",
           fork: "Side call on current model",
           tiny: "Title model role",
+          auto: "Follow input",
+          zh: "Chinese",
+          en: "English",
           nit: "Nit",
           concern: "Concern",
           blocker: "Blocker",
@@ -415,7 +450,7 @@ export function NativePreferencesPane({
         </p>
       ) : null}
       {notice ? <p role="status">{notice}</p> : null}
-      {(["advisor", "tools", "titles", "diagnostics"] as const).filter(group => !groups || groups.includes(group)).map((group) => (
+      {(["advisor", "tools", "titles", "thinking", "diagnostics"] as const).filter(group => !groups || groups.includes(group)).map((group) => (
         <SettingSection
           key={group}
           title={
@@ -429,6 +464,10 @@ export function NativePreferencesPane({
                 ? zh
                   ? "标题"
                   : "Titles"
+                : group === "thinking"
+                ? zh
+                  ? "思考过程"
+                  : "Thinking"
                 : zh
                   ? "诊断导出"
                   : "Diagnostic export"

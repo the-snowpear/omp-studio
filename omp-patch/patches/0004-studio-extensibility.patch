@@ -3070,7 +3070,7 @@ index cff9d0d861..0ca4b056be 100644
  {{#if autoBackgroundEnabled}}
  Non-`pty` calls still running after {{autoBackgroundSeconds}}s (or 1s before `timeout`, if sooner) usually move to background job `bg_N` and keep running to `timeout`.
 diff --git a/packages/coding-agent/src/sdk.ts b/packages/coding-agent/src/sdk.ts
-index 9b3f393f0f..ab39710464 100644
+index 9b3f393f0f..110a9900c1 100644
 --- a/packages/coding-agent/src/sdk.ts
 +++ b/packages/coding-agent/src/sdk.ts
 @@ -1,4 +1,5 @@
@@ -3101,7 +3101,15 @@ index 9b3f393f0f..ab39710464 100644
  import { isIrcEnabled } from "./irc/messaging";
  import { imageGenTool } from "./tools/image-gen";
  import { wrapToolWithMetaNotice } from "./tools/output-meta";
-@@ -1046,6 +1048,8 @@ export interface CreateAgentSessionOptions {
+@@ -431,6 +433,7 @@ import {
+ 	cfgTierAnthropic,
+ 	cfgTierGoogle,
+ 	cfgTierOpenai,
++	composeThinkingAppend,
+ 	systemPromptTemplatePatterns,
+ } from "./session/settings";
+ import { cfgInterruptMode } from "./modes/settings";
+@@ -1046,6 +1049,8 @@ export interface CreateAgentSessionOptions {
  	 * Print, RPC, ACP and subagent sessions read replies as text. Default: false.
  	 */
  	tuiTranscript?: boolean;
@@ -3110,7 +3118,7 @@ index 9b3f393f0f..ab39710464 100644
  	/**
  	 * Name the unnamed session from the operator's messages once each reply begins
  	 * (see `title.generator`). Only the interactive TUI sets this; ignored for subagents. Default: false.
-@@ -1103,8 +1107,8 @@ export interface CreateAgentSessionResult {
+@@ -1103,8 +1108,8 @@ export interface CreateAgentSessionResult {
  	session: AgentSession;
  	/** Extensions result (loaded extensions + runtime) */
  	extensionsResult: LoadExtensionsResult;
@@ -3121,7 +3129,7 @@ index 9b3f393f0f..ab39710464 100644
  	/** MCP manager for server lifecycle management (undefined if MCP disabled) */
  	mcpManager?: MCPManager;
  	/** Warning if session was restored with a different model than saved */
-@@ -2031,6 +2035,7 @@ export function createAutoLearnCaptureRunner(
+@@ -2031,6 +2036,7 @@ export function createAutoLearnCaptureRunner(
   * ```
   */
  export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
@@ -3129,7 +3137,7 @@ index 9b3f393f0f..ab39710464 100644
  	registerLocalInferenceApi();
  	const extensionRoots = options.extensionRoots?.();
  	const explicit = extensionRoots?.explicit ?? options.additionalExtensionPaths ?? [];
-@@ -2503,6 +2508,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -2503,6 +2509,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  	const agentKind: AgentKind = isSubagentSession ? SUB_AGENT_RULE_NAME : MAIN_AGENT_RULE_NAME;
  	// Visuals (Mermaid, SVG figures, table charts) are drawn only in the top-level TUI transcript.
  	const tuiTranscript = options.tuiTranscript === true && !isSubagentSession;
@@ -3137,7 +3145,7 @@ index 9b3f393f0f..ab39710464 100644
  	const resolvedAgentName = (options.agentName ?? agentKind).trim().toLowerCase();
  
  	// Discover rules and bucket them in one pass to avoid repeated scans over large rule sets.
-@@ -2693,11 +2699,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -2693,11 +2700,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  			isToolActive: name => activeToolNames.has(name),
  			setActiveToolNames,
  			toolRegistry,
@@ -3152,7 +3160,7 @@ index 9b3f393f0f..ab39710464 100644
  			// Explicit resolvers retain their existing pass-through contract. Ordinary
  			// sessions inherit stored affinity into the child's own provider session.
  			getApiKey: options.getApiKey,
-@@ -2936,6 +2943,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -2936,6 +2944,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  			return [...enabled, ...mcpNamespaces.preludes(evalBound, taken)];
  		};
  		toolSession.getEvalPreludes = getEvalPreludes;
@@ -3161,7 +3169,7 @@ index 9b3f393f0f..ab39710464 100644
  		// SessionTools owns the advertised snapshot; before it exists the base
  		// prompt is built from, and therefore advertises, the live set.
  		toolSession.getAdvertisedEvalPreludes = () => session?.getAdvertisedEvalPreludes() ?? getEvalPreludes();
-@@ -4389,13 +4398,18 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4389,13 +4399,18 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  		// `auto` enforces the per-model policy (inline for Gemini, off otherwise), so
  		// a mid-session model switch re-decides it. Prompt and agent (description
  		// pruning) must agree: every prompt rebuild re-syncs the agent's pruning.
@@ -3182,7 +3190,7 @@ index 9b3f393f0f..ab39710464 100644
  		// The process agent dir uses the process-wide store; a session rooted in
  		// another agent dir keeps its own, closed when the session is disposed.
  		const ownedSkillDescriptionStore =
-@@ -4447,8 +4461,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4447,8 +4462,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  			toolNames,
  			tools,
  			xdev,
@@ -3193,7 +3201,7 @@ index 9b3f393f0f..ab39710464 100644
  			let activeRepoContext = initialActiveRepoContext;
  			// Re-discover rules and context files from disk on every session-scoped
  			// rebuild. The rule buckets are otherwise frozen at
-@@ -4459,7 +4475,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4459,7 +4476,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  			// injection state is retained only for rule names that remain registered.
  			// Sessions handed an explicit rule set (subagents inherit the parent's) keep it
  			// but still re-bucket, so live `ttsr.*` filter changes apply to them too.
@@ -3202,7 +3210,7 @@ index 9b3f393f0f..ab39710464 100644
  				// These reads share only the cwd and discovery scope. Start them together:
  				// a slow repository lookup must not delay context files or rules, including
  				// the first refresh after session_start hooks have edited those files.
-@@ -4503,24 +4519,33 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4503,24 +4520,33 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  					setActiveRules(nextActiveRules);
  				}
  			}
@@ -3245,8 +3253,15 @@ index 9b3f393f0f..ab39710464 100644
  				};
  			}
  
-@@ -4589,9 +4614,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
- 			const appendPrompt = composeAppendPrompt(appendParts, options.appendSystemPrompt);
+@@ -4586,12 +4612,15 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 					appendParts.push(`### ${srvName}\n${truncated}`);
+ 				}
+ 			}
+-			const appendPrompt = composeAppendPrompt(appendParts, options.appendSystemPrompt);
++			// `think.language` is read live from the session settings at every
++			// build (the options object is frozen at creation), so a preference
++			// change reaches this session's next rebuild.
++			const appendPrompt = composeAppendPrompt(appendParts, composeThinkingAppend(options.appendSystemPrompt, settings));
  			// Owned/in-band tool dialects (non-native) require the full functions-
  			// namespace catalog; native tool calling lets the compact name list suffice.
 -			const nativeTools = resolveDialect(cfgToolsFormat.get(settings), agent?.state.model ?? model) === undefined;
@@ -3257,7 +3272,7 @@ index 9b3f393f0f..ab39710464 100644
  				const treeRoot = path.resolve(promptCwd);
  				const treeEpoch = hasSession ? session.transcriptEpoch : 0;
  				const conversation = sessionManager.getSessionId();
-@@ -4645,6 +4670,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4645,6 +4674,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  				modelSystemPromptTemplates: systemPromptTemplatePatterns.get(settings),
  				skills: cfgSkillful.get(settings) ? (session?.promptSkills ?? skills) : [],
  				skillDescriptions,
@@ -3265,7 +3280,7 @@ index 9b3f393f0f..ab39710464 100644
  				contextFiles,
  				tools: promptTools,
  				toolNames,
-@@ -4662,7 +4688,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4662,7 +4692,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  				eagerTasksAlways: agentKind === "main" && cfgTaskEager.get(settings) === "always",
  				taskBatch: cfgTaskBatch.get(settings),
  				scoutAvailable: isScoutSpawnable(cfgTaskDisabledAgents.get(settings), options.spawns ?? "*"),
@@ -3274,7 +3289,7 @@ index 9b3f393f0f..ab39710464 100644
  				taskIrcEnabled: !restrictToolNames && isIrcEnabled(settings, options.taskDepth ?? 0),
  				autoQaEnabled: !restrictToolNames && isAutoQaEnabled(settings),
  				ovnfs: ovnfsCommand(settings),
-@@ -4672,13 +4698,13 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4672,13 +4702,13 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  				resultShaping: spotlightExperiment ? SHAPE_RULE : undefined,
  				workspaceTree: workspaceTreePromise ?? emptyWorkspaceTree,
  				includeWorkspaceTree,
@@ -3291,7 +3306,7 @@ index 9b3f393f0f..ab39710464 100644
  				includeModelInPrompt: cfgIncludeModelInPrompt.get(settings),
  				personality: agentKind === "sub" ? "none" : cfgPersonality.get(settings),
  				subagent: agentKind === "sub",
-@@ -4699,6 +4725,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4699,6 +4729,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  				systemPrompt: typeof customPrompt === "string" ? [customPrompt] : customPrompt,
  				// The viewer attributes only default blocks the callback left unchanged.
  				sources: defaultPrompt.sources,
@@ -3299,7 +3314,7 @@ index 9b3f393f0f..ab39710464 100644
  			};
  		};
  
-@@ -4858,13 +4885,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4858,13 +4889,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  		}
  
  		setSessionActiveToolNames(initialToolNames);
@@ -3318,7 +3333,7 @@ index 9b3f393f0f..ab39710464 100644
  
  		const promptTemplates = await promptTemplatesPromise;
  		toolSession.promptTemplates = promptTemplates;
-@@ -4980,7 +5005,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4980,7 +5009,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  			await extensionRunner.emitAfterProviderResponse(response, model, signal);
  		};
  
@@ -3327,7 +3342,7 @@ index 9b3f393f0f..ab39710464 100644
  			toolContextStore.setUIContext(uiContext, hasUI);
  		};
  
-@@ -5584,6 +5609,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -5584,6 +5613,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  			convertToLlm: convertToLlmFinal,
  			rebuildSystemPrompt,
  			systemPromptSources,

@@ -12,13 +12,15 @@ export const NATIVE_PREFERENCE_KEYS = [
 	"title.icons",
 	"title.generator",
 	"title.refreshOnReplan",
+	"title.language",
+	"think.language",
 	"telemetry.otlpExportEnabled",
 ] as const;
 export type NativePreferenceKey = (typeof NATIVE_PREFERENCE_KEYS)[number];
 export type NativePreferenceValue = string | number | boolean;
 export interface NativePreference {
 	key: NativePreferenceKey;
-	group: "advisor" | "tools" | "titles" | "diagnostics";
+	group: "advisor" | "tools" | "titles" | "thinking" | "diagnostics";
 	label: string;
 	description: string;
 	value: NativePreferenceValue;

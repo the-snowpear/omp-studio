@@ -26,6 +26,31 @@ export function withoutDeletedSessions(model: SessionHistoryReadModel, deleted: 
   return entries.length === model.entries.length ? model : { entries, total: Math.max(0, model.total - (model.entries.length - entries.length)) };
 }
 
+/**
+ * Keep the sidebar session list visually stable across refreshes. Opening a
+ * session bumps its `modifiedAt`, and the Host sorts `history.list` by
+ * `modifiedAt`, so a plain requery would jump the just-opened session to the
+ * top and shuffle the list. Pinned entries keep the Host's order (pinning is
+ * an explicit user action); unpinned entries already shown keep their previous
+ * position — only sessions missing from the previous page (new/untitled yet)
+ * take their fresh position.
+ */
+export function stableHistoryOrder(previous: SessionHistoryReadModel | undefined, next: SessionHistoryReadModel): SessionHistoryReadModel {
+  if (previous === undefined || previous.entries.length === 0) return next;
+  const previousIndex = new Map<string, number>();
+  previous.entries.forEach((entry, index) => {
+    const id = entry.sessionId ?? entry.historyId;
+    if (id !== undefined && !previousIndex.has(id)) previousIndex.set(id, index);
+  });
+  const pinned = next.entries.filter(entry => entry.pinned === true);
+  const unpinned = [...next.entries.filter(entry => entry.pinned !== true)].sort((left, right) => {
+    const leftIndex = previousIndex.get(left.sessionId ?? left.historyId ?? "");
+    const rightIndex = previousIndex.get(right.sessionId ?? right.historyId ?? "");
+    return leftIndex !== undefined && rightIndex !== undefined ? leftIndex - rightIndex : 0;
+  });
+  return { entries: [...pinned, ...unpinned], total: next.total };
+}
+
 /** Stable effect key for the first streaming snapshot of one project/session.
  * Unrelated token snapshots keep the same key, so they cannot retrigger the
  * project history query until streaming stops and a later turn starts. */
@@ -184,7 +209,8 @@ export function useProjectHistories({
         status: "active",
       });
       if (store.epoch !== requestEpoch || requestRef.current[key] !== requestId) return undefined;
-      const model = withoutDeletedSessions(result, store.deletedSessions);
+      const fresh = withoutDeletedSessions(result, store.deletedSessions);
+      const model = stableHistoryOrder(cacheRef.current[key]?.model, fresh);
       setCache((previous) => ({
         ...previous,
         [key]: { status: "ready", requestedLimit: limit, model },

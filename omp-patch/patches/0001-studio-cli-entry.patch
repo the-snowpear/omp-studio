@@ -659,7 +659,7 @@ index e5e6677814..42fb1ddd4a 100644
  		this.writeValue(setting, value, "override");
  		this.#softPins.add(setting);
 diff --git a/packages/coding-agent/src/main.ts b/packages/coding-agent/src/main.ts
-index ad2f725878..5a3072c919 100644
+index ad2f725878..10a0cbec8d 100644
 --- a/packages/coding-agent/src/main.ts
 +++ b/packages/coding-agent/src/main.ts
 @@ -1,3 +1,5 @@
@@ -849,7 +849,18 @@ index ad2f725878..5a3072c919 100644
  }
  
  /** Discover APPEND_SYSTEM.md file if no CLI append system prompt was provided */
-@@ -1833,6 +1878,7 @@ interface RunRootCommandDependencies {
+@@ -1753,7 +1798,9 @@ export async function buildSessionOptions(
+ 	// API key from CLI - set in authStorage
+ 	// (handled by caller before createAgentSession)
+ 
+-	// System prompt
++	// System prompt. `think.language` is not injected here: the session options
++	// are frozen at creation, so the thinking-language line is composed live
++	// from the settings at every prompt build (sdk rebuildSystemPrompt).
+ 	applyResolvedSystemPromptInputs(options, resolvedSystemPrompt, resolvedAppendPrompt);
+ 	if (resolvedSystemPromptTemplate !== undefined) {
+ 		options.systemPromptTemplate = resolvedSystemPromptTemplate;
+@@ -1833,6 +1880,7 @@ interface RunRootCommandDependencies {
  	discoverAuthStorage?: typeof discoverAuthStorage;
  	selectSession?: SessionPicker;
  	runAcpMode?: RunAcpMode;
@@ -857,7 +868,7 @@ index ad2f725878..5a3072c919 100644
  	createForeignSessionStore?: (source: ForeignSessionSource) => ForeignSessionStore;
  	settings?: Settings;
  	forceSetupWizard?: boolean;
-@@ -1907,6 +1953,10 @@ export async function runRootCommand(
+@@ -1907,6 +1955,10 @@ export async function runRootCommand(
  			rejectNoUiWithoutRpc(parsedArgs);
  		}
  		const mode = parsedArgs.mode || "text";
@@ -868,7 +879,7 @@ index ad2f725878..5a3072c919 100644
  		// RPC owns stdin. Claim its singleton stream before plugin/extension discovery can load an in-process consumer.
  		const rpcInput = mode === "rpc" || mode === "rpc-ui" ? claimRpcInput() : undefined;
  
-@@ -1941,8 +1991,10 @@ export async function runRootCommand(
+@@ -1941,8 +1993,10 @@ export async function runRootCommand(
  		// session-critical database connection picks the right busy timeout.
  		// See getDbBusyTimeoutMs().
  		const isProtocolMode = mode === "rpc" || mode === "rpc-ui" || mode === "acp";
@@ -880,7 +891,7 @@ index ad2f725878..5a3072c919 100644
  		// Without a terminal on stdin the TUI cannot run, so such a launch is always
  		// headless: a piped or argv prompt runs like `-p`, and one with no prompt
  		// fails with a usage error instead of booting the interactive stack and
-@@ -1950,10 +2002,10 @@ export async function runRootCommand(
+@@ -1950,10 +2004,10 @@ export async function runRootCommand(
  		const stdinIsTerminal = process.stdin.isTTY === true;
  		const autoPrint =
  			(pipedInput !== undefined || !stdinIsTerminal) && !parsedArgs.print && parsedArgs.mode === undefined;
@@ -893,7 +904,7 @@ index ad2f725878..5a3072c919 100644
  		// Before session resolution: resume, fork, and import act on these same
  		// startup-parse flags, so rejecting later would leave forked or imported
  		// transcripts (or an opened picker) behind a usage error.
-@@ -1977,7 +2029,7 @@ export async function runRootCommand(
+@@ -1977,7 +2031,7 @@ export async function runRootCommand(
  		// Only the interactive host renders a focusable Agent Hub / subagent session
  		// tree; declare it so headless subagent optimizations (e.g. skipping replan
  		// title refresh) can tell a focusable process from a print/RPC/eval one.
@@ -902,7 +913,7 @@ index ad2f725878..5a3072c919 100644
  		if (!isInteractive) {
  			stopPendingStartupComposer();
  		}
-@@ -1988,8 +2040,27 @@ export async function runRootCommand(
+@@ -1988,8 +2042,27 @@ export async function runRootCommand(
  			? Promise.resolve(deps.settings)
  			: logger.time("settings:init", Settings.init, { cwd, configFiles: parsedArgs.config });
  		settingsPromise.catch(() => {});
@@ -931,7 +942,7 @@ index ad2f725878..5a3072c919 100644
  		);
  		authStoragePromise.catch(() => {});
  		let authStorage: AuthStorage;
-@@ -2001,8 +2072,12 @@ export async function runRootCommand(
+@@ -2001,8 +2074,12 @@ export async function runRootCommand(
  			process.stderr.write(`${chalk.red(`Error: ${message}`)}\n`);
  			process.exit(1);
  		}
@@ -945,7 +956,7 @@ index ad2f725878..5a3072c919 100644
  		if (parsedArgs.approvalMode) {
  			// Runtime override (not persisted): every `tools.approvalMode` read downstream
  			// sees this value. The wrapper still honours --auto-approve / --yolo on top of it.
-@@ -2246,6 +2321,9 @@ export async function runRootCommand(
+@@ -2246,6 +2323,9 @@ export async function runRootCommand(
  		}
  		// Only createSessionManager's implicit auto-resume promotes continue here.
  		const autoResumed = !explicitSessionSelection && parsedArgs.continue === true;
@@ -955,7 +966,7 @@ index ad2f725878..5a3072c919 100644
  
  		if ((typeof parsedArgs.resume === "string" || foreignSource) && sessionManager && !parsedArgs.noSession) {
  			const previousCwd = cwd;
-@@ -2412,11 +2490,12 @@ export async function runRootCommand(
+@@ -2412,11 +2492,12 @@ export async function runRootCommand(
  			);
  			options.authStorage = authStorage;
  			options.modelRegistry = modelRegistry;
@@ -971,7 +982,7 @@ index ad2f725878..5a3072c919 100644
  			options.deferHintCompression = isInteractive;
  			options.settings = settingsInstance;
  			options.telemetry = startupTelemetry;
-@@ -2529,8 +2608,11 @@ export async function runRootCommand(
+@@ -2529,8 +2610,11 @@ export async function runRootCommand(
  			// input; the first request waits for them instead. Kept eager when argv may
  			// carry extension flags (they must parse now), `--tools` must validate
  			// extension tools, or a restored transcript needs extension renderers.
@@ -983,7 +994,7 @@ index ad2f725878..5a3072c919 100644
  				parsedArgs.unrecognizedFlags.length === 0 &&
  				!parsedArgs.tools?.length &&
  				!(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork || parsedArgs.restore || foreignSource);
-@@ -2752,8 +2834,8 @@ export async function runRootCommand(
+@@ -2752,8 +2836,8 @@ export async function runRootCommand(
  			// runInteractiveMode calls it once init has painted. None feeds the first
  			// prompt: fallback-chain validation and the startup changelog only add header
  			// rows, and the background refresh already raced the first prompt when it ran earlier.
@@ -994,7 +1005,7 @@ index ad2f725878..5a3072c919 100644
  					void resolveStartupChangelogForDisplay({
  						mode: cfgStartupChangelogMode.get(settingsInstance),
  						currentVersion: VERSION,
-@@ -2780,10 +2862,7 @@ export async function runRootCommand(
+@@ -2780,10 +2864,7 @@ export async function runRootCommand(
  					);
  				}
  			};
@@ -1006,7 +1017,7 @@ index ad2f725878..5a3072c919 100644
  
  			if (modelFallbackMessage) {
  				notifs.push({ kind: "warn", message: modelFallbackMessage });
-@@ -2897,32 +2976,124 @@ export async function runRootCommand(
+@@ -2897,32 +2978,124 @@ export async function runRootCommand(
  				try {
  					stopStartupWatchdog();
  					logger.endTiming();
@@ -1154,7 +1165,7 @@ index ad2f725878..5a3072c919 100644
  				// Branch-only single-shot runner: keep print-mode code out of normal interactive startup.
  				stopStartupWatchdog();
  				// PI_TIMING prints the tree after the run; otherwise stop recording now so a
-@@ -2945,6 +3116,8 @@ export async function runRootCommand(
+@@ -2945,6 +3118,8 @@ export async function runRootCommand(
  				await disposeSessionQuietly(session);
  				stopThemeWatcher();
  				await postmortem.quit(exitCode);
