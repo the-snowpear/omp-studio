@@ -4,8 +4,14 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
     "paths": {
-      "@oh-my-pi/pi-tui/html-form/data": ["../../omp-patch/vendor/oh-my-pi/packages/tui/src/html-form/data.ts"],
-      "@oh-my-pi/pi-tui/html-form/model": ["../../omp-patch/vendor/oh-my-pi/packages/tui/src/html-form/model.ts"]
+      "@oh-my-pi/pi-tui/html-form/data": ["../../omp-patch/vendor/oh-my-pi/packages/coding-agent/src/tools/html-form/data.ts"],
+      "@oh-my-pi/pi-tui/html-form/model": ["../../omp-patch/vendor/oh-my-pi/packages/coding-agent/src/tools/html-form/parse.ts"],
+      "@oh-my-pi/pi-tui/text/sanitize": ["../../omp-patch/vendor/oh-my-pi/packages/tui/src/text/sanitize.ts"],
+      "@oh-my-pi/pi-tui/native/blobs": ["../../omp-patch/vendor/oh-my-pi/packages/tui/src/native/blobs.ts"],
+      "@oh-my-pi/pi-tui/theme/contract": ["../../omp-patch/vendor/oh-my-pi/packages/tui/src/theme/contract.ts"],
+      "@oh-my-pi/pi-utils/dom": ["../../omp-patch/vendor/oh-my-pi/packages/utils/src/dom.ts"],
+      "@oh-my-pi/pi-natives": ["../../omp-patch/vendor/oh-my-pi/packages/natives"],
+      "@oh-my-pi/pi-ai": ["../../omp-patch/vendor/oh-my-pi/packages/ai"]
     },
     "noEmit": true,
     "tsBuildInfoFile": "node_modules/.tmp/tsconfig.app.tsbuildinfo"

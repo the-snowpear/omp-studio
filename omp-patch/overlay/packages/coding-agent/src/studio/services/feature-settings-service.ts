@@ -17,7 +17,7 @@ import { cfgToolsIntentTracing } from "../../tools/settings";
 import { cfgLiveEndpoint, cfgLiveApiKey, cfgLiveVoice } from "../../live/settings";
 import { outRepliesActive } from "../../internal-urls/out-protocol";
 import { cfgMagicKeyword, cfgMagicKeywordsEnabled } from "../../modes/settings";
-import { cfgOutEnabled, cfgToolsXdevNotices } from "../../tools/settings";
+import { cfgOutEnabled, cfgToolsCommandNotices } from "../../tools/settings";
 import {
 	cfgBtwInject,
 	cfgComposerPredictionAlternatives,
@@ -76,7 +76,7 @@ import {
 } from "../../session/settings";
 import {
 	cfgAsyncWidgets,
-	cfgComputerBackgroundFallback,
+	cfgComputerTakeover,
 	cfgComputerEnabled,
 	cfgComputerDisplay,
 	cfgComputerMaxWidth,
@@ -167,7 +167,7 @@ const HANDLES: Record<FeatureSettingKey, AnySetting> = {
 	"judgment.attemptTimeoutMs": cfgJudgmentAttemptTimeoutMs,
 	"skills.manualSkills": cfgSkillsManualSkills,
 	"hindsight.globalScope": cfgHindsightGlobalScope,
-	"tools.xdevNotices": cfgToolsXdevNotices,
+	"tools.xdevNotices": cfgToolsCommandNotices,
 	"spotlight.experiment.enabled": cfgSpotlightExperimentEnabled,
 	"spotlight.url": cfgSpotlightUrl,
 	"spotlight.model": cfgSpotlightModel,
@@ -197,7 +197,7 @@ const HANDLES: Record<FeatureSettingKey, AnySetting> = {
 	"computer.display": cfgComputerDisplay,
 	"computer.maxWidth": cfgComputerMaxWidth,
 	"computer.maxHeight": cfgComputerMaxHeight,
-	"computer.backgroundFallback": cfgComputerBackgroundFallback,
+	"computer.backgroundFallback": cfgComputerTakeover,
 	"tools.restrictedFolders": cfgToolsRestrictedFolders,
 	"extensionHandlers.modeControl": cfgExtensionHandlersModeControl,
 	"recap.enabled": cfgRecapEnabled,

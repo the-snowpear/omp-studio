@@ -1,7 +1,6 @@
 import { redactSensitiveCredentials, withCredentialRedaction } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import { randomUUID } from "node:crypto";
-import type { ContextViewData, ContextViewEntry } from "@oh-my-pi/pi-tui/chrome/context-view-model";
-import { contextCategoryDescriptor } from "@oh-my-pi/pi-tui/chrome/context-view-model";
+import { CONTEXT_CATEGORIES, type ContextViewData, type ContextViewEntry } from "../../session/context-view-model";
 import type { AgentSession } from "../../session/agent-session";
 import { buildSessionContextView } from "../../session/context-view";
 import type {
@@ -236,14 +235,21 @@ export class StudioContextViewService {
 
 		const breakdown = native.breakdown;
 		const categories: ContextCategorySummary[] = native.categories.map(category => {
-			const descriptor = contextCategoryDescriptor(category.id);
+			const descriptor = CONTEXT_CATEGORIES.find(entry => entry.id === category.id) as
+				| {
+						id: string;
+						label: string;
+						overviewLabel?: string;
+						openable?: false;
+				  }
+				| undefined;
 			return {
 				id: category.id,
 				label: category.label,
 				tokens: category.tokens,
 				entries: groups.get(category.id)?.length ?? 0,
-				...(descriptor.overviewLabel ? { overviewLabel: descriptor.overviewLabel } : {}),
-				...(descriptor.openable === false ? { openable: false as const } : {}),
+				...(descriptor?.overviewLabel ? { overviewLabel: descriptor.overviewLabel } : {}),
+				...(descriptor?.openable === false ? { openable: false as const } : {}),
 				...((category.children?.length ?? 0) > 0
 					? {
 							children: category

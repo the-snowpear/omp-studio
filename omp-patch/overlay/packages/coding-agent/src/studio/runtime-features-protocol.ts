@@ -52,7 +52,7 @@ export interface JobWidgetView {
 }
 
 /** Upstream `AsyncJobInspection` for one job. */
-import type { TaskStepState } from "@oh-my-pi/pi-tui/tools/task";
+import type { TaskStepState } from "../task/task-details";
 import type { JobActionsView } from "./job-actions-protocol";
 
 export interface JobInspection {

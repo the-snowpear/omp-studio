@@ -1,5 +1,5 @@
-import { isReplyWrite, toolResultReplies } from "@oh-my-pi/pi-tui/chat/reply-write";
-import { asyncJobState } from "@oh-my-pi/pi-tui/chat/tool-execution";
+import { isReplyWrite, toolResultReplies } from "../../session/transcript/reply-write";
+import { asyncJobState } from "../../session/transcript/tool-execution";
 import { projectToolMedia } from "./conversation-media";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, AssistantMessageEvent, ToolCall } from "@oh-my-pi/pi-ai";

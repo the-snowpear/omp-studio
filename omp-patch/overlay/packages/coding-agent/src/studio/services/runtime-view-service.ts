@@ -1,10 +1,6 @@
 import { isRecord } from "@oh-my-pi/pi-utils";
 import { isShellTrace, type ShellTrace } from "@oh-my-pi/pi-wire/shell-trace";
-import {
-	defaultShellVizPreferences,
-	readShellPresentation,
-	shellVisualization,
-} from "@oh-my-pi/pi-tui/tools/shell-viz";
+import { defaultShellVizPreferences, readShellPresentation, shellVisualization } from "../../tools/shell-viz";
 import type { AgentSession } from "../../session/agent-session";
 import { SessionManager } from "../../session/session-manager";
 import { probeSessionLeases } from "../../session/session-storage";

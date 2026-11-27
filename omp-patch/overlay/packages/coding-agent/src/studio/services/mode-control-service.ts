@@ -23,10 +23,9 @@ import guidedGoalInterviewPrompt from "../../prompts/goals/guided-goal-interview
 import planModeApprovedPrompt from "../../prompts/system/plan-mode-approved.md" with { type: "text" };
 import planModeCompactInstructionsPrompt from "../../prompts/system/plan-mode-compact-instructions.md" with { type: "text" };
 import type { AgentSession } from "../../session/agent-session";
-import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
+import type { ConfiguredThinkingLevel } from "../../utils/render-utils";
 import { confineToWorkspace, formatPathRelativeToCwd, normalizePathLikeInput } from "../../tools/path-utils";
-import { PROPOSE_DEVICE_NAME } from "@oh-my-pi/pi-tui/tools/resolve";
-import { writeDeviceDispatch } from "../../tools/resolve";
+import { proposeDispatchDetails } from "../../tools/resolve";
 import { type VibeOwnerScope, type VibeParentSession, VibeSessionRegistry } from "../../vibe/runtime";
 
 export class StudioModeError extends Error {
@@ -152,8 +151,7 @@ export class StudioModeControlService {
 		this.#unsubscribeSession = session.subscribe(event => {
 			if (event.type === "goal_updated") this.#notify();
 			if (event.type === "tool_execution_end" && this.#planReviewAbortPending && !event.isError) {
-				const dispatch = writeDeviceDispatch(event.toolName, event.result);
-				if (dispatch?.tool === PROPOSE_DEVICE_NAME && dispatch.mode === "execute") {
+				if (proposeDispatchDetails(event.toolName, event.result) !== undefined) {
 					this.#planReviewAbortPending = false;
 					queueMicrotask(() => {
 						void this.#abortPlanReviewTurn();

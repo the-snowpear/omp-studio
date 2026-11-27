@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
+import { ToolError } from "../../tools/tool-errors";
 import type { TabSession } from "../../tools/browser/tab-supervisor";
 
 interface ControlLease {

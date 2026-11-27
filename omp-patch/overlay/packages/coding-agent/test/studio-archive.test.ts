@@ -13,6 +13,7 @@ test("Archive bounds native content and pages while preserving IDs and omitting 
 		created: "2026-10-07T00:00:00.000Z",
 		modified: "2026-10-08T00:00:00.000Z",
 		messages: 9,
+		status: null,
 		recap: "界".repeat(3000),
 	}));
 	const read = spyOn(archive, "archiveSessions").mockResolvedValue({ records: rows, text: "unused" });
@@ -31,7 +32,7 @@ test("Archive bounds native content and pages while preserving IDs and omitting 
 		});
 		expect(JSON.stringify(result)).not.toContain("/private/");
 		expect(JSON.stringify(result)).not.toContain("界".repeat(513));
-		expect(read).toHaveBeenCalledWith("/workspace", 21);
+		expect(read).toHaveBeenCalledWith({ cwd: "/workspace", window: undefined, limit: 21 });
 		await expect(
 			new StudioArchiveService(session).execute({
 				kind: "archive.sessions.list",

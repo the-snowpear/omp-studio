@@ -15,7 +15,7 @@
  */
 
 import type { AsyncJob, AsyncJobFilter, AsyncJobType } from "../../async/job-manager";
-import type { TaskStepState } from "@oh-my-pi/pi-tui/tools/task";
+import type { TaskStepState } from "../../task/task-details";
 import type { JobActionsView } from "../job-actions-protocol";
 import { nativeJobTaskRecord, projectJobActions } from "./job-actions";
 import type { JobWidgetView } from "../runtime-features-protocol";

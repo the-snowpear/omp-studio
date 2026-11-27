@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   prepareSvg,
   closePartialSvg,
-} from "../../../../omp-patch/vendor/oh-my-pi/packages/tui/src/chat/svg-source";
+} from "../../../../omp-patch/vendor/oh-my-pi/packages/coding-agent/src/ui/transcript/figures/svg";
 import { useI18n } from "../i18n";
 const TOKENS: Record<string, string> = {
   fg: "text",

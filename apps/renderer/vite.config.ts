@@ -36,8 +36,13 @@ export default defineConfig({
   base: "./",
   resolve: {
     alias: [
-      { find: "@oh-my-pi/pi-tui/html-form/data", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/tui/src/html-form/data.ts", import.meta.url)) },
-      { find: "@oh-my-pi/pi-tui/html-form/model", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/tui/src/html-form/model.ts", import.meta.url)) },
+      { find: "@oh-my-pi/pi-tui/html-form/data", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/coding-agent/src/tools/html-form/data.ts", import.meta.url)) },
+      { find: "@oh-my-pi/pi-tui/html-form/model", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/coding-agent/src/tools/html-form/parse.ts", import.meta.url)) },
+      { find: "@oh-my-pi/pi-tui/text/sanitize", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/tui/src/text/sanitize.ts", import.meta.url)) },
+      { find: "@oh-my-pi/pi-tui/native/blobs", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/tui/src/native/blobs.ts", import.meta.url)) },
+      { find: "@oh-my-pi/pi-tui/theme/contract", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/tui/src/theme/contract.ts", import.meta.url)) },
+      { find: "@oh-my-pi/pi-utils/dom", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/utils/src/dom.ts", import.meta.url)) },
+      { find: "@oh-my-pi/pi-natives", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/natives", import.meta.url)) },
     ],
   },
   server: { cors: { origin: ["null", /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/] } },

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
+import { parseHtmlForm } from "../src/tools/html-form/parse";
 import { presentHtmlForm } from "@oh-my-pi/pi-coding-agent/studio/services/form-presentation";
 import type {
 	StudioInteractionRequiredEvent,

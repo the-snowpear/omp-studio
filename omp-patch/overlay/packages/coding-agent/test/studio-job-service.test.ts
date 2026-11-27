@@ -11,7 +11,7 @@ import { JobWidgets } from "../src/job-widgets/registry";
 import { TextTap } from "../src/job-widgets/text-tap";
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
 import { type } from "@oh-my-pi/omptype";
-import type { GhRunWatchViewDetails } from "@oh-my-pi/pi-tui/tools/github";
+import type { GhRunWatchViewDetails } from "../src/tools/details/github";
 import { buildRunWatchRunDetails } from "../src/tools/gh-run-watch";
 import { callSessionTool, type JsStatusEvent } from "../src/eval/js/tool-bridge";
 import { Settings } from "../src/config/settings";

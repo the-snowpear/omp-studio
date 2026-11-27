@@ -1,4 +1,5 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import type { Composer } from "../../ui/composer/composer";
 import { ComposerPredictionController, predictionAnchor } from "../../modes/controllers/composer-prediction-controller";
 import type { AgentSession } from "../../session/agent-session";
 import { cfgComposerPredictions } from "../../modes/settings";
@@ -24,21 +25,23 @@ export class StudioMessagePrediction {
 			rank?: number,
 		) => void,
 	) {
-		const owner = this;
-		this.#controller = new ComposerPredictionController({
-			get settings() {
-				return session.settings;
-			},
-			get viewSession() {
-				return session;
-			},
-			editor: { getText: () => this.#active?.text ?? "draft" },
-			ui: {
-				requestRender() {
-					owner.#show();
+		this.#controller = new ComposerPredictionController(
+			{
+				get settings() {
+					return session.settings;
 				},
+				get viewSession() {
+					return session;
+				},
+				focusedAgentId: undefined,
+				composer: { text: () => this.#active?.text ?? "draft" } as unknown as Composer,
 			},
-		});
+			{
+				// The controller is reactive for the TUI ghost; Studio re-publishes the channel on
+				// offer/retire instead.
+				onChange: () => this.#show(),
+			},
+		);
 		this.#unsubscribe = session.subscribe(event => {
 			if (
 				event.type === "agent_start" ||

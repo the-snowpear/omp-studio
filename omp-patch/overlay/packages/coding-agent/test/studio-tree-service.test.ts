@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
-import type { AskToolDetails } from "@oh-my-pi/pi-tui/tools/ask";
+import type { AskToolDetails } from "../src/tools/details/ask";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 
 const FORM_HTML = `<form><fieldset><legend>Pick</legend><label><input type="radio" name="q1" value="a" checked>A</label><label><input type="radio" name="q1" value="b">B</label></fieldset></form>`;

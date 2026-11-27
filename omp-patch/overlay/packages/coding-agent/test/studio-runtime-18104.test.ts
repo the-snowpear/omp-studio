@@ -2,8 +2,9 @@ import { expect, test, mock } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
-import { TempDir, getAgentDir, setAgentDir, setWorktreesDir } from "@oh-my-pi/pi-utils";
+import { TempDir, getAgentDir, getSessionsDir, setAgentDir, setWorktreesDir } from "@oh-my-pi/pi-utils";
 import { readArchiveEntries } from "@oh-my-pi/pi-utils/ar";
+import { compressionWorks } from "../src/cli/gc-compress";
 import { Settings } from "../src/config/settings";
 import { cfgTaskAgentAccountPools, cfgWorktreeOnStart } from "../src/task/settings";
 import { cfgComposerPredictions } from "../src/modes/settings";
@@ -368,6 +369,19 @@ test("compression rechecks reviewed files and leaves compressed session bytes re
 			return;
 		}
 		expect(scan.summary.candidates).toBeGreaterThan(0);
+		if (!(await compressionWorks(getSessionsDir(getAgentDir()), scan.summary.method!))) {
+			// The volume reports a compressing method yet stores plain copies
+			// (macOS 27 `ditto`, upstream #16244): apply short-circuits with a
+			// probe failure, so only the recheck contract is verifiable.
+			const probed = await service.execute({
+				kind: "maintenance.compression.apply",
+				sessionId: "maintenance",
+				token: scan.token!,
+			});
+			expect(probed.summary?.compressed).toBe(0);
+			expect(probed.summary?.errors.length).toBeGreaterThan(0);
+			return;
+		}
 		await fs.appendFile(file, "\n");
 		const skipped = await service.execute({
 			kind: "maintenance.compression.apply",

@@ -7,8 +7,9 @@ import {
 	WordCompletionProvider,
 	type WordPredictionBackend,
 	type WordCompletionEngine,
-} from "@oh-my-pi/pi-tui/prompt/word-completion";
+} from "../../modes/view-model/prompt/word-completion";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
+import { createRoot, effect } from "@oh-my-pi/pi-tui";
 import { cfgSpellingAutocomplete } from "../../modes/settings";
 import { resolveTextPredictMethod } from "../../predict/client";
 import { StudioPredictionEngine, type StudioPredictionQuery } from "./prediction-engine";
@@ -40,6 +41,7 @@ interface Channel {
 	provider: WordCompletionProvider;
 	input?: { revision: number; lines: string[]; line: number; column: number; suffix: string | null };
 	importing: boolean;
+	dispose: () => void;
 }
 const clean = (cause: unknown) =>
 	sanitizeText(cause instanceof Error ? cause.message : String(cause))
@@ -214,9 +216,16 @@ export class StudioPredictionService {
 			provider,
 			importing: false,
 			protocolVersion,
+			dispose: () => {},
 		};
 		channel.timer.unref();
-		provider.onUpdate = () => this.#suggest(channel);
+		channel.dispose = createRoot(dispose => {
+			effect(() => {
+				provider.revision();
+				if (!channel.closed) this.#suggest(channel);
+			});
+			return dispose;
+		});
 		this.#channels.set(id, channel);
 		try {
 			const ready = Promise.withResolvers<void>();
@@ -402,7 +411,7 @@ export class StudioPredictionService {
 		channel.closed = true;
 		clearInterval(channel.timer);
 		channel.provider.setMethod("off");
-		channel.provider.onUpdate = undefined;
+		channel.dispose();
 		channel.input = undefined;
 		for (const socket of channel.peers) socket.destroy();
 		channel.server.close();

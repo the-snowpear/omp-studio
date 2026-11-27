@@ -1,7 +1,7 @@
 import * as crypto from "node:crypto";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import type { ToolCallContext } from "@oh-my-pi/pi-agent-core";
-import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
+import { parseHtmlForm } from "../tools/html-form/parse";
 import { presentHtmlForm } from "./services/form-presentation";
 import { validateAskAnswerPayload } from "./ask-attachments-protocol";
 import { runtimeText } from "./locale";
@@ -18,15 +18,18 @@ import type {
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
 	ExtensionUISelectItem,
-	ExtensionUiComponentFactory,
+	ExtensionUiFactory,
 	ExtensionWidgetContent,
 	ExtensionWidgetOptions,
 	TerminalInputHandler,
 } from "../extensibility/extensions/types";
 import { getExtensionUISelectOptionLabel } from "../extensibility/extensions/types";
-import { createTheme, getBuiltinThemes } from "@oh-my-pi/pi-tui/theme/loader";
+import { builtinThemes } from "@oh-my-pi/pi-tui/theme/loader";
+import type { ExtensionTheme } from "../extensibility/extensions/render-types";
+import { extensionTheme } from "../ui/extensions/render-output";
+import { createTheme } from "@oh-my-pi/pi-tui/theme/theme";
 import type { ThemeJson } from "@oh-my-pi/pi-tui/theme/schema";
-import type { Theme } from "@oh-my-pi/pi-tui/theme/theme";
+import type { ResolvedTheme } from "@oh-my-pi/pi-tui/theme/theme";
 import type { ToolUiFactory } from "../tools/context";
 import { ignoreSettle } from "../thread/services/support";
 import { StudioInteractionError, type StudioInteractionGateway } from "./services/interaction-port";
@@ -158,7 +161,7 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 	getLinkClicksAvailable(): boolean {
 		return true;
 	}
-	#fallbackTheme: Theme | undefined;
+	#fallbackTheme: ResolvedTheme | undefined;
 	readonly #gatewayGeneration: number | undefined;
 
 	constructor(
@@ -371,11 +374,11 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 		// Widgets are not supported on the Remote surface.
 	}
 
-	setFooter(_factory: ExtensionUiComponentFactory | undefined): void {
+	setFooter(_factory: ExtensionUiFactory | undefined): void {
 		// Custom footer components are not supported on the Remote surface.
 	}
 
-	setHeader(_factory: ExtensionUiComponentFactory | undefined): void {
+	setHeader(_factory: ExtensionUiFactory | undefined): void {
 		// Custom header components are not supported on the Remote surface.
 	}
 
@@ -411,27 +414,27 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 		return undefined;
 	}
 
-	get theme(): Theme {
+	get theme(): ExtensionTheme {
 		// The module-level `theme` singleton is only assigned after TUI theme
 		// initialization; headless Studio contexts fall back to a static
 		// default so Ask helpers (e.g. the "Done selecting" label) never
 		// dereference an uninitialized global.
 		if (this.#fallbackTheme === undefined) {
-			const firstDefault = Object.values(getBuiltinThemes())[0];
+			const firstDefault = Object.values(builtinThemes())[0];
 			this.#fallbackTheme = createTheme(firstDefault as ThemeJson);
 		}
-		return this.#fallbackTheme;
+		return extensionTheme(this.#fallbackTheme);
 	}
 
 	getAllThemes(): Promise<{ name: string; path: string | undefined }[]> {
 		return Promise.resolve([]);
 	}
 
-	getTheme(_name: string): Promise<Theme | undefined> {
+	getTheme(_name: string): Promise<ExtensionTheme | undefined> {
 		return Promise.resolve(undefined);
 	}
 
-	setTheme(_theme: string | Theme): Promise<{ success: boolean; error?: string }> {
+	setTheme(_theme: string | ResolvedTheme): Promise<{ success: boolean; error?: string }> {
 		return Promise.resolve({ success: false, error: "Theme switching is not supported by the Studio remote UI" });
 	}
 

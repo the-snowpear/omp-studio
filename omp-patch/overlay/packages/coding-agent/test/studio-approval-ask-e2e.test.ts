@@ -5,11 +5,11 @@ import * as path from "node:path";
 import type { AgentToolContext } from "@oh-my-pi/pi-agent-core";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { getBuiltinThemes } from "@oh-my-pi/pi-tui/theme/loader";
-const defaultThemes = getBuiltinThemes();
-import { createTheme } from "@oh-my-pi/pi-tui/theme/loader";
+import { builtinThemes } from "@oh-my-pi/pi-tui/theme/loader";
+const defaultThemes = builtinThemes();
+import { createTheme } from "@oh-my-pi/pi-tui/theme/theme";
 import type { ThemeJson } from "@oh-my-pi/pi-tui/theme/schema";
-import { setThemeInstance } from "@oh-my-pi/pi-tui/theme/theme";
+import { setCurrentTheme } from "@oh-my-pi/pi-tui/theme/runtime";
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
@@ -49,7 +49,7 @@ describe("studio real tool approval and ask E2E", () => {
 	beforeAll(async () => {
 		// AskTool's "Done selecting" label reads the module theme singleton;
 		// the TUI initializes it at startup, so do the same here.
-		setThemeInstance(createTheme(Object.values(defaultThemes)[0] as ThemeJson));
+		setCurrentTheme(createTheme(Object.values(defaultThemes)[0] as ThemeJson));
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `pi-approval-e2e-${Snowflake.next()}-`));
 		const cwd = path.join(tempDir, "cwd");
 		fs.mkdirSync(cwd, { recursive: true });

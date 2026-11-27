@@ -2,7 +2,8 @@ import { cfgTaskAgentModelOverrides } from "../../task/settings";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import type { AgentSession } from "../../session/agent-session";
-import { AUTO_THINKING, type ConfiguredThinkingLevel, parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
+import type { ConfiguredThinkingLevel } from "../../utils/render-utils";
+import { AUTO_THINKING, parseConfiguredThinkingLevel } from "../../thinking/levels";
 
 export class StudioModelControlError extends Error {
 	constructor(

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
+import { parseHtmlForm } from "../src/tools/html-form/parse";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";

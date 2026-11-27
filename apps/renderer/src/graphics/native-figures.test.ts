@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { nativeTableFigure } from "./native-table-chart";
 import { validateSvgFigure } from "./SvgFigureImage";
-import { closePartialSvg } from "../../../../omp-patch/vendor/oh-my-pi/packages/tui/src/chat/svg-source";
+import { closePartialSvg } from "../../../../omp-patch/vendor/oh-my-pi/packages/coding-agent/src/ui/transcript/figures/svg";
 describe("native Studio figures", () => {
   it("uses native numeric inference and safely escapes table labels in generated charts", () => {
     const figure = nativeTableFigure({

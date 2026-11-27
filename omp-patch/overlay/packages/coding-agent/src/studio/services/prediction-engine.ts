@@ -6,7 +6,7 @@ import { Database } from "bun:sqlite";
 import { getAgentDir, getHistoryDbPath, withFileLock } from "@oh-my-pi/pi-utils";
 import { TextPredictionClient } from "../../predict/client";
 import type { TextPredictMethod } from "../../predict/protocol";
-import type { WordCompletionEngine } from "@oh-my-pi/pi-tui/prompt/word-completion";
+import type { WordCompletionEngine } from "../../modes/view-model/prompt/word-completion";
 import { cfgSpellingAutocomplete } from "../../modes/settings";
 import type { AgentSession } from "../../session/agent-session";
 import { readForeignPrompts } from "../../predict/foreign-history";

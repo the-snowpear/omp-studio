@@ -38,7 +38,7 @@ type Review = { edit: DisassemblerEdit; expiresAt: number } & (
 	| { binding: Binding }
 	| { file: string; fingerprint: string; arch?: string }
 );
-const engines = ["ida", "ghidra"] as const;
+const engines = ["ida", "ghidra", "binja"] as const;
 
 function workerBinding(db: DisasmDatabase, signal?: AbortSignal): Promise<Binding> {
 	return db.request("studio", { method: "status" }, { timeoutMs: 5000, signal });
@@ -139,7 +139,7 @@ export class StudioDisassemblerService {
 			return { state: (await isGhidraInstall(install)) ? "unknown" : "unavailable", detail: install };
 		}
 		try {
-			const worker = await resolveWorkerRuntime(this.#tool(), "ida");
+			const worker = await resolveWorkerRuntime(this.#tool(), backend);
 			return { state: "ready", detail: worker.pythonPath };
 		} catch (error) {
 			return { state: "unavailable", detail: error instanceof Error ? error.message : String(error) };
@@ -149,16 +149,17 @@ export class StudioDisassemblerService {
 	async #status(): Promise<DisassemblerStatus> {
 		const { settings } = this.session;
 		const activeBackend = cfgDisasmBackend.get(settings);
-		const [ida, ghidra, ...rows] = await Promise.all([
+		const [ida, ghidra, binja, ...rows] = await Promise.all([
 			this.#backendStatus("ida"),
 			this.#backendStatus("ghidra"),
+			this.#backendStatus("binja"),
 			...engines.map(async engine => {
 				const databases = await listDatabases(engine);
 				return Promise.all(databases.map(db => this.#project(db, engine)));
 			}),
 		]);
 		const databases = rows.flat();
-		const backends = { ida, ghidra };
+		const backends = { ida, ghidra, binja };
 		if (
 			ghidra.state === "unknown" &&
 			databases.some(database => database.backend === "ghidra" && database.state === "open")

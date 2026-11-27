@@ -73,7 +73,7 @@ export const PREVIEW_FEATURE_SETTINGS: FeatureSettingRow[] = [
   { key: "prewalk.auto", value: "suggest", source: "global" },
   { key: "prewalk.autoTarget", value: "@smol", source: "default" },
   { key: "async.widgets", value: true, source: "default" },
-  { key: "computer.backgroundFallback", value: "takeover", source: "default" },
+  { key: "computer.backgroundFallback", value: "fallback", source: "default" },
   { key: "tools.restrictedFolders", value: ["private/credentials", "production-data"], source: "project" },
   { key: "extensionHandlers.modeControl", value: true, source: "default" },
   { key: "recap.enabled", value: false, source: "runtime" },

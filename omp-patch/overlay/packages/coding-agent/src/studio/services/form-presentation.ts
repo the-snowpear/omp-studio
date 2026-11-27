@@ -1,6 +1,6 @@
-import { defaultFormData, fieldQuestions } from "@oh-my-pi/pi-tui/html-form/data";
-import { isSvgMedia, loadMedia, svgMedia, type MediaOptions } from "@oh-my-pi/pi-tui/media";
-import type { FormBlock, HtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
+import { defaultFormData, fieldQuestions } from "../../tools/html-form/data";
+import { isSvgMedia, loadMedia, svgMedia, type MediaOptions } from "./media";
+import type { FormBlock, HtmlForm } from "../../tools/html-form/parse";
 import { resizeImage } from "../../utils/image-resize";
 import type { InteractionForm, InteractionFormBlock } from "../form-protocol";
 import { utf8ByteLength } from "./conversation-sanitizer";

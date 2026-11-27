@@ -1,4 +1,4 @@
-import type { GhRunWatchViewDetails } from "@oh-my-pi/pi-tui/tools/github";
+import type { GhRunWatchViewDetails } from "../../tools/details/github";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import type { AsyncJob } from "../../async/job-manager";
 import type {
