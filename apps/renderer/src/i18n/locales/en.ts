@@ -998,6 +998,7 @@ export const en: LocaleDictionary = {
     "moreModels": "More Models",
     "allModels": "All Models",
     "noAvailableModels": "No available models",
+    "noMatchingModels": "No matching models",
     "previewModelNote": "Demo data, does not write to local config",
     "model": "Model",
     "thinkingNotSupported": "Not supported",
@@ -1405,6 +1406,7 @@ export const en: LocaleDictionary = {
     "primaryModel": "Primary Model",
     "pickByProvider": "Select by Provider",
     "noAvailableModels": "No available models",
+    "noMatchingModels": "No matching models",
     "currentNotInList": "Current model not in list",
     "autoModel": "Auto-select",
     "autoModelDesc": "Clear the assignment and use native OMP role routing",
@@ -1630,6 +1632,15 @@ export const en: LocaleDictionary = {
     "drag": "Drag",
     "nativeProviderBadge": "Native",
     "customProviderBadge": "Custom",
+    "inFlightCapBadge": "Cap ×{count}",
+    "inFlightCapTooltip": "In-flight request cap: {count}",
+    "applyLimit": "Apply limit",
+    "inFlightCapsLabel": "Global request limit",
+    "inFlightCapsUnlimited": "Unlimited",
+    "inFlightCapsUnavailable": "This runtime has not supplied provider limits.",
+    "inFlightCapsDesc": "Shared by local OMP processes. Project or session settings may override this global limit.",
+    "inFlightCapsInvalid": "The in-flight cap must be an integer of 1 or more.",
+    "inFlightCapsSaveFailed": "Could not save the limit. Retry to apply your change.",
     "modelCount": "{count} models",
     "testConnection": "Test Connection",
     "refreshModels": "Refresh Models",
@@ -1821,7 +1832,14 @@ export const en: LocaleDictionary = {
     "cannotSaveRoleNoPrimary": "Cannot save: role {labels} has no primary model after cancellation, please set another model first",
     "localOauthCredential": "Local OAuth credential",
     "noWorkspaceTip": "No workspace",
-    "statusDemoNoHost": "Demo · Not written to Host"
+    "statusDemoNoHost": "Demo · Not written to Host",
+    "statusOmpResolved": "Available models resolved by OMP",
+    "statusReadFromModelsYml": "Read from models.yml",
+    "statusDisabledInConfig": "Disabled in disabledProviders",
+    "statusDisabled": "Disabled",
+    "statusNoCredentials": "Credentials not configured",
+    "statusApiKeySaved": "API key saved",
+    "statusLocalServiceNotRunning": "Local service not running"
   },
   "settings": {
     "title": "Settings",
@@ -3208,7 +3226,9 @@ export const en: LocaleDictionary = {
   "sidebar": {
     "waitingApproval": "Pending Approval",
     "waitingPlan": "Pending Review",
-    "waitingAsk": "Pending Answer"
+    "waitingAsk": "Pending Answer",
+    "completed": "Turn ended",
+    "draftTag": "Draft"
   },
   "tests": {
     "notice": "Test commands run by the agent in this session. Click a row to correlate with the Bash card in chat. Failures display runner output verbatim without suite tree parsing.",

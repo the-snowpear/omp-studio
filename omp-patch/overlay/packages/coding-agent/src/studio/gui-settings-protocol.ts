@@ -24,6 +24,16 @@ export const GUI_SETTING_DEFINITIONS = {
 		zh: "OpenAI 实时纠偏",
 		en: "OpenAI live steering",
 	},
+	"providers.maxInFlightRequests": {
+		type: "numberRecord",
+		default: {},
+		zh: "服务商并发请求上限",
+		en: "Max in-flight requests per provider",
+		note: "键为服务商 ID（如 openai），值为 ≥1 的正整数；未列出的服务商不限。同一配置根下的本地 OMP 进程共享计数。",
+		noteEn:
+			"Keyed by provider id (e.g. openai) with positive integers >= 1; omitted providers are unlimited. Counted across local OMP processes sharing this config root.",
+	},
+
 	"telemetry.otlpExportEnabled": {
 		type: "boolean",
 		default: true,
@@ -158,7 +168,9 @@ type DefinitionValue<D> = D extends { type: "enum"; values: readonly (infer V)[]
 				? string[]
 				: D extends { type: "thresholds" }
 					? Record<string, number | string | null>
-					: string;
+					: D extends { type: "numberRecord" }
+						? Record<string, number>
+						: string;
 export type GuiSettingsSnapshot = { [K in GuiSettingKey]?: DefinitionValue<(typeof GUI_SETTING_DEFINITIONS)[K]> };
 export const GUI_SETTING_KEYS = Object.keys(GUI_SETTING_DEFINITIONS) as GuiSettingKey[];
 export function isGuiSettingKey(key: string): key is GuiSettingKey {
@@ -201,6 +213,23 @@ export function validateGuiSetting(key: GuiSettingKey, value: unknown): void {
 					(v === null ||
 						(typeof v === "number" && Number.isSafeInteger(v) && v > 0) ||
 						(typeof v === "string" && /^\d+(?:\.\d+)?%$/.test(v) && parseFloat(v) > 0 && parseFloat(v) <= 100)),
+			)
+		)
+			return;
+	}
+	if (d.type === "numberRecord" && value && typeof value === "object" && !Array.isArray(value)) {
+		const entries = Object.entries(value);
+		if (
+			entries.length <= 256 &&
+			entries.every(
+				([name, v]) =>
+					name.trim().length > 0 &&
+					name.length <= 256 &&
+					!/[\u0000-\u001f]/u.test(name) &&
+					!["__proto__", "constructor", "prototype"].includes(name) &&
+					typeof v === "number" &&
+					Number.isSafeInteger(v) &&
+					v > 0,
 			)
 		)
 			return;

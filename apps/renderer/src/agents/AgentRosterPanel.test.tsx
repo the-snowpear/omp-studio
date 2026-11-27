@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AgentId, Generation, StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { AgentRosterPanel } from "./AgentRosterPanel";
 import { PREVIEW_DOCK_AGENTS } from "../preview/agentDockPreview";
 import { PreviewModeProvider } from "../preview/PreviewContext";
@@ -7,6 +8,37 @@ import { __resetAppSettingsForTests, getAppSettings } from "../settings/appSetti
 
 beforeEach(() => { localStorage.clear(); __resetAppSettingsForTests(null); });
 afterEach(() => { cleanup(); localStorage.clear(); __resetAppSettingsForTests(null); });
+
+const agentSnapshot = (id: string, startedAt: string, extra: Partial<StudioAgentSnapshot> = {}): StudioAgentSnapshot => ({
+  agentId: id as AgentId,
+  generation: 1 as Generation,
+  kind: "task",
+  displayName: id,
+  status: "running",
+  startedAt,
+  updatedAt: startedAt,
+  hasLiveSession: true,
+  hasTranscript: true,
+  unreadCount: 0,
+  activeJobIds: [],
+  ...extra,
+});
+
+describe("Agent roster ordering", () => {
+  it("lists newest-spawned agents first while keeping a parent above its child", () => {
+    // Input order is the runtime's updatedAt order: an old agent that is still
+    // actively updating arrives first. The roster must re-sort by spawn time.
+    const agents = [
+      agentSnapshot("old", "2026-11-23T05:00:00Z"),
+      agentSnapshot("new", "2026-11-23T06:00:00Z"),
+      agentSnapshot("mid", "2026-11-23T05:30:00Z"),
+      agentSnapshot("child", "2026-11-23T05:45:00Z", { parentAgentId: "mid" as AgentId }),
+    ];
+    render(<AgentRosterPanel agents={agents} visible ready onOpen={vi.fn()} onMain={vi.fn()} />);
+    const names = [...document.querySelectorAll(".agent-roster-title strong")].map(node => node.textContent);
+    expect(names).toEqual(["new", "mid", "child", "old"]);
+  });
+});
 
 describe("Agent roster density", () => {
   it("keeps the selected density after remounting and shows the actual model in single-line rows", () => {

@@ -200,6 +200,28 @@ function fakeClient(probe: ModelDiscoveryResult | Error = PROBE_OK, modelConfig?
   };
 }
 
+it("saves only the edited global provider limit from the main form while a session override is active", async () => {
+  const key = "providers.maxInFlightRequests";
+  const client = fakeClient();
+  const capabilities = { capabilities: ["runtime.settings.get", "runtime.settings.set"].map(id => ({ id, grade: "stable" })) } as ClientBootstrap["capabilityManifest"];
+  Object.assign(client, { getState: () => ({ commands: {
+    "req-runtime.settings.get": { status: "completed", result: { values: { [key]: { gateway: 1 } }, activation: { configured: { [key]: { gateway: 4, other: 2 } } } } },
+    "req-runtime.settings.set": { status: "completed", result: { value: { gateway: 7, other: 2 }, effectiveValue: { gateway: 1 } } },
+  } }) });
+  render(<ModelConfigPage client={client} sessionId="owner" runtimeAvailable capabilities={capabilities} />);
+  const edit = () => screen.findByRole("button", { name: "编辑供应商" });
+  fireEvent.click(await edit());
+  const input = await screen.findByLabelText<HTMLInputElement>("全局并发上限");
+  await waitFor(() => expect(input.value).toBe("4"));
+  fireEvent.change(input, { target: { value: "7" } });
+  fireEvent.click(screen.getByRole("button", { name: /保存修改/ }));
+  await waitFor(() => expect(screen.queryByLabelText("全局并发上限")).toBeNull());
+  expect(client.command).toHaveBeenCalledWith("runtime.settings.set", { key, providerId: "gateway", value: { gateway: 7 }, persist: true });
+  expect(client.command.mock.calls.some(([name]) => name === "models.yml.write" || name === "models.provider.upsert")).toBe(false);
+  fireEvent.click(await edit());
+  expect((await screen.findByLabelText<HTMLInputElement>("全局并发上限")).value).toBe("7");
+});
+
 it("configures OpenCode Go from the provider editor and keeps a saved key when the catalog needs a retry", async () => {
   const providerId = "opencode-go";
   const configuredProvider = { ...gateway(), id: providerId, name: "OpenCode Go", auth: { type: "oauth" as const, hasSecret: false }, models: [] };
@@ -482,6 +504,53 @@ describe("ModelConfigPage 自动获取模型", () => {
         parameterSources: expect.objectContaining({ contextWindow: expect.objectContaining({ source: "catalog" }) }),
       })]) }),
     })));
+  });
+
+  it("re-reads the model catalog when the session or Runtime readiness arrives after mount", async () => {
+    // Cold start: the page can mount before the session selection or the
+    // Runtime snapshot exist; the Host then answers models.get with the
+    // unverified read (empty model list) and the page must re-read on its
+    // own instead of staying empty until it is reopened.
+    window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
+    // No endpointUrl: the card shows statusDetail only when there is no URL to display.
+    const gatewayNoUrl = (): ModelProviderRecord => {
+      const provider = gateway();
+      const { endpointUrl: _ignored, ...rest } = provider;
+      void _ignored;
+      return rest;
+    };
+    const cold: ModelConfigReadModel = {
+      ...readModel(),
+      availableModels: [],
+      providers: [{ ...gatewayNoUrl(), statusDetail: "已读取配置；当前 Runtime 可用性未验证", models: [] }],
+    };
+    const hot: ModelConfigReadModel = {
+      ...readModel(),
+      providers: [{ ...gatewayNoUrl(), statusDetail: "已从 models.yml 读取" }],
+    };
+    let current: ModelConfigReadModel = cold;
+    const client = fakeClient(PROBE_OK, undefined);
+    const delegate = client.query.getMockImplementation() as (name: string, input: unknown) => Promise<unknown>;
+    const modelsGetCalls = () => client.query.mock.calls.filter(call => call[0] === "models.get").length;
+    client.query.mockImplementation(async (name, input) => name === "models.get" ? current : delegate(name, input));
+    const page = (props: { ready: boolean; sessionId?: string }) => (
+      <PreviewModeProvider switchEnabled>
+        <ModelConfigPage client={client} runtimeAvailable={props.ready} sessionId={props.sessionId} />
+      </PreviewModeProvider>
+    );
+    const view = render(page({ ready: false }));
+    try {
+      await screen.findAllByRole("button", { name: "编辑供应商" });
+      expect(screen.getByText("已读取配置；当前 Runtime 可用性未验证")).toBeTruthy();
+      expect(modelsGetCalls()).toBe(1);
+      current = hot;
+      view.rerender(page({ ready: true, sessionId: "owner" }));
+      await waitFor(() => expect(modelsGetCalls()).toBe(2));
+      await screen.findByText("已从 models.yml 读取");
+      expect(screen.queryByText("已读取配置；当前 Runtime 可用性未验证")).toBeNull();
+    } finally {
+      window.localStorage.removeItem(PREVIEW_MODE_STORAGE_KEY);
+    }
   });
 
   it("probes the wire API without a discovery type and imports picked models into the draft", async () => {

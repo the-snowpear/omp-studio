@@ -50,6 +50,7 @@ export interface RuntimeSkillIdentity {
 	source: string;
 	scope?: "workspace" | "global" | "builtin" | "runtime";
 	conflict: boolean;
+	path?: string;
 }
 export type SessionGuiOperation =
 	| ResourceOperation

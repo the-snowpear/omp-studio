@@ -13,6 +13,7 @@ import type { ModelParameterValues, ModelParameterSources, ModelCatalogStatus } 
 
 import type {
   OperatorStateSnapshot,
+  SessionTitleSource,
   StudioRuntimeSettingsSnapshot,
 } from "@omp-studio/studio-protocol";
 
@@ -254,6 +255,9 @@ export interface ResidentSessionRow {
   readonly phase: ResidentSessionPhase;
   readonly pendingMessages: number;
   readonly waitKind?: ResidentWaitKind;
+  /** Latest in-memory session title observed from the resident Worker. */
+  readonly title?: string;
+  readonly titleSource?: SessionTitleSource;
   readonly lastActivityAt: string;
 }
 

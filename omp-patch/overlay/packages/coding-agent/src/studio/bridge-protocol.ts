@@ -101,7 +101,13 @@ export type StudioOperation =
 	| EvaluationOperation
 	| { kind: "runtime.snapshot"; timeTravelCapture?: boolean }
 	| { kind: "runtime.settings.get"; keys?: StudioRuntimeSettingKey[]; checkHindsight?: boolean }
-	| { kind: "runtime.settings.set"; key: StudioRuntimeSettingKey; value: unknown; persist: boolean }
+	| {
+			kind: "runtime.settings.set";
+			key: StudioRuntimeSettingKey;
+			value: unknown;
+			persist: boolean;
+			providerId?: string;
+	  }
 	| { kind: "runtime.pause" }
 	| { kind: "runtime.resume"; expectedPauseEpoch: number }
 	| { kind: "runtime.shutdown"; drain: true }
@@ -720,7 +726,16 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 			}
 			break;
 		case "runtime.settings.set":
-			exactKeys(operation, ["kind", "key", "value", "persist"]);
+			exactKeys(operation, ["kind", "key", "value", "persist", "providerId"]);
+			if (
+				operation.providerId !== undefined &&
+				(operation.key !== "providers.maxInFlightRequests" ||
+					typeof operation.providerId !== "string" ||
+					!operation.providerId.trim() ||
+					Object.keys(record(operation.value)).some(key => key !== operation.providerId))
+			) {
+				throw new StudioFrameError("Invalid provider limit selection");
+			}
 			if (
 				!isStudioRuntimeSettingKey(operation.key) ||
 				!isStudioRuntimeSettingValue(operation.key, operation.value) ||

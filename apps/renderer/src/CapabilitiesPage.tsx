@@ -281,10 +281,17 @@ export function CapabilitiesPage({
         try {
           const identities = await loadRuntimeSkills(client, sessionId);
           if (epoch !== refreshEpoch.current) return;
-          nextSkills = identities.map(skill => ({kind: "skill", name: skill.name,
-            desc: skill.description + (skill.conflict ? (zh ? " · 名称冲突" : " · Name conflict") : ""),
-            src: [skill.namespace, skill.source].filter(Boolean).join(" · "),
-            scope: skill.scope ?? "runtime", path: "", enabled: true, loaded: true, session: true}));
+          const inventory = skillsResult.value.skills;
+          nextSkills = identities.map(skill => {
+            const matches = inventory.filter(row => row.name === skill.name && (!skill.scope || row.scope === skill.scope));
+            const source = matches.length === 1 && !skill.conflict ? matches[0] : undefined;
+            const managedScope = source?.scope === "workspace" ? "project" : source?.scope === "global" ? "user" : undefined;
+            return { kind: "skill", name: skill.name,
+              desc: skill.description + (skill.conflict ? (zh ? " · 名称冲突" : " · Name conflict") : ""),
+              src: [skill.namespace, skill.source].filter(Boolean).join(" · "),
+              scope: skill.scope ?? "runtime", path: skill.path ?? "", enabled: source?.enabled ?? true,
+              ...(managedScope && { managedScope }), loaded: true, session: true };
+          });
         } catch (error) {
           if (epoch !== refreshEpoch.current) return;
           nextSkills = [];
@@ -377,7 +384,7 @@ export function CapabilitiesPage({
       return;
     }
     try {
-      const handle = await client.command("skills.reveal", { name: skill.name });
+      const handle = await client.command("skills.reveal", { name: skill.name, ...(skill.managedScope && { scope: skill.managedScope }) });
       const receipt = await waitReceipt<ConfigWriteResult>(client, handle.requestId);
       toast(receipt.message ?? t("capabilities.openedSkillDir", { name: skill.name, fileManager: fileManagerName(t) }));
     } catch (error) {
@@ -485,7 +492,7 @@ export function CapabilitiesPage({
     const next = !skill.enabled;
     setSkillBusy((current) => new Set(current).add(skill.name));
     try {
-      const handle = await client.command("skills.setEnabled", { name: skill.name, enabled: next });
+      const handle = await client.command("skills.setEnabled", { name: skill.name, enabled: next, ...(skill.managedScope && { scope: skill.managedScope }) });
       const receipt = await waitReceipt<ConfigWriteResult>(client, handle.requestId);
       toast(receipt.message ?? (next ? t("common.enabled") : t("common.disabled")));
       await refresh();
@@ -600,7 +607,7 @@ export function CapabilitiesPage({
                     <span className={`cap-scope ${scope.cls}`}>{scope.label}</span>
                     {skill.src ? <span className="chip outline xs">{skill.src}</span> : null}
                   </div>
-                  <Stepper loaded={skill.loaded} session={skill.session} configuredOnly={!preview} />
+                  <Stepper loaded={skill.loaded} session={skill.session} configuredOnly={!preview && !sessionId} />
                 </div>
                 <div className="cap-item-actions">
                   {preview ? (
@@ -609,8 +616,8 @@ export function CapabilitiesPage({
                       label={t("capabilities.toggleSkillAria", { name: skill.name })}
                       onToggle={() => void toggleSkill(skill)}
                     />
-                  ) : skill.scope === "builtin" || (sessionId && !skill.path) ? (
-                    <Disabled className="switch" tip={sessionId && !skill.path ? (zh ? "Runtime 身份不支持按名称修改" : "Runtime identities cannot be changed by name") : t("capabilities.scopeBuiltin")}>
+                  ) : skill.scope === "builtin" || (sessionId && !skill.managedScope) ? (
+                    <Disabled className="switch" tip={sessionId && !skill.managedScope ? (zh ? "Runtime 身份不支持按名称修改" : "Runtime identities cannot be changed by name") : t("capabilities.scopeBuiltin")}>
                       <span className="sr-only">{t("capabilities.toggleSkillAria", { name: skill.name })}</span>
                     </Disabled>
                   ) : (
@@ -622,7 +629,7 @@ export function CapabilitiesPage({
                     />
                   )}
                   <Disabled className="btn small outline" tip={CONTRACT.view}>{t("capabilities.viewDetails")}</Disabled>
-                  {skill.scope === "builtin" || (sessionId && !skill.path) ? (
+                  {skill.scope === "builtin" || (sessionId && !skill.managedScope) ? (
                     <Disabled className="icon-btn small" tip={CONTRACT.builtinDir}><Icon name="folder-open" extra="sm" /></Disabled>
                   ) : (
                     <button

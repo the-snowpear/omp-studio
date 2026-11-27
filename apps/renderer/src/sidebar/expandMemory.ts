@@ -106,3 +106,24 @@ export function __resetExpandMemoryForTests(): void {
     /* ignore */
   }
 }
+
+/** The sidebar follows the active conversation document. Its project list belongs to the target. */
+export class SidebarProjectList {
+  readonly memory = readExpandedProjects();
+  private state = { expanded: this.memory.restored ? this.memory.ids : new Set<string>() as ReadonlySet<string>, limits: {} as Record<string, number> };
+  private listeners = new Set<() => void>();
+  subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
+  snapshot = () => this.state;
+  setExpanded = (update: (value: ReadonlySet<string>) => ReadonlySet<string>) => {
+    const expanded = update(this.state.expanded);
+    if (expanded === this.state.expanded) return;
+    this.state = { ...this.state, expanded };
+    for (const notify of this.listeners) notify();
+  };
+  setLimits = (update: (value: Record<string, number>) => Record<string, number>) => {
+    const limits = update(this.state.limits);
+    if (limits === this.state.limits) return;
+    this.state = { ...this.state, limits };
+    for (const notify of this.listeners) notify();
+  };
+}

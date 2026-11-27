@@ -308,7 +308,9 @@ export function ComposerModelMenu({
             </div>
             <div className="rms-scroll">
             {filtered.length === 0 ? (
-              <div className="rms-empty">{t("composer.noAvailableModels")}</div>
+              /* A filter that matches nothing is not an empty catalog: say so
+                 separately, otherwise the list looks like the models are gone. */
+              <div className="rms-empty">{groups.length > 0 && (groupQuery || modelQuery) ? t("composer.noMatchingModels") : t("composer.noAvailableModels")}</div>
             ) : (
               filtered.map((group) => (
                 <div className="rms-group" key={group.providerId} role="group" aria-label={group.providerName}>

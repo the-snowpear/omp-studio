@@ -998,6 +998,7 @@ const zhRaw = {
     "moreModels": "更多模型",
     "allModels": "全部模型",
     "noAvailableModels": "没有可用模型",
+    "noMatchingModels": "没有匹配的模型",
     "previewModelNote": "演示数据，不写入本机配置",
     "model": "模型",
     "thinkingNotSupported": "不支持",
@@ -1405,6 +1406,7 @@ const zhRaw = {
     "primaryModel": "主模型",
     "pickByProvider": "按供应商选择",
     "noAvailableModels": "没有可用模型",
+    "noMatchingModels": "没有匹配的模型",
     "currentNotInList": "当前模型不在列表中",
     "autoModel": "自动选择",
     "autoModelDesc": "清除显式分配，使用 OMP 原生角色路由",
@@ -1630,6 +1632,15 @@ const zhRaw = {
     "drag": "拖动",
     "nativeProviderBadge": "原生",
     "customProviderBadge": "第三方",
+    "inFlightCapBadge": "并发 ×{count}",
+    "inFlightCapTooltip": "并发请求上限：{count}",
+    "applyLimit": "应用上限",
+    "inFlightCapsLabel": "全局并发上限",
+    "inFlightCapsUnlimited": "不限",
+    "inFlightCapsUnavailable": "当前 Runtime 尚未提供服务商并发上限。",
+    "inFlightCapsDesc": "本地 OMP 进程共享此上限，项目或会话设置可覆盖全局值。",
+    "inFlightCapsInvalid": "并发请求上限必须是 1 或更大的整数。",
+    "inFlightCapsSaveFailed": "并发上限保存失败，可重试。",
     "modelCount": "{count} 个模型",
     "testConnection": "测试连接",
     "refreshModels": "刷新模型",
@@ -1821,7 +1832,14 @@ const zhRaw = {
     "cannotSaveRoleNoPrimary": "无法保存：角色 {labels} 取消后没有主模型，请先设置另一个模型",
     "localOauthCredential": "本机 OAuth 凭据",
     "noWorkspaceTip": "无工作区",
-    "statusDemoNoHost": "演示 · 未写入 Host"
+    "statusDemoNoHost": "演示 · 未写入 Host",
+    "statusOmpResolved": "OMP 已解析到可用模型",
+    "statusReadFromModelsYml": "已从 models.yml 读取",
+    "statusDisabledInConfig": "已在 disabledProviders 中禁用",
+    "statusDisabled": "已禁用",
+    "statusNoCredentials": "尚未配置凭据",
+    "statusApiKeySaved": "API Key 已保存",
+    "statusLocalServiceNotRunning": "本地服务未运行"
   },
   "settings": {
     "title": "设置",
@@ -3208,7 +3226,9 @@ const zhRaw = {
   "sidebar": {
     "waitingApproval": "待确认",
     "waitingPlan": "待审核",
-    "waitingAsk": "待回答"
+    "waitingAsk": "待回答",
+    "completed": "本轮已结束",
+    "draftTag": "草稿"
   },
   "tests": {
     "notice": "当前会话里 Agent 跑过的测试命令。点一行可对上对话里的 Bash 卡片。失败时直接展示 runner 原文，不解析成套件树。",

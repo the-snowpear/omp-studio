@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { isInaccessible } from "@testing-library/dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ClientContextScope, ClientTransport } from "@omp-studio/client-contract";
+import type { ClientContextScope, ClientTransport, SessionId } from "@omp-studio/client-contract";
 import { StudioClientImpl } from "@omp-studio/client";
 import { contractFixtures } from "@omp-studio/testkit";
 import { App } from "../App";
@@ -24,14 +24,19 @@ vi.mock("../TerminalPane", () => ({ TerminalPane: () => null }));
 vi.setConfig({ testTimeout: 15_000 });
 
 afterEach(() => { cleanup(); localStorage.clear(); window.history.replaceState(null, "", "/"); __resetAppSettingsForTests(null); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
-function client(options: { delayContext?: Promise<void>; bootstrap?: () => void; openContext?: (scope: ClientContextScope) => void; openProjectContext?: () => void; reportActiveProject?: boolean } = {}) {
+function client(options: { delayContext?: Promise<void>; bootstrap?: () => void; openContext?: (scope: ClientContextScope) => void; openProjectContext?: () => void; reportActiveProject?: boolean; reportContextSession?: boolean; historyCount?: number } = {}) {
   const workspaceId = contractFixtures.bootstrap.residents!.residents[0]!.workspaceId;
   const transport: ClientTransport = {
     openContext: async scope => { if (scope.sessionId) options.openContext?.(scope); else options.openProjectContext?.(); return { ...transport, bootstrap: async () => {
       options.bootstrap?.();
       await options.delayContext;
       const { snapshot, stateVersion, selected, ...value } = structuredClone(contractFixtures.bootstrap);
-      return { ...value, selected: { workspaceId: scope.workspaceId } };
+      // A fresh context gets its own Runtime session; the real Host reports it in the
+      // bootstrap (selected) and the snapshot. reportContextSession mimics that.
+      const contextSession = options.reportContextSession ? (scope.sessionId ?? "fresh-session") : undefined;
+      return { ...value,
+        ...(contextSession && snapshot ? { snapshot: { ...snapshot, sessionId: contextSession as SessionId } } : {}),
+        selected: { workspaceId: scope.workspaceId, ...(contextSession ? { sessionId: contextSession as SessionId, threadId: selected.threadId } : {}) } };
     } }; },
     bootstrap: async () => { options.bootstrap?.(); const value = structuredClone(contractFixtures.bootstrap); return { ...value, selected: { ...value.selected, workspaceId } }; },
     query: async request => {
@@ -39,7 +44,17 @@ function client(options: { delayContext?: Promise<void>; bootstrap?: () => void;
       if (request.queryName === "projects.list") response.result.workspaces = [{ workspaceId, name: "First project", active: true, lastOpenedAt: "2026-11-04T00:00:00.000Z" }, { workspaceId: "ws-second", name: "Second project", active: false, lastOpenedAt: "2026-11-04T00:00:00.000Z" }];
       // The desktop Host also names the active project; the shared fixture omits it.
       if (request.queryName === "projects.list" && options.reportActiveProject) response.result.activeWorkspaceId = workspaceId;
-      if (request.queryName === "history.list") response.result.entries = response.result.entries.slice(0, 1).flatMap((entry: object) => [{ ...entry, sessionId: "second-session", historyId: "second-history", title: "Second conversation" }, { ...entry, sessionId: "third-session", historyId: "third-history", title: "Third conversation" }]);
+      if (request.queryName === "history.list") {
+        const base = response.result.entries.slice(0, 1)[0] as object;
+        if (options.historyCount === undefined) {
+          response.result.entries = [base].flatMap((entry: object) => [{ ...entry, sessionId: "second-session", historyId: "second-history", title: "Second conversation" }, { ...entry, sessionId: "third-session", historyId: "third-history", title: "Third conversation" }]);
+        } else {
+          // N entries so the sidebar list hits its default limit and renders the
+          // 「展开」(load more) button; total matches so the button hides at N.
+          response.result.entries = Array.from({ length: options.historyCount }, (_, i) => ({ ...base, sessionId: i === 0 ? "second-session" : i === 1 ? "third-session" : `bulk-${i}-session`, historyId: i === 0 ? "second-history" : i === 1 ? "third-history" : `bulk-${i}-history`, title: i === 0 ? "Second conversation" : i === 1 ? "Third conversation" : `Conversation ${i + 1}` }));
+          response.result.total = options.historyCount;
+        }
+      }
       return response;
     },
     command: async request => ({ commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: new Date().toISOString() }),
@@ -653,7 +668,9 @@ describe("conversation windows", () => {
       for (const x of [1699, 1701, 1700]) {
         const previous = dragPreview.snapshot();
         fireEvent.pointerMove(window, { clientX: x, clientY: 400 });
-        await waitFor(() => expect(dragPreview.snapshot()).not.toBe(previous));
+        // The snapshot owns live DOM hosts. Compare identity without asking
+        // the runner to serialize that tree on every pending animation frame.
+        await waitFor(() => expect(dragPreview.snapshot() !== previous).toBe(true));
         expect(dragPreview.snapshot()?.snapKey).toBe(snapped);
         expect(document.querySelector(".dock-layout-preview")).not.toBeNull();
       }
@@ -663,7 +680,7 @@ describe("conversation windows", () => {
       for (const x of [1650, 1651, 1650, 1651]) {
         const previous = dragPreview.snapshot();
         fireEvent.pointerMove(window, { clientX: x, clientY: 400 });
-        await waitFor(() => expect(dragPreview.snapshot()).not.toBe(previous));
+        await waitFor(() => expect(dragPreview.snapshot() !== previous).toBe(true));
         expect(dragPreview.snapshot()?.target.region).toBe("rail");
         expect(dragPreview.snapshot()?.cards?.icons).toBe(false);
         expect(dragPreview.snapshot()?.rect.width).toBe(318);
@@ -856,7 +873,7 @@ describe("conversation windows", () => {
     expect(document.querySelector(".cw-directory")).toBeNull();
     expect(screen.queryByRole("button", { name: "刷新目录" })).toBeNull();
     const first = document.querySelector(".cw-main-conversation .cw-document")!;
-    drag(document.querySelector("#projectList .thread:not(.active)")!);
+    drag(within(document.querySelector<HTMLElement>("#projectList")!).getByRole("button", { name: /New chat \(empty\)/ }));
     await waitFor(() => expect(document.querySelector(".dock-conversation-window")).not.toBeNull());
     const floating = document.querySelector(".dock-conversation-window")!;
     const owner = floating.querySelector<HTMLElement>(".cw-document")!.dataset.conversationDocument;
@@ -899,7 +916,7 @@ describe("conversation windows", () => {
   });
   it("borrows the body and complete floating header once and restores them on Escape", async () => {
     await mount(true);
-    drag(document.querySelector("#projectList .thread:not(.active)")!);
+    drag(within(document.querySelector<HTMLElement>("#projectList")!).getByRole("button", { name: /New chat \(empty\)/ }));
     await waitFor(() => expect(document.querySelector('.dock-conversation-window .cw-document #appRoot[aria-busy="false"]')).not.toBeNull());
     await landed();
     const floating = document.querySelector<HTMLElement>("[data-conversation-view].dock-conversation-window")!;
@@ -938,12 +955,87 @@ describe("conversation windows", () => {
     expect(document.querySelector(".dock-conversation-window .cw-document")).toBe(body);
     expect(body.querySelector("[contenteditable=true]")).toBe(editor);
   });
+  it("clicking the unsent draft row reopens the draft document with its composer text", async () => {
+    // A fresh context gets its own Runtime session, which the Host reports in the
+    // context bootstrap; the document ref must be re-keyed to that session, or the
+    // sidebar draft row (keyed by session id) opens a new empty document and the
+    // per-document composer book no longer shares the draft.
+    await mount(false, client({ reportContextSession: true }));
+    const project = [...document.querySelectorAll<HTMLElement>("#projectList .project")].find(row => row.textContent?.includes("First project"))!;
+    fireEvent.click(project.querySelector("button[aria-label='New chat in this project']")!);
+    const editor = () => document.querySelector(".cw-main-conversation [contenteditable=true]")!;
+    await waitFor(() => expect(editor()).not.toBeNull());
+    editor().textContent = "unsent draft row";
+    fireEvent.input(editor());
+    await waitFor(() => {
+      expect([...document.querySelectorAll<HTMLElement>("#projectList .thread")].some(row => row.textContent?.includes("unsent draft row"))).toBe(true);
+    });
+    // Switch to another conversation; the draft row stays in the sidebar.
+    fireEvent.click([...document.querySelectorAll<HTMLElement>("#projectList .thread")].find(row => row.textContent?.includes("Second conversation"))!);
+    await waitFor(() => expect(editor().textContent).not.toBe("unsent draft row"));
+    expect([...document.querySelectorAll<HTMLElement>("#projectList .thread")].some(row => row.textContent?.includes("unsent draft row"))).toBe(true);
+    // Clicking the draft row must reuse the draft document and restore its text;
+    // without the ref promotion a new document is opened and its book is empty.
+    fireEvent.click([...document.querySelectorAll<HTMLElement>("#projectList .thread")].find(row => row.textContent?.includes("unsent draft row"))!);
+    await waitFor(() => expect(editor().textContent).toBe("unsent draft row"));
+    // The draft document is presented again as a single conversation (no duplicate window).
+    expect(document.querySelectorAll("[data-conversation-document]")).toHaveLength(1);
+  });
+  it("keeps project expansion shared with background documents (no stale per-document collapse)", async () => {
+    // Each document is a full app shell whose AppShell renders the shared
+    // sidebar. A document left open in the background (a floating window)
+    // keeps its own mounted state; project expansion must be shared per
+    // target so focusing such a document does not re-show the stale set it
+    // had when it was mounted (the project appearing to "auto-collapse").
+    localStorage.setItem("omp.sidebar.expandedProjects", JSON.stringify({ expandedProjects: ["ws-second"] }));
+    await mount(false);
+    const projectHeader = (name: string) => [...document.querySelectorAll<HTMLElement>("#projectList .project-head")].find(node => node.textContent?.includes(name))!;
+    const rowsIn = (project: string) => [...document.querySelectorAll<HTMLElement>("#projectList .project")].find(row => row.textContent?.includes(project))!
+      .querySelectorAll<HTMLElement>(".thread");
+    const rowIn = (project: string, title: string) => [...rowsIn(project)].find(row => row.textContent?.includes(title))!;
+    // Startup restored memory: the second project is expanded, the first collapsed.
+    await waitFor(() => expect(projectHeader("Second project").getAttribute("aria-expanded")).toBe("true"));
+    expect(projectHeader("First project").getAttribute("aria-expanded")).toBe("false");
+    // Drag a conversation into a floating window: its document stays mounted
+    // in the background while the main document keeps working.
+    drag(rowIn("Second project", "Second conversation"));
+    await waitFor(() => expect(document.querySelector(".dock-conversation-window")).not.toBeNull());
+    // Refocus the main document and expand the first project there.
+    fireEvent.pointerDown(document.querySelector(".cw-main-conversation")!);
+    fireEvent.click(projectHeader("First project"));
+    await waitFor(() => expect(projectHeader("First project").getAttribute("aria-expanded")).toBe("true"));
+    // Focus the floating document: its sidebar chrome shows the shared
+    // expansion state, not the stale set from its mount time.
+    fireEvent.pointerDown(document.querySelector(".dock-conversation-window")!);
+    await waitFor(() => expect(projectHeader("First project").getAttribute("aria-expanded")).toBe("true"));
+  });
+  it("keeps the loaded thread count when switching conversations (the 「展开」count survives the document switch)", async () => {
+    // 「展开 +N」loads more sessions for the project; the count is shared per
+    // target. Clicking a conversation opens a new document whose sidebar must
+    // keep the loaded count instead of snapping back to the default 6 (the
+    // list appearing to "auto-collapse").
+    localStorage.setItem("omp.sidebar.expandedProjects", JSON.stringify({ expandedProjects: ["ws-second"] }));
+    await mount(false, client({ historyCount: 8 }));
+    const projectRows = () => [...document.querySelectorAll<HTMLElement>("#projectList .project")].find(row => row.textContent?.includes("Second project"))!;
+    const rowsInProject = () => projectRows().querySelectorAll<HTMLElement>(".thread");
+    const loadMore = () => projectRows().querySelector<HTMLElement>(".load-more");
+    // Default limit (6) of the 8 sessions: the 「展开」button offers the rest.
+    await waitFor(() => expect(rowsInProject().length).toBe(6));
+    expect(loadMore()).not.toBeNull();
+    fireEvent.click(loadMore()!);
+    await waitFor(() => expect(rowsInProject().length).toBe(8));
+    expect(loadMore()).toBeNull();
+    // Switch to another conversation: the new document keeps the loaded count.
+    fireEvent.click([...rowsInProject()].find(row => row.textContent?.includes("Third conversation"))!);
+    await waitFor(() => expect(rowsInProject().length).toBe(8));
+    expect(loadMore()).toBeNull();
+  });
   it("drags main A while the shared title represents B, cancels to B and disables dragging when main is empty", async () => {
     await mount(true);
     const main = document.querySelector<HTMLElement>(".cw-main-conversation")!;
     const body = main.querySelector<HTMLElement>(".cw-document")!;
     const owner = body.dataset.conversationDocument;
-    drag(document.querySelector("#projectList .thread:not(.active)")!);
+    drag(within(document.querySelector<HTMLElement>("#projectList")!).getByRole("button", { name: /New chat \(empty\)/ }));
     await waitFor(() => expect(document.querySelectorAll("[data-conversation-view].dock-conversation-window")).toHaveLength(1));
     const bOwner = document.querySelector<HTMLElement>(".cw-shared-conversationTitle")!.dataset.conversationOwner;
     expect(bOwner).not.toBe(owner);
@@ -964,7 +1056,7 @@ describe("conversation windows", () => {
     const mainBody = document.querySelector<HTMLElement>(".cw-main-conversation .cw-document")!;
     const mainEditor = mainBody.querySelector<HTMLElement>("[contenteditable=true]")!;
     mainEditor.textContent = "并排之后保留"; fireEvent.input(mainEditor);
-    drag(document.querySelector("#projectList .thread:not(.active)")!);
+    drag(within(document.querySelector<HTMLElement>("#projectList")!).getByRole("button", { name: /New chat \(empty\)/ }));
     await waitFor(() => expect(document.querySelector("[data-conversation-view].dock-conversation-window")).not.toBeNull());
     const floating = document.querySelector<HTMLElement>("[data-conversation-view].dock-conversation-window")!;
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -995,7 +1087,7 @@ describe("conversation windows", () => {
   });
   it("keeps title-menu keyboard input, drag cancellation and window controls independent", async () => {
     await mount(true);
-    drag(document.querySelector("#projectList .thread:not(.active)")!);
+    drag(within(document.querySelector<HTMLElement>("#projectList")!).getByRole("button", { name: /New chat \(empty\)/ }));
     await waitFor(() => expect(document.querySelector(".cw-window-title-menu")).not.toBeNull());
     const floating = document.querySelector<HTMLElement>(".dock-conversation-window")!;
     const title = within(floating).getByRole("button", { name: /New chat/ });
@@ -1019,7 +1111,7 @@ describe("conversation windows", () => {
     await mount(true);
     const main = document.querySelector<HTMLElement>(".cw-main-conversation")!;
     const mainOwner = main.querySelector<HTMLElement>(".cw-document")!.dataset.conversationDocument;
-    drag(document.querySelector("#projectList .thread:not(.active)")!);
+    drag(within(document.querySelector<HTMLElement>("#projectList")!).getByRole("button", { name: /New chat \(empty\)/ }));
     await waitFor(() => expect(document.querySelectorAll(".dock-conversation-window")).toHaveLength(1));
     const first = document.querySelector<HTMLElement>(".dock-conversation-window")!;
     const owner = first.querySelector<HTMLElement>(".cw-document")!.dataset.conversationDocument;
@@ -1042,7 +1134,7 @@ describe("conversation windows", () => {
   const landed = () => waitFor(() => expect(document.querySelector(".dock-drag-preview")).toBeNull());
   it("moves the breadcrumb into window title rows and lists conversation tabs only once the main area is empty", async () => {
     await mount(true);
-    drag(document.querySelector("#projectList .thread:not(.active)")!);
+    drag(within(document.querySelector<HTMLElement>("#projectList")!).getByRole("button", { name: /New chat \(empty\)/ }));
     await waitFor(() => expect(windows()).toHaveLength(1));
     await landed();
     expect(document.querySelector(".topbar .tb-left")).not.toBeNull();
@@ -1066,7 +1158,7 @@ describe("conversation windows", () => {
   });
   it("restores, focuses and closes conversation windows from the tabs without capsules or a replacement draft", async () => {
     await mount(true);
-    drag(document.querySelector("#projectList .thread:not(.active)")!);
+    drag(within(document.querySelector<HTMLElement>("#projectList")!).getByRole("button", { name: /New chat \(empty\)/ }));
     await waitFor(() => expect(windows()).toHaveLength(1));
     await landed();
     drag(document.querySelector(".topbar")!);
@@ -1112,7 +1204,7 @@ describe("conversation windows", () => {
   });
   it("lists tool windows beside conversations and opens a tool or a conversation from the tab bar's +", async () => {
     await mount(true);
-    drag(document.querySelector("#projectList .thread:not(.active)")!);
+    drag(within(document.querySelector<HTMLElement>("#projectList")!).getByRole("button", { name: /New chat \(empty\)/ }));
     await waitFor(() => expect(windows()).toHaveLength(1));
     await landed();
     drag(document.querySelector(".topbar")!);

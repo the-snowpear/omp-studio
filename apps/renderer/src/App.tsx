@@ -25,7 +25,7 @@ import { createShellModelLoader } from "./shellModelLoader";
 import { TerminalSessionsProvider } from "./terminalSessions";
 import { TipHost } from "./TipHost";
 import "./agents/agents.css";
-import { PreviewModeProvider } from "./preview/PreviewContext";
+import { PreviewModeProvider, usePreviewMode } from "./preview/PreviewContext";
 import { getAppSettings, writeLastRoute } from "./settings/appSettings";
 import { OnboardingHost } from "./onboarding/OnboardingHost";
 import { type ClientStateSource, type Route } from "./workbench/types";
@@ -191,6 +191,24 @@ function TargetApp({ client: inputClient }: { readonly client: StudioClient }) {
       // which every bootstrap fails with "transport is closed".
     };
   }, [client]);
+
+  const preview = usePreviewMode().preview;
+  /* 草稿文档的 ref 只有 draftId（随机 UUID）。新上下文打开时 Host 稍后才会
+     创建运行时会话（ensure fresh），会话 id 经 snapshot 事件送达（此时的
+     bootstrap 还没有绑定会话，selected 里可能没有 sessionId）。把文档 ref
+     提升为真实 session id：侧栏草稿行按会话 id 记账，未提升时点行找不到
+     本文档，会另开一个新空文档（草稿簿按文档隔离），输入框为空。预览文档
+     的身份是 previewProjectId/previewThreadId（AppShell 另行同步），不参与。 */
+  const draftSessionId = state.clientState?.entities.snapshot?.sessionId ?? state.bootstrap?.selected?.sessionId;
+  useEffect(() => {
+    if (preview) return;
+    const document = mdi?.document;
+    const store = mdi?.store;
+    if (!document || !store) return;
+    if (document.ref.draftId === undefined || document.ref.sessionId !== undefined) return;
+    if (draftSessionId === undefined) return;
+    store.updateDocument(document.id, { ref: { ...document.ref, draftId: undefined, sessionId: draftSessionId } });
+  }, [draftSessionId, mdi?.store, mdi?.document, preview]);
 
   const runtimeEpoch = state.clientState?.connection.runtimeEpoch;
   useEffect(() => { conversationViewLeases.setEpoch(runtimeEpoch ?? undefined); }, [runtimeEpoch]);

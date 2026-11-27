@@ -12,6 +12,7 @@ export type DrawerCat = "all" | "skill" | "plugin";
 
 export type SkillPreview = {
   kind: "skill";
+  managedScope?: "user" | "project";
   name: string;
   desc: string;
   src: string;

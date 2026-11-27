@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- 项目侧栏按对话活动时间排列历史，优先展示运行中的会话和最近结束的回合。后台标题实时刷新，未发送的草稿可从所属项目重新打开。
+- Project history follows conversation activity. Running and recently ended turns appear first, background titles refresh live, and unsent drafts reopen in their project.
+- 模型页可独立保存 OMP 原生的服务商并发上限。Runtime 就绪时自动刷新模型目录，切换语言保留正在编辑的值。
+- The model page edits OMP’s native per-provider request limits independently. The catalog refreshes when the Runtime becomes ready, and language changes preserve edits.
+
 ## [0.2.11] - 2026-11-25
 
 ### Added

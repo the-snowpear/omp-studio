@@ -31,6 +31,7 @@ export interface SessionCatalogEntry {
   title?: string;
   createdAt?: string;
   modifiedAt: string;
+  lastActivityAt?: string;
   sizeBytes: number;
 }
 
@@ -74,6 +75,7 @@ export interface SessionCatalogOptions {
 }
 
 interface ParsedHeader {
+  lastActivityAt?: string;
   id: string;
   /** Runtime metadata alone is not a conversation; at least one message must exist. */
   hasConversationMessage: boolean;
@@ -142,7 +144,11 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
     if (metadata.size > maxSessionBytes) return { note: "OVERSIZE_SKIPPED" };
     const header = await cachedSessionHeader(file, metadata, archived ? prefixBytes : Math.min(prefixBytes, metadata.size), maxSessionBytes);
     if (header === undefined) return { note: "CORRUPT_SKIPPED" };
-    if (!header.hasConversationMessage && options.includeEmptySessions !== true) return {};
+    // List views hide sessions without a conversation message yet (freshly
+    // created, never sent). An explicit single-session lookup may legitimately
+    // target exactly such a session — the renderer resolves provisional
+    // (unsent) rows through it for resume, archive and delete.
+    if (!header.hasConversationMessage && options.includeEmptySessions !== true && !(lookup && header.id === lookup.sessionId)) return {};
     if (lookup && header.id !== lookup.sessionId) return {};
     const workspaceId = header.cwd === undefined ? undefined : workspaceIds?.get(workspacePathKey(header.cwd));
     if (lookup && workspaceId === undefined) return {};
@@ -162,6 +168,7 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
         pinned: pinnedSessionIds.has(header.id),
         ...(header.waitingForApproval ? { waitingForApproval: true } : {}),
         modifiedAt: metadata.mtime.toISOString(),
+        ...(header.lastActivityAt && { lastActivityAt: header.lastActivityAt }),
         sizeBytes: metadata.size,
         ...(title === undefined ? {} : { title }),
         ...(createdAt === undefined ? {} : { createdAt }),
@@ -189,7 +196,7 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
 
   return {
     sessions: [...byId.values()].sort((left, right) =>
-      right.modifiedAt.localeCompare(left.modifiedAt) || left.sessionId.localeCompare(right.sessionId),
+      (right.lastActivityAt ?? right.modifiedAt).localeCompare(left.lastActivityAt ?? left.modifiedAt) || left.sessionId.localeCompare(right.sessionId),
     ),
     diagnostics: [...counts.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
@@ -243,7 +250,11 @@ async function cachedSessionHeader(
   let header: ParsedHeader | undefined;
   try {
     header = await readSessionHeader(file, byteLimit, maxSessionBytes);
-    if (header && !file.endsWith(".gz")) header.waitingForApproval = await readPendingToolApproval(file, metadata.size, metadata.mtimeMs);
+    if (header && !file.endsWith(".gz")) {
+      const activity = await readSessionActivity(file, metadata.size, metadata.mtimeMs);
+      header.waitingForApproval = activity.waiting;
+      if (activity.lastActivityAt) header.lastActivityAt = activity.lastActivityAt;
+    }
   } catch {
     // The file vanished or became unreadable between lstat and open.
     return undefined;
@@ -504,6 +515,7 @@ interface ApprovalScan {
   leaf: string | null;
   lastSelfSelected: string | null;
   waiting: boolean;
+  lastActivityAt?: string;
 }
 const approvalCache = new Map<string, ApprovalScan>();
 
@@ -525,15 +537,16 @@ function branchWaitingForApproval(nodes: ReadonlyMap<string, ApprovalNode>, leaf
 }
 
 /** Read appended approval records once; polling a growing transcript must not replay its whole body. */
-async function readPendingToolApproval(file: string, size: number, mtime: number): Promise<boolean> {
+async function readSessionActivity(file: string, size: number, mtime: number): Promise<Pick<ApprovalScan, "waiting" | "lastActivityAt">> {
   const cached = approvalCache.get(file);
-  if (cached?.size === size && cached.mtime === mtime) return cached.waiting;
+  if (cached?.size === size && cached.mtime === mtime) return cached;
   const append = cached !== undefined && size > cached.size;
   const nodes = new Map(append ? cached.nodes : []);
   let leaf = append ? cached.leaf : null;
   let lastSelfSelected = append ? cached.lastSelfSelected : null;
   let bytes = append ? cached.bytes : 0;
-  if (size === 0) return false;
+  let lastActivityAt = append ? cached.lastActivityAt : undefined;
+  if (size === 0) return { waiting: false };
   const input = createReadStream(file, { start: bytes, end: size - 1 });
   let parts: Buffer[] = [];
   let partBytes = 0;
@@ -549,7 +562,12 @@ async function readPendingToolApproval(file: string, size: number, mtime: number
         start = end + 1;
         let row: unknown;
         try { row = JSON.parse(line); } catch { continue; }
-        if (!isRecord(row) || row.type === "session" || row.type === "title" || typeof row.id !== "string") continue;
+        if (!isRecord(row)) continue;
+        if (row.type === "message" || (row.type === "custom_message" && row.display === true)) {
+          const time = normalizeTimestamp(typeof row.timestamp === "string" ? row.timestamp : undefined);
+          if (time && (!lastActivityAt || time > lastActivityAt)) lastActivityAt = time;
+        }
+        if (row.type === "session" || row.type === "title" || typeof row.id !== "string") continue;
         const node: ApprovalNode = { parentId: typeof row.parentId === "string" ? row.parentId : null };
         if (row.type === "custom" && isRecord(row.data) && typeof row.data.toolCallId === "string") {
           if (row.customType === "tool_approval_requested") node.request = { toolCallId: row.data.toolCallId, ...(typeof row.data.parentToolCallId === "string" ? { parentToolCallId: row.data.parentToolCallId } : {}) };
@@ -567,8 +585,9 @@ async function readPendingToolApproval(file: string, size: number, mtime: number
   if (leaf !== null && !nodes.has(leaf)) leaf = lastSelfSelected;
   const waiting = branchWaitingForApproval(nodes, leaf);
   if (approvalCache.size >= HEADER_CACHE_MAX) approvalCache.clear();
-  approvalCache.set(file, { bytes, size, mtime, nodes, leaf, lastSelfSelected, waiting });
-  return waiting;
+  const scan = { bytes, size, mtime, nodes, leaf, lastSelfSelected, waiting, ...(lastActivityAt && { lastActivityAt }) };
+  approvalCache.set(file, scan);
+  return scan;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

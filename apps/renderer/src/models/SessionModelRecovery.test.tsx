@@ -32,7 +32,7 @@ it("requires an explicit replacement and confirmation; preview never changes the
       })) as HTMLButtonElement
     ).disabled,
   ).toBe(true);
-  selectOption(screen.getByRole("combobox", { name: "替代模型" }), "Available model · demo/current-model");
+  selectOption(screen.getByRole("combobox", { name: "替代模型" }), "可用模型 · demo/current-model");
   fireEvent.click(screen.getByRole("button", { name: "使用所选模型恢复" }));
   expect(client.command).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "确认并恢复" }));

@@ -1,7 +1,7 @@
 /** Native selective-commit metadata. Patch bodies are transient reads, not snapshot/ledger data. */
 export type SelectiveCommitOwnership = "own" | "other" | "review";
 export type SelectiveCommitSelectionState = "none" | "partial" | "all";
-export type SelectiveCommitPathKind = "text" | "binary" | "non-utf8" | "large" | "symlink" | "mode";
+export type SelectiveCommitPathKind = "text" | "binary" | "non-utf8" | "large" | "symlink" | "mode" | "gitlink";
 export type SelectiveCommitReason =
   | { kind: "entangled"; with: readonly string[] }
   | { kind: "rewritten"; by: string }

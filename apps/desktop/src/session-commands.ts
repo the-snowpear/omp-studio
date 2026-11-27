@@ -119,6 +119,8 @@ function toCatalogEntry(entry: SessionCatalogEntry): HostCatalogEntry {
   return {
     sessionId: entry.sessionId,
     modifiedAt: entry.modifiedAt,
+    ...(entry.lastActivityAt && { lastActivityAt: entry.lastActivityAt }),
+    ...(entry.waitingForApproval && { waitingForApproval: true }),
     messageCount: 0,
     status: entry.archived ? "archived" : "active",
     origin: entry.origin,
@@ -174,6 +176,16 @@ export function createWorkspaceSessionCatalog(
       }
       if (cwd === undefined) return [];
       return (await scan(cwd)).map((entry) => ({ ...entry }));
+    },
+    // The list views hide sessions without a conversation message yet (fresh,
+    // never sent), but their threads are still addressable for resume, archive
+    // and delete: scan the catalog with empty sessions included and match the
+    // derived thread id.
+    async resolveThreadId(threadId: string): Promise<string | undefined> {
+      const cwd = getCwd();
+      if (!cwd) return undefined;
+      const result = await scanSessionCatalog({ allowedCwd: cwd, includeCliSessions: true, includeEmptySessions: true });
+      return result.sessions.find((entry) => threadIdFor(entry.sessionId) === threadId)?.sessionId;
     },
   };
 }
@@ -770,10 +782,17 @@ async function resolveCatalogSessionId(
   }
   const entries = await options.catalog.list();
   const match = entries.find((entry) => threadIdFor(entry.sessionId) === threadId);
-  if (match === undefined) {
-    throw new StudioHostError("INVALID_ARGUMENT", "Session is not available in this workspace");
+  if (match !== undefined) {
+    return match.sessionId;
   }
-  return match.sessionId;
+  // The session is on disk but has no conversation message yet (fresh, never
+  // sent), so no list view contains it. Its thread is still addressable — the
+  // renderer resolves these sessions for resume, archive and delete.
+  const emptySessionId = await options.catalog.resolveThreadId?.(threadId);
+  if (emptySessionId !== undefined) {
+    return emptySessionId;
+  }
+  throw new StudioHostError("INVALID_ARGUMENT", "Session is not available in this workspace");
 }
 
 function throwIfNotCompleted(receipt: { readonly status: string; readonly error?: { readonly code?: string; readonly message?: string } }): void {

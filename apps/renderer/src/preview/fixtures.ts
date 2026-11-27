@@ -46,6 +46,7 @@ export type PreviewThread = {
   status: "running" | "idle" | "archived";
   /** Sidebar capsule while a deck card is waiting (审批 / plan / ask). */
   wait?: PreviewThreadWait;
+  recentlyEnded?: boolean;
   pinned?: boolean;
   hasSub?: boolean;
   unread?: number;
@@ -200,7 +201,7 @@ export function getPreviewProjects(zh = isZh()): PreviewProject[] {
       attention: true, preview: "running", pinned: true,
       threads: [
         { id: "t0", title: zh ? "新建对话（空白）" : "New chat (empty)", time: "now", msgs: 0, status: "idle" },
-        { id: "t15", title: zh ? "内容图鉴：全部工具卡与正文格式" : "Content gallery: all tool cards & formats", time: "now", msgs: 58, status: "idle", pinned: true },
+        { id: "t15", title: zh ? "内容图鉴：全部工具卡与正文格式" : "Content gallery: all tool cards & formats", time: "now", msgs: 58, status: "idle", recentlyEnded: true, pinned: true },
         { id: "t1", title: zh ? "跟踪上游 pi-web 更新到 omp-web" : "Track upstream pi-web updates to omp-web", time: "32m ago", msgs: 45, status: "running", pinned: true, hasSub: true, unread: 3 },
         { id: "t2", title: "Audit and fix OSS repository issues", time: "2h ago", msgs: 12, status: "idle", wait: "ask", unread: 0 },
         { id: "t3", title: zh ? "Mermaid 全屏缩放计划与交互确认" : "Mermaid fullscreen zoom plan & confirmation", time: "4d ago", msgs: 16, status: "idle", wait: "plan", hasSub: true, unread: 1 },

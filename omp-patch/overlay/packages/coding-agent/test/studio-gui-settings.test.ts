@@ -169,3 +169,25 @@ test("GUI settings expose binja in disassembler.backend", async () => {
 	expect(service.snapshot()["disassembler.backend"]).toBe("binja");
 	expect(service.activation().sources?.["disassembler.backend"]).toBe("runtime");
 });
+
+test("editing one global provider limit preserves other providers and session overrides", async () => {
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "studio-provider-limits-"));
+	try {
+		const settings = await Settings.loadIsolated({ agentDir: dir, cwd: dir });
+		const service = new StudioRuntimeSettingsService({ settings } as AgentSession);
+		const key = "providers.maxInFlightRequests";
+		await service.set(key, { openai: 3, google: 2 }, true);
+		await service.set(key, { anthropic: 7 }, false);
+		const changed = await service.set(key, { openai: 4 }, true, "openai");
+		expect(changed.value).toEqual({ openai: 4, google: 2 });
+		expect(changed.effectiveValue).toEqual(service.snapshot()[key]);
+		await service.set(key, {}, true, "openai");
+		const reloaded = await Settings.loadReadOnly({ agentDir: dir, cwd: dir });
+		expect(new StudioRuntimeSettingsService({ settings: reloaded } as AgentSession).snapshot()[key]).toEqual({
+			google: 2,
+		});
+	} finally {
+		AgentStorage.close();
+		await fs.rm(dir, { recursive: true, force: true });
+	}
+});

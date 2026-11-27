@@ -349,7 +349,7 @@ export function SelectiveCommitPane({ client, sessionId, runtimeEpoch, available
   const ownerLabel = (owner: SelectiveCommitOwnership) => owner === "own" ? tr("本会话", "This session") : owner === "other" ? tr("其他来源", "Other") : tr("需审核", "Review");
   const kindLabel = (kind: SelectiveCommitPath["kind"]) => ({
     text: tr("文本", "Text"), binary: tr("二进制", "Binary"), "non-utf8": tr("非 UTF-8", "Non-UTF-8"),
-    large: tr("大文件", "Large"), symlink: tr("符号链接", "Symlink"), mode: tr("权限位", "Mode"),
+    large: tr("大文件", "Large"), symlink: tr("符号链接", "Symlink"), mode: tr("权限位", "Mode"), gitlink: tr("子模块", "Submodule"),
   })[kind];
   const changeMark = (change: SelectiveCommitPath["change"]) => change === "added" ? "A" : change === "deleted" ? "D" : "M";
   const changeLabel = (change: SelectiveCommitPath["change"]) => change === "added" ? tr("新增", "Added") : change === "deleted" ? tr("删除", "Deleted") : tr("修改", "Modified");

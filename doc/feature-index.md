@@ -237,6 +237,7 @@ Time Travel：`history/TimeTravel{Activation,Dialog,Pane}.tsx`、`history/useTim
 
 | 功能 | Host / Desktop | Runtime overlay |
 |---|---|---|
+| 侧栏会话排序、分页外运行项和回合结束标记 | `sidebar/{AppSidebar,useSidebarActivity,expandMemory}`；常驻标题由 Desktop `runtime-session.ts` 投影，项目草稿经 `session-commands.ts` 解析 | 历史活动由 Host 复用审批记录扫描；文件修改时间独立用于去重 |
 | 创建 / 恢复 / 删除 | `apps/desktop/src/session-commands.ts` | `services/session-control-service.ts` |
 | 目录扫描 | `studio-host/src/session-catalog.ts` | — |
 | 归档 / 解档 | `studio-host/src/session-archive-service.ts` | 切走 live 文件后再 gzip |
@@ -255,6 +256,7 @@ Renderer 读当前查看会话：`apps/renderer/src/telemetry/useViewedSessionTe
 
 | 功能 | UI | Host 适配 | Runtime |
 |---|---|---|---|
+| 服务商全局并发上限 | `models/config/ProviderLimitField.tsx`、`ModelConfigPage.tsx`、`preview/modelConfigFixtures.ts` | `runtime.settings.get/set` → overlay `runtime-settings-service.ts` → 原生 `providers.maxInFlightRequests` |
 | Agent Hub 页 | `apps/renderer/src/AgentHub.tsx`、`agents/hub/HubDossier.tsx`（详情头部、操作、Sigil、折叠节）、`agents/hub/HubAgentOverview.tsx`（概览各节）、`conversation/SubagentConversationPane.tsx`、`conversation/persistedSessionAgents.ts`；样式 `styles/agent-hub.css` 的「详情列：Agent 档案」 | 名册：`session.agents.list` 与 live `snapshot.agents` 合并（仅 viewed session === live session 时叠 live）；写操作（spawn/send/kill/revive/release/`job.cancel`）仅 live 会话；历史 Transcript 不读 live `agent.transcript.read`，用「打开」走归档对话；详情「打开」走 `agent.conversation.read`，缺失或非 live 则 `session.transcript.readPage` + `agentId`；聊天附件胶囊经 `agent.send` | overlay `services/agent-hub-service.ts`、`job-service.ts` |
 | 批量评审 | `judgments/JudgmentsPane.tsx`、`preview/judgmentsPreview.ts` | `judgments.list/create/read/cancel/close/retry`；有界分页、付费操作前确认、结果保存产物库 | overlay `services/judgment-service.ts`；native `eval/judgment-batch-bridge.ts` 独立观察游标 |
 | 子代理面板 | `SubagentsPanel.tsx` | `agent.spawn/send/kill/revive/release` | 同上 + `agent-conversation-service.ts` |

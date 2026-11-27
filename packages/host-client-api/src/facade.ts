@@ -569,6 +569,7 @@ function residentsEqual(left: ResidentsReadModel | undefined, right: ResidentsRe
       previous.phase === next.phase &&
       previous.pendingMessages === next.pendingMessages &&
       previous.waitKind === next.waitKind &&
+      previous.title === next.title && previous.titleSource === next.titleSource &&
       previous.lastActivityAt === next.lastActivityAt;
   });
 }
@@ -2350,7 +2351,26 @@ export class StudioHostClientFacade implements ClientTransport {
     const catalog = await this.#options.catalog.list(
       input.workspaceId === undefined ? undefined : { workspaceId: input.workspaceId },
     );
-    const visible = catalog.filter(entry =>
+    // The list view hides sessions without a conversation message yet (freshly
+    // created, never sent), but an explicit single-session query may target
+    // exactly such a session — the renderer resolves provisional (unsent) rows
+    // through it for resume, archive and delete. Merge the Host's
+    // single-session lookup so the query can reach it; list views are
+    // unaffected (they never pass sessionId).
+    let entries = catalog;
+    if (input.sessionId !== undefined && !catalog.some(entry => entry.sessionId === input.sessionId)) {
+      const locate = this.#options.catalog.locate;
+      if (locate !== undefined) {
+        const located = await locate.call(this.#options.catalog, input.sessionId);
+        const listed = new Set(catalog.map(entry => entry.sessionId));
+        const extras = located
+          .filter(row => input.workspaceId === undefined || row.workspaceId === input.workspaceId)
+          .map(row => row.entry)
+          .filter(entry => !listed.has(entry.sessionId));
+        if (extras.length > 0) entries = [...catalog, ...extras];
+      }
+    }
+    const visible = entries.filter(entry =>
       (input.sessionId === undefined || input.sessionId === entry.sessionId) &&
       !this.#options.evaluations?.sessionIds().has(entry.sessionId),
     );
@@ -2358,7 +2378,7 @@ export class StudioHostClientFacade implements ClientTransport {
     const sorted = [...filtered].sort(
       (left, right) =>
         Number(right.pinned === true) - Number(left.pinned === true) ||
-        right.modifiedAt.localeCompare(left.modifiedAt) ||
+        (right.lastActivityAt ?? right.modifiedAt).localeCompare(left.lastActivityAt ?? left.modifiedAt) ||
         left.sessionId.localeCompare(right.sessionId),
     );
     return { entries: sorted.slice(offset, offset + limit).map(entry => this.#mapHistoryEntry(entry)), total: sorted.length };
@@ -2378,7 +2398,7 @@ export class StudioHostClientFacade implements ClientTransport {
       ...(title === undefined ? {} : { title }),
       ...(summary === undefined ? {} : { summary }),
       startedAt: entry.createdAt ?? entry.modifiedAt,
-      lastActiveAt: entry.modifiedAt,
+      lastActiveAt: entry.lastActivityAt ?? entry.modifiedAt,
       messageCount: entry.messageCount,
       status: entry.status,
       ...(entry.pinned === undefined ? {} : { pinned: entry.pinned }),
@@ -2405,7 +2425,7 @@ export class StudioHostClientFacade implements ClientTransport {
     const recentThreads = [...catalog]
       .filter((entry) => entry.status !== "archived")
       .sort(
-        (left, right) => right.modifiedAt.localeCompare(left.modifiedAt) || left.sessionId.localeCompare(right.sessionId),
+        (left, right) => (right.lastActivityAt ?? right.modifiedAt).localeCompare(left.lastActivityAt ?? left.modifiedAt) || left.sessionId.localeCompare(right.sessionId),
       )
       .slice(0, HOME_RECENT_THREADS)
       .map((entry) => {
@@ -2413,7 +2433,7 @@ export class StudioHostClientFacade implements ClientTransport {
         return {
           threadId: threadIdFor(entry.sessionId),
           ...(title === undefined ? {} : { title }),
-          lastActiveAt: entry.modifiedAt,
+          lastActiveAt: entry.lastActivityAt ?? entry.modifiedAt,
         };
       });
     const workspaces = this.#options.workspaces;

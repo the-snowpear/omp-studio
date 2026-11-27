@@ -281,6 +281,8 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     readonly title?: string;
     readonly running: boolean;
     readonly submitted: boolean;
+    /** The surface stopped owning this session; its unsent draft row is removed. */
+    readonly final?: boolean;
   }) => void;
   /** Refresh Host history after Runtime's `/pin` command persists its global pin file. */
   onPinCompleted?: () => Promise<void>;
@@ -467,7 +469,8 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       onComposerDraftChange?.(selectedSessionId, composerRef.current?.getSnapshot() ?? draftLive.current);
       return;
     }
-    replaceDraft(composerDraftRef.current ?? emptySnapshot());
+    const restoredSnapshot = composerDraftRef.current ?? emptySnapshot();
+    replaceDraft(restoredSnapshot);
     setSubmittedPrompt((current) => current !== undefined && selectedSessionId !== undefined && current.sessionId === selectedSessionId ? current : undefined);
     setComposerError(undefined);
     setQueueEdit(undefined);
@@ -1210,7 +1213,18 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
     : composerRunning ? "running" : "idle";
   // Title freezes on the first accepted prompt; later drafts never override it.
   const provisionalTitle = submittedPromptTitle ?? provisionalThreadTitle(draft.text);
+  const lastComposerOwnerRef = useRef<SessionId | undefined>(undefined);
   useEffect(() => {
+    // The surface stopped owning the previous session (session switch or new
+    // chat): report it as hidden one last time. Without this final report an
+    // unsent draft row stays in the sidebar forever — it has no history entry
+    // and no row menu, so only a restart could remove it. Sent conversations
+    // keep their row; the reconciler decides that.
+    const previousOwner = lastComposerOwnerRef.current;
+    lastComposerOwnerRef.current = composerOwner;
+    if (!preview && previousOwner !== undefined && previousOwner !== composerOwner) {
+      onProvisionalSessionChange?.({ sessionId: previousOwner, visible: false, running: false, submitted: false, final: true });
+    }
     const visible = textReady || provisionalTitle !== undefined || running;
     onProvisionalSessionChange?.({
       ...(composerOwner === undefined ? {} : { sessionId: composerOwner }),
@@ -1220,7 +1234,7 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
       running,
       submitted: submittedPromptTitle !== undefined || running,
     });
-  }, [onProvisionalSessionChange, provisionalTitle, running, composerOwner, submittedPromptTitle, textReady, workspaceId]);
+  }, [onProvisionalSessionChange, provisionalTitle, running, composerOwner, submittedPromptTitle, textReady, workspaceId, preview]);
   useEffect(() => {
     if (preview || !snapshot || !composerOwner || executionTarget.id) return;
     conversationViewLeases.setOwnerKnown();

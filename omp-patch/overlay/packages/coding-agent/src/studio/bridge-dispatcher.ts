@@ -779,7 +779,12 @@ export class StudioBridgeDispatcher {
 						}
 					: this.runtime.services.settings.get(operation.keys);
 			case "runtime.settings.set":
-				return await this.runtime.services.settings.set(operation.key, operation.value, operation.persist);
+				return await this.runtime.services.settings.set(
+					operation.key,
+					operation.value,
+					operation.persist,
+					operation.providerId,
+				);
 			case "session.clearContext":
 				return await this.#sessionControl.clearContext();
 			case "session.drop": {

@@ -39,7 +39,7 @@ import { bindSlashTypedCommand, isDestructiveMemoryClear, resolveSlashExecute, t
 import { composerOwnerSessionId } from "../composer/dispatch";
 import { createWorkspaceFileIndex, followWorkspaceFileIndex, loadMentions, previewMentions, workspaceDirectoryLister } from "../composer/mentions";
 import { createComposerDraftBook } from "../composer/draftStore";
-import { type ComposerSnapshot } from "../composer/types";
+import { emptySnapshot, type ComposerSnapshot } from "../composer/types";
 import type { FileViewerActions } from "../files/fileActions";
 import { mergeUsedSkills } from "../skills/skillUsage";
 import { RuntimeLossBanner } from "../RuntimeLossBanner";
@@ -77,7 +77,7 @@ import { useBtwSession } from "../btw/useBtwSession";
 import { usableCapabilityManifest } from "../deck/interactionGate";
 import { residentForSession } from "../sidebar/threadRunning";
 import { sidebarProjectOrder } from "../sidebar/projectOrder";
-import { readExpandedProjects, writeExpandedProjects } from "../sidebar/expandMemory";
+import { SidebarProjectList, writeExpandedProjects } from "../sidebar/expandMemory";
 import { isPlaceholderSessionTitle, ProvisionalThreadStore, provisionalThreadForHistoryEntry, reconcileProvisionalProjectThread, resolveProvisionalHistoryTitle, sidebarThreadTitle, type ProvisionalProjectThread } from "../sidebar/provisionalThread";
 import { workspaceForSession } from "../sidebar/sessionTitle";
 import { type ThreadWaitKind } from "../sidebar/threadWait";
@@ -193,10 +193,17 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   const [explorerOpen, setExplorerOpen] = useState(() => previewOn());
   /** Real projects may be expanded together; preview keeps its fixture selection below.
       启动时按本地记忆恢复各项目展开状态；从未写过记忆时保持旧行为（首启展开活动项目）。 */
-  const [expandedProjectsMemory] = useState(readExpandedProjects);
-  const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(
-    () => (expandedProjectsMemory.restored ? expandedProjectsMemory.ids : new Set<string>()),
-  );
+  const sharedSidebarMemory = fileTargets.scope(executionTarget.id, "app-shell").memory;
+  const projectList = useMemo(() => {
+    const key = previewMode.preview ? "previewProjectList" : "projectList";
+    const existing = sharedSidebarMemory.get(key) as SidebarProjectList | undefined;
+    if (existing) return existing;
+    const created = new SidebarProjectList();
+    sharedSidebarMemory.set(key, created);
+    return created;
+  }, [sharedSidebarMemory, previewMode.preview]);
+  const { expanded: expandedProjects, limits: projectThreadLimits } = useSyncExternalStore(projectList.subscribe, projectList.snapshot);
+  const { memory: expandedProjectsMemory, setExpanded: setExpandedProjects, setLimits: setProjectThreadLimits } = projectList;
   const [projectListExpanded, setProjectListExpanded] = useState(true);
   const [selectedProject, setSelectedProject] = useState<SelectedProject | null>(() => previewOn() ? CURRENT_PROJECT : null);
   const composerRef = useRef<ChipComposerHandle | null>(null);
@@ -257,8 +264,6 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
   useEffect(() => {
     if (selectedHistoryId !== null) setSelectedProvisionalSessionId(undefined);
   }, [selectedHistoryId]);
-  /** 各项目当前展开的会话条数；折叠会话列表时清掉对应键回到默认 6 条。 */
-  const [projectThreadLimits, setProjectThreadLimits] = useState<Record<string, number>>({});
   const projectHistories = useProjectHistories({ client, preview: previewMode.preview, shared: mdi?.store.history(executionTarget.id) });
   const {
     cache: projectHistoryCache,
@@ -277,7 +282,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       next.add(workspaceId);
       return next;
     });
-  }, []);
+  }, [setExpandedProjects]);
   const collapseProject = useCallback((workspaceId: string) => {
     setExpandedProjects((current) => {
       if (!current.has(workspaceId)) return current;
@@ -285,7 +290,7 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       next.delete(workspaceId);
       return next;
     });
-  }, []);
+  }, [setExpandedProjects]);
   /* 项目展开状态本地记忆：真实模式随变更写入；预览模式不写（见 expandMemory）。 */
   useEffect(() => {
     if (previewMode.preview) return;
@@ -731,6 +736,8 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     ? (previewThread?.thread.title ?? (zh ? "跟踪上游 pi-web 更新到 omp-web" : "Track upstream pi-web updates to omp-web"))
     : currentThreadTitle ?? (state.route === "history" ? t("menu.history") : state.route === "home" ? t("menu.home") : state.route === "agent-hub" ? "Agent Hub" : state.route === "capabilities" ? t("menu.capabilities") : state.route === "model-config" ? t("menu.modelConfig") : untitledThreadTitle);
   const selectedTitleIsPlaceholder = isPlaceholderSessionTitle(selected?.title);
+  /** Final hides deferred while the Runtime snapshot still describes the session. */
+  const pendingFinalHidesRef = useRef<Set<string>>(new Set());
   const onProvisionalSessionChange = useCallback((change: {
     readonly sessionId?: SessionId;
     readonly workspaceId?: WorkspaceId;
@@ -738,10 +745,43 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
     readonly title?: string;
     readonly running: boolean;
     readonly submitted: boolean;
+    readonly final?: boolean;
   }) => {
     if (change.sessionId === undefined) return;
+    // The surface owner moved away, but the snapshot still describes this
+    // session (the selection/resume switch is in flight). Applying the hide
+    // now would remove the live session's row and the transition already
+    // happened, so defer it until the snapshot actually moves on.
+    if (change.final === true) {
+      const key = String(change.sessionId);
+      // A never-sent draft with text stays in the sidebar instead of being
+      // hidden: clicking the row back restores the per-session composer draft
+      // (the session itself resolves through the single-session query), and
+      // the row menu lets the user delete it. Only empty drafts are dropped,
+      // so abandoned fresh chats without any text still do not accumulate.
+      const draftText = composerDraftBook.get(key)?.text ?? "";
+      if (draftText.trim() !== "") {
+        pendingFinalHidesRef.current.delete(key);
+        // Keep the row exactly as stored: it stays selectable (the composer
+        // draft comes back on click) and deletable from the row menu.
+        return;
+      }
+      if (key === String(snapshot?.sessionId ?? "")) {
+        pendingFinalHidesRef.current.add(key);
+        return;
+      }
+      pendingFinalHidesRef.current.delete(key);
+    }
+    // The Runtime's resident binding is the authority for which project a
+    // live session belongs to; the surface report only says which project is
+    // selected. Passing both through keeps a row from sticking under the
+    // wrong project when it is first reported mid-switch.
+    const authoritativeWorkspaceId = residentForSession(residentModel, String(change.sessionId))?.workspaceId;
     setProvisionalThreadsBySession((current) =>
-      reconcileProvisionalProjectThread(current, change, {
+      reconcileProvisionalProjectThread(current, {
+        ...change,
+        ...(authoritativeWorkspaceId !== undefined ? { authoritativeWorkspaceId } : {}),
+      }, {
         preview: previewMode.preview,
         sessionCreating: creatingSession,
         selectedHistoryId,
@@ -750,7 +790,15 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
         excludedSessionIds: provisionalStore.excludedSessionIds,
       }),
     );
-  }, [creatingSession, previewMode.preview, provisionalStore, selectedHistoryId, selectedTitleIsPlaceholder, setProvisionalThreadsBySession, t]);
+  }, [composerDraftBook, creatingSession, previewMode.preview, provisionalStore, residentModel, selectedHistoryId, selectedTitleIsPlaceholder, setProvisionalThreadsBySession, snapshot?.sessionId, t]);
+  useEffect(() => {
+    if (pendingFinalHidesRef.current.size === 0) return;
+    for (const id of [...pendingFinalHidesRef.current]) {
+      if (id === String(snapshot?.sessionId ?? "")) continue;
+      pendingFinalHidesRef.current.delete(id);
+      onProvisionalSessionChange({ sessionId: id as SessionId, visible: false, running: false, submitted: false, final: true });
+    }
+  }, [onProvisionalSessionChange, snapshot?.sessionId]);
   useEffect(() => {
     const untitledTitle = t("conversation.untitledSession");
     setProvisionalThreadsBySession((current) => {
@@ -1584,6 +1632,8 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       if (!entry) throw new Error(t("history.deleteHistoryPending"));
       const workspaceId = sidebarDelete.kind === "real" ? sidebarDelete.workspaceId : sidebarDelete.thread.workspaceId;
       await deleteSessionThread(entry, deleteManagedArtifacts, workspaceId, false);
+      // 草稿簿按会话 id 记账：会话没了，它的未发送草稿也别再占着。
+      if (entry.sessionId !== undefined) composerDraftBook.set(entry.sessionId, emptySnapshot());
       setSidebarDelete(null);
     } catch (error) {
       setSidebarDeleteError(error);
@@ -2094,11 +2144,31 @@ export function AppShell({ state, client, healthReady, onRoute, selectedHistoryI
       return;
     }
     if (!thread.submitted) {
+      // 未发送的行已经是真实会话：worker 启动即创建会话文件，但还没有
+      // 对话消息，历史列表不显示它（模型里也没有，走历史条目选中会失去
+      // canvas 的 selectedSessionId）。选择就留在本会话 —— composer 草稿
+      // 按会话 id 存储，会随选中一起回到输入框；单会话查询（可命中无消息
+      // 的会话）解析 threadId，再显式 resume 让 Runtime 活动会话与视图一致。
+      const generation = navigationGate.next();
       commitDockSelection({ target: executionTarget.id ?? "local", project: thread.workspaceId, session: thread.sessionId });
       setSelectedProvisionalSessionId(thread.sessionId);
       onNewThread();
       setSessionActionError(undefined);
-      onRoute("workbench");
+      void workspaceActionQueue.enqueue(async () => {
+        if (!navigationGate.isCurrent(generation)) return;
+        try {
+          await ensureWorkspaceActive(thread.workspaceId);
+          if (!navigationGate.isCurrent(generation)) return;
+          const entry = await resolveProvisionalHistoryEntry(thread);
+          if (!navigationGate.isCurrent(generation)) return;
+          if (!entry) throw new Error(zhRef.current ? "草稿会话尚未出现在项目目录中，可重新打开。" : "The draft is not in the project catalog yet. Try opening it again.");
+          const handle = await client.command("session.resume", { threadId: entry.threadId });
+          const resumed = await waitReceipt<OperatorStateSnapshot>(client, handle.requestId);
+          if (resumed.sessionId !== thread.sessionId) throw new Error(zhRef.current ? "恢复的会话与目标会话不一致" : "Resumed session does not match the target session");
+        } catch (error) {
+          if (navigationGate.isCurrent(generation)) setSessionActionError(hostErrorMessage(error, zhRef.current ? "恢复会话失败" : "Failed to resume session"));
+        }
+      });
       return;
     }
     void (async () => {

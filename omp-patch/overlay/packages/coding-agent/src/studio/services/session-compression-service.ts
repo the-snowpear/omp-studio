@@ -29,7 +29,7 @@ function summary(result: CompressGcResult, files: CompressionFile[], truncated: 
 		allocatedAfter: result.allocatedAfter,
 		files,
 		truncated,
-		errors: result.errors.slice(0, 20).map(clean),
+		errors: [...(result.probeFailure ? [clean(result.probeFailure)] : []), ...result.errors.slice(0, 20).map(clean)],
 	};
 }
 export class StudioSessionCompressionService {

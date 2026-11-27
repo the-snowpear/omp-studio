@@ -36,12 +36,16 @@ export function SessionModelRecovery({
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [inspection, setInspection] = useState<SessionRestoreInspection>();
+  const [fallbackModels, setFallbackModels] = useState<{ model: string; label: string }[]>([]);
   const [model, setModel] = useState("");
-  const [error, setError] = useState("");
+  const [failure, setFailure] = useState<{ step: "inspect" | "restore"; cause: unknown }>();
+  const error = failure && hostErrorMessage(failure.cause, failure.step === "inspect"
+    ? (zh ? "无法检查会话模型" : "Cannot inspect the saved model")
+    : (zh ? "恢复未完成，请重试。" : "Restore did not complete. Try again."));
   const [busy, setBusy] = useState(false);
   const [retry, setRetry] = useState(0);
   const [confirmed, setConfirmed] = useState(false);
-  const [notice, setNotice] = useState("");
+  const [showNotice, setShowNotice] = useState(false);
   const epoch = useRef(0);
   const lock = useRef(false);
   const enabled = preview
@@ -61,10 +65,11 @@ export function SessionModelRecovery({
     lock.current = false;
     setInspection(undefined);
     setModel("");
-    setError("");
+    setFailure(undefined);
     setBusy(false);
     setConfirmed(false);
-    setNotice("");
+    setShowNotice(false);
+    setFallbackModels([]);
     if (!enabled) return;
     if (preview) {
       setInspection({
@@ -91,19 +96,19 @@ export function SessionModelRecovery({
         )
       ).result;
       if (generation === epoch.current) setInspection(result);
-    })().catch((cause) => {
-      if (generation === epoch.current)
-        setError(
-          hostErrorMessage(
-            cause,
-            zh ? "无法检查会话模型" : "Cannot inspect the saved model",
-          ),
-        );
+    })().catch(async (cause) => {
+      if (generation !== epoch.current) return;
+      setFailure({ step: "inspect", cause });
+      try {
+        const catalog = await client.query("models.get", {});
+        if (generation !== epoch.current) return;
+        setFallbackModels((catalog.availableModels ?? []).slice(0, 500).map(row => ({ model: `${row.provider}/${row.id}`, label: row.name || row.id })));
+      } catch { /* Inspection can be retried from the recovery card. */ }
     });
-    return () => {
-      epoch.current++;
-    };
-  }, [client, currentSessionId, targetSessionId, enabled, preview, retry, zh]);
+    return () => { epoch.current++; };
+  }, [client, currentSessionId, targetSessionId, enabled, preview, retry, marks]);
+
+  const alternatives = inspection?.alternatives ?? fallbackModels;
   async function restore() {
     if (
       !enabled ||
@@ -115,16 +120,11 @@ export function SessionModelRecovery({
       return;
     lock.current = true;
     setBusy(true);
-    setError("");
+    setFailure(undefined);
     const generation = epoch.current;
     try {
       if (preview) {
-        if (marks)
-          setNotice(
-            zh
-              ? "演示：已选择替代模型，真实会话未更改。"
-              : "Demo: replacement selected; the real session is unchanged.",
-          );
+        setShowNotice(marks);
       } else {
         const handle = await client.command("session.resume", {
           threadId: threadId!,
@@ -144,14 +144,7 @@ export function SessionModelRecovery({
       if (generation === epoch.current) setConfirmed(false);
     } catch (cause) {
       if (generation === epoch.current)
-        setError(
-          hostErrorMessage(
-            cause,
-            zh
-              ? "恢复未完成，当前会话保留。请检查状态后重试。"
-              : "Restore did not complete. The current session is retained. Check its state before retrying.",
-          ),
-        );
+        setFailure({ step: "restore", cause });
     } finally {
       if (generation === epoch.current) {
         lock.current = false;
@@ -194,7 +187,7 @@ export function SessionModelRecovery({
         </span>
       ) : null}
       {error ? <p role="alert">{error}</p> : null}
-      {notice ? <p role="status">{notice}</p> : null}
+      {showNotice ? <p role="status">{zh ? "演示：已选择替代模型。" : "Demo: replacement model selected."}</p> : null}
       <div className="session-recovery-actions">
         <AppSelect
           className="select"
@@ -209,9 +202,9 @@ export function SessionModelRecovery({
           <option value="">
             {zh ? "选择可用模型…" : "Choose an available model…"}
           </option>
-          {inspection?.alternatives.map((row) => (
+          {alternatives.map((row) => (
             <option key={row.model} value={row.model}>
-              {row.label} · {row.model}
+              {preview ? (zh ? "可用模型" : "Available model") : row.label} · {row.model}
             </option>
           ))}
         </AppSelect>

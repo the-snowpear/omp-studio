@@ -5,7 +5,11 @@ import {
 	type GuiSettingsSnapshot,
 } from "../gui-settings-protocol";
 import { cfgModelRoles } from "../../config/model-settings";
-import { cfgProvidersCacheWarming } from "../../session/settings";
+import {
+	cfgProvidersCacheWarming,
+	cfgProvidersMaxInFlightRequests,
+	normalizeProviderMaxInFlightRequests,
+} from "../../session/settings";
 import { cfgTaskSpeculativeLaunch } from "../../task/settings";
 import { cfgProvidersOpenaiLiveSteering } from "../../session/settings";
 import { cfgTelemetryOtlpExportEnabled } from "../../telemetry-settings";
@@ -188,6 +192,7 @@ const GUI_SETTING_HANDLES = {
 	"model.toolCallLoopGuard.enabled": cfgModelToolCallLoopGuardEnabled,
 	"model.toolCallLoopGuard.threshold": cfgModelToolCallLoopGuardThreshold,
 	"providers.cacheWarming": cfgProvidersCacheWarming,
+	"providers.maxInFlightRequests": cfgProvidersMaxInFlightRequests,
 	"task.speculativeLaunch": cfgTaskSpeculativeLaunch,
 	"providers.openaiLiveSteering": cfgProvidersOpenaiLiveSteering,
 	"telemetry.otlpExportEnabled": cfgTelemetryOtlpExportEnabled,
@@ -473,10 +478,18 @@ export class StudioRuntimeSettingsService {
 		if (!pending) this.#notesConfigured = this.#notesEffective;
 	}
 
+	#globalProviderLimits(): Record<string, number> {
+		const providers = this.session.settings.getGlobalSettings().providers;
+		return normalizeProviderMaxInFlightRequests(isRecord(providers) ? providers.maxInFlightRequests : undefined);
+	}
+
 	activation(): StudioRuntimeSettingsActivation {
 		this.#syncSession();
 		return {
-			configured: { "compaction.experimentalContextManagement": this.#notesConfigured },
+			configured: {
+				"compaction.experimentalContextManagement": this.#notesConfigured,
+				"providers.maxInFlightRequests": this.#globalProviderLimits(),
+			},
 			hindsightCredential: {
 				configured: Boolean(cfgHindsightApiToken.get(this.session.settings)),
 				source: cfgHindsightApiToken.provenance(this.session.settings),
@@ -560,6 +573,7 @@ export class StudioRuntimeSettingsService {
 		key: string,
 		value: unknown,
 		persist: boolean,
+		providerId?: string,
 	): Promise<{
 		key: StudioRuntimeSettingKey;
 		value: StudioRuntimeSettingValue;
@@ -570,6 +584,14 @@ export class StudioRuntimeSettingsService {
 		assertKey(key);
 		if (typeof persist !== "boolean") {
 			throw new StudioRuntimeSettingsError("INVALID_ARGUMENT", "Runtime setting persistence flag must be boolean");
+		}
+		if (providerId !== undefined && key === "providers.maxInFlightRequests" && isRecord(value)) {
+			const limits = persist
+				? this.#globalProviderLimits()
+				: { ...cfgProvidersMaxInFlightRequests.get(this.session.settings) };
+			if (Object.hasOwn(value, providerId)) limits[providerId] = value[providerId] as number;
+			else delete limits[providerId];
+			value = limits;
 		}
 		assertValue(key, value);
 		if (key === "compaction.experimentalContextManagement") {
@@ -599,7 +621,14 @@ export class StudioRuntimeSettingsService {
 		}
 		this.#apply(key, value, persist);
 		if (persist) await this.session.settings.flush();
-		return { key, value: cloneValue(value), persisted: persist };
+		return {
+			key,
+			value: cloneValue(value),
+			persisted: persist,
+			...(providerId !== undefined && {
+				effectiveValue: cfgProvidersMaxInFlightRequests.get(this.session.settings),
+			}),
+		};
 	}
 
 	#apply(key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue, persist: boolean): void {

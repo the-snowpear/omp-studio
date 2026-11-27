@@ -1,3 +1,4 @@
+import { ProviderLimitField, useProviderLimits, type ProviderLimitEdit } from "./models/config/ProviderLimitField";
 import { useProviderDiscovery } from "./models/config/useProviderDiscovery";
 import "./styles/models-roles.css";
 import { useListReorder } from "./models/useListReorder";
@@ -97,6 +98,9 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<"all" | "native" | "third">("all");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const limitEdit = useRef<ProviderLimitEdit>(null);
+  const [providerLimitDirty, setProviderLimitDirty] = useState(false);
+  const providerLimits = useProviderLimits(client, sessionId, workspaceId, runtimeAvailable, capabilities, preview);
   const [editorState, setEditor] = useState<Draft | null>(null);
   const [showKey, setShowKey] = useState(false);
   const { shown: editor, phase: editorPhase, live: editorLive, dir: editorDir } = useDeferredPresence(editorState);
@@ -196,12 +200,18 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     }
   }, [client, preview, workspaceId]);
 
+  // Cold-start ordering: models.get can run before the selected session or
+  // the Runtime snapshot exist; the Host then answers with the honest
+  // unverified read (configuration visible, model list empty) that would
+  // otherwise persist until the page is reopened. Re-run the read when the
+  // session or Runtime readiness changes so the model list fills in on its
+  // own, and re-read on session switches (the catalog is per-workspace).
   useEffect(() => {
     void refresh();
     return () => {
       refreshEpoch.current += 1;
     };
-  }, [refresh]);
+  }, [refresh, sessionId, runtimeAvailable]);
   useEffect(() => () => {
     testEpochRef.current += 1;
   }, []);
@@ -498,11 +508,11 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   const ymlCardsDirty = providerFormDirty || roleFormDirty || modelsYmlEdited || configYmlEdited || fallbackDirty;
 
   useEffect(() => {
-    setModelConfigDirty(ymlCardsDirty || accountPoolsDirty || systemTemplatesDirty || webSearchDirty);
+    setModelConfigDirty(ymlCardsDirty || providerLimitDirty || accountPoolsDirty || systemTemplatesDirty || webSearchDirty);
     return () => {
       setModelConfigDirty(false);
     };
-  }, [ymlCardsDirty, accountPoolsDirty, systemTemplatesDirty, webSearchDirty]);
+  }, [ymlCardsDirty, providerLimitDirty, accountPoolsDirty, systemTemplatesDirty, webSearchDirty]);
 
   const mutateLocal = (recipe: (current: ModelConfigReadModel) => ModelConfigReadModel) => {
     if (preview) previewMutatedRef.current = true;
@@ -660,6 +670,10 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       return;
     }
     const roleUpdates = rolePrimaryUpdates(roles, roleAssignDraft);
+    if (limitEdit.current?.dirty) {
+      if (!await limitEdit.current.save()) return;
+      if (!modelsYmlDirty && !providerFormDirty && !roleUpdates.length) { setEditor(null); return; }
+    }
     // A hand-edited card or an unsaved form both go through the YAML write: the
     // form's model list, overrides and advanced fields only reach models.yml
     // when the overlay rides along with the text.
@@ -683,6 +697,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         return next;
       });
       setRoleAssignDraft({});
+
       setEditor(null);
       if (marks) toast(roleUpdates.length > 0 ? t("modelConfig.demoUpdatedListAndRoles") : t("modelConfig.demoUpdatedList"));
       return;
@@ -694,6 +709,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         "models.provider.upsert",
         providerUpsertFromDraft(editorState, data?.contentHash),
       );
+
       await applyRolePrimaryUpdates(roleUpdates, { announce: false, refreshAfter: false });
       setRoleAssignDraft({});
       mergeContentHash(result.contentHash);
@@ -1312,7 +1328,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   };
 
   const closeProviderEditor = () => {
-    if ((providerFormDirty || modelsYmlDirty) && !confirmDiscardDirty(t)) return;
+    if ((providerFormDirty || modelsYmlDirty || providerLimitDirty) && !confirmDiscardDirty(t)) return;
     setEditor(null);
   };
 
@@ -1527,6 +1543,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                   </div>
                   <div className="field"><label htmlFor="f-site">{t("modelConfig.websiteLabel")}</label><input className="input mono" id="f-site" value={editor.website} onChange={(event) => setEditor({ ...editor, website: event.target.value })} /></div>
                   <div className="field"><label htmlFor="f-note">{t("modelConfig.notesLabel")}</label><input className="input" id="f-note" value={editor.note} onChange={(event) => setEditor({ ...editor, note: event.target.value })} /></div>
+                  {editExisting && <ProviderLimitField ref={limitEdit} key={`${workspaceId}/${sessionId}/${editor.id}/${preview}`} providerId={editor.id} limits={providerLimits} onDirtyChange={setProviderLimitDirty} />}
                 </div>
 
                 <div className="mp-sec-divider" aria-hidden="true" />
@@ -1572,7 +1589,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                             {authed ? t("modelConfig.relogin") : t("modelConfig.login")}
                           </button>
                           {authed ? (
-                            <button type="button" className="btn small outline" disabled={busy} onClick={() => { if (!providerFormDirty || confirmDiscardDirty(t)) { setEditor(null); setTab("accounts"); } }}>{resolvedLanguage === "zh" ? "管理账户" : "Manage accounts"}</button>
+                            <button type="button" className="btn small outline" disabled={busy} onClick={() => { if (!(providerFormDirty || modelsYmlDirty || providerLimitDirty) || confirmDiscardDirty(t)) { setEditor(null); setTab("accounts"); } }}>{resolvedLanguage === "zh" ? "管理账户" : "Manage accounts"}</button>
                           ) : null}
                         </div>
                         {nativeAuth.error ? <p role="alert" className="small">{nativeAuth.error}</p> : null}
@@ -1920,6 +1937,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
               {filtered.length === 0 ? <div className="empty"><Icon name="search" />{providers.length === 0 ? t("modelConfig.noProviders") : t("modelConfig.noMatchingProviders")}</div> : null}
               <div className={`pv-list${draggingId && dragPhase === "dragging" ? " is-sorting" : ""}`} ref={listRef}>
               {filtered.map((provider) => {
+                const inFlightCap = providerLimits.values?.[provider.id];
                 const open = expanded.has(provider.id);
                 const st = STATUS_META[provider.status] ?? STATUS_META.available;
                 const cardCls = !provider.enabled || provider.status === "disabled" ? "is-disabled"
@@ -1944,6 +1962,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                           <span className="chip-code">{provider.id}</span>
                           <span className={`chip ${SOURCE_GROUP(provider.source) === "native" ? "blue" : "gray"} xs`}>{SOURCE_GROUP(provider.source) === "native" ? t("modelConfig.nativeProviderBadge") : t("modelConfig.customProviderBadge")}</span>
                           <span className="pv-count"><span className={`pv-dot dot ${st?.dot || "gray"}`} />{t("modelConfig.modelCount", { count: provider.models.length })}</span>
+                          {inFlightCap ? <span className="chip gray xs" data-tip={t("modelConfig.inFlightCapTooltip", { count: inFlightCap })}>{t("modelConfig.inFlightCapBadge", { count: inFlightCap })}</span> : null}
                         </div>
                         <div className="pv-sub"><span className="pv-url ellipsis">{provider.endpointUrl || formatProviderStatusDetail(provider.statusDetail, t, marks, resolvedLanguage === "zh")}</span></div>
                       </div>

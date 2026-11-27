@@ -109,6 +109,7 @@ export interface StudioRuntimeSettingsActivation {
 
 type StudioRuntimeSettingSetInputFor<K extends StudioRuntimeSettingKey> = {
   key: K;
+  providerId?: K extends "providers.maxInFlightRequests" ? string : never;
   value: Exclude<StudioRuntimeSettingsSnapshot[K], undefined>;
   persist: boolean;
 };

@@ -362,3 +362,5 @@ export function previewSearchCredentials(providers: readonly import("@omp-studio
   }
   return [...rows.values()];
 }
+
+export const PREVIEW_PROVIDER_LIMITS: Record<string, number> = { anthropic: 2, openai: 4 };

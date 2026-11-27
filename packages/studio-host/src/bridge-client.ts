@@ -742,19 +742,31 @@ export class StudioBridgeClient {
           return;
         }
         if (frames.length === 0) return;
-        if (frames.length !== 1) {
+        // The Runtime writes the hello result first and only then queues its
+        // first event frames on the same socket, so a single read can deliver
+        // the tail of the hello result and a complete event frame together
+        // (the snapshot path already replays the frames that follow its
+        // snapshot frame). The handshake completes on the hello result; the
+        // remainder flows through the ready path, where events are dropped
+        // harmlessly until the snapshot baseline exists.
+        const helloFrame = frames[0]!;
+        if (
+          helloFrame.body === null ||
+          typeof helloFrame.body !== "object" ||
+          (helloFrame.body as { type?: unknown }).type !== "studio.hello.result"
+        ) {
           fail("MALFORMED_RESPONSE");
           return;
         }
 
         let response: StudioHelloResponse;
         try {
-          response = parseStudioHelloResponse(frames[0]!.body);
+          response = parseStudioHelloResponse(helloFrame.body);
         } catch {
           fail("MALFORMED_RESPONSE");
           return;
         }
-        if (response.requestId !== requestId || frames[0]!.header.runtimeEpoch !== response.runtimeEpoch) {
+        if (response.requestId !== requestId || helloFrame.header.runtimeEpoch !== response.runtimeEpoch) {
           fail("MALFORMED_RESPONSE");
           return;
         }
@@ -785,6 +797,14 @@ export class StudioBridgeClient {
         if (this.options.locale) this.setLocale(this.options.locale());
         socket.once("error", () => socket.destroy());
         socket.once("close", () => this.#handleSocketClosed(socket));
+        if (frames.length > 1) {
+          try {
+            for (const lateFrame of frames.slice(1)) this.#processReadyFrame(lateFrame);
+          } catch (error) {
+            this.#report(error, "frame");
+            socket.destroy();
+          }
+        }
         resolve(response);
       };
 

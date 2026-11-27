@@ -138,6 +138,25 @@ test("locates exact session IDs in registered workspaces, including the cold arc
   assert.ok(!JSON.stringify(result).includes("unregistered"));
 });
 
+test("single-session locate reaches a metadata-only session the list views hide", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-studio-catalog-locate-empty-"));
+  const project = join(root, "project");
+  await mkdir(project);
+  const metadata = [
+    JSON.stringify({ type: "title", v: 1, title: "", pad: "" }),
+    JSON.stringify({ type: "session", id: "fresh-id", timestamp: "2026-08-24T00:00:00.000Z", cwd: project, studioOrigin: "studio-host" }),
+    JSON.stringify({ type: "model_change", provider: "test", modelId: "test" }),
+  ];
+  await writeFile(join(project, "fresh.jsonl"), `${metadata.join("\n")}\n`);
+  const hidden = await scanSessionCatalog({ sessionsRoot: root, includeCliSessions: true });
+  assert.deepEqual(hidden.sessions, []);
+  const located = await scanSessionCatalog({
+    sessionsRoot: root, includeCliSessions: true,
+    locate: { sessionId: "fresh-id", workspaces: [{ workspaceId: "ws-one", canonicalPath: project }] },
+  });
+  assert.deepEqual(located.sessions.map(entry => [entry.sessionId, entry.workspaceId, entry.archived]), [["fresh-id", "ws-one", false]]);
+});
+
 test("session catalog handles title slots, unknown origins, duplicates, corruption, oversize, and symlinks", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "omp-studio-catalog-edge-"));
   const project = join(root, "project");
@@ -204,6 +223,52 @@ test("session catalog reports an unavailable root without exposing it", async ()
   assert.deepEqual(result.diagnostics, [{ code: "ROOT_UNAVAILABLE", count: 1 }]);
   assert.ok(!JSON.stringify(result).includes("missing-omp-session-root"));
   assert.match(defaultOmpSessionsRoot({ OMP_AGENT_DIR: "C:\\omp-profile\\agent" }), /sessions$/u);
+});
+
+test("session catalog keeps last-conversation time stable when opening disposes append Runtime markers", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-studio-catalog-tail-"));
+  const project = join(root, "--project--");
+  await mkdir(project);
+  const { utimes } = await import("node:fs/promises");
+
+  const message = (role: string, timestamp: string) => JSON.stringify({ type: "message", id: `m-${role}`, parentId: "s", timestamp, message: { role, content: `${role} text` } });
+  const marker = (customType: string, timestamp: string) => JSON.stringify({ type: "custom", customType, id: `c-${customType}`, parentId: "s", timestamp, data: "{}", runtime: "{}" });
+
+  const alpha = join(project, "alpha.jsonl");
+  const beta = join(project, "beta.jsonl");
+  const alphaHeader = JSON.stringify({ type: "session", id: "alpha-id", timestamp: "2026-08-01T00:00:00.000Z", cwd: "C:\\alpha", studioOrigin: "studio-host" });
+  const betaHeader = JSON.stringify({ type: "session", id: "beta-id", timestamp: "2026-08-02T00:00:00.000Z", cwd: "C:\\beta", studioOrigin: "studio-host" });
+  await writeFile(alpha, `${alphaHeader}\n${message("user", "2026-08-03T00:00:00.000Z")}\n${message("assistant", "2026-08-03T01:00:00.000Z")}\n`);
+  await writeFile(beta, `${betaHeader}\n${message("user", "2026-08-04T00:00:00.000Z")}\n${message("assistant", "2026-08-04T01:00:00.000Z")}\n`);
+  // Fixed mtimes: beta's conversation is newer than alpha's.
+  await utimes(alpha, new Date("2026-08-03T02:00:00.000Z"), new Date("2026-08-03T02:00:00.000Z"));
+  await utimes(beta, new Date("2026-08-04T02:00:00.000Z"), new Date("2026-08-04T02:00:00.000Z"));
+
+  const byId = new Map((await scanSessionCatalog({ sessionsRoot: root })).sessions.map((entry) => [entry.sessionId, entry]));
+  assert.equal(byId.get("alpha-id")?.lastActivityAt, "2026-08-03T01:00:00.000Z");
+  assert.equal(byId.get("beta-id")?.lastActivityAt, "2026-08-04T01:00:00.000Z");
+
+  // Opening then disposing alpha appends markers that bump its mtime past
+  // beta's, exactly like the Runtime's session_exit records.
+  await writeFile(alpha, `${alphaHeader}\n${message("user", "2026-08-03T00:00:00.000Z")}\n${message("assistant", "2026-08-03T01:00:00.000Z")}\n${marker("eval-state-context", "2026-08-09T00:00:00.000Z")}\n${marker("session_exit", "2026-08-09T01:00:00.000Z")}\n`);
+  const reshuffled = await scanSessionCatalog({ sessionsRoot: root });
+  assert.deepEqual(reshuffled.sessions.map((entry) => entry.sessionId), ["beta-id", "alpha-id"]);
+  assert.equal(reshuffled.sessions.find((entry) => entry.sessionId === "alpha-id")?.lastActivityAt, "2026-08-03T01:00:00.000Z");
+
+  // A real new message still moves the session forward.
+  await writeFile(alpha, `${alphaHeader}\n${message("user", "2026-08-03T00:00:00.000Z")}\n${message("assistant", "2026-08-03T01:00:00.000Z")}\n${marker("session_exit", "2026-08-09T01:00:00.000Z")}\n${message("assistant", "2026-08-10T00:00:00.000Z")}\n`);
+  const advanced = await scanSessionCatalog({ sessionsRoot: root });
+  assert.deepEqual(advanced.sessions.map((entry) => entry.sessionId), ["alpha-id", "beta-id"]);
+  assert.equal(advanced.sessions.find((entry) => entry.sessionId === "alpha-id")?.lastActivityAt, "2026-08-10T00:00:00.000Z");
+
+  // Displayed custom messages count; hidden ones (display:false) do not.
+  const gamma = join(project, "gamma.jsonl");
+  const gammaHeader = JSON.stringify({ type: "session", id: "gamma-id", timestamp: "2026-08-05T00:00:00.000Z", cwd: "C:\\gamma", studioOrigin: "studio-host" });
+  const hiddenCustom = JSON.stringify({ type: "custom_message", customType: "eval-state-context", content: "hidden", display: false, id: "g1", parentId: "s", timestamp: "2026-08-06T00:00:00.000Z" });
+  const shownCustom = JSON.stringify({ type: "custom_message", customType: "todo-nudge", content: "shown", display: true, id: "g2", parentId: "s", timestamp: "2026-08-06T01:00:00.000Z" });
+  await writeFile(gamma, `${gammaHeader}\n${hiddenCustom}\n${message("user", "2026-08-05T01:00:00.000Z")}\n${shownCustom}\n`);
+  const gammaScan = await scanSessionCatalog({ sessionsRoot: root });
+  assert.equal(gammaScan.sessions.find((entry) => entry.sessionId === "gamma-id")?.lastActivityAt, "2026-08-06T01:00:00.000Z");
 });
 
 test("session catalog reads global pins and degrades safely for missing, corrupt, and stale ids", async () => {

@@ -32,6 +32,8 @@ import { PreviewFileTree } from "../preview/surfaces";
 import { usableCapabilityManifest } from "../deck/interactionGate";
 import { ThreadSpin } from "./ThreadSpin";
 import { ThreadWaitChip } from "./ThreadWaitChip";
+import { useSidebarActivity } from "./useSidebarActivity";
+import { ThreadCompletedChip } from "./ThreadCompletedChip";
 import { residentForSession, residentRowsOf, threadRunningFromLive } from "./threadRunning";
 import { sidebarProjectOrder } from "./projectOrder";
 import { isPlaceholderSessionTitle, projectHasSession, provisionalThreadForHistoryEntry, sidebarThreadTitle } from "./provisionalThread";
@@ -319,6 +321,8 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
     ...(liveSnapshot?.waitingForApproval === undefined ? {} : { snapshotWaitingForApproval: liveSnapshot.waitingForApproval }),
     ...(persistedWaitingForApproval === undefined ? {} : { persistedWaitingForApproval }),
   });
+  const activity = useSidebarActivity(client, residentRows, chrome.projectHistories, chrome.expandedProjects, preview);
+  const isRecentlyCompleted = (id?: SessionId) => id !== undefined && activity.ended.has(id);
   // Explorer git 徽章：真实模式读取选中项目的仓库状态；预览模式的徽章来自 fixtures，不查 Host。
   const gitWorkspaceId = preview || !chrome.selectedProject ? undefined : (chrome.selectedProject.id as WorkspaceId);
   const { repository: gitRepository, refresh: refreshGitRepository } = useGitRepository(client, gitWorkspaceId);
@@ -604,14 +608,16 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                 {open ? (() => {
                   const limit = chrome.projectThreadLimits[project.id] ?? PROJECT_THREADS_INITIAL;
                   const threads = project.threads.filter((thread) => !chrome.hiddenPreviewThreads.has(thread.id));
-                  const visible = threads.slice(0, limit);
+                  const rank = (thread: (typeof threads)[number]) => thread.status === "running" ? 0 : thread.recentlyEnded ? 1 : 2;
+                  const visible = [...threads].sort((a, b) => rank(a) - rank(b)).slice(0, limit);
                   return (<>
                     {visible.map((thread) => {
                       const wait = thread.id === "t3" ? chrome.previewDeckWait : thread.wait;
                       const running = thread.status === "running";
+                      const completed = thread.recentlyEnded && !running && !wait;
                       return (
                       <div
-                        className={`thread-row${wait ? " has-wait" : ""}`}
+                        className={`thread-row${wait ? " has-wait" : ""}${completed ? " has-completed" : ""}`}
                         key={thread.id}
                         onContextMenu={(event) => openRowMenuAtCursor(event, thread.id)}
                       >
@@ -625,8 +631,8 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                         >
                           <ThreadSpin running={running} />
                           <span className="t-title"><SessionTitleMark row={previewSessionTitle(thread.id,thread.title)} title={thread.title}/><span className="t-scroll">{thread.title}</span></span>
-                          {wait || running ? null : <span className="t-meta">{thread.time}</span>}
-                          {wait ? <ThreadWaitChip kind={wait} /> : null}
+                          {wait || running || completed ? null : <span className="t-meta">{thread.time}</span>}
+                          {wait ? <ThreadWaitChip kind={wait} /> : completed ? <ThreadCompletedChip /> : null}
                         </button>
                         {/* 悬停操作区：最右「归档」（演示：本地隐藏），其左 ⋯ 菜单（顶栏同款；
                             演示行无真实会话，会话动作禁用，写表面不伪造目标）。 */}
@@ -721,110 +727,148 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                   {open ? (() => {
                     const limit = chrome.projectThreadLimits[workspace.workspaceId] ?? PROJECT_THREADS_INITIAL;
                     const historyState = chrome.projectHistories?.[workspace.workspaceId];
-                    const entries = (historyState?.model?.entries ?? []).slice(0, limit);
+                    const page = historyState?.model?.entries ?? [];
+                    const entries = [...page, ...activity.extra.filter(row => row.workspaceId === workspace.workspaceId && row.entry.sessionId && !projectHasSession(page, row.entry.sessionId)).map(row => row.entry)];
                     const total = historyState?.model?.total ?? 0;
+                    const entryRunning = (entry: (typeof entries)[number]) => threadRunningFromLive({
+                      ...(entry.sessionId === undefined ? {} : { sessionId: entry.sessionId }),
+                      ...(hasResidentModel
+                        ? { residents: residentRows }
+                        : {
+                          ...(liveSnapshot?.sessionId === undefined ? {} : { snapshotSessionId: liveSnapshot.sessionId }),
+                          ...(liveSnapshot?.isStreaming === undefined ? {} : { streaming: liveSnapshot.isStreaming }),
+                          ...(liveSnapshot?.isCompacting === undefined ? {} : { compacting: liveSnapshot.isCompacting }),
+                        }),
+                    });
                     const projectProvisionalThreads = chrome.provisionalThreads.filter(
                       (thread) => thread.workspaceId === workspace.workspaceId,
                     );
                     const transientThreads = projectProvisionalThreads.filter(
                       (thread) => !projectHasSession(entries, thread.sessionId),
                     );
+                    const rows = [
+                      ...transientThreads.map(thread => ({ kind: "draft" as const, thread, rank: thread.running ? 0 : 2 })),
+                      ...entries.map(entry => ({ kind: "history" as const, entry, rank: entryRunning(entry) ? 0 : isRecentlyCompleted(entry.sessionId) ? 1 : 3 })),
+                    ].sort((a, b) => a.rank - b.rank);
+                    const visible = rows.slice(0, limit);
+                    const remaining = Math.max(0, total + transientThreads.length - visible.length);
                     return (<>
-                      {transientThreads.map((thread) => {
-                        const transientTitle = thread.sessionId === liveSnapshot?.sessionId && liveSnapshotTitle
-                          ? liveSnapshotTitle
-                          : thread.title;
-                        return (
-                        <div
-                          className={`thread-row${thread.running ? " running" : ""}`}
-                          key={`provisional:${thread.sessionId}`}
-                          // 草稿行（未发送）没有菜单，保留原生右键。
-                          {...(thread.submitted ? { onContextMenu: (event: ReactMouseEvent) => openRowMenuAtCursor(event, `provisional:${String(thread.sessionId)}`) } : {})}
-                        >
-                          <button
-                            type="button"
-                            className={`thread${chrome.activeProvisionalSessionId === thread.sessionId ? " active" : ""}`}
-                            {...(chrome.activeProvisionalSessionId === thread.sessionId ? { "aria-current": "page" as const } : {})}
-                            aria-label={transientTitle}
-                            data-window-drag={mdi ? "" : undefined}
-                            onPointerDown={event => { if (mdi) dragConversation(event, mdi.store, { ref: { targetId: mdi.document.ref.targetId, workspaceId: thread.workspaceId, ...(thread.submitted ? { sessionId: thread.sessionId } : { draftId: thread.sessionId }) }, title: transientTitle }, zh); }}
-                            onClick={() => chrome.onSelectProvisionalThread(thread)}
+                      {visible.map(row => {
+                        if (row.kind === "draft") {
+                          const thread = row.thread;
+                          const transientTitle = thread.sessionId === liveSnapshot?.sessionId && liveSnapshotTitle
+                            ? liveSnapshotTitle
+                            : thread.title;
+                          return (
+                          <div
+                            className={`thread-row${thread.running ? " running" : ""}`}
+                            key={`provisional:${thread.sessionId}`}
+                            onContextMenu={(event: ReactMouseEvent) => openRowMenuAtCursor(event, `provisional:${String(thread.sessionId)}`)}
                           >
-                            <ThreadSpin running={thread.running} />
-                            <span className="t-title"><SessionTitleMark row={titleMetadata.rows.get(String(thread.sessionId))} title={transientTitle}/><span className="t-scroll">{transientTitle}</span></span>
-                          </button>
-                          {thread.submitted ? (
-                            <span className="t-actions">
-                              {/* 临时行尚未进历史目录；仅当它就是当前活动会话时动作与顶栏同源
-                                  （作用于当前 live 会话），否则诚实禁用。 */}
-                              <ThreadRowMenu
-                                id={`provisional:${String(thread.sessionId)}`}
-                                openId={openRowMenuId}
-                                onToggle={setOpenRowMenuId}
-                                contextPoint={openRowMenuId === `provisional:${String(thread.sessionId)}` ? rowMenuPoint : null}
-                                menu={
-                                  <>
-                                    <ThreadActionMenuItems
-                                      live={sessionLive && chrome.activeProvisionalSessionId === thread.sessionId}
-                                      busy={sessionBusy}
-                                      forkBusy={forkBusy}
-                                      compacting={liveSnapshot?.isCompacting === true}
-                                      compactPending={chrome.compactPending}
-                                      reason={t("common.unavailable")}
-                                      onRename={() => runRowAction(chrome.onRenameThread)}
-                                      onFork={() => runRowAction(chrome.onForkThread)}
-                                      onHandoff={() => runRowAction(chrome.onHandoffThread)}
-                                      onCompact={() => runRowAction(chrome.onCompactThread)}
-                                      onExport={() => runRowAction(chrome.onExportThread)}
-                                      onHistory={() => runRowAction(() => onRoute("history"))}
-                                    />
-                                    <CopySessionMenuItem identity={{
-                                      sessionId: thread.sessionId,
-                                      source: { targetId: executionTarget.id, workspaceId: thread.workspaceId, workspaceName: workspace.name, title: transientTitle },
-                                    }} onClose={() => runRowAction()} />
-                                    <div className="menu-sep" />
-                                    <MenuItem icon="archive" onClick={() => runRowAction(() => chrome.onArchiveProvisionalThread(thread))}>{t("history.archiveSession")}</MenuItem>
-                                    <button type="button" role="menuitem" className="menu-item danger" onClick={() => runRowAction(() => chrome.onDeleteProvisionalThread(thread))}>
-                                      <Icon name="trash" extra="sm" /><span>{t("history.deleteSession")}</span>
-                                    </button>
-                                  </>
-                                }
-                              />
-                              <button
-                                type="button"
-                                className="icon-btn"
-                                data-tip={t("history.archiveSession")}
-                                aria-label={t("history.archiveSession")}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  chrome.onArchiveProvisionalThread(thread);
-                                }}
-                              ><Icon name="archive" extra="sm" /></button>
-                            </span>
-                          ) : null}
-                        </div>
-                        );
-                      })}
-                      {entries.map((entry) => {
+                            <button
+                              type="button"
+                              className={`thread${chrome.activeProvisionalSessionId === thread.sessionId ? " active" : ""}`}
+                              {...(chrome.activeProvisionalSessionId === thread.sessionId ? { "aria-current": "page" as const } : {})}
+                              aria-label={transientTitle}
+                              data-window-drag={mdi ? "" : undefined}
+                              onPointerDown={event => { if (mdi) dragConversation(event, mdi.store, { ref: { targetId: mdi.document.ref.targetId, workspaceId: thread.workspaceId, ...(thread.submitted ? { sessionId: thread.sessionId } : { draftId: thread.sessionId }) }, title: transientTitle }, zh); }}
+                              onClick={() => chrome.onSelectProvisionalThread(thread)}
+                            >
+                              <ThreadSpin running={thread.running} />
+                              <span className="t-title"><SessionTitleMark row={titleMetadata.rows.get(String(thread.sessionId))} title={transientTitle}/><span className="t-scroll">{transientTitle}</span></span>
+                              {/* 未发送的草稿行挂一个中性 tag，和进入历史目录后的真实会话区分。 */}
+                              {!thread.submitted ? (
+                                <span className="t-wait chip gray xs" role="status" aria-label={t("sidebar.draftTag")}>
+                                  {t("sidebar.draftTag")}
+                                </span>
+                              ) : null}
+                            </button>
+                            {thread.submitted ? (
+                              <span className="t-actions">
+                                {/* 临时行尚未进历史目录；仅当它就是当前活动会话时动作与顶栏同源
+                                    （作用于当前 live 会话），否则诚实禁用。 */}
+                                <ThreadRowMenu
+                                  id={`provisional:${String(thread.sessionId)}`}
+                                  openId={openRowMenuId}
+                                  onToggle={setOpenRowMenuId}
+                                  contextPoint={openRowMenuId === `provisional:${String(thread.sessionId)}` ? rowMenuPoint : null}
+                                  menu={
+                                    <>
+                                      <ThreadActionMenuItems
+                                        live={sessionLive && chrome.activeProvisionalSessionId === thread.sessionId}
+                                        busy={sessionBusy}
+                                        forkBusy={forkBusy}
+                                        compacting={liveSnapshot?.isCompacting === true}
+                                        compactPending={chrome.compactPending}
+                                        reason={t("common.unavailable")}
+                                        onRename={() => runRowAction(chrome.onRenameThread)}
+                                        onFork={() => runRowAction(chrome.onForkThread)}
+                                        onHandoff={() => runRowAction(chrome.onHandoffThread)}
+                                        onCompact={() => runRowAction(chrome.onCompactThread)}
+                                        onExport={() => runRowAction(chrome.onExportThread)}
+                                        onHistory={() => runRowAction(() => onRoute("history"))}
+                                      />
+                                      <CopySessionMenuItem identity={{
+                                        sessionId: thread.sessionId,
+                                        source: { targetId: executionTarget.id, workspaceId: thread.workspaceId, workspaceName: workspace.name, title: transientTitle },
+                                      }} onClose={() => runRowAction()} />
+                                      <div className="menu-sep" />
+                                      <MenuItem icon="archive" onClick={() => runRowAction(() => chrome.onArchiveProvisionalThread(thread))}>{t("history.archiveSession")}</MenuItem>
+                                      <button type="button" role="menuitem" className="menu-item danger" onClick={() => runRowAction(() => chrome.onDeleteProvisionalThread(thread))}>
+                                        <Icon name="trash" extra="sm" /><span>{t("history.deleteSession")}</span>
+                                      </button>
+                                    </>
+                                  }
+                                />
+                                <button
+                                  type="button"
+                                  className="icon-btn"
+                                  data-tip={t("history.archiveSession")}
+                                  aria-label={t("history.archiveSession")}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    chrome.onArchiveProvisionalThread(thread);
+                                  }}
+                                ><Icon name="archive" extra="sm" /></button>
+                              </span>
+                            ) : (
+                              <span className="t-actions">
+                                {/* 草稿行（未发送）没有 live 会话动作；只给归档与删除，
+                                    否则空会话会一直留在项目列表里。 */}
+                                <ThreadRowMenu
+                                  id={`provisional:${String(thread.sessionId)}`}
+                                  openId={openRowMenuId}
+                                  onToggle={setOpenRowMenuId}
+                                  contextPoint={openRowMenuId === `provisional:${String(thread.sessionId)}` ? rowMenuPoint : null}
+                                  menu={
+                                    <>
+                                      <MenuItem icon="archive" onClick={() => runRowAction(() => chrome.onArchiveProvisionalThread(thread))}>{t("history.archiveSession")}</MenuItem>
+                                      <button type="button" role="menuitem" className="menu-item danger" onClick={() => runRowAction(() => chrome.onDeleteProvisionalThread(thread))}>
+                                        <Icon name="trash" extra="sm" /><span>{t("history.deleteSession")}</span>
+                                      </button>
+                                    </>
+                                  }
+                                />
+                              </span>
+                            )}
+                          </div>
+                          );
+                        }
+                        const entry = row.entry;
                         const provisional = provisionalThreadForHistoryEntry(chrome.provisionalThreads, entry);
+                        // Live snapshot covers the selected session; the resident
+                        // roster carries the freshest title for background ones
+                        // (their snapshot is not delivered until re-selection).
                         const entryLiveTitle = entry.sessionId !== undefined && entry.sessionId === liveSnapshot?.sessionId
                           ? liveSnapshotTitle
-                          : undefined;
+                          : residentForSession(residentRows, entry.sessionId)?.title;
                         const resolvedEntryTitle = sidebarThreadTitle(entry, provisional, t("conversation.untitledSession"), entryLiveTitle);
                         const wait = threadWaitForSession(entry.sessionId, entry.waitingForApproval);
-                        const running = threadRunningFromLive({
-                          ...(entry.sessionId === undefined ? {} : { sessionId: entry.sessionId }),
-                          ...(hasResidentModel
-                            ? { residents: residentRows }
-                            : {
-                              ...(liveSnapshot?.sessionId === undefined ? {} : { snapshotSessionId: liveSnapshot.sessionId }),
-                              ...(liveSnapshot?.isStreaming === undefined ? {} : { streaming: liveSnapshot.isStreaming }),
-                              ...(liveSnapshot?.isCompacting === undefined ? {} : { compacting: liveSnapshot.isCompacting }),
-                            }),
-                        });
+                        const running = entryRunning(entry);
+                        const completed = !wait && !running && isRecentlyCompleted(entry.sessionId);
                         return (
                         <div
-                          className={`thread-row${wait ? " has-wait" : ""}`}
+                          className={`thread-row${wait ? " has-wait" : ""}${completed ? " has-completed" : ""}`}
                           key={entry.historyId}
                           onContextMenu={(event) => openRowMenuAtCursor(event, entry.historyId)}
                         >
@@ -841,8 +885,8 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                               {entry.pinned === true ? <span className="t-pin" role="img" aria-label={t("history.pinned")}><Icon name="pin" extra="sm" /></span> : null}
                               <SessionTitleMark row={titleMetadata.rows.get(entry.sessionId ?? "")} title={resolvedEntryTitle}/><span className="t-scroll">{resolvedEntryTitle}</span>
                             </span>
-                            {wait || running ? null : <span className="t-meta">{relativeTime(entry.lastActiveAt, zh)}</span>}
-                          {wait ? <ThreadWaitChip kind={wait} /> : null}
+                            {wait || running || completed ? null : <span className="t-meta">{relativeTime(entry.lastActiveAt, zh)}</span>}
+                          {wait ? <ThreadWaitChip kind={wait} /> : completed ? <ThreadCompletedChip /> : null}
                           </button>
                           {/* 悬停操作区：最右「归档」（session.archive），其左 ⋯ 菜单（顶栏同款；
                               会话动作作用于所在行，非当前会话先打开 resume 再执行）。 */}
@@ -897,16 +941,16 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                         </div>
                         );
                       })}
-                      {entries.length < total ? (
+                      {remaining > 0 ? (
                         <button type="button" className="load-more" onClick={() => chrome.onLoadMoreThreads(workspace.workspaceId)}>
                           <Icon name="chevron-d" extra="sm" />
                           <span>{t("common.expand")}</span>
-                          <span className="lm-count">{`+${total - entries.length}`}</span>
+                          <span className="lm-count">{`+${remaining}`}</span>
                         </button>
                       ) : null}
-                      {(historyState === undefined || historyState.status === "loading") && !total ? <div className="empty" style={{ padding: "16px 8px" }}><p className="muted small">{t("common.loading")}</p></div> : null}
-                      {historyState?.status === "error" && !total ? <div className="empty" style={{ padding: "16px 8px" }}><p className="muted small">{historyState.error ?? t("history.catalogUnavailable")}</p></div> : null}
-                      {historyState !== undefined && historyState.status === "ready" && !total ? <div className="empty" style={{ padding: "16px 8px" }}><p className="muted small">{t("home.noRecentSessions")}</p></div> : null}
+                      {(historyState === undefined || historyState.status === "loading") && !rows.length && !total ? <div className="empty" style={{ padding: "16px 8px" }}><p className="muted small">{t("common.loading")}</p></div> : null}
+                      {historyState?.status === "error" && !rows.length && !total ? <div className="empty" style={{ padding: "16px 8px" }}><p className="muted small">{historyState.error ?? t("history.catalogUnavailable")}</p></div> : null}
+                      {historyState !== undefined && historyState.status === "ready" && !rows.length && !total ? <div className="empty" style={{ padding: "16px 8px" }}><p className="muted small">{t("home.noRecentSessions")}</p></div> : null}
                     </>);
                   })() : null}
                 </div>
