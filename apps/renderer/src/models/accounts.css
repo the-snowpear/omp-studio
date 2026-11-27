@@ -74,3 +74,4 @@
 .account-live { gap: var(--sp-4); }
 .account-live > .dot { width: 6px; height: 6px; }
 .account-credential { font-family: var(--font-mono); color: var(--text-3); }
+.account-fast-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-6); }

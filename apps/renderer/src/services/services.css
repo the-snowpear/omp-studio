@@ -141,10 +141,41 @@
 .service-scope .seg button.active .service-scope-count { color: var(--accent); }
 .service-name-line { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--sp-6); min-width: 0; }
 .service-name-line .chip { gap: var(--sp-4); }
-.leftover-processes { border-top: 1px solid var(--border); padding-top: var(--sp-12); }
-.leftover-processes h4 { margin: 0; flex: 1; }
-.leftover-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-12); padding-block: var(--sp-12); border-bottom: 1px solid var(--border); }
-.leftover-command { display: grid; gap: var(--sp-4); flex: 1 1 180px; min-width: 0; }
-.leftover-command code { overflow-wrap: anywhere; font-size: var(--fs-12); }
-.leftover-row form { display: flex; flex-wrap: wrap; gap: var(--sp-6); flex: 1 1 200px; }
-.leftover-row input { min-width: 100px; flex: 1; }
+/* Leftover background processes: unmanaged work the agent left behind. */
+.leftover-processes { display: grid; gap: var(--sp-10); margin: var(--sp-20) 0 var(--sp-16); }
+.leftover-head { display: flex; align-items: flex-start; gap: var(--sp-8); }
+.leftover-title { flex: 1; min-width: 0; }
+.leftover-title h4 { display: flex; align-items: center; gap: var(--sp-6); margin: 0; color: var(--text); font-size: var(--fs-13); font-weight: var(--fw-semibold); }
+.leftover-title p { margin: var(--sp-4) 0 0; color: var(--text-3); font-size: var(--fs-11); line-height: 1.55; }
+.leftover-count { min-width: 18px; padding: 0 var(--sp-6); border-radius: var(--r-full); background: var(--amber-soft); color: var(--amber); font-size: var(--fs-11); font-variant-numeric: tabular-nums; line-height: 18px; text-align: center; }
+.leftover-empty { display: flex; align-items: center; gap: var(--sp-6); margin: 0; padding: var(--sp-10) var(--sp-12); border: 1px dashed var(--border); border-radius: var(--r-8); color: var(--text-3); font-size: var(--fs-12); }
+.leftover-list { display: grid; gap: var(--sp-6); margin: 0; padding: 0; list-style: none; }
+.leftover-row {
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-8);
+  background: var(--surface);
+  transition: border-color var(--dur-fast) var(--ease);
+}
+.leftover-row:hover, .leftover-row[data-adopting] { border-color: var(--border); }
+.leftover-main { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-10); padding: var(--sp-8) var(--sp-10); }
+.leftover-icon { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: var(--r-6); background: var(--surface-2); color: var(--text-3); }
+.leftover-command { display: grid; flex: 1 1 200px; gap: 3px; min-width: 0; }
+.leftover-command code { overflow: hidden; color: var(--text); font-family: var(--font-mono); font-size: var(--fs-12); text-overflow: ellipsis; white-space: nowrap; }
+.leftover-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4) var(--sp-8); color: var(--text-3); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.leftover-kind { padding: 0 var(--sp-6); border-radius: var(--r-4); background: var(--surface-2); color: var(--text-2); font-family: var(--font-mono); }
+.leftover-kind[data-kind="nohup"] { background: var(--amber-soft); color: var(--amber); }
+.leftover-actions { display: flex; flex: none; align-items: center; gap: var(--sp-4); margin-left: auto; }
+.leftover-adopt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-8) var(--sp-10);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-2);
+  border-radius: 0 0 var(--r-8) var(--r-8);
+  animation: var(--motion-unfold);
+}
+.leftover-adopt-label { color: var(--text-3); font-size: var(--fs-11); }
+.leftover-adopt .input { flex: 1 1 140px; min-width: 100px; height: 26px; }

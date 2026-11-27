@@ -59,6 +59,7 @@ function ServerRow({ server, paneId, zh, props, preview, authAvailable, onComple
   const source = server.source;
   const sourceLabel = source ? [source.providerName, source.level === "project" ? (zh ? "项目" : "Project") : source.level === "user" ? (zh ? "用户" : "User") : (zh ? "内置" : "Native")].join(" · ") : "";
   const toolsId = `${paneId}-tools`;
+  const challenge = server.authChallenge && server.authChallenge.status !== "authorized" ? server.authChallenge : undefined;
   return (
     <article className={`runtime-mcp-server state-${server.state}${open && hasTools ? " expanded" : ""}`} aria-label={server.name}>
       <div className="runtime-mcp-identity">
@@ -77,7 +78,15 @@ function ServerRow({ server, paneId, zh, props, preview, authAvailable, onComple
       </button>
       {preview || authAvailable ? <McpAuthActions client={props.client} sessionId={props.sessionId} name={server.name}
         available={authAvailable} preview={preview} zh={zh} authSupported={server.transport !== "stdio"} previewScope={server.source?.level === "project" ? "project" : "user"} challenge={server.authChallenge} onComplete={onComplete} /> : <span className="runtime-mcp-actions-unavailable">{zh ? "连接操作不可用" : "Connection actions unavailable"}</span>}
-      {server.replacedByBuiltin || server.evalNamespaceUri ? <div className="runtime-mcp-notes">
+      {server.replacedByBuiltin || server.evalNamespaceUri || server.runtime || challenge ? <div className="runtime-mcp-notes">
+        {challenge ? <div className="runtime-mcp-note is-auth">
+          <Icon name="lock" extra="sm" />
+          <span className="runtime-mcp-note-copy">
+            <b>{challenge.authChallenge.kind === "insufficient_scope" ? (zh ? "需要补充授权范围" : "Additional scopes required") : (zh ? "凭据需要重新授权" : "Credential requires re-authorization")}</b>
+            <small>{zh ? "点击「重新授权」完成浏览器授权，服务器随后自动重连。" : "Choose Re-authorize to finish in the browser; the server reconnects afterwards."}</small>
+          </span>
+          {challenge.requiredScopes.length ? <span className="runtime-mcp-scopes">{challenge.requiredScopes.map(scope => <code key={scope}>{scope}</code>)}</span> : null}
+        </div> : null}
         {server.replacedByBuiltin ? <div className="runtime-mcp-note is-replaced">
           <Icon name="layers" extra="sm" />
           <span className="runtime-mcp-note-copy">
@@ -91,8 +100,9 @@ function ServerRow({ server, paneId, zh, props, preview, authAvailable, onComple
           <span className="runtime-mcp-note-copy"><b>{zh ? "Eval 命名空间" : "Eval namespace"}</b></span>
           <code className="runtime-mcp-note-uri">{server.evalNamespaceUri}</code>
         </div> : null}
+        {server.runtime ? <div className="runtime-mcp-note is-runtime" data-state={server.runtime.state}><Icon name={server.runtime.era === "modern" ? "network" : "server"} extra="sm" /><span className="runtime-mcp-note-copy"><b>{server.runtime.era === "modern" ? (zh ? "支持共享的连接" : "Shareable connection") : (zh ? "会话独立连接" : "Session-bound connection")}</b><small>{server.runtime.pid === undefined ? "" : `PID ${server.runtime.pid} · `}{zh ? `${server.runtime.links} 个会话绑定` : `${server.runtime.links} session bindings`} · {({ idle: zh ? "空闲" : "Idle", starting: zh ? "启动中" : "Starting", running: zh ? "运行中" : "Running", failed: zh ? "失败" : "Failed" })[server.runtime.state]}</small></span></div> : null}
       </div> : null}
-      {server.runtime ? <div className="runtime-mcp-notes"><div className="runtime-mcp-note"><Icon name="server" extra="sm" /><span className="runtime-mcp-note-copy"><b>{server.runtime.era === "modern" ? (zh ? "支持共享的连接" : "Shareable connection") : (zh ? "会话独立连接" : "Session-bound connection")}</b><small>{server.runtime.pid === undefined ? "" : `PID ${server.runtime.pid} · `}{zh ? `${server.runtime.links} 个会话绑定` : `${server.runtime.links} session bindings`} · {({ idle: zh ? "空闲" : "Idle", starting: zh ? "启动中" : "Starting", running: zh ? "运行中" : "Running", failed: zh ? "失败" : "Failed" })[server.runtime.state]}</small></span></div>{server.runtime.exit?.stderr ? <p className="runtime-mcp-failure">{server.runtime.exit.stderr}</p> : null}</div> : null}
+      {server.runtime?.exit?.stderr ? <p className="runtime-mcp-failure"><Icon name="alert-c" extra="xs" /><span>{server.runtime.exit.stderr}</span></p> : null}
       {server.error ? <p className="runtime-mcp-failure"><Icon name="alert-c" extra="xs" /><span>{server.error}</span></p> : null}
       {open && hasTools ? <div id={toolsId} className="runtime-mcp-tools-region"><ServerTools server={server} zh={zh} /></div> : null}
     </article>
@@ -216,7 +226,7 @@ export function McpRuntimePane(props: RuntimeCatalogProps & { authAvailable?: bo
       {status?.available ? <>
         <div className="runtime-mcp-overview">
           <div className="runtime-mcp-overview-title"><span className={`runtime-mcp-state ${error ? "state-disconnected" : status.ready ? "state-ready" : status.settled ? "state-failed" : "state-pending"}`}><span aria-hidden="true" />{error ? (zh ? "等待刷新" : "Awaiting refresh") : overall}</span><span className="runtime-mcp-startup"><Icon name="clock" extra="xs" />{zh ? "启动等待" : "Startup wait"}<code>{status.startupTimeoutMs === 0 ? (zh ? "等待全部连接" : "Wait for all") : `${status.startupTimeoutMs} ms`}</code></span></div>
-          <p className="runtime-mcp-startup">{status.shared === undefined ? (zh ? "共享策略未知" : "Sharing policy unknown") : status.shared ? (zh ? "已启用共享 MCP" : "Shared MCP enabled") : (zh ? "使用私有 MCP 连接" : "Private MCP connections")}{status.idleStopMinutes === undefined ? "" : zh ? ` · 空闲 ${status.idleStopMinutes} 分钟后停止` : ` · Stop after ${status.idleStopMinutes} idle minutes`}</p>
+          <p className="runtime-mcp-sharing" data-shared={status.shared || undefined}><Icon name="network" extra="xs" />{status.shared === undefined ? (zh ? "共享策略未知" : "Sharing policy unknown") : status.shared ? (zh ? "已启用共享 MCP" : "Shared MCP enabled") : (zh ? "使用私有 MCP 连接" : "Private MCP connections")}{status.idleStopMinutes === undefined ? "" : zh ? ` · 空闲 ${status.idleStopMinutes} 分钟后停止` : ` · Stop after ${status.idleStopMinutes} idle minutes`}</p>
           <div className="runtime-mcp-metrics">
             <div className="runtime-mcp-metric"><strong>{ready}<small> / {servers.length}</small></strong><span>{zh ? "已就绪服务器" : "Servers ready"}</span></div>
             <div className="runtime-mcp-metric"><strong>{toolCount}</strong><span>{zh ? "已加载工具" : "Loaded tools"}</span></div>

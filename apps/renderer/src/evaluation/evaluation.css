@@ -872,3 +872,9 @@
   color: var(--accent);
   border-color: var(--accent);
 }
+/* Archive call analysis, opened from the header toggle. */
+.eval-archive-activity { margin: 0 0 var(--sp-16); padding: var(--sp-14) var(--sp-16); border: 1px solid var(--border-subtle); border-radius: var(--r-10); background: var(--bg-subtle); animation: var(--motion-unfold); }
+.eval-archive-activity > header { display: grid; gap: 2px; }
+.eval-archive-activity > header strong { color: var(--text); font-size: var(--fs-13); font-weight: var(--fw-semibold); }
+.eval-archive-activity > header span { color: var(--text-3); font-size: var(--fs-11); }
+.eval-archive-activity .archive-activity { padding-top: var(--sp-12); }

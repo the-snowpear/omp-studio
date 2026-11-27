@@ -162,8 +162,7 @@ function ProviderErrorDetail({ error }: { error: ConversationMessageError }) {
     .join(" · ");
   return (
     <div className="ev-provider-error">
-      {error.source === "agentLoop" ? <div className="chip amber xs">{zh ? "Agent 执行流程错误" : "Agent loop error"}</div> : null}
-      {meta ? <div className="muted small">{meta}</div> : null}
+      {error.source === "agentLoop" || meta ? <div className="ev-provider-error-meta">{error.source === "agentLoop" ? <span className="chip amber xs">{zh ? "Agent 执行流程错误" : "Agent loop error"}</span> : null}{meta ? <span className="muted small">{meta}</span> : null}</div> : null}
       <p className="ev-provider-error-text">{error.message}</p>
     </div>
   );

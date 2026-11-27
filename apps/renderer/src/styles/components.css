@@ -788,6 +788,57 @@ textarea.input { height: auto; min-height: 72px; padding: var(--sp-8) var(--sp-1
 .meter.warn > i { background: var(--amber); }
 .meter.danger > i { background: var(--red); }
 
+/* ---------- State pill & callout (workspaces/StatusBits.tsx) ----------
+   One status vocabulary for Runtime-owned panes: a dot + label pill for a
+   state, and a bordered callout for a sentence that needs attention. */
+.state-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  min-height: 20px;
+  padding: 0 var(--sp-8);
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.state-pill > i { flex: none; width: 6px; height: 6px; border-radius: var(--r-full); background: currentColor; }
+.state-pill[data-tone="ready"] { background: var(--green-soft); color: var(--green); }
+.state-pill[data-tone="warn"] { background: var(--amber-soft); color: var(--amber); }
+.state-pill[data-tone="blocked"] { background: var(--red-soft); color: var(--red); }
+.state-pill[data-tone="active"] { background: var(--accent-soft); color: var(--accent); }
+.state-pill[data-tone="active"] > i,
+.state-pill[data-live] > i { animation: omp-pulse var(--loop-pulse) var(--ease-loop) infinite; }
+
+.ui-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-10);
+  padding: var(--sp-10) var(--sp-12);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-8);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  animation: var(--motion-reveal);
+}
+.ui-callout > .icon { flex: none; margin-top: 2px; color: var(--accent); }
+.ui-callout-body { flex: 1; min-width: 0; }
+.ui-callout-body > strong { display: block; color: var(--text); font-weight: var(--fw-semibold); }
+.ui-callout-body > p { margin: var(--sp-4) 0 0; }
+.ui-callout-body > code { display: block; margin-top: var(--sp-6); color: var(--text-3); font-size: var(--fs-11); }
+.ui-callout[data-tone="error"] { border-color: color-mix(in srgb, var(--red) 30%, transparent); background: var(--red-soft); color: var(--text); }
+.ui-callout[data-tone="error"] > .icon { color: var(--red); }
+.ui-callout[data-tone="warn"] { border-color: color-mix(in srgb, var(--amber) 32%, transparent); background: var(--amber-soft); color: var(--text); }
+.ui-callout[data-tone="warn"] > .icon { color: var(--amber); }
+.ui-callout[data-tone="success"] { border-color: color-mix(in srgb, var(--green) 28%, transparent); background: var(--green-soft); color: var(--text); }
+.ui-callout[data-tone="success"] > .icon { color: var(--green); }
+
 /* ---------- Agent status chip 颜色映射 ---------- */
 .st-thinking { color: var(--accent); }
 .st-running { color: var(--blue); }

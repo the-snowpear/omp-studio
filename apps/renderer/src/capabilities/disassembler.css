@@ -337,3 +337,9 @@
   line-height: 1.5;
 }
 .disassembler-quick-message.is-error { color: var(--red); }
+/* Engine-specific paths, shown under the backend that uses them. */
+.disassembler-engine-paths { display: grid; gap: var(--sp-10); margin: 0; padding: var(--sp-10) var(--sp-12) var(--sp-12); border: 1px solid var(--border-subtle); border-radius: var(--r-8); background: var(--surface-2); animation: var(--motion-unfold); }
+.disassembler-engine-paths legend { padding: 0 var(--sp-4); color: var(--text-2); font-size: var(--fs-12); font-weight: var(--fw-semibold); }
+.disassembler-engine-paths legend small { color: var(--text-3); font-weight: var(--fw-regular); }
+.disassembler-engine-paths > label { display: grid; gap: var(--sp-6); color: var(--text-2); font-size: var(--fs-12); }
+.disassembler-engine-paths > label .input { width: 100%; }

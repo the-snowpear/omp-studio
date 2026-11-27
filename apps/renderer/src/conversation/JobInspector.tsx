@@ -12,6 +12,8 @@ import { useSurfaceDocument } from "../dock/SurfaceContext";
 import "./jobs.css";
 import { AppSelect } from "../AppSelect";
 import { previewJobStreamOutput } from "../preview/backgroundTasksPreview";
+import { StatePill } from "../workspaces/StatusBits";
+import { formatStreamBytes } from "./outputStreams";
 
 const POLL_MS = 2000;
 export type JobInspectorTarget = {
@@ -145,17 +147,23 @@ export function JobInspector({ job, client, sessionId, available, previewInspect
     } catch (cause) { if (inputOwner.current === epoch) setInputError(hostErrorMessage(cause, inputZh.current ? "未能发送终端输入" : "Could not send console input")); }
     finally { if (inputOwner.current === epoch) setSending(false); }
   };
-  const terminalInput = shown?.canInput ? <form className="ji-input" onSubmit={event => { event.preventDefault(); void sendInput(input + String.fromCharCode(13), true); }}>
-    <label>{zh ? "终端输入" : "Console input"}<input className="input mono" value={input} autoComplete="off" spellCheck={false} disabled={sending || !preview && !available} onChange={event => setInput(event.target.value)} /></label>
-    <div className="ji-input-actions"><button className="btn small primary" type="submit" disabled={sending || !preview && !available}>{zh ? "发送并回车" : "Send + Enter"}</button><button className="btn small outline" type="button" disabled={sending || !preview && !available} onClick={() => void sendInput(String.fromCharCode(3), false)}>Ctrl+C</button></div>
-    {shown.inputDetection === "unknown" ? <p className="ji-note">{zh ? "此系统无法自动判断终端是否等待输入，可在上方手动输入。" : "This system cannot detect whether the console is waiting; you can send input above."}</p> : null}
-    {inputError ? <p className="ji-error" role="alert">{inputError}</p> : inputNotice ? <p className="ji-note" role="status">{preview && marks ? (zh ? "演示：输入仅在本页处理。" : "Demo: input was handled locally.") : (zh ? "输入已发送" : "Input sent")}</p> : null}
+  const inputLocked = sending || !preview && !available;
+  const terminalInput = shown?.canInput ? <form className="ji-input" data-waiting={shown.waitingForInput || undefined} onSubmit={event => { event.preventDefault(); void sendInput(input + String.fromCharCode(13), true); }}>
+    <div className="ji-input-bar">
+      <span className="ji-input-prompt" aria-hidden>›</span>
+      <input className="ji-input-field" aria-label={zh ? "终端输入" : "Console input"} placeholder={zh ? "输入内容，回车发送到终端" : "Type a reply, Enter sends it to the console"} value={input} autoComplete="off" spellCheck={false} disabled={inputLocked} onChange={event => setInput(event.target.value)} />
+      <button className="btn small primary" type="submit" disabled={inputLocked}>{zh ? "发送并回车" : "Send + Enter"}</button>
+      <button className="btn small ghost ji-input-interrupt" type="button" disabled={inputLocked} data-tip={zh ? "发送中断信号" : "Send an interrupt"} onClick={() => void sendInput(String.fromCharCode(3), false)}>Ctrl+C</button>
+    </div>
+    {inputError ? <p className="ji-input-foot ji-error" role="alert">{inputError}</p>
+      : inputNotice ? <p className="ji-input-foot is-sent" role="status">{preview && marks ? (zh ? "演示：输入仅在本页处理。" : "Demo: input was handled locally.") : (zh ? "输入已发送" : "Input sent")}</p>
+      : shown.inputDetection === "unknown" ? <p className="ji-input-foot">{zh ? "此系统无法自动判断终端是否等待输入，可直接在上方输入。" : "This system cannot detect whether the console is waiting; you can still type above."}</p> : null}
   </form> : null;
-  const streamSelector = shown?.streams?.length ? <div className="ji-streams"><label>{zh ? "输出流" : "Output stream"}<AppSelect value={streamId} onChange={event => setStreamId(event.target.value)}>
+  const streamSelector = shown?.streams?.length ? <AppSelect className="select ji-stream-select" aria-label={zh ? "输出流" : "Output stream"} value={streamId} onChange={event => setStreamId(event.target.value)}>
     <option value="">{zh ? "标准输出" : "Command output"}</option>
-    {shown.streams.map(stream => <option key={stream.id} value={stream.id}>{stream.kind === "file" ? stream.consumer : `${stream.producer} → ${stream.consumer}`} · {stream.bytes} B</option>)}
-  </AppSelect></label></div> : null;
-  const waiting = shown?.waitingForInput ? <p className="ji-waiting" role="status">{zh ? "终端正在等待键盘输入" : "The console is waiting for keyboard input"}</p> : null;
+    {shown.streams.map(stream => <option key={stream.id} value={stream.id}>{stream.kind === "file" ? stream.consumer : `${stream.producer} → ${stream.consumer}`} · {formatStreamBytes(stream.bytes)}</option>)}
+  </AppSelect> : null;
+  const waiting = shown?.waitingForInput ? <span className="ji-waiting" role="status"><StatePill tone="warn" live>{zh ? "等待键盘输入" : "Waiting for input"}</StatePill></span> : null;
   const output = preview && streamId ? previewJobStreamOutput(shown?.streams?.find(stream => stream.id === streamId)?.consumer ?? streamId, zh) : shown?.output;
   const steps = shown ? <>
     {shown.actions ? <ActionsSteps view={shown.actions} zh={zh} parentStatus={job.status} /> : null}
@@ -196,9 +204,6 @@ export function JobInspector({ job, client, sessionId, available, previewInspect
           <button className="btn small ghost" type="button" onClick={onClose} aria-label={zh ? "关闭" : "Close"}>×</button>
         </div> : null}
         {steps}
-        {waiting}
-        {terminalInput}
-        {streamSelector}
         {shown?.command ? <div className="ji-process-command">
           <span>{zh ? "命令" : "Command"}</span><code>{shown.command}</code>
         </div> : null}
@@ -206,7 +211,9 @@ export function JobInspector({ job, client, sessionId, available, previewInspect
           <div className="ji-process-toolbar">
             <span className="ji-process-label">{zh ? "最近输出" : "Recent output"}</span>
             {preview && marks ? <span className="chip gray xs">{zh ? "演示" : "Demo"}</span> : null}
+            {waiting}
             <div className="ji-process-actions">
+              {streamSelector}
               {following ? <span className="ji-note">{zh ? "跟随输出" : "Following output"}</span>
                 : <button className="btn small ghost" type="button" onClick={() => { pinned.current = true; setFollowing(true); }}>
                   {zh ? "回到最新" : "Jump to latest"}
@@ -235,6 +242,7 @@ export function JobInspector({ job, client, sessionId, available, previewInspect
             {output ? <pre className="ji-output">{output}</pre>
               : !error ? <div className="ji-note" role="status">{shown?.binary ? zh ? "二进制输出无法作为文本显示。" : "Binary output cannot be displayed as text." : note}</div> : null}
           </div>
+          {terminalInput}
           <div className="ji-process-limit">{zh ? "只读 · 仅末尾最多 16 KiB，非完整记录" : "Read-only · Up to the last 16 KiB, not the full log"}</div>
         </div>
         {shown ? <details className="ji-process-details" key={JSON.stringify([sessionId, scopeKey, job.id, job.generation, preview])}>
@@ -259,13 +267,14 @@ export function JobInspector({ job, client, sessionId, available, previewInspect
       {error ? <div className="ji-error" role="alert">{error}</div> : null}
       {shown ? <>
         {steps}
-        {waiting}
-        {terminalInput}
-        {streamSelector}
         {metadata}
         {shown.widget ? <JobWidget view={shown.widget} /> : null}
-        {output ? <pre className="ji-output" aria-label={zh ? "输出尾部" : "Output tail"}>{output}</pre>
-          : <div className="ji-note">{shown.binary ? zh ? "二进制输出无法作为文本显示。" : "Binary output cannot be displayed as text." : zh ? "暂无输出" : "No output yet"}</div>}
+        <div className="ji-output-panel">
+          {waiting || streamSelector ? <div className="ji-output-head"><span className="ji-process-label">{zh ? "输出" : "Output"}</span>{waiting}<span className="ji-output-head-end">{streamSelector}</span></div> : null}
+          {output ? <pre className="ji-output" aria-label={zh ? "输出尾部" : "Output tail"}>{output}</pre>
+            : <div className="ji-note ji-output-empty">{shown.binary ? zh ? "二进制输出无法作为文本显示。" : "Binary output cannot be displayed as text." : zh ? "暂无输出" : "No output yet"}</div>}
+          {terminalInput}
+        </div>
       </> : !error && (preview || available) ? <div className="ji-note">
         {preview ? (marks ? (zh ? "此演示任务没有详情" : "No demo details for this job") : zh ? "没有更多详情" : "No further details") : zh ? "读取中…" : "Loading…"}
       </div> : null}

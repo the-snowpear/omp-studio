@@ -574,7 +574,7 @@ export function EvaluationPage({
             <p>{descriptions[tab]}</p>
           </div>
           <div className="eval-header-actions">
-            <button className="btn outline" aria-pressed={archiveActivity} onClick={() => setArchiveActivity(value => !value)}>{t("归档调用分析", "Archive call analysis")}</button>
+            <button className={`btn ${archiveActivity ? "primary" : "outline"}`} aria-pressed={archiveActivity} onClick={() => setArchiveActivity(value => !value)}><Icon name="chart" extra="sm" />{t("归档调用分析", "Archive call analysis")}</button>
             <button
               className="btn outline"
               onClick={() => {
@@ -596,7 +596,7 @@ export function EvaluationPage({
             </button>
           </div>
         </header>
-        {archiveActivity ? <ArchiveActivityPane client={client} sessionId={sessionId} scope="workspace" active available={context?.available === true} /> : null}
+        {archiveActivity ? <section className="eval-archive-activity" aria-label={t("归档调用分析", "Archive call analysis")}><header><strong>{t("归档调用分析", "Archive call analysis")}</strong><span>{t("当前工作区已归档会话中的工具调用、错误与转录搜索。", "Tool calls, errors and transcript search across archived sessions in this workspace.")}</span></header><ArchiveActivityPane client={client} sessionId={sessionId} scope="workspace" active available={context?.available === true} /></section> : null}
         {error ? (
           <div className="eval-message error" role="alert">
             {error}

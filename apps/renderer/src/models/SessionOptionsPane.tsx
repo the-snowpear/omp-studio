@@ -21,6 +21,7 @@ import { useI18n } from "../i18n";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { SourceBadge } from "../settings/SettingRow";
 import { WorkspaceStatus } from "../workspaces/Workspace";
+import { Icon } from "../icons";
 import "./sessionOptions.css";
 
 export type SessionOptionsProps = {
@@ -333,8 +334,8 @@ export function SessionOptionsPane({
             ) : null}
           </div>
         ) : null}
-        {speed?.fastAccounts ? <p className="small muted">{zh ? `当前模型：${speed.fastAccounts.eligible} / ${speed.fastAccounts.total} 个凭据声明支持加速` : `This model: ${speed.fastAccounts.eligible} / ${speed.fastAccounts.total} credentials advertise fast service`}</p> : null}
-        {speed && (speed.fastStatus === "credential-unavailable" || speed.fastStatus === "provider-fallback") ? <p role="status">{speed.fastStatus === "provider-fallback" ? (zh ? "供应商拒绝加速后已回退普通速度。资格恢复后可重新启用 Fast。" : "The provider declined fast service, so requests use normal speed. Re-enable Fast after eligibility is restored.") : (zh ? "当前凭据未提供加速，已按普通速度执行。Runtime 会在可用凭据恢复后自动使用加速。" : "The current credential is not offering fast service. Requests use normal speed; the Runtime resumes fast service when eligible credentials return.")} <button className="btn small outline" disabled={busy || !supports("session.speed.set") || !speed.model} onClick={() => setConfirm({ speed: speed.selected === "ultrafast" ? "ultrafast" : "fast", expectedModel: speed.model! })}>{zh ? "重新启用加速" : "Re-enable fast service"}</button></p> : null}
+        {speed?.fastAccounts ? <p className="session-options-fast-accounts"><Icon name="zap" extra="sm" /><span>{zh ? `当前模型：${speed.fastAccounts.eligible} / ${speed.fastAccounts.total} 个凭据声明支持加速` : `This model: ${speed.fastAccounts.eligible} / ${speed.fastAccounts.total} credentials advertise fast service`}</span><span className="session-options-meter" aria-hidden><i style={{ width: `${speed.fastAccounts.total ? speed.fastAccounts.eligible / speed.fastAccounts.total * 100 : 0}%` }} /></span></p> : null}
+        {speed && (speed.fastStatus === "credential-unavailable" || speed.fastStatus === "provider-fallback") ? <p role="status" className="session-options-fallback"><Icon name="alert" extra="sm" />{speed.fastStatus === "provider-fallback" ? (zh ? "供应商拒绝加速后已回退普通速度。资格恢复后可重新启用 Fast。" : "The provider declined fast service, so requests use normal speed. Re-enable Fast after eligibility is restored.") : (zh ? "当前凭据未提供加速，已按普通速度执行。Runtime 会在可用凭据恢复后自动使用加速。" : "The current credential is not offering fast service. Requests use normal speed; the Runtime resumes fast service when eligible credentials return.")} <button className="btn small outline" disabled={busy || !supports("session.speed.set") || !speed.model} onClick={() => setConfirm({ speed: speed.selected === "ultrafast" ? "ultrafast" : "fast", expectedModel: speed.model! })}>{zh ? "重新启用加速" : "Re-enable fast service"}</button></p> : null}
       </section>
       <section className="session-options-card">
         <h3>{zh ? "缓存保温" : "Cache warming"}</h3>
