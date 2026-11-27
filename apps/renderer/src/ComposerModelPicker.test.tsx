@@ -49,7 +49,7 @@ it("shows a model's full selector and keeps thinking levels in the open picker w
   expect(option.textContent).toContain("Off · low · high");
 });
 
-it("discards queued thinking changes when the picker switches conversations", async () => {
+it.each(["switch", "close"])("keeps queued thinking changes bound to their conversation (%s)", async (action) => {
   const models = { ...createPreviewModelConfig(false), roles: [], availableModels: [{
     provider: "test", id: "reasoner", selector: "test/reasoner", name: "Reasoner", reasoning: true,
     thinkingConfig: { mode: "effort" as const, requiresEffort: true, efforts: ["low", "medium", "high"] as const },
@@ -69,8 +69,14 @@ it("discards queued thinking changes when the picker switches conversations", as
   fireEvent.keyDown(screen.getByRole("slider"), { key: "ArrowRight" });
   fireEvent.keyDown(screen.getByRole("slider"), { key: "End" });
   expect(run).toHaveBeenCalledWith("session.thinking.set", { level: "medium" });
-  view.rerender(picker("second"));
-  expect(screen.getByRole("slider").getAttribute("aria-valuetext")).toBe("Low");
+  if (action === "switch") {
+    view.rerender(picker("second"));
+    expect(screen.getByRole("slider").getAttribute("aria-valuetext")).toBe("Low");
+  } else {
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("slider")).toBeNull();
+  }
   await act(async () => { finish(true); });
-  expect(run).toHaveBeenCalledTimes(1);
+  expect(run).toHaveBeenCalledTimes(action === "switch" ? 1 : 2);
+  if (action === "close") expect(run).toHaveBeenLastCalledWith("session.thinking.set", { level: "high" });
 });

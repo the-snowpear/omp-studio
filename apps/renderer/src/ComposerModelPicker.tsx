@@ -679,16 +679,15 @@ export function ComposerModelPicker({
           <span className="cmp-pill-label">{thinkingLabel}</span>
           <Icon name="chevron-d" extra="sm cmp-pill-caret" />
         </button>
-        {menu === "thinking" ? (
-          <ThinkingSliderPopover
-            key={`${preview}·${refreshKey}·${pick?.selector ?? ""}`}
-            items={thinking.items}
-            value={thinking.value}
-            unverified={selectedModel?.thinkingConfig?.unverified === true}
-            onCommit={commitThinking}
-            onClose={closeAll}
-          />
-        ) : null}
+        <ThinkingSliderPopover
+          key={`${preview}·${refreshKey}·${pick?.selector ?? ""}`}
+          open={menu === "thinking"}
+          items={thinking.items}
+          value={thinking.value}
+          unverified={selectedModel?.thinkingConfig?.unverified === true}
+          onCommit={commitThinking}
+          onClose={closeAll}
+        />
       </span>
     </>
   );

@@ -307,12 +307,14 @@ export function ThinkingTrack({
 }
 
 export function ThinkingSliderPopover({
+  open = true,
   items,
   value,
   unverified = false,
   onCommit,
   onClose,
 }: {
+  open?: boolean;
   items: ReadonlyArray<ThinkingLevelItem>;
   /** Runtime（或预览本地选择）的当前档位。 */
   value: string;
@@ -355,6 +357,8 @@ export function ThinkingSliderPopover({
   useEffect(() => {
     if (pending !== null && value === pending && !inflight.current) setPending(null);
   }, [value, pending]);
+
+  useEffect(() => { if (!open) setScrub(null); }, [open]);
 
   useLayoutEffect(() => {
     active.current = true;
@@ -401,6 +405,10 @@ export function ThinkingSliderPopover({
   };
 
   const descKey = shown ? DESC_KEYS[shown.id] : undefined;
+
+  // Closing the dialog keeps already-picked levels queued for this conversation.
+  // The owner key unmounts us when the conversation or model actually changes.
+  if (!open) return null;
 
   return (
     <>
