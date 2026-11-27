@@ -489,6 +489,7 @@ export class StudioChromeRelayHostService {
 			}
 		} else if (platform === "linux") {
 			const dirs = this.#env.linuxPolicyDirs ?? LINUX_POLICY_DIRS;
+			const byBrowser = new Map<string, { record: Record<string, unknown>; sources: Map<string, string> }>();
 			for (const { browser, dir } of dirs) {
 				let entries: string[];
 				try {
@@ -502,11 +503,15 @@ export class StudioChromeRelayHostService {
 					try {
 						const parsed: unknown = await Bun.file(fullPath).json();
 						if (isRecord(parsed)) {
-							evaluatePolicyRecord(
-								parsed,
-								{ browser, scope: "managed", source: fullPath, extensionIds },
-								denials,
-							);
+							let merged = byBrowser.get(browser);
+							if (!merged) {
+								merged = { record: {}, sources: new Map() };
+								byBrowser.set(browser, merged);
+							}
+							for (const [key, value] of Object.entries(parsed)) {
+								merged.record[key] = value;
+								merged.sources.set(key, fullPath);
+							}
 						}
 					} catch (error) {
 						warnings.push(
@@ -517,6 +522,13 @@ export class StudioChromeRelayHostService {
 						);
 					}
 				}
+			}
+			for (const [browser, merged] of byBrowser) {
+				evaluatePolicyRecord(
+					merged.record,
+					{ browser, scope: "managed", source: [...new Set(merged.sources.values())].join("; "), extensionIds },
+					denials,
+				);
 			}
 		}
 
@@ -1121,13 +1133,36 @@ export class StudioChromeRelayHostService {
 			extensionIds.length > 0
 				? ((await syncRelayInstalls({ mode: "explicit", ...locations })) as ChromeRelayHostSyncItem[])
 				: [];
+		if (options.installIfMissing !== false) {
+			for (const [index, item] of syncResults.entries()) {
+				if (item.status !== "missing") continue;
+				try {
+					// An explicit repair may recreate a registered folder; ordinary sync deliberately does not.
+					const dir = await installRelayExtension(item.dir, locations);
+					syncResults[index] = { dir, status: "written", ompVersion: VERSION };
+				} catch (error) {
+					syncResults[index] = {
+						dir: item.dir,
+						status: "failed",
+						error: error instanceof Error ? error.message : String(error),
+					};
+				}
+			}
+			extensionIds = await registeredRelayExtensionIds(locations);
+		}
 		const idsToRegister =
 			extensionIds.length > 0
 				? extensionIds
 				: [extensionIdForPath(path.resolve(locations.defaultDir), this.#platform())];
 		const { manifestPaths, registryUpdated } = await this.#registerNativeHost(idsToRegister);
 
-		const warnings: string[] = [];
+		const warnings = syncResults.flatMap(item =>
+			item.status === "failed"
+				? [`${item.dir}: ${item.error}`]
+				: item.status === "missing"
+					? [runtimeText(`扩展目录仍缺失：${item.dir}`, `Extension directory is still missing: ${item.dir}`)]
+					: [],
+		);
 		let profileInstalls: ChromeRelayProfileInstallReport[] = [];
 		let profileInstallError: string | undefined;
 		if (options.repairProfile) {
@@ -1150,6 +1185,12 @@ export class StudioChromeRelayHostService {
 						),
 					);
 				}
+			} else {
+				profileInstallError = runtimeText(
+					`扩展文件缺失，无法修复 Profile 注册：${targetDir}`,
+					`Extension files are missing; cannot repair profile registration: ${targetDir}`,
+				);
+				warnings.push(profileInstallError);
 			}
 		}
 

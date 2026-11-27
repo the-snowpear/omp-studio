@@ -1,6 +1,6 @@
 # OMP 19.2.1 迁移报告
 
-目标上游固定为正式标签 `v19.2.1`，提交 `b55cd1bb664d8ab46ddc77f2a34eb47555dbf1ac`，不包含上游未发布提交。新上游版本线的首个未发布 Runtime 定为 `19.2.1-studio.1`；开发期间的回收计数在产物构建前按原计划归一，未复用已发布版本。Studio workspace 版本仍为 `0.2.11`，本次不发布安装包或推送 Tag。
+目标上游固定为正式标签 `v19.2.1`，提交 `b55cd1bb664d8ab46ddc77f2a34eb47555dbf1ac`，不包含上游未发布提交。初次交付的 Runtime 为 `19.2.1-studio.1`；合并审查修复及格式化按标准回收流程递增为 `19.2.1-studio.3`，未复用已构建产物的身份。Studio workspace 版本仍为 `0.2.11`，本次不发布安装包或推送 Tag。
 
 ## Runtime 与工作台
 
@@ -37,7 +37,7 @@
 
 ## 验证记录
 
-以下证据来自最终源码；此前被暂停的重放以及修复前失败记录不作为通过证据。
+以下为初次交付 `19.2.1-studio.1` 的证据；合并前审查修复与最终验证另记于[合并审查](../reviews/omp-19.2.1-merge-review.md)。此前被暂停的重放以及修复前失败记录不作为通过证据。
 
 - `npm run models:catalog:check` 已通过，可从固定上游提交复现目录。
 - `npm run omp:verify:patches -- --source outputs/upgrade-19.2.1-handoff/replay` 在独立干净检出上重放 324 个 overlay 文件和四组接缝，通过 Bun `check:ts`、145 份测试报告（1,143 项通过、6 项跳过、0 失败）及 CLI 源码冒烟；验证后该检出恢复干净。
@@ -49,11 +49,11 @@
 
 ## Windows x64 Canary
 
-最终 `19.2.1-studio.1` Runtime 位于 `outputs/canary/omp-19.2.1-studio.1-win32-x64/`。通过 `build-omp-host.mjs` 执行原生编译、二进制构建、`--smoke-test`、认证 Bridge Hello、快照与命令清单校验，以及优雅退出。已完成生产检查，因此构建使用 `--skip-build` 复用已验证的 Studio 产物。
+初次交付 `19.2.1-studio.1` Runtime 位于 `outputs/canary/omp-19.2.1-studio.1-win32-x64/`。通过 `build-omp-host.mjs` 执行原生编译、二进制构建、`--smoke-test`、认证 Bridge Hello、快照与命令清单校验，以及优雅退出。已完成生产检查，因此构建使用 `--skip-build` 复用已验证的 Studio 产物；合并审查后的新版 Canary 见上述审查记录。
 
 使用隔离的开发密钥生成 Canary，未安装进用户 Runtime，也未发布。独立调用 Runtime Installer 的签名与全文件校验确认 Ed25519 签名和 SHA-256 全部有效；二进制摘要为 `22b647ee2b6a30b8de035503e38922130c4aaeab74977d1a32d1fbdde9945d29`。
 
-对最终二进制额外进行了真实 Bridge 读取：新设置、Todo 后端、MCP 状态、反汇编器状态、工作树钩子、遗留进程、归档全文搜索和调用统计，八项全部完成，再次确认命令清单与优雅退出。探测使用临时用户配置和工作区，不使用真实账号或用户会话。
+对该二进制额外进行了真实 Bridge 读取：新设置、Todo 后端、MCP 状态、反汇编器状态、工作树钩子、遗留进程、归档全文搜索和调用统计，八项全部完成，再次确认命令清单与优雅退出。探测使用临时用户配置和工作区，不使用真实账号或用户会话。
 
 ## GUI 与平台边界
 

@@ -1,10 +1,92 @@
 import { expect, test, spyOn } from "bun:test";
+import { AsyncJobManager } from "../src/async/job-manager";
 import { AgentRegistry, type AgentRef } from "../src/registry/agent-registry";
 import type { AgentSession } from "../src/session/agent-session";
+import { inspectAsyncJob } from "../src/session/async-job-views";
 import { SessionManager } from "../src/session/session-manager";
 import { StudioAgentModelService } from "../src/studio/services/agent-model-service";
-import { inspectStudioJob } from "../src/studio/services/job-inspect";
+import { inputStudioJob, inspectStudioJob, readStudioPtyInputWaits } from "../src/studio/services/job-inspect";
 import { sessionWaitingForApproval } from "../src/studio/services/pending-approvals";
+
+test("a descendant PTY wait retains its source and can receive input through the observing session", async () => {
+	const manager = new AsyncJobManager({});
+	const ready = Promise.withResolvers<void>();
+	const finished = Promise.withResolvers<void>();
+	const inputs: string[] = [];
+	const registry = AgentRegistry.global();
+	const list = spyOn(registry, "list").mockReturnValue([
+		{ id: "Main" },
+		{ id: "Child", parentId: "Main" },
+		{ id: "Other" },
+	] as AgentRef[]);
+	try {
+		const jobId = manager.register(
+			"bash",
+			"Child prompt",
+			async ({ reportProgress }) => {
+				await reportProgress("Enter name:", {
+					pty: {
+						sessionId: "child-session",
+						toolCallId: "child-pty",
+						command: "read name",
+						waiting: true,
+						notify: true,
+						canInput: true,
+					},
+				});
+				ready.resolve();
+				await finished.promise;
+				return "done";
+			},
+			{
+				ownerId: "Child",
+				process: {
+					command: "read name",
+					cwd: ".",
+					pids: () => [],
+					input: async data => {
+						inputs.push(data);
+					},
+				},
+			},
+		);
+		await ready.promise;
+		const session = {
+			sessionId: "parent-session",
+			asyncJobManager: manager,
+			inspectAsyncJob: (id: string) => inspectAsyncJob(manager, "Main", id),
+		} as unknown as AgentSession;
+		const waits = readStudioPtyInputWaits(session);
+		expect(waits).toEqual([
+			{
+				sessionId: "parent-session",
+				sourceSessionId: "child-session",
+				ownerAgentId: "Child",
+				jobId,
+				jobGeneration: manager.getJob(jobId)!.startTime,
+				toolCallId: "child-pty",
+				command: "read name",
+				waiting: true,
+				notify: true,
+			},
+		]);
+		await inputStudioJob(session, waits[0]!.jobId!, waits[0]!.jobGeneration!, "Alice\r");
+		expect(inputs).toEqual(["Alice\r"]);
+		expect(
+			readStudioPtyInputWaits({
+				...session,
+				inspectAsyncJob: (id: string) => inspectAsyncJob(manager, "Other", id),
+			} as AgentSession),
+		).toEqual([]);
+		finished.resolve();
+		await manager.getJob(jobId)!.promise;
+		expect(readStudioPtyInputWaits(session)).toEqual([]);
+	} finally {
+		finished.resolve();
+		list.mockRestore();
+		await manager.dispose({ timeoutMs: 1000 });
+	}
+});
 
 test("approval wait survives disconnect and settles when a repaired parent tool result arrives", async () => {
 	const manager = SessionManager.inMemory();

@@ -465,9 +465,9 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     emit();
   };
 
-  const replaceChipImage = (chipId: string, nextImage: PromptImage): void => {
+  const replaceChipImage = (chipId: string, nextImage: PromptImage): boolean => {
     const editor = editorRef.current;
-    if (!editor || disabled) return;
+    if (!editor || disabled) return false;
     for (const element of editor.querySelectorAll<HTMLElement>(".cm-chip-image")) {
       const parsed = parseChipPayload(element.dataset.chip ?? "");
       if (parsed?.id !== chipId) continue;
@@ -481,8 +481,9 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       }
       imagesRef.current.set(chipId, nextImage);
       emit();
-      return;
+      return true;
     }
+    return false;
   };
 
   /* Dragged capsules land where the pointer is, not at the last caret. */
@@ -1578,10 +1579,12 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       {annotating !== null ? (
         <ImageAnnotatorModal
           image={annotating}
+          disabled={!!disabled}
           onClose={() => setAnnotatingId(null)}
           onConfirm={(nextImage) => {
-            replaceChipImage(annotating.id, nextImage);
+            if (!replaceChipImage(annotating.id, nextImage)) return false;
             setAnnotatingId(null);
+            return true;
           }}
           {...(onError === undefined ? {} : { onError })}
         />

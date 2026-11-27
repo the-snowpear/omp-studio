@@ -2502,38 +2502,179 @@ index 68f3f6e067..6e5ab9c83f 100644
  			const model = runtime.ctx.viewSession.model;
  			return model ? `Model: ${model.provider}/${model.id}` : "Model: none selected";
 diff --git a/packages/coding-agent/src/thread/services/async-jobs-protocol.ts b/packages/coding-agent/src/thread/services/async-jobs-protocol.ts
-index cbe791eb72..7f66f3611b 100644
+index cbe791eb72..082b5938f5 100644
 --- a/packages/coding-agent/src/thread/services/async-jobs-protocol.ts
 +++ b/packages/coding-agent/src/thread/services/async-jobs-protocol.ts
-@@ -79,6 +79,8 @@ export interface JobFeedDelta {
+@@ -1,3 +1,4 @@
++import type { PipeStreamInfo } from "@oh-my-pi/pi-natives";
+ /**
+  * Wire protocol of the root `AsyncJobManager` a subagent worker reaches by
+  * reference (kind `"async-job-manager"`).
+@@ -72,13 +73,32 @@ export interface JobFeedSource {
  
+ /** What changed in a worker-registered job's process and widget inputs. */
+ export interface JobFeedDelta {
++	/** Inventory only. Stream bytes are requested only for the selected stream. */
++	readonly streams?: readonly PipeStreamInfo[];
+ 	readonly pids?: readonly number[];
+ 	readonly brief?: JobWidgetBrief;
+ 	readonly sources?: readonly JobFeedSource[];
+ }
+ 
++/** Bounded native stream bytes; native PipeStreams remains the sole capture owner. */
++export interface WireJobStreamChunk {
++	readonly start: number;
++	readonly end: number;
++	readonly data: Uint8Array;
++	readonly open: boolean;
++}
++export interface WireJobStreams {
++	readonly list: () => readonly PipeStreamInfo[] | Promise<readonly PipeStreamInfo[]>;
++	readonly read: (id: number, from: number) => WireJobStreamChunk | null | Promise<WireJobStreamChunk | null>;
++}
++/** At most one native screenful per selected-stream request, matching shell-steps' tail budget. */
++export const JOB_STREAM_TAIL_BYTES = 64 * 1024;
++
  /** Data stand-in for `process` / `widgetInputs` of a job registered from a worker. */
  export interface WireJobFeed {
++	readonly streams?: WireJobStreams;
 +	/** Callback into the worker owning a live PTY; never a serialized native handle. */
 +	readonly input?: (data: string) => void | Promise<void>;
  	readonly process?: { readonly command: string; readonly cwd: string };
  	/** Present when the job offers widget inputs; their brief at registration. */
  	readonly brief?: JobWidgetBrief;
 diff --git a/packages/coding-agent/src/thread/services/async-jobs-remote.ts b/packages/coding-agent/src/thread/services/async-jobs-remote.ts
-index 742a22ed55..26f8d29bc2 100644
+index 742a22ed55..c07942c4c8 100644
 --- a/packages/coding-agent/src/thread/services/async-jobs-remote.ts
 +++ b/packages/coding-agent/src/thread/services/async-jobs-remote.ts
-@@ -78,6 +78,7 @@ class WorkerJobFeed {
+@@ -38,6 +38,7 @@ import type {
+ import type { JobTextSource, JobWidgetInputs, JobWidgetRegistry } from "../../job-widgets/types";
+ import type { RemoteObject } from "../rpc";
+ import {
++	JOB_STREAM_TAIL_BYTES,
+ 	type AsyncJobManagerProtocol,
+ 	type AsyncJobWire,
+ 	fromWireSignal,
+@@ -78,6 +79,23 @@ class WorkerJobFeed {
  		const { process, widgetInputs } = this.#inputs;
  		return {
  			process: process ? { command: process.command, cwd: process.cwd } : undefined,
 +			...(process?.input ? { input: (data: string) => process.input!(data) } : {}),
++			...(process?.streams
++				? {
++						streams: {
++							list: () => process.streams!.list(),
++							read: (id: number, from: number) => {
++								const streams = process.streams!;
++								const info = streams.list().find(row => row.id === id);
++								if (!info) return null;
++								const chunk = streams.read(id, Math.max(from, info.total - JOB_STREAM_TAIL_BYTES, 0));
++								if (!chunk) return null;
++								const data = chunk.data.subarray(Math.max(0, chunk.data.length - JOB_STREAM_TAIL_BYTES));
++								return { start: chunk.end - data.length, end: chunk.end, data, open: chunk.open };
++							},
++						},
++					}
++				: {}),
  			brief: widgetInputs?.brief(),
  			pull: () => this.delta(),
  		};
+@@ -85,7 +103,8 @@ class WorkerJobFeed {
+ 
+ 	delta(): JobFeedDelta {
+ 		const { process, widgetInputs } = this.#inputs;
+-		if (!widgetInputs) return { pids: process ? [...process.pids()] : undefined };
++		const streams = process?.streams?.list();
++		if (!widgetInputs) return { pids: process ? [...process.pids()] : undefined, streams };
+ 		const sources: JobFeedSource[] = [];
+ 		for (const source of widgetInputs.sources()) {
+ 			const known = this.#offsets.get(source.id);
+@@ -102,7 +121,7 @@ class WorkerJobFeed {
+ 				...(reset ? { reset: true } : {}),
+ 			});
+ 		}
+-		return { pids: process ? [...process.pids()] : undefined, brief: widgetInputs.brief(), sources };
++		return { pids: process ? [...process.pids()] : undefined, streams, brief: widgetInputs.brief(), sources };
+ 	}
+ }
+ 
 diff --git a/packages/coding-agent/src/thread/services/async-jobs.ts b/packages/coding-agent/src/thread/services/async-jobs.ts
-index 8aa79bed21..7b02a01f7f 100644
+index 8aa79bed21..a85af02e9e 100644
 --- a/packages/coding-agent/src/thread/services/async-jobs.ts
 +++ b/packages/coding-agent/src/thread/services/async-jobs.ts
-@@ -51,11 +51,14 @@ registerRpcError("AsyncJobError", message => new AsyncJobError(message));
+@@ -1,3 +1,5 @@
++import type { PipeStreamChunk, PipeStreamInfo, PipeStreams } from "@oh-my-pi/pi-natives";
++import { shellStreamId } from "../../tools/shell-steps";
+ /**
+  * The root `AsyncJobManager` across subagent worker links (kind
+  * `"async-job-manager"`, protocol in `./async-jobs-protocol`).
+@@ -27,10 +29,12 @@ import {
+ import { TextTap } from "../../job-widgets/text-tap";
+ import type { JobTextSource, JobWidgetBrief, JobWidgetInputs } from "../../job-widgets/types";
+ import type { ThreadId } from "../identity";
+-import { registerRpcError, type RpcServe } from "../rpc";
++import { registerRpcError, RpcClosedError, type RpcServe } from "../rpc";
+ import type { ThreadService, WorkerPeer } from "../services";
+ import {
+ 	ASYNC_JOB_MANAGER_KIND,
++	JOB_STREAM_TAIL_BYTES,
++	type WireJobStreams,
+ 	type AsyncJobManagerProtocol,
+ 	type AsyncJobWire,
+ 	fromWireReason,
+@@ -49,13 +53,64 @@ registerRpcError("AsyncJobError", message => new AsyncJobError(message));
+ // Main side
+ // ─────────────────────────────────────────────────────────────────────────────
  
++/** Async refresh precedes the existing synchronous nativeShellStreams projection. */
++class MirroredPipeStreams implements PipeStreams {
++	#entries: readonly PipeStreamInfo[] = [];
++	readonly #chunks = new Map<number, PipeStreamChunk>();
++	constructor(readonly remote: WireJobStreams) {}
++	update(entries: readonly PipeStreamInfo[]): void {
++		this.#entries = entries;
++		for (const id of this.#chunks.keys()) if (!entries.some(entry => entry.id === id)) this.#chunks.delete(id);
++	}
++	list(): PipeStreamInfo[] {
++		return [...this.#entries];
++	}
++	read(id: number, from = 0): PipeStreamChunk | null {
++		const chunk = this.#chunks.get(id);
++		if (!chunk) return null;
++		const offset = Math.max(0, Math.min(chunk.data.length, from - chunk.start));
++		return { ...chunk, start: chunk.start + offset, data: chunk.data.subarray(offset) };
++	}
++	async refresh(streamId?: string): Promise<void> {
++		this.update(await this.remote.list());
++		if (streamId === undefined) return;
++		const info = this.#entries.find(row => shellStreamId(row) === streamId);
++		if (!info) return;
++		const chunk = await this.remote.read(info.id, Math.max(0, info.total - JOB_STREAM_TAIL_BYTES));
++		this.#chunks.delete(info.id);
++		if (chunk) this.#chunks.set(info.id, { ...chunk, data: Buffer.from(chunk.data) });
++		// A few recent selections suffice; never retain every file's body in the root manager.
++		while (this.#chunks.size > 4) this.#chunks.delete(this.#chunks.keys().next().value!);
++	}
++}
++
++/** Read metadata and only the requested native tail from the owning worker, including settled jobs. */
++export async function refreshWorkerJobStreams(job: AsyncJob, streamId?: string): Promise<void> {
++	if (!(job.process instanceof MirroredProcess)) return;
++	try {
++		await job.process.streams?.refresh(streamId);
++	} catch (error) {
++		// The root retains the job's ordinary output after its worker exits. An unselected
++		// stream inventory may stay at its last observation; explicit tail reads must fail.
++		if (streamId === undefined && error instanceof RpcClosedError) return;
++		throw new AsyncJobError(
++			`Worker output streams are unavailable: ${error instanceof Error ? error.message : String(error)}`,
++		);
++	}
++}
++
  /** Main-side mirror of a worker job's process. */
  class MirroredProcess implements AsyncJobProcess {
++	readonly streams?: MirroredPipeStreams;
 +	readonly input?: (data: string) => Promise<void>;
  	constructor(
  		readonly command: string,
@@ -2542,26 +2683,37 @@ index 8aa79bed21..7b02a01f7f 100644
 -	) {}
 +	) {
 +		if (mirror.input) this.input = data => Promise.resolve(mirror.input!(data));
++		this.streams = mirror.streams;
 +	}
  
  	pids(): readonly number[] {
  		this.mirror.refresh();
-@@ -68,6 +71,7 @@ class MirroredSource extends TextTap {}
+@@ -68,6 +123,8 @@ class MirroredSource extends TextTap {}
  
  /** Latest data of a worker job's {@link WireJobFeed}; implements its widget inputs over it. */
  class JobFeedMirror implements JobWidgetInputs {
++	readonly streams: MirroredPipeStreams | undefined;
 +	readonly input: WireJobFeed["input"];
  	readonly process: MirroredProcess | undefined;
  	readonly widgetInputs: JobWidgetInputs | undefined;
  	pids: readonly number[] = [];
-@@ -79,6 +83,7 @@ class JobFeedMirror implements JobWidgetInputs {
+@@ -79,6 +136,8 @@ class JobFeedMirror implements JobWidgetInputs {
  
  	constructor(feed: WireJobFeed) {
  		this.#pull = feed.pull;
 +		this.input = feed.input;
++		this.streams = feed.streams ? new MirroredPipeStreams(feed.streams) : undefined;
  		this.#brief = feed.brief;
  		this.process = feed.process ? new MirroredProcess(feed.process.command, feed.process.cwd, this) : undefined;
  		this.widgetInputs = feed.brief ? this : undefined;
+@@ -103,6 +162,7 @@ class JobFeedMirror implements JobWidgetInputs {
+ 	/** Adopt a delta; `final` is the settled body's last one, after which no pulls run. */
+ 	apply(delta: JobFeedDelta, final = false): void {
+ 		if (delta.pids) this.pids = delta.pids;
++		if (delta.streams) this.streams?.update(delta.streams);
+ 		if (delta.brief) this.#brief = delta.brief;
+ 		for (const source of delta.sources ?? []) {
+ 			let mirror = this.#sources.get(source.id);
 diff --git a/packages/coding-agent/src/ui/overlays/panels/pause-screen.tsx b/packages/coding-agent/src/ui/overlays/panels/pause-screen.tsx
 index 697da993e8..9c6f2d4542 100644
 --- a/packages/coding-agent/src/ui/overlays/panels/pause-screen.tsx
@@ -2879,10 +3031,15 @@ index 8007a05618..e95a55c2c2 100644
  		await Bun.write(path.join(root, ".gitattributes"), "*.bin filter=asset\nwide.dat text eol=lf\n");
  		await Bun.write(path.join(root, "logo.bin"), Buffer.from([0, 1]));
 diff --git a/packages/coding-agent/test/fixtures/runtime-service-worker.ts b/packages/coding-agent/test/fixtures/runtime-service-worker.ts
-index d27a1331ac..6268b02024 100644
+index d27a1331ac..860ed98ff4 100644
 --- a/packages/coding-agent/test/fixtures/runtime-service-worker.ts
 +++ b/packages/coding-agent/test/fixtures/runtime-service-worker.ts
-@@ -88,7 +88,15 @@ function registerBody(jobs: AsyncJobManagerApi, ownerId: string, withInputs: boo
+@@ -1,3 +1,4 @@
++import { PipeStreams, Shell } from "@oh-my-pi/pi-natives";
+ import { type MessagePort, parentPort } from "node:worker_threads";
+ import {
+ 	ASYNC_JOB_MANAGER_SHUTDOWN_REASON,
+@@ -88,7 +89,15 @@ function registerBody(jobs: AsyncJobManagerApi, ownerId: string, withInputs: boo
  			ownerId,
  			...(tap
  				? {
@@ -2899,6 +3056,60 @@ index d27a1331ac..6268b02024 100644
  						widgetInputs: {
  							sources: () => [tap],
  							brief: () => ({ kind: "bash" as const, command: "fixture --run" }),
+@@ -101,10 +110,53 @@ function registerBody(jobs: AsyncJobManagerApi, ownerId: string, withInputs: boo
+ 	return id;
+ }
+ 
++async function registerStreamBody(jobs: AsyncJobManagerApi, ownerId: string, cwd: string): Promise<string> {
++	const streams = new PipeStreams(),
++		shell = new Shell();
++	await Bun.write(
++		`${cwd}/source.txt`,
++		"old-line".repeat(32000) + String.fromCharCode(10) + "last-line" + String.fromCharCode(10),
++	);
++	await Bun.write(`${cwd}/source.bin`, new Uint8Array([65, 0, 66]));
++	const entry: Body = { finish: Promise.withResolvers() };
++	const ready = Promise.withResolvers<void>();
++	const id = jobs.register(
++		"bash",
++		"worker pipe and redirect",
++		async ({ signal, reportProgress }) => {
++			const result = await shell.run({
++				command: "cat source.txt | cat > stream.log; cat source.bin > binary.log; cat source.txt > retained.log",
++				cwd,
++				streams,
++				signal,
++				timeoutMs: 10000,
++			});
++			if (result.exitCode !== 0) throw new Error(`Native shell returned ${result.exitCode}`);
++			await reportProgress("streams ready");
++			ready.resolve();
++			return await entry.finish.promise;
++		},
++		{
++			ownerId,
++			process: {
++				command: "cat source.txt | cat > stream.log; cat source.bin > binary.log; cat source.txt > retained.log",
++				cwd,
++				streams,
++				pids: () => [],
++			},
++		},
++	);
++	bodies.set(id, entry);
++	await ready.promise;
++	return id;
++}
++
+ const probe: RuntimeProbe = async (op, ...args) => {
+ 	switch (op) {
+ 		case "noop":
+ 			return true;
++		case "registerStreams":
++			return registerStreamBody(manager(args[0]), String(args[1]), String(args[2]));
+ 		case "register":
+ 			return registerBody(manager(args[0]), String(args[1]), args[2] === true);
+ 		case "progress":
 diff --git a/packages/coding-agent/test/interactive-mode-loop.test.ts b/packages/coding-agent/test/interactive-mode-loop.test.ts
 index a53148870a..ea98de5951 100644
 --- a/packages/coding-agent/test/interactive-mode-loop.test.ts
@@ -3031,13 +3242,92 @@ index 73887ae146..27cf9ed650 100644
  				run.term.dispose();
  			}
 diff --git a/packages/coding-agent/test/thread/runtime-service.test.ts b/packages/coding-agent/test/thread/runtime-service.test.ts
-index ca7e176f34..6b3822723d 100644
+index ca7e176f34..16bd2a7df0 100644
 --- a/packages/coding-agent/test/thread/runtime-service.test.ts
 +++ b/packages/coding-agent/test/thread/runtime-service.test.ts
-@@ -104,6 +104,18 @@ async function jobId(probe: Probe, manager: AsyncJobManager, ownerId: string, wi
+@@ -1,3 +1,6 @@
++import type { AgentSession } from "../../src/session/agent-session";
++import { inspectAsyncJob } from "../../src/session/async-job-views";
++import { inspectStudioJob } from "../../src/studio/services/job-inspect";
+ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+ import * as fs from "node:fs";
+ import * as os from "node:os";
+@@ -12,7 +15,9 @@ import { cfgSessionMaxCost } from "../../src/session/settings";
+ import type { MainThreadLink, SubagentMainApi, SubagentWorkerApi } from "../../src/thread/protocol";
+ import { type RpcFrame, RpcLink } from "../../src/thread/rpc";
+ import type { ThreadService, WorkerPeer } from "../../src/thread/services";
+-import { asyncJobsThreadService } from "../../src/thread/services/async-jobs";
++import { nativeShellStreams } from "../../src/tools/shell-steps";
++import { JOB_STREAM_TAIL_BYTES } from "../../src/thread/services/async-jobs-protocol";
++import { asyncJobsThreadService, refreshWorkerJobStreams } from "../../src/thread/services/async-jobs";
+ import { runtimeThreadService } from "../../src/thread/services/runtime";
+ import { settingsThreadService } from "../../src/thread/services/settings";
+ import { EventBus } from "../../src/utils/event-bus";
+@@ -104,6 +109,79 @@ async function jobId(probe: Probe, manager: AsyncJobManager, ownerId: string, wi
  }
  
  describe("runtime thread services: async jobs", () => {
++	it("exposes worker-owned native pipe and file inventories and fetches only bounded selected tails", async () => {
++		const manager = newManager(),
++			probe = await startWorker();
++		const id = (await probe("registerStreams", manager, "Worker", tmp)) as string;
++		const job = manager.getJob(id)!;
++		await refreshWorkerJobStreams(job);
++		const native = job.process?.streams;
++		if (!native) throw new Error("worker stream inventory missing");
++		const inventory = nativeShellStreams(native);
++		const pipe = inventory.find(row => row.kind === "pipe")!;
++		const file = inventory.find(row => row.consumer.endsWith("stream.log"))!;
++		const binary = inventory.find(row => row.consumer.endsWith("binary.log"))!;
++		const retained = inventory.find(row => row.consumer.endsWith("retained.log"))!;
++		expect(pipe.bytes).toBeGreaterThan(JOB_STREAM_TAIL_BYTES);
++		expect(file.bytes).toBe(pipe.bytes);
++		// Inventory transfer must not carry a whole redirected file into the root.
++		expect(native.read(Number(file.id.split(":")[1]))).toBeNull();
++		await refreshWorkerJobStreams(job, pipe.id);
++		expect(
++			nativeShellStreams(native)
++				.find(row => row.id === pipe.id)
++				?.tail(),
++		).toBe("last-line" + String.fromCharCode(10));
++		await refreshWorkerJobStreams(job, file.id);
++		const chunk = native.read(Number(file.id.split(":")[1]));
++		expect(chunk!.data.byteLength).toBeLessThanOrEqual(JOB_STREAM_TAIL_BYTES);
++		expect(
++			nativeShellStreams(native)
++				.find(row => row.id === file.id)
++				?.tail(),
++		).toBe("last-line" + String.fromCharCode(10));
++		await refreshWorkerJobStreams(job, binary.id);
++		expect(
++			nativeShellStreams(native)
++				.find(row => row.id === binary.id)
++				?.tail(),
++		).toBeUndefined();
++		await probe("finish", id, "done");
++		await job.promise;
++		expect(native.read(Number(retained.id.split(":")[1]))).toBeNull();
++		await refreshWorkerJobStreams(job, retained.id);
++		expect(
++			nativeShellStreams(native)
++				.find(row => row.id === retained.id)
++				?.tail(),
++		).toBe("last-line" + String.fromCharCode(10));
++		expect(nativeShellStreams(native).find(row => row.id === retained.id)?.open).toBe(false);
++		const worker = started[0]!;
++		worker.peer.link.close("test worker disconnected");
++		worker.worker.terminate();
++		const session = {
++			sessionId: "root",
++			asyncJobManager: manager,
++			inspectAsyncJob: (jobId: string) => inspectAsyncJob(manager, "Worker", jobId),
++		} as unknown as AgentSession;
++		const stopped = await inspectStudioJob(session, id);
++		expect(stopped.output).toBe("done");
++		expect(stopped.streams?.map(row => row.id)).toContain(file.id);
++		await expect(inspectStudioJob(session, id, file.id)).rejects.toThrow("Worker output streams are unavailable");
++	});
++
 +	it("sends typed process input from main to the worker that owns the job", async () => {
 +		const manager = newManager(),
 +			probe = await startWorker();

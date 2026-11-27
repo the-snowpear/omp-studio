@@ -518,7 +518,12 @@ export interface StudioOperatorStateSnapshot {
 	 */
 	awaitingAsyncWork?: boolean;
 	ptyInputWaits?: Array<{
+		/** The observing session, which may own a descendant's job. */
 		sessionId: string;
+		sourceSessionId?: string;
+		ownerAgentId?: string;
+		jobId?: string;
+		jobGeneration?: number;
 		toolCallId: string;
 		command: string;
 		pid?: number;

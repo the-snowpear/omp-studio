@@ -12,7 +12,7 @@ import type {
   StudioClient,
 } from "@omp-studio/client-contract";
 import { I18nProvider } from "../i18n";
-import { PreviewModeProvider } from "../preview/PreviewContext";
+import { PreviewModeProvider, PreviewSurface } from "../preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
 import { AgentModelDetails } from "./AgentModelDetails";
 import { selectOption } from "../test/selectOption";
@@ -83,6 +83,18 @@ it("keeps a preview hot-switched model and effort through zh → en → zh", asy
   expect(screen.getByRole("combobox", { name: "切换模型" }).textContent).toContain("GPT-5");
   expect(screen.getByRole("combobox", { name: "思考档位" }).textContent).toBe("low");
   expect(client.command).not.toHaveBeenCalled();
+});
+it("clears preview model controls when returning to an unavailable real Runtime", async () => {
+  const command = vi.fn(), client = { command } as unknown as StudioClient;
+  const content = (preview: boolean) => <I18nProvider forcedLanguage="en"><PreviewModeProvider switchEnabled><PreviewSurface preview={preview}><AgentModelDetails client={client} sessionId="main" agentId="child" available={false} running={false} /></PreviewSurface></PreviewModeProvider></I18nProvider>;
+  const mounted = render(content(true));
+  fireEvent.click(mounted.container.querySelector("summary")!);
+  await screen.findByRole("combobox", { name: "Change model" });
+  mounted.rerender(content(false));
+  await waitFor(() => expect(screen.queryByRole("combobox", { name: "Change model" })).toBeNull());
+  expect(screen.queryByText("Native live state")).toBeNull();
+  expect(screen.getByText("This Runtime does not provide agent model details.")).toBeTruthy();
+  expect(command).not.toHaveBeenCalled();
 });
 it("ignores a late model inspection after changing the selected agent", async () => {
   let resolveOld!: (value: { requestId: string }) => void;

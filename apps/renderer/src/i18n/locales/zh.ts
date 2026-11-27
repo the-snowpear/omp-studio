@@ -1139,6 +1139,7 @@ const zhRaw = {
       "loading": "正在载入图片…",
       "loadFailed": "无法载入这张图片，请关闭后重试。",
       "exportFailed": "无法生成批注图片，请重试。",
+      "saveUnavailable": "暂时无法保存，批注已保留。输入框恢复可用后可重试。",
       "emptyNotice": "尚未添加批注，点击确认将保留原图"
     }
   },

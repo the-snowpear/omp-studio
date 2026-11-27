@@ -7,16 +7,21 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { previewArchiveTranscript, previewArchiveActivity } from "../preview/archivePreview";
 import { hostErrorMessage } from "../hostError";
 
-// Keep reads local to the inspector: changing display language never resets its controls.
-export function ArchiveTranscriptInspector({ client, sessionId, targetSessionId }: {
+export interface ArchiveTranscriptPreferences { detail: ArchiveTranscriptDetail; budget: number; lastTurns: number; }
+export const initialArchiveTranscriptPreferences = (): ArchiveTranscriptPreferences => ({ detail: "auto", budget: 16000, lastTurns: 0 });
+
+// A parent that replaces its detail while refreshing keeps these controls with the selection.
+export function ArchiveTranscriptInspector({ client, sessionId, targetSessionId, preferences, onPreferencesChange }: {
   client?: StudioClient | undefined; sessionId?: string | undefined; targetSessionId: string;
+  preferences?: ArchiveTranscriptPreferences;
+  onPreferencesChange?: (next: ArchiveTranscriptPreferences) => void;
 }) {
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const { preview } = usePreviewMode();
-  const [detail, setDetail] = useState<ArchiveTranscriptDetail>("auto");
-  const [budget, setBudget] = useState(16000);
-  const [lastTurns, setLastTurns] = useState(0);
+  const [localPreferences, setLocalPreferences] = useState(initialArchiveTranscriptPreferences);
+  const { detail, budget, lastTurns } = preferences ?? localPreferences;
+  const setPreferences = onPreferencesChange ?? setLocalPreferences;
   const [result, setResult] = useState<NativeArchiveTranscript>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -39,14 +44,14 @@ export function ArchiveTranscriptInspector({ client, sessionId, targetSessionId 
   return <section className="archive-transcript" aria-label={zh ? "会话转录" : "Session transcript"}>
     <h4>{zh ? "会话转录" : "Session transcript"}</h4>
     <div className="archive-toolbar">
-      <label>{zh ? "详细程度" : "Detail"}<AppSelect value={detail} onChange={event => setDetail(event.target.value as ArchiveTranscriptDetail)}>
+      <label>{zh ? "详细程度" : "Detail"}<AppSelect value={detail} onChange={event => setPreferences({ detail: event.target.value as ArchiveTranscriptDetail, budget, lastTurns })}>
         <option value="auto">{zh ? "自动" : "Auto"}</option><option value="brief">{zh ? "简要" : "Brief"}</option>
         <option value="normal">{zh ? "标准" : "Normal"}</option><option value="full">{zh ? "完整" : "Full"}</option>
       </AppSelect></label>
-      <label>{zh ? "字符预算" : "Character budget"}<AppSelect value={budget} onChange={event => setBudget(Number(event.target.value))}>
+      <label>{zh ? "字符预算" : "Character budget"}<AppSelect value={budget} onChange={event => setPreferences({ detail, budget: Number(event.target.value), lastTurns })}>
         {[4000, 16000, 64000].map(value => <option key={value} value={value}>{value.toLocaleString()}</option>)}
       </AppSelect></label>
-      <label>{zh ? "回合" : "Turns"}<AppSelect value={lastTurns} onChange={event => setLastTurns(Number(event.target.value))}>
+      <label>{zh ? "回合" : "Turns"}<AppSelect value={lastTurns} onChange={event => setPreferences({ detail, budget, lastTurns: Number(event.target.value) })}>
         <option value={0}>{zh ? "全部" : "All"}</option><option value={1}>{zh ? "最后 1 轮" : "Last turn"}</option>
         <option value={5}>{zh ? "最后 5 轮" : "Last 5 turns"}</option><option value={20}>{zh ? "最后 20 轮" : "Last 20 turns"}</option>
       </AppSelect></label>

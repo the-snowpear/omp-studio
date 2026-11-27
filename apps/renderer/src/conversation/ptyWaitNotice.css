@@ -22,3 +22,5 @@
 .pty-wait-copy code { display: block; margin-top: var(--sp-4); font-size: var(--fs-11); color: var(--text-3); overflow-wrap: anywhere; }
 .pty-wait-copy p { margin: var(--sp-4) 0 0; font-size: var(--fs-11); color: var(--text-3); }
 .pty-wait-row > button { flex: none; }
+.pty-wait-actions { display: flex; flex-wrap: wrap; gap: var(--sp-6); justify-content: flex-end; }
+.pty-wait-entry > .job-inspector { margin: var(--sp-8) 0 0; max-height: 300px; overflow: auto; }

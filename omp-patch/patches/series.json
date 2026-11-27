@@ -1,11 +1,11 @@
 {
   "upstreamCommit": "b55cd1bb664d8ab46ddc77f2a34eb47555dbf1ac",
+  "patchsetVersion": "studio.3",
+  "patchsetDigest": "sha256:ef49a8a7050d1830f547102ec111fc0e24b73f2cb26673e36d1c670f4209b0c8",
   "patches": [
     "0001-studio-cli-entry.patch",
     "0002-studio-session-runtime.patch",
     "0003-studio-modes-and-pause.patch",
     "0004-studio-extensibility.patch"
-  ],
-  "patchsetVersion": "studio.1",
-  "patchsetDigest": "sha256:b235717f17a9624d99766bc055d403b12465dd0cf81ef0de50c91b6df952f272"
+  ]
 }

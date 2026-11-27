@@ -73,7 +73,8 @@ export function AgentModelDetails({
     const current = ++epoch.current;
     let reading = false;
     setError("");
-    if (!open || !enabled) return;
+    if (!enabled) { setData(undefined); return; }
+    if (!open) return;
     if (preview) {
       setData(current => current?.agentId === agentId ? current : previewAgentModel(agentId, previewModel, previewSaved));
       return;

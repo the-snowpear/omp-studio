@@ -1,10 +1,11 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import { PreviewModeProvider, PreviewSurface } from "../preview/PreviewContext";
 import { previewPtyInputWaits } from "../preview/ptyWaitPreview";
 import { CONVERSATION_REVEAL, revealConversationTarget, type ConversationRevealRequest } from "./conversationReveal";
 import { PtyWaitNotice, type PtyInputWait } from "./PtyWaitNotice";
+import type { StudioClient } from "@omp-studio/client-contract";
 
 const url = window.location.href;
 afterEach(() => { cleanup(); window.history.replaceState({}, "", url); });
@@ -57,9 +58,43 @@ it("uses the matching preview tool identity and hides the demo mark with marks=o
   expect(screen.queryByText("Demo")).toBeNull();
   expect(screen.getByText("npm run typecheck")).toBeTruthy();
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "View command" })); });
-  expect(onReveal).toHaveBeenCalledWith("preview-bash-live");
+  expect(onReveal).toHaveBeenCalledWith("preview-bash-live", expect.objectContaining({ jobId: "preview-pty" }));
   mounted.rerender(view("zh"));
   expect(screen.getByRole("button", { name: "查看命令" })).toBeTruthy();
   expect(screen.getByText("npm run typecheck")).toBeTruthy();
   expect(previewPtyInputWaits("t2")).toEqual([]);
+});
+
+it("opens a child PTY directly by job identity when its transcript is not loaded and resets it on scope changes", async () => {
+  const row: PtyInputWait = { ...waits[0]!, sourceSessionId: "child-session", ownerAgentId: "Child", jobId: "child-job", jobGeneration: 77 };
+  const commands: Record<string, unknown> = {};
+  let sequence = 0;
+  const command = vi.fn(async (kind: string) => {
+    const requestId = String(++sequence);
+    commands[requestId] = { status: "completed", result: { result: kind === "jobs.inspect" ? { jobId: row.jobId, pids: [], canInput: true, inputGeneration: 77, waitingForInput: true } : { sent: true } } };
+    return { requestId };
+  });
+  const client = { command, getState: () => ({ commands }) } as unknown as StudioClient;
+  const reveal = vi.fn(async () => false);
+  const view = (language: "zh" | "en", preview = false, rows = [row], sessionId = "session") => <I18nProvider forcedLanguage={language}><PreviewModeProvider switchEnabled><PreviewSurface preview={preview}><PtyWaitNotice client={client} sessionId={sessionId} waits={rows} onReveal={reveal} /></PreviewSurface></PreviewModeProvider></I18nProvider>;
+  const mounted = render(view("zh"));
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "查看命令" })); });
+  expect(reveal).toHaveBeenCalledWith("pty-call", row);
+  fireEvent.click(screen.getByRole("button", { name: "打开终端" }));
+  fireEvent.change(await screen.findByRole("textbox", { name: "终端输入" }), { target: { value: "answer" } });
+  mounted.rerender(view("en"));
+  expect(screen.getByRole("textbox", { name: "Console input" })).toHaveProperty("value", "answer");
+  fireEvent.click(screen.getByRole("button", { name: "Send + Enter" }));
+  await waitFor(() => expect(command).toHaveBeenCalledWith("jobs.input", { sessionId: "session", jobId: "child-job", expectedGeneration: 77, data: "answer\r" }));
+  mounted.rerender(view("zh"));
+  fireEvent.click(screen.getByRole("button", { name: "关闭终端" }));
+  expect(screen.queryByRole("textbox", { name: "终端输入" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "打开终端" }));
+  await screen.findByRole("textbox", { name: "终端输入" });
+  mounted.rerender(view("zh", true));
+  expect(screen.queryByRole("textbox", { name: "终端输入" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "打开终端" }));
+  expect(screen.getByRole("textbox", { name: "终端输入" })).toBeTruthy();
+  mounted.rerender(view("zh", false, [{ ...row, sessionId: "next" }], "next"));
+  expect(screen.queryByRole("textbox", { name: "终端输入" })).toBeNull();
 });

@@ -1,4 +1,4 @@
-import { ArchiveTranscriptInspector, ArchiveActivityPane } from "./ArchiveExplorer";
+import { ArchiveTranscriptInspector, ArchiveActivityPane, initialArchiveTranscriptPreferences } from "./ArchiveExplorer";
 import { AppSelect } from "../AppSelect";
 import { useEffect, useRef, useState } from "react";
 import type {
@@ -59,6 +59,7 @@ export function NativeArchivePane({
     [error, setError] = useState(""),
     [detailError, setDetailError] = useState("");
   const [truncated, setTruncated] = useState(false);
+  const [transcriptPreferences, setTranscriptPreferences] = useState(initialArchiveTranscriptPreferences);
   const epoch = useRef(0),
     detailEpoch = useRef(0),
     previousContext = useRef("");
@@ -408,7 +409,7 @@ export function NativeArchivePane({
                         : "This entry is not in the current Studio catalog. Refresh the catalog before opening."}
                     </p>
                   ) : null}
-                  <ArchiveTranscriptInspector client={client} sessionId={context?.sessionId} targetSessionId={detail.session.id} />
+                  <ArchiveTranscriptInspector client={client} sessionId={context?.sessionId} targetSessionId={detail.session.id} preferences={transcriptPreferences} onPreferencesChange={setTranscriptPreferences} />
                   <h4>{zh ? "空闲回顾" : "Idle recaps"}</h4>
                   {detail.recaps.length ? (
                     detail.recaps.map(renderText)

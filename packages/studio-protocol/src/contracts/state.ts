@@ -190,7 +190,19 @@ export interface OperatorStateSnapshot {
    */
   awaitingAsyncWork?: boolean;
   /** Native interactive consoles currently waiting for keyboard input. */
-  ptyInputWaits?: Array<{ sessionId: string; toolCallId: string; command: string; pid?: number; waiting: boolean; notify: boolean }>;
+  ptyInputWaits?: Array<{
+    /** The observing session, which may own a descendant's job. */
+    sessionId: string;
+    sourceSessionId?: string;
+    ownerAgentId?: string;
+    jobId?: string;
+    jobGeneration?: number;
+    toolCallId: string;
+    command: string;
+    pid?: number;
+    waiting: boolean;
+    notify: boolean;
+  }>;
   /** Unresolved tool approval records persisted by the session. */
   waitingForApproval?: boolean;
   /**

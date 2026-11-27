@@ -2688,7 +2688,9 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       const listRequest = transport === "pi-native"
         ? { urls: [`${endpointUrl.replace(/\/+$/, "")}/v1/pi/models`], headers: { Accept: "application/json", ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) } }
         : modelListRequest(endpointUrl, api ?? "openai-completions", apiKey);
-      const urls = discoveryType === "ollama"
+      const urls = transport === "pi-native"
+        ? listRequest.urls
+        : discoveryType === "ollama"
         ? [ollamaTagsUrl(endpointUrl)]
         : discoveryType === "litellm"
           ? litellmInfoUrls(endpointUrl)
@@ -2711,7 +2713,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           const gatewayRows = probeRecord(payload)?.models;
           const scopedPayload = transport === "pi-native" && Array.isArray(gatewayRows) ? { models: gatewayRows.filter(row => probeRecord(row)?.provider === input.providerId) } : payload;
           let models = parseDiscoveryModels(scopedPayload, advertisedReasoning);
-          if (discoveryType === "lm-studio") {
+          if (transport !== "pi-native" && discoveryType === "lm-studio") {
             const nativeBase = endpointUrl.replace(/\/$/, "").replace(/\/v1$/, "");
             const metadata = new Map<string, Record<string, unknown>>();
             for (const nativePath of ["/api/v0/models", "/api/v1/models"]) {

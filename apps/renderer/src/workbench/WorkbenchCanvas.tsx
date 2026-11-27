@@ -2399,9 +2399,9 @@ export function WorkbenchCanvas({ workbenchVisible, railMode, layoutOverlayDismi
           </CommandBlockProvider>
           </InlineBtwContext.Provider></SpillViewer.Provider>
           <div className="composer-region" ref={computerApprovalRef}>
-            <PtyWaitNotice sessionId={preview ? "preview-session" : snapshot?.sessionId}
+            <PtyWaitNotice client={client} available={runtimeConnected && executionMatches && !connection?.resyncRequired} sessionId={preview ? "preview-session" : snapshot?.sessionId}
               waits={preview ? previewPtyInputWaits(previewThreadId) : runtimeConnected && executionMatches && !connection?.resyncRequired ? snapshot?.ptyInputWaits : undefined}
-              onReveal={toolCallId => revealConversationTarget(convoScrollerRef.current, { toolCallId })} />
+              onReveal={(toolCallId, wait) => preview ? revealConversationTarget(convoScrollerRef.current, { toolCallId }) : revealComputerAction({ sessionId: wait.sourceSessionId ?? wait.sessionId, toolCallId, ...(wait.sourceSessionId && wait.sourceSessionId !== wait.sessionId && wait.ownerAgentId ? { agentId: wait.ownerAgentId } : {}) })} />
             {/* 真实 pending Interaction 永远优先；预览关时 Plan Review 走 snapshot；预览开才用演示 Deck。 */}
             {deckInteraction ? (
               <InteractionDeck partialAsk={partialAsk}

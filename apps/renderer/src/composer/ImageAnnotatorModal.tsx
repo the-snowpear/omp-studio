@@ -39,7 +39,8 @@ export type ImageAnnotatorSubject = {
 
 export type ImageAnnotatorModalProps = {
   image: ImageAnnotatorSubject;
-  onConfirm: (nextImage: PromptImage) => void;
+  onConfirm: (nextImage: PromptImage) => boolean | void;
+  disabled?: boolean;
   onClose: () => void;
   onError?: (message: string) => void;
 };
@@ -70,7 +71,7 @@ function draftToOp(drag: ActiveDrag | null): AnnotationOp | null {
   return createArrowOp(drag.color, drag.strokeWidth, drag.start, drag.end);
 }
 
-export function ImageAnnotatorModal({ image, onConfirm, onClose, onError }: ImageAnnotatorModalProps) {
+export function ImageAnnotatorModal({ image, onConfirm, onClose, onError, disabled = false }: ImageAnnotatorModalProps) {
   const { t } = useI18n();
   const document = useSurfaceDocument();
   const window = surfaceWindow(document);
@@ -84,6 +85,8 @@ export function ImageAnnotatorModal({ image, onConfirm, onClose, onError }: Imag
   const textInputRef = useRef<HTMLTextAreaElement>(null);
   const dragRef = useRef<ActiveDrag | null>(null);
   const mountedRef = useRef(true);
+  const confirmRef = useRef({ disabled, onConfirm });
+  confirmRef.current = { disabled, onConfirm };
 
   const [tool, setTool] = useState<AnnotationTool>("pen");
   const [sizePreset, setSizePreset] = useState<AnnotationSizePreset>("medium");
@@ -350,7 +353,7 @@ export function ImageAnnotatorModal({ image, onConfirm, onClose, onError }: Imag
   };
 
   const handleConfirm = async () => {
-    if (busy || loadError || naturalSize === null || !imgRef.current) return;
+    if (busy || disabled || loadError || naturalSize === null || !imgRef.current) return;
     const pendingText = textDraft !== null ? textDraft.value.trim() : "";
     const finalOps: AnnotationOp[] =
       pendingText.length > 0 && textDraft !== null
@@ -372,7 +375,10 @@ export function ImageAnnotatorModal({ image, onConfirm, onClose, onError }: Imag
         document,
       });
       if (!mountedRef.current) return;
-      onConfirm(nextImage);
+      if (confirmRef.current.disabled || confirmRef.current.onConfirm(nextImage) === false) {
+        setBusy(false);
+        return;
+      }
     } catch {
       if (!mountedRef.current) return;
       const message = t("composer.imageAnnotate.exportFailed");
@@ -660,7 +666,7 @@ export function ImageAnnotatorModal({ image, onConfirm, onClose, onError }: Imag
         </div>
 
         <footer className="img-annotator-footer">
-          {error ? (
+          {disabled ? <p id={hintId} role="status" className="img-annotator-status">{t("composer.imageAnnotate.saveUnavailable")}</p> : error ? (
             <p id={hintId} role="alert" className="img-annotator-status is-error">
               {error}
             </p>
@@ -678,7 +684,7 @@ export function ImageAnnotatorModal({ image, onConfirm, onClose, onError }: Imag
             <button
               type="button"
               className="btn primary"
-              disabled={busy || !ready}
+              disabled={busy || disabled || !ready}
               onClick={() => void handleConfirm()}
             >
               <Icon name="check" extra="sm" />

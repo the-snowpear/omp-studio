@@ -11,7 +11,7 @@ import { PREVIEW_LEFTOVER_PROCESSES, PREVIEW_SERVICES } from "../preview/service
 import { previewAgentModel } from "../preview/agentModelPreview";
 import { PREVIEW_SESSION_WORKTREES, previewWorktreeHook } from "../preview/sessionWorktreesPreview";
 import { PREVIEW_BACKGROUND_DETAILS } from "../preview/backgroundTasksPreview";
-import { PtyWaitNotice } from "../conversation/PtyWaitNotice";
+import { PtyWaitNotice, type PtyInputWait } from "../conversation/PtyWaitNotice";
 import { previewPtyInputWaits } from "../preview/ptyWaitPreview";
 import { CONVERSATION_REVEAL, revealConversationTarget, type ConversationRevealRequest } from "../conversation/conversationReveal";
 
@@ -19,6 +19,7 @@ const kinds = ["services.start", "services.leftovers.list", "services.leftovers.
 const capabilities = { capabilities: kinds.map(id => ({ id, grade: "stable", version: 1, evidence: "controlled acceptance" })) } as ClientBootstrap["capabilityManifest"];
 const inputGeneration = 1795760000000;
 const inputInspection: JobInspection = { ...PREVIEW_BACKGROUND_DETAILS["job-82"]!, inputGeneration, canInput: true, inputDetection: "unknown", waitingForInput: false };
+const controlledPtyWaits: PtyInputWait[] = [{ sessionId: "session-acceptance", sourceSessionId: "child-acceptance", ownerAgentId: "Child", jobId: "job-82", jobGeneration: inputGeneration, toolCallId: "child-pty-call", command: "npm run build | tee build.log", waiting: true, notify: false }];
 type JobInput = Omit<Extract<RuntimeFeatureOperation, { kind: "jobs.input" }>, "kind">;
 
 /** Controlled counterpart for exercising the real read/write paths without touching user processes. */
@@ -40,7 +41,7 @@ export function SessionFeaturesHarness({ visible = true }: { visible?: boolean }
     const reveal = (event: Event) => {
       const request = (event as CustomEvent<ConversationRevealRequest>).detail;
       event.preventDefault();
-      const found = request.toolCallId === "preview-bash-live";
+      const found = request.toolCallId === "preview-bash-live" || request.toolCallId === "child-pty-call";
       setRevealed(found); request.finish(found);
     };
     element.addEventListener(CONVERSATION_REVEAL, reveal);
@@ -88,8 +89,9 @@ export function SessionFeaturesHarness({ visible = true }: { visible?: boolean }
     </div>
     <div hidden={tab !== "worktrees"}><SessionWorktreesPane client={client} context={{ sessionId: "session-acceptance", available: true, capabilities }} visible={visible && tab === "worktrees"} /></div>
     <div hidden={tab !== "pty"}>
-      <PtyWaitNotice sessionId="preview-session" waits={previewPtyInputWaits("t1")} onReveal={toolCallId => revealConversationTarget(ptySource.current, { toolCallId })} />
-      <div ref={ptySource}>{revealed ? <div className="convo-notice info" role="status">{zh ? "已定位对应工具调用" : "Source tool call located"} · <code>preview-bash-live</code></div> : null}</div>
+      <PtyWaitNotice client={client} available sessionId={preview ? "preview-session" : "session-acceptance"} waits={preview ? previewPtyInputWaits("t1") : controlledPtyWaits} onReveal={(_toolCallId, row) => revealConversationTarget(ptySource.current, { toolCallId: row.toolCallId })} />
+      <div ref={ptySource}>{revealed ? <div className="convo-notice info" role="status">{zh ? "已定位对应工具调用" : "Source tool call located"} · <code>{preview ? "preview-bash-live" : "child-pty-call"}</code></div> : null}</div>
+      <pre data-testid="pty-input-calls" style={{ marginTop: 12, fontSize: 11, whiteSpace: "pre-wrap" }}>{JSON.stringify(inputCalls, null, 2)}</pre>
     </div>
   </div>;
 }

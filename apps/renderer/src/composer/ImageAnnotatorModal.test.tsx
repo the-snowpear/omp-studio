@@ -351,6 +351,36 @@ describe("ImageAnnotatorModal", () => {
 });
 
 describe("ChipComposer image annotation integration", () => {
+  it("keeps annotations when the composer becomes disabled during image composition and permits retry", async () => {
+    stubCanvasEnvironment("bmV3");
+    let finish!: BlobCallback;
+    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(callback => { finish = callback; });
+    const ref = createRef<ChipComposerHandle>();
+    const content = (disabled: boolean, language: "zh" | "en") => <I18nProvider forcedLanguage={language}><ChipComposer ref={ref} disabled={disabled} /></I18nProvider>;
+    const mounted = render(content(false, "zh"));
+    act(() => { ref.current!.insertChip({ id: "preserved-image", kind: "image", label: "图1", image: png("b2xk") }); });
+    fireEvent.click(screen.getByRole("button", { name: "批注 图1" }));
+    loadDialogImage();
+    const canvas = screen.getByRole("img", { name: "图片批注画布" });
+    pointer(canvas, "pointerdown", 20, 20); pointer(canvas, "pointermove", 60, 50); pointer(canvas, "pointerup", 60, 50);
+    fireEvent.click(screen.getByRole("button", { name: "确认" }));
+    await waitFor(() => expect(finish).toBeDefined());
+    mounted.rerender(content(true, "en"));
+    await act(async () => { finish(new Blob(["new"], { type: "image/png" })); });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Confirm" })).toHaveProperty("disabled", true));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Undo" })).toHaveProperty("disabled", false);
+    expect(screen.getByText(/Saving is temporarily unavailable/)).toBeTruthy();
+    expect(ref.current!.getSnapshot().images[0]?.data).toBe("b2xk");
+    mounted.rerender(content(true, "zh"));
+    expect(screen.getByText("暂时无法保存，批注已保留。输入框恢复可用后可重试。")).toBeTruthy();
+    mounted.rerender(content(false, "zh"));
+    fireEvent.click(screen.getByRole("button", { name: "确认" }));
+    await act(async () => { finish(new Blob(["new"], { type: "image/png" })); });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(ref.current!.getSnapshot().images[0]?.data).toBe("bmV3");
+  });
+
   it("replaces annotated attachment bytes while strictly preserving chip identity and [图N] serialization", async () => {
     stubCanvasEnvironment("YW5ub3RhdGVkMg==");
     const ref = createRef<ChipComposerHandle>();

@@ -1139,6 +1139,7 @@ export const en: LocaleDictionary = {
       "loading": "Loading image…",
       "loadFailed": "Unable to load this image. Close and try again.",
       "exportFailed": "Unable to composite annotated image. Try again.",
+      "saveUnavailable": "Saving is temporarily unavailable. Your annotations are kept; try again when the composer is ready.",
       "emptyNotice": "No annotations added yet; confirming keeps the original image"
     }
   },

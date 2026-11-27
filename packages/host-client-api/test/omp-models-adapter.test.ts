@@ -1810,3 +1810,37 @@ test("OpenRouter uses its native catalog API and pi-native discovery keeps provi
     assert.deepEqual(result.models[0], { id: "model-id", name: "Readable title", api: "anthropic-messages", reasoning: true, thinkingConfig: { mode: "effort", efforts: ["low", "high"], defaultLevel: "high" }, image: true, contextWindow: 131072, maxTokens: 8192 });
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+
+test("pi-native discovery takes precedence over preset and saved discovery routes", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "omp-gateway-discovery-routing-"));
+  const calls: string[] = [];
+  const service = createOmpModelsService({ agentDir: directory, fetch: async url => {
+    calls.push(String(url));
+    return new Response(JSON.stringify({ models: [
+      { provider: "ollama", id: "ollama-model", name: "Gateway Ollama", api: "openai-completions", input: ["text"] },
+      { provider: "litellm", id: "litellm-model", name: "Gateway LiteLLM", api: "openai-completions", input: ["text"] },
+      { provider: "local", id: "local-model", name: "Gateway Local", api: "openai-completions", input: ["text"] },
+    ] }), { status: 200 });
+  } });
+  try {
+    await writeFile(join(directory, "models.yml"), `providers:
+  local:
+    api: openai-completions
+    baseUrl: https://gateway.invalid
+    transport: pi-native
+    discovery:
+      type: lm-studio
+`);
+    for (const providerId of ["ollama", "litellm"]) {
+      calls.length = 0;
+      const result = await service.probeProvider({ providerId, transport: "pi-native", endpointUrl: "https://gateway.invalid" });
+      assert.deepEqual(calls, ["https://gateway.invalid/v1/pi/models"]);
+      assert.deepEqual(result.models.map(row => row.id), [`${providerId}-model`]);
+    }
+    calls.length = 0;
+    const local = await service.probeProvider({ providerId: "local" });
+    assert.deepEqual(calls, ["https://gateway.invalid/v1/pi/models"]);
+    assert.deepEqual(local.models.map(row => row.id), ["local-model"]);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});

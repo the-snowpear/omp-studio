@@ -111,6 +111,47 @@ test("a specifically selected profile installs even when another profile already
 	expect(status.profiles.find(row => row.profileDir === "Profile 1")?.loaded).toBe(false);
 });
 
+test("explicit repair recreates a missing registered extension at the same path and repairs its profile", async () => {
+	const profileCalls: string[] = [];
+	const h = await harness({
+		installInChrome: async options => {
+			profileCalls.push(options.dir);
+			return [];
+		},
+	});
+	const dir = path.join(h.root, "custom-relay");
+	const installed = await h.service.install({ dir, registerChrome: false });
+	await fs.rm(installed.dir, { recursive: true });
+	const repaired = await h.service.repair({ installIfMissing: true, repairProfile: true });
+	expect(repaired.syncResults).toContainEqual({ dir: installed.dir, status: "written", ompVersion: VERSION });
+	expect(repaired.status.installs.find(row => row.dir === installed.dir)).toMatchObject({
+		extensionId: installed.extensionId,
+		exists: true,
+		upToDate: true,
+	});
+	expect(profileCalls).toEqual([installed.dir]);
+	expect(repaired.warnings).toEqual([]);
+
+	await fs.rm(installed.dir, { recursive: true });
+	const declined = await h.service.repair({ installIfMissing: false, repairProfile: true });
+	expect(declined.syncResults).toContainEqual({ dir: installed.dir, status: "missing" });
+	expect(await Bun.file(path.join(installed.dir, "manifest.json")).exists()).toBe(false);
+	expect(declined.profileInstallError).toBeDefined();
+	expect(declined.warnings.length).toBeGreaterThan(0);
+	expect(profileCalls).toEqual([installed.dir]);
+});
+
+test("repair reports a blocked extension path as partial failure instead of claiming complete recovery", async () => {
+	const h = await harness();
+	const installed = await h.service.install({ registerChrome: false });
+	await fs.rm(installed.dir, { recursive: true });
+	await Bun.write(installed.dir, "a user file now occupies the registered directory");
+	const repaired = await h.service.repair({ installIfMissing: true });
+	expect(repaired.syncResults[0]?.status).toBe("failed");
+	expect(repaired.warnings.some(warning => warning.includes(installed.dir))).toBe(true);
+	expect(await Bun.file(installed.dir).text()).toBe("a user file now occupies the registered directory");
+});
+
 test("enterprise policy reports exact Native Messaging refusal while respecting allowlists", async () => {
 	const h = await harness({
 		runRegistry: async args => {
@@ -131,6 +172,36 @@ test("enterprise policy reports exact Native Messaging refusal while respecting 
 	expect(policy.userLevelHostsDisabled).toBe(true);
 	expect(policy.denials.map(row => row.policy)).toEqual(["NativeMessagingBlocklist", "NativeMessagingUserLevelHosts"]);
 	expect(policy.denials.every(row => row.browser === "Google Chrome" && row.source.startsWith("HKLM"))).toBe(true);
+});
+
+test("Linux policy allowlists override matching blocklists stored in separate files", async () => {
+	const h = await harness();
+	const dir = path.join(h.root, "managed-policies");
+	const blockFile = path.join(dir, "00-block.json"),
+		allowFile = path.join(dir, "10-allow.json");
+	const extensionId = extensionIdForPath(h.defaultDir, "linux");
+	await Bun.write(blockFile, JSON.stringify({ NativeMessagingBlocklist: ["*"], ExtensionInstallBlocklist: ["*"] }));
+	await Bun.write(
+		allowFile,
+		JSON.stringify({ NativeMessagingAllowlist: ["sh.omp.browser"], ExtensionInstallAllowlist: [extensionId] }),
+	);
+	const service = new StudioChromeRelayHostService({ sessionId: "relay-chat" } as AgentSession, {
+		...h.env,
+		locations: { platform: "linux", home: h.root, configHome: path.join(h.root, "config") },
+		linuxPolicyDirs: [{ browser: "Google Chrome", dir }],
+	});
+	const allowed = await service.getStatus({ probeHealth: false });
+	expect(allowed.policy.blocked).toBe(false);
+	expect(allowed.policy.denials).toEqual([]);
+
+	const overrideFile = path.join(dir, "20-override.json");
+	await Bun.write(overrideFile, JSON.stringify({ NativeMessagingAllowlist: [] }));
+	const blocked = await service.getStatus({ probeHealth: false });
+	expect(blocked.policy.denials).toHaveLength(1);
+	expect(blocked.policy.denials[0]?.policy).toBe("NativeMessagingBlocklist");
+	expect(blocked.policy.denials[0]?.source).toContain(blockFile);
+	expect(blocked.policy.denials[0]?.source).toContain(overrideFile);
+	expect(blocked.policy.extensionBlocked).toBe(false);
 });
 
 test("profile unregister removes only unpacked relay records and leaves a restorable backup", async () => {

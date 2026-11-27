@@ -1,11 +1,12 @@
 import type { AgentSession } from "../../session/agent-session";
+import { refreshWorkerJobStreams } from "../../thread/services/async-jobs";
 import type { JobInspection } from "../runtime-features-protocol";
 import { shortenHomePath } from "./conversation-sanitizer";
 import { SessionControlError } from "./session-control-service";
 import { projectJobActions } from "./job-actions";
 import { taskJobProgress } from "./job-service";
 import { cleanJobText, outputTail } from "./job-output";
-import type { PtyInputWait } from "../../tools/bash-interactive";
+import type { StudioOperatorStateSnapshot } from "../bridge-protocol";
 import { runtimeText } from "../locale";
 export * from "./job-output";
 
@@ -18,11 +19,19 @@ export async function inspectStudioJob(
 	jobId: string,
 	streamId?: string,
 ): Promise<JobInspection> {
-	const inspection = session.inspectAsyncJob(jobId);
+	let inspection = session.inspectAsyncJob(jobId);
 	if (inspection === undefined) {
 		throw new SessionControlError("INVALID_ARGUMENT", `Job "${jobId}" is not in this session's job tree`);
 	}
-	const job = session.asyncJobManager?.getJob(jobId);
+	let job = session.asyncJobManager?.getJob(jobId);
+	if (job) {
+		await refreshWorkerJobStreams(job, streamId);
+		inspection = session.inspectAsyncJob(jobId);
+		if (inspection === undefined) {
+			throw new SessionControlError("INVALID_ARGUMENT", `Job "${jobId}" is not in this session's job tree`);
+		}
+		job = session.asyncJobManager?.getJob(jobId);
+	}
 	if (job) session.asyncJobManager?.widgets?.requestCaption(job);
 	const caption = job && session.asyncJobManager?.widgets?.caption(job);
 	const stream = streamId ? inspection.streams?.find(row => row.id === streamId) : undefined;
@@ -74,13 +83,19 @@ export async function inspectStudioJob(
 }
 
 /** Durable job metadata crosses native worker RPC; no thread-local console registry is required. */
-export function readStudioPtyInputWaits(session: AgentSession): PtyInputWait[] {
-	const waits: PtyInputWait[] = [];
+export function readStudioPtyInputWaits(
+	session: AgentSession,
+): NonNullable<StudioOperatorStateSnapshot["ptyInputWaits"]> {
+	const waits: NonNullable<StudioOperatorStateSnapshot["ptyInputWaits"]> = [];
 	for (const job of session.asyncJobManager?.getRunningJobs() ?? []) {
 		const pty = job.latestDetails?.pty;
 		if (pty?.waiting === true && session.inspectAsyncJob(job.id))
 			waits.push({
 				sessionId: session.sessionId,
+				sourceSessionId: pty.sessionId,
+				...(job.ownerId === undefined ? {} : { ownerAgentId: job.ownerId }),
+				jobId: job.id,
+				jobGeneration: job.startTime,
 				toolCallId: pty.toolCallId,
 				command: pty.command,
 				...(pty.pid === undefined ? {} : { pid: pty.pid }),
