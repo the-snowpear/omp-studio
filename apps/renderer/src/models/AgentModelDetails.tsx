@@ -201,18 +201,24 @@ export function AgentModelDetails({
               </dd>
             </div>
           </dl>
-          {data.controllable ? <div className="amd-controls">
-            <label>{zh ? "切换模型" : "Change model"}<AppSelect value={data.selectedModel ?? ""}
-              disabled={changing || !data.models?.length} onChange={event => void change("agent.model.set", event.target.value)}>
-              {data.selectedModel && !data.models?.some(row => row.selector === data.selectedModel) ? <option value={data.selectedModel}>{data.selectedModel}</option> : null}
-              {data.models?.map(model => <option key={model.selector} value={model.selector}>{model.name} · {model.selector}</option>)}
-            </AppSelect></label>
-            {data.thinkingLevels?.length ? <label>{zh ? "思考档位" : "Thinking effort"}<AppSelect value={data.configuredThinking ?? data.effectiveThinking ?? "auto"}
-              disabled={changing} onChange={event => void change("agent.effort.set", event.target.value)}>
-              {data.thinkingLevels.map(level => <option key={level} value={level}>{level === "auto" ? zh ? "自动" : "Auto" : level === "off" ? zh ? "关闭" : "Off" : level}</option>)}
-            </AppSelect></label> : null}
-            <p className="tiny muted">{zh ? "立即用于此代理后续请求，保留当前任务。" : "Applies to this agent’s next request while keeping its task."}</p>
-          </div> : null}
+          {data.controllable ? <section className="amd-controls" aria-label={zh ? "实时切换" : "Live switch"} aria-busy={changing}>
+            <header className="amd-controls-head">
+              <span className="amd-controls-title"><Icon name="sliders" extra="sm" />{zh ? "实时切换" : "Live switch"}</span>
+              {changing ? <span className="amd-controls-state" role="status"><i className="amd-spinner" aria-hidden />{zh ? "正在应用…" : "Applying…"}</span> : null}
+            </header>
+            <div className="amd-controls-fields">
+              <label className="amd-field amd-field-model"><span>{zh ? "切换模型" : "Change model"}</span><AppSelect value={data.selectedModel ?? ""}
+                disabled={changing || !data.models?.length} onChange={event => void change("agent.model.set", event.target.value)}>
+                {data.selectedModel && !data.models?.some(row => row.selector === data.selectedModel) ? <option value={data.selectedModel}>{data.selectedModel}</option> : null}
+                {data.models?.map(model => <option key={model.selector} value={model.selector}>{model.name} · {model.selector}</option>)}
+              </AppSelect></label>
+              {data.thinkingLevels?.length ? <label className="amd-field"><span>{zh ? "思考档位" : "Thinking effort"}</span><AppSelect value={data.configuredThinking ?? data.effectiveThinking ?? "auto"}
+                disabled={changing} onChange={event => void change("agent.effort.set", event.target.value)}>
+                {data.thinkingLevels.map(level => <option key={level} value={level}>{level === "auto" ? zh ? "自动" : "Auto" : level === "off" ? zh ? "关闭" : "Off" : level}</option>)}
+              </AppSelect></label> : null}
+            </div>
+            <p className="amd-controls-hint"><Icon name="info" extra="sm" />{zh ? "立即用于此代理后续请求，保留当前任务。" : "Applies to this agent’s next request while keeping its task."}</p>
+          </section> : null}
           <b className="amd-chain-title">{zh ? "原生候选链" : "Native candidate chain"}</b>
           {data.candidates ? (
             <ol>

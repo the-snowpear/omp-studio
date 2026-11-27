@@ -306,7 +306,7 @@ export function AccountStatusPane({
                   </button>
                 ) : null}
               </div>
-              {account.fastEligibility ? <p className="account-policy-line small muted" data-tip={account.fastEligibility.model}>{zh ? "加速资格" : "Fast eligibility"} · {account.fastEligibility.state === "eligible" ? (zh ? "原生目录确认支持" : "Supported by native discovery") : account.fastEligibility.state === "unavailable" ? (zh ? "当前凭据不支持" : "Unavailable for this credential") : (zh ? "尚未报告" : "Not reported")}</p> : null}
+              {account.fastEligibility ? <p className="account-policy-line account-fast-line small muted" data-tip={account.fastEligibility.model}><span>{zh ? "加速资格" : "Fast eligibility"}</span><span className={`chip xs ${account.fastEligibility.state === "eligible" ? "green" : account.fastEligibility.state === "unavailable" ? "amber" : "gray"}`}>{account.fastEligibility.state === "eligible" ? (zh ? "原生目录确认支持" : "Supported by native discovery") : account.fastEligibility.state === "unavailable" ? (zh ? "当前凭据不支持" : "Unavailable for this credential") : (zh ? "尚未报告" : "Not reported")}</span></p> : null}
               {account.policy ? <p className="account-policy-line small muted">Priority {account.policy.priority} · Reserve {account.policy.reservePct}% ({account.policy.reserveSource}) · {account.policy.state}{account.policy.remainingPct === undefined ? "" : ` · ${account.policy.remainingPct}% left`}</p> : null}
               {quotas(account.limits)}
               {account.resetPolicies?.length || account.source === "oauth" ? <div className="account-resets-block">

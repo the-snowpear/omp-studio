@@ -348,11 +348,14 @@ export function DisassemblerPane({ client, sessionId, available, visible = true,
       <form className="disassembler-edit-form" onSubmit={event => { event.preventDefault(); setConfiguration(false); setConfirm({ kind: "configure", backend, maxOpen, idleCloseSec, binjaInstallDir, binjaPython }); }}>
         {errorNotice}
         {dock ? <div className="disassembler-environment">{engineStates}</div> : null}
-        <label>{zh ? "Binary Ninja 安装目录" : "Binary Ninja install directory"}<input className="input mono" value={binjaInstallDir} placeholder={zh ? "留空自动检测" : "Leave empty to auto-detect"} onChange={event => setBinjaInstallDir(event.target.value)} /></label>
-        <label>{zh ? "Binary Ninja Python" : "Binary Ninja Python"}<input className="input mono" value={binjaPython} placeholder={zh ? "留空自动检测 Python 3" : "Leave empty to find Python 3"} onChange={event => setBinjaPython(event.target.value)} /></label>
         <label>{zh ? "后端" : "Backend"}<AppSelect value={backend} onChange={event => setBackend(event.target.value as DisassemblerBackend)}>
           <option value="auto">{zh ? "自动 · 优先 IDA Pro" : "Auto · prefer IDA Pro"}</option><option value="ida">IDA Pro</option><option value="ghidra">Ghidra</option><option value="binja">Binary Ninja</option><option value="none">{zh ? "仅查看文件头" : "Metadata only"}</option>
         </AppSelect></label>
+        {backend === "binja" || backend === "auto" ? <fieldset className="disassembler-engine-paths">
+          <legend>Binary Ninja{backend === "auto" ? <small>{zh ? " · 自动选择时使用" : " · used when chosen automatically"}</small> : null}</legend>
+          <label>{zh ? "安装目录" : "Install directory"}<input className="input mono" aria-label={zh ? "Binary Ninja 安装目录" : "Binary Ninja install directory"} value={binjaInstallDir} placeholder={zh ? "留空自动检测" : "Leave empty to auto-detect"} onChange={event => setBinjaInstallDir(event.target.value)} /></label>
+          <label>Python<input className="input mono" aria-label={zh ? "Binary Ninja Python" : "Binary Ninja Python"} value={binjaPython} placeholder={zh ? "留空自动检测 Python 3" : "Leave empty to find Python 3"} onChange={event => setBinjaPython(event.target.value)} /></label>
+        </fieldset> : null}
         <label>{zh ? "最大打开数据库数" : "Maximum open databases"}<input className="input" type="number" value={maxOpen} onChange={event => setMaxOpen(event.target.valueAsNumber)} /></label>
         <label>{zh ? "空闲关闭时间（秒）" : "Idle timeout (seconds)"}<input className="input" type="number" value={idleCloseSec} onChange={event => setIdleCloseSec(event.target.valueAsNumber)} /></label>
         <button className="btn primary" disabled={!can("disassembler.configure")}>{zh ? "保存设置" : "Save settings"}</button>

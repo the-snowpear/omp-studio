@@ -111,7 +111,7 @@ it("switching away from a pending statistics read leaves transcript search usabl
   const client = { query } as unknown as StudioClient;
   render(<I18nProvider forcedLanguage="en"><PreviewModeProvider switchEnabled><ArchiveActivityPane client={client} sessionId="s" scope="workspace" active available /></PreviewModeProvider></I18nProvider>);
   expect(screen.getByRole("status").textContent).toContain("Loading");
-  selectOption(screen.getByRole("combobox", { name: "View" }), "Transcript regex search");
+  fireEvent.click(screen.getByRole("button", { name: "Regex search" }));
   expect((screen.getByRole("button", { name: "Search" }) as HTMLButtonElement).disabled).toBe(false);
   fireEvent.change(screen.getByRole("textbox", { name: "Regular expression" }), { target: { value: "failure" } });
   fireEvent.click(screen.getByRole("button", { name: "Search" }));

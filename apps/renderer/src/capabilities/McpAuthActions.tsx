@@ -86,7 +86,6 @@ export function McpAuthActions({
   const disabled = !enabled || busy !== undefined;
   return (
     <div className="mcp-auth-actions">
-      {challenge && challenge.status !== "authorized" ? <p className="mcp-auth-error" role="status"><Icon name="lock" extra="xs" /><span>{challenge.authChallenge.kind === "insufficient_scope" ? (zh ? "需要补充授权范围" : "Additional scopes required") : (zh ? "凭据需要重新授权" : "Credential requires re-authorization")}{challenge.requiredScopes.length ? <code> {challenge.requiredScopes.join(" · ")}</code> : null}</span></p> : null}
       <div className="mcp-auth-buttons">
         {authSupported ? <><button type="button" className="mcp-auth-secondary" disabled={disabled} onClick={() => void run("reauth")} aria-label={(zh ? "重新授权 " : "Re-authorize ") + name}>
           <Icon name="lock" extra="xs" />{busy === "reauth" ? (zh ? "授权中…" : "Authorizing…") : zh ? "重新授权" : "Re-authorize"}

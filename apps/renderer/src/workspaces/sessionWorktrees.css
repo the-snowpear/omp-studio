@@ -19,8 +19,36 @@
 .worktree-empty p { color:var(--text-muted); font-size:var(--fs-12); }
 .worktree-launcher { margin:var(--sp-12); }
 @media(max-width:600px) { .worktree-modal-backdrop { padding:12px; } .worktree-manager-dialog { width:calc(100vw - 24px); } .worktree-modal { padding:20px; max-height:calc(100vh - 24px); } }
-.worktree-hook { display: grid; gap: var(--sp-8); padding: var(--sp-12) 0; border-block: 1px solid var(--border); }
-.worktree-hook progress { width: 100%; accent-color: var(--accent); }
-.worktree-hook p { margin: 0; }
-.worktree-hook-items { display: flex; flex-wrap: wrap; gap: var(--sp-6); }
-.worktree-hook-warning { color: var(--amber); font-size: var(--fs-12); overflow-wrap: anywhere; }
+/* post-checkout hook status for the newest worktree. */
+.worktree-hook {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-10);
+  margin: var(--sp-12) 0;
+  padding: var(--sp-10) var(--sp-12);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-10);
+  background: var(--surface);
+  animation: var(--motion-reveal);
+}
+.worktree-hook[data-state="succeeded"] { border-color: color-mix(in srgb, var(--green) 22%, var(--border-subtle)); }
+.worktree-hook[data-state="failed"], .worktree-hook[data-state="warning"] { border-color: color-mix(in srgb, var(--amber) 32%, var(--border-subtle)); }
+.worktree-hook-mark { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: var(--r-8); background: var(--accent-soft); color: var(--accent); }
+.worktree-hook[data-state="succeeded"] .worktree-hook-mark { background: var(--green-soft); color: var(--green); }
+.worktree-hook:not([data-state="running"]):not([data-state="succeeded"]) .worktree-hook-mark { background: var(--amber-soft); color: var(--amber); }
+.worktree-hook-spinner { width: 12px; height: 12px; border: 1.5px solid color-mix(in srgb, currentColor 25%, transparent); border-top-color: currentColor; border-radius: var(--r-full); animation: omp-spin var(--loop-spin) linear infinite; }
+.worktree-hook-body { display: grid; flex: 1; gap: var(--sp-6); min-width: 0; }
+.worktree-hook-title { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-6) var(--sp-8); min-height: 22px; }
+.worktree-hook-title strong { color: var(--text); font-size: var(--fs-12); font-weight: var(--fw-semibold); }
+.worktree-hook-title code { padding: 0 var(--sp-6); border-radius: var(--r-4); background: var(--surface-2); color: var(--text-3); font-size: var(--fs-11); }
+.worktree-hook-time { margin-left: auto; color: var(--text-3); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.worktree-hook-track { position: relative; height: 3px; overflow: hidden; border-radius: var(--r-full); background: var(--surface-2); }
+.worktree-hook-track > i { position: absolute; inset: 0; width: 40%; border-radius: inherit; background: var(--accent); animation: omp-sweep var(--loop-drift) var(--ease-loop) infinite; }
+.worktree-hook-summary { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4) var(--sp-6); margin: 0; color: var(--text-3); font-size: var(--fs-11); }
+.worktree-hook-summary code { color: var(--text-2); font-size: var(--fs-11); }
+.worktree-hook-items { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); }
+.worktree-hook-items-label { margin-right: var(--sp-2); color: var(--text-3); font-size: var(--fs-11); }
+.worktree-hook-item { display: inline-flex; align-items: center; gap: var(--sp-4); padding: 1px var(--sp-6); border: 1px solid var(--border-subtle); border-radius: var(--r-full); background: var(--surface-2); color: var(--text-2); font-size: var(--fs-11); }
+.worktree-hook-item[data-kind="skill"] .icon { color: var(--accent); }
+.worktree-hook-item[data-kind="command"] .icon { color: var(--blue); }
+.worktree-hook-warning { margin-top: var(--sp-2); }

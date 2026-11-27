@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState, type CSSProperties, type FormEvent 
 import type { ModelAntigravityReadiness, ModelProviderRoster } from "@omp-studio/studio-protocol";
 import { AppSelect } from "../AppSelect";
 import { Icon } from "../icons";
+import { Callout } from "../workspaces/StatusBits";
 import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { PREVIEW_ANTIGRAVITY_READINESS, previewProviderRoster } from "../preview/modelServicesPreview";
@@ -187,9 +188,9 @@ export function NativeModelAccessPane({ context, auth, visible, selected, onSele
         <small>{tr("暂停与凭据是两回事：重新登录或读取状态都不会解除暂停。", "A pause is separate from credentials: signing in again or refreshing does not lift it.")}</small></span>
       <button className="btn small outline" disabled={!auth.canUnpause || !!auth.busyProvider} onClick={() => setResume(true)}>{tr("恢复使用…", "Resume…")}</button>
     </div> : null}
-    {provider?.loginVariant === "anthropic-year" || selected === "anthropic-long-lived" ? <p className="sec-desc">{tr("请求最长 1 年的推理与账号资料授权，实际到期时间由 Anthropic 决定。与普通 Anthropic 登录共用账号记录，不包含文件上传、Claude.ai 会话和 MCP 连接器权限。", "Request up to one year of inference and profile access; Anthropic decides the actual expiry. Shares the regular Anthropic account record and excludes file uploads, Claude.ai sessions and MCP connectors.")}</p> : null}
-    {provider?.loginVariant === "otari-region" || selected === "otari" ? <p className="sec-desc">{tr("原生登录先选择 US、EU 或自托管端点，再输入工作区密钥。选择的地址用于模型发现和推理；OTARI_BASE_URL 环境变量优先。", "Native sign-in first selects US, EU or a self-hosted endpoint, then requests your workspace key. Discovery and inference use that endpoint; OTARI_BASE_URL takes precedence.")}</p> : null}
-    {selected === "openrouter" ? <p className="sec-desc">{tr("刷新会读取 OpenRouter 当前目录和模型能力；模型仍按当前凭据和提供商配置可用。", "Refresh reads the current OpenRouter catalog and capabilities. Availability follows this credential and provider configuration.")}</p> : null}
+    {provider?.loginVariant === "anthropic-year" || selected === "anthropic-long-lived" ? <Callout className="model-native-hint">{tr("请求最长 1 年的推理与账号资料授权，实际到期时间由 Anthropic 决定。与普通 Anthropic 登录共用账号记录，不包含文件上传、Claude.ai 会话和 MCP 连接器权限。", "Request up to one year of inference and profile access; Anthropic decides the actual expiry. Shares the regular Anthropic account record and excludes file uploads, Claude.ai sessions and MCP connectors.")}</Callout> : null}
+    {provider?.loginVariant === "otari-region" || selected === "otari" ? <Callout className="model-native-hint">{tr("原生登录先选择 US、EU 或自托管端点，再输入工作区密钥。选择的地址用于模型发现和推理；OTARI_BASE_URL 环境变量优先。", "Native sign-in first selects US, EU or a self-hosted endpoint, then requests your workspace key. Discovery and inference use that endpoint; OTARI_BASE_URL takes precedence.")}</Callout> : null}
+    {selected === "openrouter" ? <Callout className="model-native-hint">{tr("刷新会读取 OpenRouter 当前目录和模型能力；模型仍按当前凭据和提供商配置可用。", "Refresh reads the current OpenRouter catalog and capabilities. Availability follows this credential and provider configuration.")}</Callout> : null}
     {provider?.id === ANTIGRAVITY_CLI ? <AntigravityReadiness context={context} visible={visible} zh={zh} /> : null}
     {provider?.loginBehavior === "add-account" && <p className="small muted">{tr("每次登录都会新增一个账号。现有账号继续可用。", "Each sign-in adds an account. Existing accounts stay available.")}</p>}
     {provider?.warning ? <p className="model-native-warning"><Icon name="alert" extra="sm" /><span>{provider.warning}</span></p> : null}

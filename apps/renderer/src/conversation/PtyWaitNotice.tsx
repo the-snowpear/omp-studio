@@ -31,22 +31,30 @@ function PtyWaitRow({ row, client, available, onReveal }: { row: PtyInputWait; c
   const { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   const { preview, marks } = usePreviewMode();
   const [locating, setLocating] = useState(false), [missing, setMissing] = useState(false), [expanded, setExpanded] = useState(false);
-  return <div className="pty-wait-entry"><div className="pty-wait-row">
-        <Icon name="terminal" extra="sm" />
-        <div className="pty-wait-copy">
-          <div className="pty-wait-label" role="status"><strong>{zh ? "终端正在等待输入" : "Console waiting for input"}</strong>
-            {preview && marks ? <span className="chip gray xs">{zh ? "演示" : "Demo"}</span> : null}
-          </div>
-          <code>{row.command}</code>
-          {missing ? <p role="status">{zh ? "对应命令尚未载入当前对话。" : "The source command is not loaded in this conversation yet."}</p> : null}
+  return <div className="pty-wait-entry" data-expanded={expanded || undefined}>
+    <div className="pty-wait-row">
+      <span className="pty-wait-mark" aria-hidden><Icon name="terminal" extra="sm" /></span>
+      <div className="pty-wait-copy">
+        <div className="pty-wait-label" role="status"><strong>{zh ? "终端正在等待输入" : "Console waiting for input"}</strong>
+          {row.ownerAgentId ? <span className="pty-wait-owner">{row.ownerAgentId}</span> : null}
+          {preview && marks ? <span className="chip gray xs">{zh ? "演示" : "Demo"}</span> : null}
         </div>
-        <div className="pty-wait-actions"><button type="button" className="btn small outline" disabled={locating} onClick={async () => {
+        <code className="pty-wait-command" title={row.command}>{row.command}</code>
+        {missing ? <p role="status">{zh ? "对应命令尚未载入当前对话。" : "The source command is not loaded in this conversation yet."}</p> : null}
+      </div>
+      <div className="pty-wait-actions">
+        <button type="button" className="btn small ghost" disabled={locating} onClick={async () => {
           setLocating(true); setMissing(false);
           const found = await onReveal(row.toolCallId, row);
           setMissing(!found); setLocating(false);
         }}>{locating ? zh ? "正在定位…" : "Locating…" : zh ? "查看命令" : "View command"}</button>
-        {row.jobId ? <button type="button" className="btn small primary" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? zh ? "关闭终端" : "Close console" : zh ? "打开终端" : "Open console"}</button> : null}</div>
+        {row.jobId ? <button type="button" className={`btn small ${expanded ? "outline" : "primary"}`} aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
+          <Icon name={expanded ? "chevron-u" : "keyboard"} extra="sm" />{expanded ? zh ? "关闭终端" : "Close console" : zh ? "打开终端" : "Open console"}
+        </button> : null}
       </div>
-      {expanded && row.jobId ? <JobInspector job={{ id: row.jobId, label: row.command, status: "running", generation: row.jobGeneration ?? 0 }} client={client} sessionId={row.sessionId} available={available} onClose={() => setExpanded(false)} embedded presentation="process" scopeKey={`${row.sourceSessionId ?? row.sessionId}:${row.ownerAgentId ?? ""}`} {...(preview ? { previewInspection: previewPtyInspection(row.jobId, row.jobGeneration) } : {})} /> : null}
+    </div>
+    {expanded && row.jobId ? <div className="pty-wait-console">
+      <JobInspector job={{ id: row.jobId, label: row.command, status: "running", generation: row.jobGeneration ?? 0 }} client={client} sessionId={row.sessionId} available={available} onClose={() => setExpanded(false)} embedded presentation="process" scopeKey={`${row.sourceSessionId ?? row.sessionId}:${row.ownerAgentId ?? ""}`} {...(preview ? { previewInspection: previewPtyInspection(row.jobId, row.jobGeneration) } : {})} />
+    </div> : null}
   </div>;
 }

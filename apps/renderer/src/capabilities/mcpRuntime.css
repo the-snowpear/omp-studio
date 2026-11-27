@@ -72,6 +72,18 @@
 .runtime-mcp-note-copy small { color: var(--text-3); font-size: var(--fs-11); line-height: 1.5; }
 .runtime-mcp-note > .btn { flex: none; }
 .runtime-mcp-note-uri { padding: 1px var(--sp-6); border-radius: var(--r-4); background: var(--code-chip-bg); color: var(--code-chip-text); }
+/* Pending authorization: the server is reachable but wants more scopes. */
+.runtime-mcp-note.is-auth { border: 1px solid color-mix(in srgb, var(--amber) 32%, transparent); background: var(--amber-soft); }
+.runtime-mcp-note.is-auth > .icon { color: var(--amber); }
+.runtime-mcp-scopes { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-4); }
+.runtime-mcp-scopes code { padding: 1px var(--sp-6); border-radius: var(--r-4); background: var(--surface); color: var(--text); font-family: var(--font-mono); font-size: var(--fs-11); }
+/* Shared process: the dot follows the daemon-side state. */
+.runtime-mcp-note.is-runtime > .icon { color: var(--text-3); }
+.runtime-mcp-note.is-runtime[data-state="running"] > .icon { color: var(--green); }
+.runtime-mcp-note.is-runtime[data-state="failed"] > .icon { color: var(--red); }
+.runtime-mcp-note.is-runtime[data-state="starting"] > .icon { color: var(--accent); }
+.runtime-mcp-sharing { display: inline-flex; align-items: center; gap: var(--sp-6); margin: var(--sp-2) 0 0; color: var(--text-3); font-size: var(--fs-11); }
+.runtime-mcp-sharing[data-shared] > .icon { color: var(--green); }
 
 @container runtime-catalog (max-width: 760px) {
   .runtime-mcp-columns { display: none; }

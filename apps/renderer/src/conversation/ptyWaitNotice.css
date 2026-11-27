@@ -1,26 +1,80 @@
+/* A console waiting for keyboard input, docked above the composer.
+   It reads as a request for the user, so it borrows the approval palette (amber)
+   and opens its console in place instead of sending the user elsewhere. */
 .pty-wait-notice {
   display: grid;
-  gap: var(--sp-8);
-  margin-bottom: var(--sp-8);
+  gap: var(--sp-6);
   width: 100%;
   max-width: var(--conversation-width);
-  margin-inline: auto;
+  margin: 0 auto var(--sp-8);
+}
+.pty-wait-entry {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--amber) 34%, var(--border));
+  border-radius: var(--r-10);
+  background: color-mix(in srgb, var(--amber) 5%, var(--surface));
+  box-shadow: var(--shadow-sm);
+  animation: var(--motion-reveal);
 }
 .pty-wait-row {
   display: flex;
   align-items: center;
   gap: var(--sp-10);
-  padding: var(--sp-10) var(--sp-12);
-  border-inline-start: 2px solid var(--amber);
-  border-radius: var(--r-6);
-  background: color-mix(in srgb, var(--amber) 6%, var(--surface));
+  padding: var(--sp-8) var(--sp-8) var(--sp-8) var(--sp-10);
 }
-.pty-wait-row > .icon { flex: none; color: var(--amber); }
-.pty-wait-copy { flex: 1; min-width: 0; }
-.pty-wait-label { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-6); color: var(--text-2); font-size: var(--fs-12); }
-.pty-wait-label strong { font-weight: var(--fw-medium); }
-.pty-wait-copy code { display: block; margin-top: var(--sp-4); font-size: var(--fs-11); color: var(--text-3); overflow-wrap: anywhere; }
-.pty-wait-copy p { margin: var(--sp-4) 0 0; font-size: var(--fs-11); color: var(--text-3); }
-.pty-wait-row > button { flex: none; }
-.pty-wait-actions { display: flex; flex-wrap: wrap; gap: var(--sp-6); justify-content: flex-end; }
-.pty-wait-entry > .job-inspector { margin: var(--sp-8) 0 0; max-height: 300px; overflow: auto; }
+.pty-wait-mark {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-8);
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+.pty-wait-mark::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--surface);
+  border-radius: var(--r-full);
+  background: var(--amber);
+  animation: omp-pulse var(--loop-pulse) var(--ease-loop) infinite;
+}
+.pty-wait-copy { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.pty-wait-label { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-6); color: var(--text); font-size: var(--fs-12); }
+.pty-wait-label strong { font-weight: var(--fw-semibold); }
+.pty-wait-owner { padding: 0 var(--sp-6); border-radius: var(--r-4); background: var(--surface-2); color: var(--text-3); font-size: var(--fs-11); }
+.pty-wait-command {
+  overflow: hidden;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pty-wait-command::before { content: "$ "; color: var(--text-faint); }
+.pty-wait-copy p { margin: var(--sp-2) 0 0; color: var(--amber); font-size: var(--fs-11); }
+.pty-wait-actions { display: flex; flex: none; align-items: center; gap: var(--sp-4); }
+
+/* The console opens inside the same card, under a hairline. */
+.pty-wait-console {
+  padding: 0 var(--sp-8) var(--sp-8);
+  border-top: 1px solid color-mix(in srgb, var(--amber) 22%, var(--border));
+  background: var(--surface);
+  animation: var(--motion-unfold);
+}
+.pty-wait-console > .job-inspector { margin: var(--sp-8) 0 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.pty-wait-console .ji-process-terminal { height: clamp(7em, 22vh, 14em); }
+/* The card header already names the command. */
+.pty-wait-console .ji-process-command { display: none; }
+
+@container (max-width: 480px) {
+  .pty-wait-row { flex-wrap: wrap; }
+  .pty-wait-actions { width: 100%; justify-content: flex-end; }
+}

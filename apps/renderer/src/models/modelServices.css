@@ -118,3 +118,4 @@
 .model-template-inspection summary { cursor: pointer; font-size: var(--fs-12); padding-block: var(--sp-6); color: var(--text-2); }
 .model-template-inspection pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; max-height: 320px; padding: var(--sp-12); background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--r-6); font-family: var(--font-mono); font-size: var(--fs-12); }
 @media (max-width: 700px) { .model-template-layout.is-editing { grid-template-columns: minmax(0, 1fr); } }
+.model-native-hint { margin: var(--sp-8) 0; }

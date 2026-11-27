@@ -33,6 +33,26 @@
   overflow-wrap: anywhere;
 }
 .agent-model-details .amd-refresh { align-self: flex-start; }
-.agent-model-details .amd-controls { display: grid; gap: var(--sp-8); padding-block: var(--sp-12); border-block: 1px solid var(--border); }
-.agent-model-details .amd-controls label { display: grid; gap: var(--sp-6); color: var(--text-3); font-size: var(--fs-11); }
-.agent-model-details .amd-controls p { margin: 0; }
+/* Live switch: the only writable part of this fold, so it sits in its own panel. */
+.agent-model-details .amd-controls {
+  display: grid;
+  gap: var(--sp-8);
+  padding: var(--sp-10) var(--sp-12);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--r-8);
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+  container-type: inline-size;
+}
+.agent-model-details .amd-controls-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8); min-height: 18px; }
+.agent-model-details .amd-controls-title { display: inline-flex; align-items: center; gap: var(--sp-6); color: var(--accent); font-size: var(--fs-11); font-weight: var(--fw-semibold); }
+.agent-model-details .amd-controls-state { display: inline-flex; align-items: center; gap: var(--sp-6); color: var(--text-3); font-size: var(--fs-11); animation: var(--motion-fade); }
+.agent-model-details .amd-spinner { width: 10px; height: 10px; border: 1.5px solid color-mix(in srgb, currentColor 25%, transparent); border-top-color: currentColor; border-radius: var(--r-full); animation: omp-spin var(--loop-spin) linear infinite; }
+.agent-model-details .amd-controls-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--sp-8); }
+.agent-model-details .amd-controls-fields:has(> .amd-field:only-child) { grid-template-columns: minmax(0, 1fr); }
+.agent-model-details .amd-field { display: grid; gap: var(--sp-4); min-width: 0; color: var(--text-3); font-size: var(--fs-11); font-weight: var(--fw-medium); }
+.agent-model-details .amd-field .select { width: 100%; min-width: 0; }
+.agent-model-details .amd-controls-hint { display: flex; align-items: flex-start; gap: var(--sp-6); margin: 0; color: var(--text-3); font-size: var(--fs-11); line-height: 1.5; }
+.agent-model-details .amd-controls-hint .icon { flex: none; margin-top: 2px; }
+@container (max-width: 300px) {
+  .agent-model-details .amd-controls-fields { grid-template-columns: minmax(0, 1fr); }
+}
