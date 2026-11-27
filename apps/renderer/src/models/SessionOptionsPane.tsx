@@ -189,7 +189,8 @@ export function SessionOptionsPane({
               ? {
                   ...value,
                   selected: change.speed,
-                  fastActive: change.speed === "fast",
+                  fastActive: change.speed === "fast" || change.speed === "ultrafast",
+                  fastStatus: change.speed === "fast" || change.speed === "ultrafast" ? "active" : "off",
                   slowEnabled: change.speed === "slow",
                 }
               : value,
@@ -332,13 +333,8 @@ export function SessionOptionsPane({
             ) : null}
           </div>
         ) : null}
-        {speed?.selected === "fast" && !speed.fastActive ? (
-          <p role="status">
-            {zh
-              ? "已选择 Fast，当前请求未启用加速。"
-              : "Fast is selected but is not active for the current request."}
-          </p>
-        ) : null}
+        {speed?.fastAccounts ? <p className="small muted">{zh ? `当前模型：${speed.fastAccounts.eligible} / ${speed.fastAccounts.total} 个凭据声明支持加速` : `This model: ${speed.fastAccounts.eligible} / ${speed.fastAccounts.total} credentials advertise fast service`}</p> : null}
+        {speed && (speed.fastStatus === "credential-unavailable" || speed.fastStatus === "provider-fallback") ? <p role="status">{speed.fastStatus === "provider-fallback" ? (zh ? "供应商拒绝加速后已回退普通速度。资格恢复后可重新启用 Fast。" : "The provider declined fast service, so requests use normal speed. Re-enable Fast after eligibility is restored.") : (zh ? "当前凭据未提供加速，已按普通速度执行。Runtime 会在可用凭据恢复后自动使用加速。" : "The current credential is not offering fast service. Requests use normal speed; the Runtime resumes fast service when eligible credentials return.")} <button className="btn small outline" disabled={busy || !supports("session.speed.set") || !speed.model} onClick={() => setConfirm({ speed: speed.selected === "ultrafast" ? "ultrafast" : "fast", expectedModel: speed.model! })}>{zh ? "重新启用加速" : "Re-enable fast service"}</button></p> : null}
       </section>
       <section className="session-options-card">
         <h3>{zh ? "缓存保温" : "Cache warming"}</h3>

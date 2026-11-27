@@ -15,6 +15,7 @@ import { I18nProvider } from "../i18n";
 import { PreviewModeProvider } from "../preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
 import { AgentModelDetails } from "./AgentModelDetails";
+import { selectOption } from "../test/selectOption";
 afterEach(() => {
   cleanup();
   localStorage.clear();
@@ -65,6 +66,22 @@ it("uses the shared preview display without reading native agent state", async (
   fireEvent.click(
     screen.getByRole("button", { name: "Refresh model details" }),
   );
+  expect(client.command).not.toHaveBeenCalled();
+});
+it("keeps a preview hot-switched model and effort through zh → en → zh", async () => {
+  localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "1");
+  const client = { command: vi.fn() } as unknown as StudioClient;
+  const content = (language: "zh" | "en") => <I18nProvider forcedLanguage={language}><PreviewModeProvider switchEnabled><AgentModelDetails client={client} sessionId="main" agentId="child" available running={false} /></PreviewModeProvider></I18nProvider>;
+  const mounted = render(content("zh"));
+  fireEvent.click(mounted.container.querySelector("summary")!);
+  selectOption(await screen.findByRole("combobox", { name: "切换模型" }), /GPT-5/);
+  selectOption(screen.getByRole("combobox", { name: "思考档位" }), "low");
+  mounted.rerender(content("en"));
+  await waitFor(() => expect(screen.getByRole("combobox", { name: "Change model" }).textContent).toContain("GPT-5"));
+  expect(screen.getByRole("combobox", { name: "Thinking effort" }).textContent).toBe("low");
+  mounted.rerender(content("zh"));
+  expect(screen.getByRole("combobox", { name: "切换模型" }).textContent).toContain("GPT-5");
+  expect(screen.getByRole("combobox", { name: "思考档位" }).textContent).toBe("low");
   expect(client.command).not.toHaveBeenCalled();
 });
 it("ignores a late model inspection after changing the selected agent", async () => {

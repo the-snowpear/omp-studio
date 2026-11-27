@@ -265,6 +265,13 @@ const BOOTSTRAP: ClientBootstrap = {
 };
 
 const QUERY_INPUTS = {
+ "archive.search": { sessionId: SESSION_ID, scope: "workspace", query: "queue" },
+ "archive.transcript.read": { sessionId: SESSION_ID, targetSessionId: SESSION_ID },
+ "archive.calls.list": { sessionId: SESSION_ID, scope: "workspace" },
+ "archive.messages.grep": { sessionId: SESSION_ID, scope: "workspace", pattern: "queue" },
+ "archive.stats.read": { sessionId: SESSION_ID, scope: "workspace", by: "tool" },
+ "browser.relayHost.status": { sessionId: SESSION_ID },
+
   "commit.draft.prepare": { sessionId: SESSION_ID },
   "commit.draft.read": { sessionId: SESSION_ID, draftId: "draft-fixture", revision: 1 },
   "commit.draft.preview": { sessionId: SESSION_ID, draftId: "draft-fixture", revision: 1 },
@@ -375,6 +382,13 @@ const QUERY_INPUTS = {
 } satisfies { readonly [K in QueryName]: QueryInput<K> };
 
 const QUERY_RESPONSES = {
+ "archive.search": { ok: false, queryName: "archive.search", error: { code: "CAPABILITY_UNAVAILABLE", message: "No Runtime for this contract fixture" } },
+ "archive.transcript.read": { ok: false, queryName: "archive.transcript.read", error: { code: "CAPABILITY_UNAVAILABLE", message: "No Runtime for this contract fixture" } },
+ "archive.calls.list": { ok: false, queryName: "archive.calls.list", error: { code: "CAPABILITY_UNAVAILABLE", message: "No Runtime for this contract fixture" } },
+ "archive.messages.grep": { ok: false, queryName: "archive.messages.grep", error: { code: "CAPABILITY_UNAVAILABLE", message: "No Runtime for this contract fixture" } },
+ "archive.stats.read": { ok: false, queryName: "archive.stats.read", error: { code: "CAPABILITY_UNAVAILABLE", message: "No Runtime for this contract fixture" } },
+ "browser.relayHost.status": { ok: false, queryName: "browser.relayHost.status", error: { code: "CAPABILITY_UNAVAILABLE", message: "No Runtime for this contract fixture" } },
+
   "commit.draft.prepare": { ok: false, queryName: "commit.draft.prepare", error: { code: "CAPABILITY_UNAVAILABLE", message: "No native commit journal in this contract fixture" } },
   "commit.draft.read": { ok: false, queryName: "commit.draft.read", error: { code: "CAPABILITY_UNAVAILABLE", message: "No prepared commit draft in this contract fixture" } },
   "commit.draft.preview": { ok: false, queryName: "commit.draft.preview", error: { code: "CAPABILITY_UNAVAILABLE", message: "No prepared commit draft in this contract fixture" } },

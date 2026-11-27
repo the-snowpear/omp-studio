@@ -189,6 +189,10 @@ export interface OperatorStateSnapshot {
    * resume it: the turn is waiting on background jobs, not finished.
    */
   awaitingAsyncWork?: boolean;
+  /** Native interactive consoles currently waiting for keyboard input. */
+  ptyInputWaits?: Array<{ sessionId: string; toolCallId: string; command: string; pid?: number; waiting: boolean; notify: boolean }>;
+  /** Unresolved tool approval records persisted by the session. */
+  waitingForApproval?: boolean;
   /**
    * How the last turn on the active branch ended, read from the tail assistant
    * message's `stopReason`. `interrupted` means it stopped without a final

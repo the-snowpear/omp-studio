@@ -1,3 +1,4 @@
+import { ArchiveActivityPane } from "../history/ArchiveExplorer";
 import { useExecutionTarget } from "../workspaces/ExecutionTargets";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
@@ -102,6 +103,7 @@ export function EvaluationPage({
     descriptions = evaluationDescriptions(zh);
   const [tab, setTab] = useState<EvaluationKind>(() => intent?.kind ?? "benchmark"),
     [context, setContext] = useState<EvaluationContext>();
+  const [archiveActivity, setArchiveActivity] = useState(false);
   const [records, setRecords] = useState<EvaluationRecord[]>([]),
     [selected, setSelected] = useState<string | undefined>(() => intent?.id);
   const [record, setRecord] = useState<ViewRecord>(),
@@ -572,6 +574,7 @@ export function EvaluationPage({
             <p>{descriptions[tab]}</p>
           </div>
           <div className="eval-header-actions">
+            <button className="btn outline" aria-pressed={archiveActivity} onClick={() => setArchiveActivity(value => !value)}>{t("归档调用分析", "Archive call analysis")}</button>
             <button
               className="btn outline"
               onClick={() => {
@@ -593,6 +596,7 @@ export function EvaluationPage({
             </button>
           </div>
         </header>
+        {archiveActivity ? <ArchiveActivityPane client={client} sessionId={sessionId} scope="workspace" active available={context?.available === true} /> : null}
         {error ? (
           <div className="eval-message error" role="alert">
             {error}

@@ -155,11 +155,14 @@ function AssistantStatus({ status }: { status: Extract<TimelineRow, { type: "ass
 }
 
 function ProviderErrorDetail({ error }: { error: ConversationMessageError }) {
+  const { resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const meta = [error.status !== undefined ? String(error.status) : undefined, error.provider, error.model]
     .filter((part): part is string => part !== undefined && part.length > 0)
     .join(" · ");
   return (
     <div className="ev-provider-error">
+      {error.source === "agentLoop" ? <div className="chip amber xs">{zh ? "Agent 执行流程错误" : "Agent loop error"}</div> : null}
       {meta ? <div className="muted small">{meta}</div> : null}
       <p className="ev-provider-error-text">{error.message}</p>
     </div>

@@ -1,10 +1,9 @@
+import type { ChromeRelayHostOperation } from "../chrome-relay-host-protocol";
+import { isArchiveQueryKind, type ArchiveQueryOperation } from "../archive-protocol";
+import { StudioArchiveService } from "./archive-service";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import { isShellTrace, type ShellTrace } from "@oh-my-pi/pi-wire/shell-trace";
-import {
-	defaultShellVizPreferences,
-	readShellPresentation,
-	shellVisualization,
-} from "@oh-my-pi/pi-tui/tools/shell-viz";
+import { defaultShellVizPreferences, readShellPresentation, shellVisualization } from "../../tools/shell-viz";
 import type { AgentSession } from "../../session/agent-session";
 import { SessionManager } from "../../session/session-manager";
 import { probeSessionLeases } from "../../session/session-storage";
@@ -29,6 +28,9 @@ import { ownedStudioAgent } from "./owned-sessions";
 import { SessionControlError } from "./session-control-service";
 import { studioLinkTarget } from "./extension-links-service";
 import { managedBrowserFor } from "./managed-browser-service";
+import { inspectStudioJob } from "./job-inspect";
+import { readStudioPtyInputWaits } from "./job-inspect";
+import type { JobInspection } from "../runtime-features-protocol";
 import { readStudioTaskOptions } from "./task-options-service";
 import { readStudioAgentMessages } from "./agent-messages-service";
 
@@ -39,6 +41,9 @@ function shellKey(operation: Pick<ShellRead, "sessionId" | "sourceSessionId" | "
 
 /** Reads native state and negotiates media without recording transient payloads. */
 export class StudioRuntimeViews {
+	relayHostReader?: (
+		operation: Extract<ChromeRelayHostOperation, { kind: "browser.relayHost.status" }>,
+	) => Promise<unknown>;
 	commitReader?: (
 		operation: Extract<SelectiveCommitOperation, { kind: keyof SelectiveCommitQueryInputMap }>,
 	) => Promise<unknown>;
@@ -80,6 +85,8 @@ export class StudioRuntimeViews {
 	async execute(operation: RuntimeViewOperation): Promise<unknown> {
 		if (operation.sessionId !== this.session.sessionId)
 			throw new SessionControlError("COMMAND_BLOCKED", "The Runtime view belongs to another session");
+		if (isArchiveQueryKind(operation.kind))
+			return new StudioArchiveService(this.session).execute(operation as ArchiveQueryOperation);
 		if (isSelectiveCommitKind(operation.kind)) {
 			if (!this.commitReader)
 				throw new SessionControlError("CAPABILITY_UNAVAILABLE", "Selective commit is unavailable");
@@ -100,6 +107,8 @@ export class StudioRuntimeViews {
 			);
 		}
 		switch (operation.kind) {
+			case "browser.relayHost.status":
+				return this.relayHostReader!(operation);
 			case "runtime.close.confirm":
 				return this.#confirmClose();
 			case "interaction.form.read":
@@ -157,9 +166,12 @@ export class StudioRuntimeViews {
 						: undefined;
 				let details =
 					update?.partialResult?.details ?? (result?.role === "toolResult" ? result.details : undefined);
+				let outputInspection: JobInspection | undefined;
 				if (useLive && isRecord(details) && isRecord(details.async) && typeof details.async.jobId === "string") {
 					const job = this.session.asyncJobManager?.getJob(details.async.jobId);
 					if (job?.latestDetails) details = job.latestDetails;
+					if (job)
+						outputInspection = await inspectStudioJob(this.session, job.id, operation.preferences?.streamId);
 				}
 				const liveTrace = isRecord(details) ? details.trace : undefined;
 				let trace: ShellTrace | undefined;
@@ -179,7 +191,23 @@ export class StudioRuntimeViews {
 					operation.preferences ?? defaultShellVizPreferences(),
 					trace,
 				);
-				return { available: true, presentation };
+				return {
+					available: true,
+					presentation: {
+						...presentation,
+						...(outputInspection?.streams ? { streams: outputInspection.streams } : {}),
+						...(outputInspection?.selectedStreamId
+							? {
+									selectedStreamId: outputInspection.selectedStreamId,
+									output: outputInspection.output ?? "",
+									binary: outputInspection.binary,
+								}
+							: {}),
+						waitingForInput: readStudioPtyInputWaits(this.session).some(
+							wait => wait.toolCallId === operation.toolCallId,
+						),
+					},
+				};
 			}
 		}
 	}

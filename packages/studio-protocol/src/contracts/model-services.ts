@@ -48,6 +48,8 @@ export interface ModelAuthProvider {
   kind: "api-key" | "oauth";
   credentials: Array<{ id: number; label: string; type: "api_key" | "oauth" }>;
   loginBehavior?: "add-account" | "replace";
+  credentialProvider?: string;
+  loginVariant?: "anthropic-year" | "otari-region";
   warning?: string;
   paused?: boolean;
   pauseReason?: string;
@@ -91,6 +93,7 @@ export interface ModelRosterEntry extends RuntimeModelChoice {
   api: string;
   source?: "registry";
   providerType?: string;
+  transport?: "pi-native";
   tools?: boolean;
   input?: readonly ("text" | "image")[];
   supportsComputerUse?: boolean;

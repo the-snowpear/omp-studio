@@ -70,7 +70,7 @@ export function getModelPresets(zh = isZh()): ReadonlyArray<ModelPresetGroup> {
       group: zh ? "Gateway / 聚合" : "Gateway / Aggregators",
       items: [
         { id: "commandcode", name: "Command Code", desc: zh ? "原生 OpenAI / Anthropic 路由" : "Native OpenAI / Anthropic routing", api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.commandcode.ai/provider/v1" },
-        { id: "openrouter", name: "OpenRouter", desc: zh ? "一个 Key 访问多家模型" : "Access multiple providers with one key", api: "openai-completions", auth: ["api-key"], popular: true, endpoint: "https://openrouter.ai/api/v1" },
+        { id: "openrouter", name: "OpenRouter", desc: zh ? "一个 Key 访问多家模型" : "Access multiple providers with one key", api: "openrouter", auth: ["api-key"], popular: true, endpoint: "https://openrouter.ai/api/v1" },
         { id: "github-copilot", name: "GitHub Copilot", desc: zh ? "Copilot 订阅额度" : "Copilot subscription quota", api: "openai-responses", auth: ["oauth"], oauth: true },
         { id: "litellm", name: "LiteLLM", desc: zh ? "自托管统一模型代理" : "Self-hosted unified model proxy", api: "openai-completions", auth: ["api-key", "env"], endpoint: "http://localhost:4000/v1", discovery: "litellm" },
       ],
@@ -98,6 +98,7 @@ export function getModelPresets(zh = isZh()): ReadonlyArray<ModelPresetGroup> {
 export const MODEL_PRESETS: ReadonlyArray<ModelPresetGroup> = getModelPresets();
 
 export const MODEL_API_TYPES: ReadonlyArray<{ id: ModelApiKind | string; label: string }> = [
+  { id: "openrouter", label: "OpenRouter" },
   { id: "openai-completions", label: "OpenAI Completions" },
   { id: "openai-responses", label: "OpenAI Responses" },
   { id: "openai-codex-responses", label: "OpenAI Codex Responses" },
@@ -163,7 +164,7 @@ export function createPreviewModelConfig(zh = isZh()): ModelConfigReadModel {
     }),
     provider({
       id: "openrouter", name: "OpenRouter", source: "builtin", status: "not-authenticated",
-      statusDetail: zh ? "尚未配置凭据" : "Credentials not configured", api: "openai-completions",
+      statusDetail: zh ? "尚未配置凭据" : "Credentials not configured", api: "openrouter",
       endpointUrl: "https://openrouter.ai/api/v1", local: false, enabled: true,
       auth: { type: "api-key", hasSecret: false },
       models: [m("auto", "OpenRouter Auto", 200000, 32000, { img: true, reason: true, status: "unavailable" })],

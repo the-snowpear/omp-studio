@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { StudioClient } from "@omp-studio/client-contract";
 import type { McpRuntimeStatus, PromptTemplateRow } from "@omp-studio/studio-protocol";
@@ -111,4 +111,60 @@ it("shows an honest unavailable state when no active Runtime is connected", () =
   expect(screen.queryByRole("button", { name: /review-change/u })).toBeNull();
   expect(screen.queryByRole("article", { name: "filesystem" })).toBeNull();
   expect(client.command).not.toHaveBeenCalled();
+});
+
+
+it("preserves an authorized preview server across live Chinese and English switching", async () => {
+  localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "1");
+  const client = { command: vi.fn() } as unknown as StudioClient;
+  const view = (language: "zh" | "en") => <I18nProvider forcedLanguage={language}><PreviewModeProvider switchEnabled><McpRuntimePane client={client} available={false} /></PreviewModeProvider></I18nProvider>;
+  const mounted = render(view("zh"));
+  expect(await screen.findByText(/3 个会话绑定 · 运行中/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "重新授权 docs" }));
+  expect(within(screen.getByRole("article", { name: "docs" })).queryByText("需要补充授权范围")).toBeNull();
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "docs" } });
+  mounted.rerender(view("en"));
+  expect(screen.getByRole("searchbox")).toHaveProperty("value", "docs");
+  expect(within(screen.getByRole("article", { name: "docs" })).getByText("Tools ready")).toBeTruthy();
+  expect(screen.queryByText("Additional scopes required")).toBeNull();
+  mounted.rerender(view("zh"));
+  expect(within(screen.getByRole("article", { name: "docs" })).getByText("工具就绪")).toBeTruthy();
+  expect(client.command).not.toHaveBeenCalled();
+});
+
+
+it("refreshes localized Runtime status immediately and ignores late reads while preserving search and filters", async () => {
+  localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
+  let language: "zh" | "en" = "zh", delayNext = false;
+  let completeOld: ((value: McpRuntimeStatus) => void) | undefined;
+  const status = (zh: boolean): McpRuntimeStatus => ({ available: true, ready: false, settled: true, total: 1, startupTimeoutMs: 0, servers: [{
+    name: "docs", state: "failed", transport: "http", tools: 1,
+    error: zh ? "文档连接需要重新授权" : "The documentation connection needs re-authorization",
+    toolInfo: [{ name: "mcp_docs_read", mcpServerName: "docs", mcpToolName: "read", description: zh ? "读取项目文档" : "Read project documentation" }],
+  }] });
+  const { client, command } = nativeClient(() => {
+    if (delayNext) { delayNext = false; return new Promise<McpRuntimeStatus>(resolve => { completeOld = resolve; }); }
+    return status(language === "zh");
+  });
+  const view = () => <I18nProvider forcedLanguage={language}><PreviewModeProvider switchEnabled><McpRuntimePane client={client} sessionId="session" available /></PreviewModeProvider></I18nProvider>;
+  const mounted = render(view());
+  await screen.findByText("文档连接需要重新授权");
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "docs" } });
+  fireEvent.click(screen.getByRole("button", { name: /需关注/ }));
+  fireEvent.click(screen.getByRole("button", { name: "查看 docs 的工具" }));
+  delayNext = true;
+  fireEvent.click(screen.getByRole("button", { name: "刷新连接状态" }));
+  await waitFor(() => expect(completeOld).toBeDefined());
+  language = "en"; mounted.rerender(view());
+  await screen.findByText("The documentation connection needs re-authorization");
+  expect(screen.getByText("Read project documentation")).toBeTruthy();
+  expect(screen.getByRole("searchbox")).toHaveProperty("value", "docs");
+  expect(screen.getByRole("button", { name: /Attention/ }).getAttribute("aria-pressed")).toBe("true");
+  await act(async () => { completeOld!(status(true)); });
+  expect(screen.queryByText("文档连接需要重新授权")).toBeNull();
+  language = "zh"; mounted.rerender(view());
+  await screen.findByText("文档连接需要重新授权");
+  expect(screen.getByText("读取项目文档")).toBeTruthy();
+  expect(screen.getByRole("searchbox")).toHaveProperty("value", "docs");
+  expect(command.mock.calls.filter(([kind]) => kind === "mcp.runtime.status")).toHaveLength(4);
 });

@@ -1,5 +1,6 @@
+import { ArchiveActivityPane } from "./ArchiveExplorer";
 import { selectOption } from "../test/selectOption";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { StudioClient } from "@omp-studio/client-contract";
 import { I18nProvider } from "../i18n";
@@ -69,4 +70,21 @@ it("does not query unsupported or disconnected runtimes", () => {
       .disabled,
   ).toBe(true);
   expect(client.command).not.toHaveBeenCalled();
+});
+
+
+it("switching away from a pending statistics read leaves transcript search usable", async () => {
+  let resolveStats!: (value: unknown) => void;
+  const stats = new Promise(resolve => { resolveStats = resolve; });
+  const query = vi.fn((kind: string) => kind === "archive.stats.read" ? stats : Promise.resolve({ rows: [], truncated: false }));
+  const client = { query } as unknown as StudioClient;
+  render(<I18nProvider forcedLanguage="en"><PreviewModeProvider switchEnabled><ArchiveActivityPane client={client} sessionId="s" scope="workspace" active available /></PreviewModeProvider></I18nProvider>);
+  expect(screen.getByRole("status").textContent).toContain("Loading");
+  selectOption(screen.getByRole("combobox", { name: "View" }), "Transcript regex search");
+  expect((screen.getByRole("button", { name: "Search" }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.change(screen.getByRole("textbox", { name: "Regular expression" }), { target: { value: "failure" } });
+  fireEvent.click(screen.getByRole("button", { name: "Search" }));
+  await act(async () => { resolveStats({ rows: [{ key: "late", calls: 2, errors: 0 }], truncated: false }); });
+  expect(query).toHaveBeenCalledWith("archive.messages.grep", { sessionId: "s", scope: "workspace", subagents: true, pattern: "failure" });
+  expect(screen.queryByText("late")).toBeNull();
 });

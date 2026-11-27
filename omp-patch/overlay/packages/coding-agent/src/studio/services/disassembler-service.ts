@@ -1,3 +1,4 @@
+import { cfgBinjaInstallDir, cfgBinjaPython } from "../../binja/settings";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -38,7 +39,7 @@ type Review = { edit: DisassemblerEdit; expiresAt: number } & (
 	| { binding: Binding }
 	| { file: string; fingerprint: string; arch?: string }
 );
-const engines = ["ida", "ghidra"] as const;
+const engines = ["ida", "ghidra", "binja"] as const;
 
 function workerBinding(db: DisasmDatabase, signal?: AbortSignal): Promise<Binding> {
 	return db.request("studio", { method: "status" }, { timeoutMs: 5000, signal });
@@ -139,7 +140,7 @@ export class StudioDisassemblerService {
 			return { state: (await isGhidraInstall(install)) ? "unknown" : "unavailable", detail: install };
 		}
 		try {
-			const worker = await resolveWorkerRuntime(this.#tool(), "ida");
+			const worker = await resolveWorkerRuntime(this.#tool(), backend);
 			return { state: "ready", detail: worker.pythonPath };
 		} catch (error) {
 			return { state: "unavailable", detail: error instanceof Error ? error.message : String(error) };
@@ -148,17 +149,22 @@ export class StudioDisassemblerService {
 
 	async #status(): Promise<DisassemblerStatus> {
 		const { settings } = this.session;
-		const activeBackend = cfgDisasmBackend.get(settings);
-		const [ida, ghidra, ...rows] = await Promise.all([
+		const rawActiveBackend = cfgDisasmBackend.get(settings);
+		const activeBackend: DisassemblerEngine | undefined =
+			rawActiveBackend === "ida" || rawActiveBackend === "ghidra" || rawActiveBackend === "binja"
+				? rawActiveBackend
+				: undefined;
+		const [ida, ghidra, binja, ...rows] = await Promise.all([
 			this.#backendStatus("ida"),
 			this.#backendStatus("ghidra"),
+			this.#backendStatus("binja"),
 			...engines.map(async engine => {
 				const databases = await listDatabases(engine);
 				return Promise.all(databases.map(db => this.#project(db, engine)));
 			}),
 		]);
 		const databases = rows.flat();
-		const backends = { ida, ghidra };
+		const backends = { ida, ghidra, binja };
 		if (
 			ghidra.state === "unknown" &&
 			databases.some(database => database.backend === "ghidra" && database.state === "open")
@@ -169,6 +175,8 @@ export class StudioDisassemblerService {
 			backend: cfgDisassembler.get(settings),
 			maxOpen: cfgDisasmMaxOpen.get(settings),
 			idleCloseSec: cfgDisasmIdleCloseSec.get(settings),
+			binjaInstallDir: cfgBinjaInstallDir.get(settings),
+			binjaPython: cfgBinjaPython.get(settings),
 			activeBackend,
 			backends,
 			available,
@@ -178,7 +186,7 @@ export class StudioDisassemblerService {
 
 	async #open(file: string, arch: string | undefined, signal: AbortSignal) {
 		const backend = cfgDisasmBackend.get(this.session.settings);
-		if (!backend)
+		if (backend !== "ida" && backend !== "ghidra" && backend !== "binja")
 			throw new Error(
 				runtimeText("当前配置只允许读取头部元数据", "The current configuration permits header metadata only"),
 			);
@@ -222,6 +230,8 @@ export class StudioDisassemblerService {
 			case "disassembler.configure": {
 				if (this.running) throw new Error(runtimeText("请先停止当前分析", "Stop the current analysis first"));
 				const { settings } = this.session;
+				if (op.binjaInstallDir !== undefined) cfgBinjaInstallDir.set(settings, op.binjaInstallDir);
+				if (op.binjaPython !== undefined) cfgBinjaPython.set(settings, op.binjaPython);
 				cfgDisassembler.set(settings, op.backend);
 				cfgDisasmMaxOpen.set(settings, op.maxOpen);
 				cfgDisasmIdleCloseSec.set(settings, op.idleCloseSec);

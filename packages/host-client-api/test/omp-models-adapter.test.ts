@@ -1789,3 +1789,24 @@ test("cached model metadata survives catalog round trips without copying private
  assert.deepEqual(roundtrip.serviceTiers, ["priority", "ultrafast"]); assert.deepEqual(roundtrip.promptCache, { short: 300, long: 3600 }); assert.deepEqual(roundtrip.promptCacheConfig, {});
  assert.deepEqual(roundtrip.compatibility, { preferWebsockets: true, useResponsesLite: true, toolMode: "code_mode_only" }); assert.equal(JSON.stringify(roundtrip).includes("private-secret"), false);
 });
+
+
+test("OpenRouter uses its native catalog API and pi-native discovery keeps provider identities and limits", async () => {
+  assert.deepEqual(modelListRequest("https://openrouter.ai/api/v1", "openrouter", "test-key").urls, ["https://openrouter.ai/api/v1/models"]);
+  const directory = await mkdtemp(join(tmpdir(), "omp-gateway-discovery-"));
+  const calls: Array<{ url: string; authorization: string | null }> = [];
+  const service = createOmpModelsService({ agentDir: directory, fetch: async (url, init) => {
+    calls.push({ url: String(url), authorization: new Headers(init?.headers).get("Authorization") });
+    return new Response(JSON.stringify({ models: [
+      { provider: "gateway", id: "model-id", name: "Readable title", api: "anthropic-messages", reasoning: true, thinking: { mode: "effort", efforts: ["low", "high"], defaultLevel: "high" }, input: ["text", "image"], contextWindow: 131072, maxTokens: 8192 },
+      { provider: "another", id: "private-id", name: "Another provider", api: "openai-responses", input: ["text"] },
+    ] }), { status: 200 });
+  } });
+  try {
+    const result = await service.probeProvider({ providerId: "gateway", transport: "pi-native", api: "anthropic-messages", endpointUrl: "https://gateway.invalid", apiKey: "gateway-test" });
+    assert.equal(result.ok, true);
+    assert.deepEqual(calls, [{ url: "https://gateway.invalid/v1/pi/models", authorization: "Bearer gateway-test" }]);
+    assert.equal(result.models.length, 1);
+    assert.deepEqual(result.models[0], { id: "model-id", name: "Readable title", api: "anthropic-messages", reasoning: true, thinkingConfig: { mode: "effort", efforts: ["low", "high"], defaultLevel: "high" }, image: true, contextWindow: 131072, maxTokens: 8192 });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});

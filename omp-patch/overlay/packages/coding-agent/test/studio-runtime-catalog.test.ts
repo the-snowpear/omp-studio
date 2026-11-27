@@ -87,7 +87,7 @@ it("reports native startup readiness without connecting, probing or exposing cre
 	expect(result.settled).toBe(false);
 	expect(result.servers.find(row => row.name === "ready")).toMatchObject({
 		name: "ready",
-		evalNamespaceUri: "xd://eval/ready",
+		evalNamespaceUri: "help://eval/ready",
 		state: "ready",
 		tools: 1,
 		transport: "stdio",

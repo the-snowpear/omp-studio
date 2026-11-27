@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -20,6 +20,46 @@ async function sessionFile(
   await writeFile(path, `${JSON.stringify(header)}\n${JSON.stringify({ type: "message", message: { role: "user", content: "secret body" } })}\n`);
   return path;
 }
+
+test("catalog keeps persisted approval waits beyond the title prefix and clears nested waits on parent repair", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-studio-catalog-approval-"));
+  const file = join(root, "approval.jsonl");
+  const records = [
+    { type: "session", id: "waiting", cwd: root, studioOrigin: "studio-host" },
+    { type: "title", title: "Awaiting approval" },
+    { type: "message", id: "user", parentId: null, message: { role: "user", content: "x".repeat(70000) } },
+    { type: "custom", id: "ask", parentId: "user", customType: "tool_approval_requested", data: { toolCallId: "nested", parentToolCallId: "eval" } },
+  ];
+  await writeFile(file, records.map(row => JSON.stringify(row)).join("\n") + "\n");
+  const options = { sessionsRoot: root, archiveRoot: join(root, "missing"), prefixBytes: 65536 };
+  assert.equal((await scanSessionCatalog(options)).sessions[0]?.waitingForApproval, true);
+  await writeFile(file, [...records, { type: "message", id: "repair", parentId: "ask", message: { role: "toolResult", toolCallId: "eval", content: "Interrupted" } }].map(row => JSON.stringify(row)).join("\n") + "\n");
+  assert.equal((await scanSessionCatalog(options)).sessions[0]?.waitingForApproval, undefined);
+});
+
+test("approval badges follow the active branch and preserve it across late off-branch results", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-studio-catalog-branches-"));
+  const file = join(root, "branches.jsonl");
+  await writeFile(file, [
+    { type: "session", id: "branches", studioOrigin: "studio-host" },
+    { type: "message", id: "root", parentId: null, message: { role: "user", content: "start" } },
+    { type: "custom", id: "old-ask", parentId: "root", customType: "tool_approval_requested", data: { toolCallId: "old-tool" } },
+  ].map(row => JSON.stringify(row)).join("\n") + "\n");
+  const options = { sessionsRoot: root, archiveRoot: join(root, "missing") };
+  const waiting = async () => (await scanSessionCatalog(options)).sessions[0]?.waitingForApproval;
+  assert.equal(await waiting(), true);
+  await appendFile(file, JSON.stringify({ type: "message", id: "new-branch", parentId: "root", message: { role: "user", content: [{ type: "image", data: "A".repeat(3 * 1024 * 1024), mimeType: "image/png" }] } }) + "\n");
+  assert.equal(await waiting(), undefined);
+  await appendFile(file, JSON.stringify({ type: "message", id: "late", parentId: "old-ask", activeLeafId: "new-branch", message: { role: "toolResult", toolCallId: "unrelated", content: "late output" } }) + "\n");
+  assert.equal(await waiting(), undefined);
+  const request = JSON.stringify({ type: "custom", id: "new-ask", parentId: "new-branch", customType: "tool_approval_requested", data: { toolCallId: "current-tool" } });
+  await appendFile(file, request.slice(0, 40));
+  assert.equal(await waiting(), undefined);
+  await appendFile(file, request.slice(40) + "\n");
+  assert.equal(await waiting(), true);
+  await appendFile(file, JSON.stringify({ type: "message", id: "new-result", parentId: "new-ask", message: { role: "toolResult", toolCallId: "current-tool", content: "done" } }) + "\n");
+  assert.equal(await waiting(), undefined);
+});
 
 test("session catalog distinguishes Studio and CLI sessions and supports the visibility toggle", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-studio-catalog-"));

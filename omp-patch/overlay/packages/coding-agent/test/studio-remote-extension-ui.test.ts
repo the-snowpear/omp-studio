@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
+import { parseHtmlForm } from "@oh-my-pi/pi-coding-agent/tools/html-form/parse";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
@@ -207,7 +207,17 @@ describe("WP-041 Studio Remote Extension UI", () => {
 		expect(() => ui.addAutocompleteProvider((() => undefined) as never)).not.toThrow();
 		expect(ui.getToolsExpanded()).toBe(false);
 		expect(typeof (ui as ExtensionUIContext).askDialog).toBe("function");
-		expect(() => ui.custom()).toThrow("not supported");
+		// Optional hooks must be absent so an extension can choose its headless fallback.
+		expect((ui as ExtensionUIContext).composer).toBeUndefined();
+		const handles: unknown[] = [];
+		expect(() => ui.custom()).toThrow(/does not support|暂不支持/u);
+		expect(() => ui.custom(async () => null, { fullscreen: true, onHandle: handle => handles.push(handle) })).toThrow(
+			/does not support|暂不支持/u,
+		);
+		expect(handles).toEqual([]);
+		const cancelled = new AbortController();
+		cancelled.abort(new Error("extension cancelled"));
+		expect(() => ui.custom(async () => null, { signal: cancelled.signal })).toThrow("extension cancelled");
 	});
 
 	test("approveTool maps to an approval card and resolves strictly boolean", async () => {

@@ -19,7 +19,7 @@ import { isAgentViewSession } from "../../session/agent-session-handle";
 
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { AgentKind, AgentRef, RegistryEvent } from "../../registry/agent-registry";
-import type { TaskStepState } from "@oh-my-pi/pi-tui/tools/task";
+import type { TaskStepState } from "../../task/task-details";
 
 const MAX_MESSAGE_TEXT = 64 * 1024;
 const MAX_ID_LENGTH = 512;

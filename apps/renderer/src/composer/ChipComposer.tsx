@@ -53,8 +53,10 @@ import {
   writeDoc,
 } from "./editorDom";
 import { CommandMenu } from "./CommandMenu";
+import { ImageAnnotatorModal } from "./ImageAnnotatorModal";
 import { ImagePreview, type ImagePreviewSubject } from "./ImagePreview";
 import { MentionMenu } from "./MentionMenu";
+import { Icon } from "../icons";
 import {
   filterSlashCommands,
   composerSlashExecute,
@@ -150,16 +152,29 @@ function sameThumbs(current: readonly ThumbSubject[], next: readonly ThumbSubjec
   for (let index = 0; index < current.length; index += 1) {
     const a = current[index]!;
     const b = next[index]!;
-    if (a.id !== b.id || a.label !== b.label || a.url !== b.url) return false;
+    if (a.id !== b.id || a.label !== b.label || a.url !== b.url || a.mimeType !== b.mimeType || a.data !== b.data) return false;
   }
   return true;
+}
+
+const imageObjectVersions = new WeakMap<PromptImage, number>();
+let nextImageObjectVersion = 1;
+
+function imageVersionOf(image: PromptImage | undefined): number {
+  if (image === undefined) return 0;
+  let version = imageObjectVersions.get(image);
+  if (version === undefined) {
+    version = nextImageObjectVersion++;
+    imageObjectVersions.set(image, version);
+  }
+  return version;
 }
 
 function imageChipKey(snapshot: ComposerSnapshot): string {
   let key = "";
   for (const node of snapshot.doc.nodes) {
     if (node.type !== "chip" || node.chip.kind !== "image") continue;
-    key += `${node.chip.id}\u0000${node.chip.label}\u0001`;
+    key += `${node.chip.id}\u0000${node.chip.label}\u0000${node.chip.path ?? ""}\u0000${imageVersionOf(node.chip.image)}\u0001`;
   }
   return key;
 }
@@ -323,6 +338,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   const [empty, setEmpty] = useState(true);
   const [thumbs, setThumbs] = useState<Array<ImagePreviewSubject & { id: string }>>([]);
   const [preview, setPreview] = useState<(ImagePreviewSubject & { id: string }) | null>(null);
+  const [annotatingId, setAnnotatingId] = useState<string | null>(null);
   const [mention, setMention] = useState<{ trigger: "@" | "^"; query: string } | null>(null);
   const [candidates, setCandidates] = useState<MentionCandidate[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -447,6 +463,26 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     const editor = editorRef.current;
     if (!editor || !removeChipById(editor, chipId)) return;
     emit();
+  };
+
+  const replaceChipImage = (chipId: string, nextImage: PromptImage): void => {
+    const editor = editorRef.current;
+    if (!editor || disabled) return;
+    for (const element of editor.querySelectorAll<HTMLElement>(".cm-chip-image")) {
+      const parsed = parseChipPayload(element.dataset.chip ?? "");
+      if (parsed?.id !== chipId) continue;
+      if (parsed.path !== undefined) {
+        const { path: _droppedPath, ...rest } = parsed;
+        const nextChip: ComposerChip = { ...rest, label: defaultImageChipLabel(undefined, zh) };
+        element.dataset.chip = chipPayload(nextChip);
+        element.title = nextChip.label;
+        renumberImageChips(editor, zh);
+        syncChipTruncation(editor);
+      }
+      imagesRef.current.set(chipId, nextImage);
+      emit();
+      return;
+    }
   };
 
   /* Dragged capsules land where the pointer is, not at the last caret. */
@@ -643,6 +679,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       const live = thumbs.find((thumb) => thumb.id === current.id);
       return live ?? null;
     });
+    setAnnotatingId((current) => (current !== null && thumbs.some((thumb) => thumb.id === current) ? current : null));
   }, [thumbs]);
 
   useEffect(() => {
@@ -713,6 +750,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     clear() {
       attachmentEpoch.current++;
       setSessionPreview(undefined);
+      setPreview(null);
+      setAnnotatingId(null);
       const editor = editorRef.current;
       if (!editor) return;
       dictationEditorRef.current?.invalidate();
@@ -729,6 +768,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     setSnapshot(snapshot, options) {
       attachmentEpoch.current++;
       setSessionPreview(undefined);
+      setPreview(null);
+      setAnnotatingId(null);
       const editor = editorRef.current;
       if (!editor) return;
       dictationEditorRef.current?.invalidate();
@@ -1374,6 +1415,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     else onSubmit?.();
   };
 
+  const annotating = annotatingId === null ? null : (thumbs.find((thumb) => thumb.id === annotatingId) ?? null);
+
   return (
     <div ref={rootRef} className={`chip-composer${compact ? " is-compact" : ""}`} style={{position:"relative"}}>
       {thumbs.length > 0 ? (
@@ -1388,19 +1431,39 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
               >
                 <img src={thumb.url} alt="" />
               </button>
-              <button
-                type="button"
-                className="cm-thumb-remove"
-                aria-label={zh ? `移除${thumb.label}` : `Remove ${thumb.label}`}
-                data-tip={zh ? "移除" : "Remove"}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  removeChip(thumb.id);
-                }}
+              <div
+                className="cm-thumb-actions"
+                role="group"
+                aria-label={t("composer.imageAnnotate.thumbActionsAria", { label: thumb.label })}
               >
-                <span aria-hidden="true">×</span>
-              </button>
+                <button
+                  type="button"
+                  className="cm-thumb-annotate"
+                  aria-label={t("composer.imageAnnotate.actionAria", { label: thumb.label })}
+                  data-tip={t("composer.imageAnnotate.action")}
+                  disabled={!!disabled}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (!disabled) setAnnotatingId(thumb.id);
+                  }}
+                >
+                  <Icon name="pencil" extra="sm" />
+                </button>
+                <button
+                  type="button"
+                  className="cm-thumb-remove"
+                  aria-label={zh ? `移除${thumb.label}` : `Remove ${thumb.label}`}
+                  data-tip={zh ? "移除" : "Remove"}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    removeChip(thumb.id);
+                  }}
+                >
+                  <span aria-hidden="true">×</span>
+                </button>
+              </div>
             </figure>
           ))}
         </div>
@@ -1509,6 +1572,17 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         <ImagePreview
           image={preview}
           onClose={() => setPreview(null)}
+          {...(onError === undefined ? {} : { onError })}
+        />
+      ) : null}
+      {annotating !== null ? (
+        <ImageAnnotatorModal
+          image={annotating}
+          onClose={() => setAnnotatingId(null)}
+          onConfirm={(nextImage) => {
+            replaceChipImage(annotating.id, nextImage);
+            setAnnotatingId(null);
+          }}
           {...(onError === undefined ? {} : { onError })}
         />
       ) : null}

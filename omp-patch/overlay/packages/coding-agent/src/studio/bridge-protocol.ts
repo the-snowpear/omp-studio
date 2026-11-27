@@ -1,3 +1,5 @@
+import { validateChromeRelayHostOperation } from "./chrome-relay-host-protocol";
+import { isArchiveQueryKind, validateArchiveQuery } from "./archive-protocol";
 import { RUNTIME_VIEW_KINDS, isRuntimeViewKind, type RuntimeViewOperation } from "./runtime-views-protocol";
 import { isSelectiveCommitKind, validateSelectiveCommitOperation } from "./commit-protocol";
 import {
@@ -515,6 +517,15 @@ export interface StudioOperatorStateSnapshot {
 	 * starts, the run settles terminally, or no job is left running.
 	 */
 	awaitingAsyncWork?: boolean;
+	ptyInputWaits?: Array<{
+		sessionId: string;
+		toolCallId: string;
+		command: string;
+		pid?: number;
+		waiting: boolean;
+		notify: boolean;
+	}>;
+	waitingForApproval?: boolean;
 	/**
 	 * How the last turn on the active branch ended, from the tail assistant
 	 * message's `stopReason`: `interrupted` covers an operator abort, a provider
@@ -647,6 +658,11 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 		validateSelectiveCommitOperation(operation);
 		return input as unknown as StudioRequest;
 	}
+	if (isArchiveQueryKind(operation.kind)) {
+		validateArchiveQuery(operation);
+		return input as unknown as StudioRequest;
+	}
+	if (operation.kind === "browser.relayHost.status") validateChromeRelayHostOperation(operation);
 	if (isRuntimeViewKind(operation.kind)) return input as unknown as StudioRequest;
 	if (isModelServicesKind(operation.kind)) return input as unknown as StudioRequest;
 	if (isContextViewKind(operation.kind)) return input as unknown as StudioRequest;

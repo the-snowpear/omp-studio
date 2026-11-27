@@ -26,6 +26,7 @@ import { invokeServiceCommand, type ServiceCommandKind } from "./serviceCommands
 import { useI18n } from "../i18n";
 import { Icon } from "../icons";
 import "./services.css";
+import { LeftoverProcesses } from "./LeftoverProcesses";
 
 type Definition = {
   id: string;
@@ -626,6 +627,7 @@ export function ServicesPane({
               </form>
             </section>
           ) : null}
+          <LeftoverProcesses client={client} available={available} capabilities={capabilities} visible={visible} sessionId={sessionId} onAdopted={service => service ? setRows(current => [...current, service]) : void refresh()} />
           <h4>{label("保存的配置", "Saved configurations")}</h4>
           {!preview && !globalThis.ompStudioChrome?.saveServiceDefinition ? (
             <p className="small muted">

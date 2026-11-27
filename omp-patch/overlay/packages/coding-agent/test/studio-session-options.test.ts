@@ -1,3 +1,8 @@
+import {
+	anthropicProviderSessionStateKey,
+	resolveDirectAnthropicBaseUrl,
+} from "@oh-my-pi/pi-ai/providers/anthropic-state";
+import type { ProviderSessionState } from "@oh-my-pi/pi-ai";
 import { expect, test } from "bun:test";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { Settings } from "../src/config/settings";
@@ -88,4 +93,35 @@ test("unavailable preset leaves roles and current model intact and preset writes
 		presets: [{ name: "missing" }],
 	});
 	validateWorkbenchOperation({ kind: "models.presets.apply", sessionId: "s", name: "missing" });
+});
+
+test("speed status distinguishes provider fallback from credential unavailability and updates on recovery", () => {
+	const model = {
+		...getBundledModel("anthropic", "claude-opus-4-6")!,
+		provider: "anthropic",
+		api: "anthropic-messages",
+		id: "claude-opus-4-6",
+	};
+	let active = false;
+	const providerSessionState = new Map<string, ProviderSessionState>();
+	const session = {
+		model,
+		providerSessionState,
+		isSlowModeSupported: () => false,
+		isSlowModeEnabled: () => false,
+		getSlowModeScope: () => "session",
+		getUsageLimitState: () => undefined,
+		isFastModeEnabled: () => true,
+		isFastModeActive: () => active,
+		isUltrafastModeEnabled: () => false,
+		effectiveServiceTier: () => "priority",
+	} as unknown as AgentSession;
+	const service = new StudioSessionOptionsService(session);
+	expect(service.speed().fastStatus).toBe("credential-unavailable");
+	const key = anthropicProviderSessionStateKey(resolveDirectAnthropicBaseUrl(session.model!), model.id);
+	providerSessionState.set(key, { fastModeDisabled: true, close: () => {} } as ProviderSessionState);
+	expect(service.speed().fastStatus).toBe("provider-fallback");
+	providerSessionState.clear();
+	active = true;
+	expect(service.speed().fastStatus).toBe("active");
 });

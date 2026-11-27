@@ -1,6 +1,6 @@
 # Managed OMP patch boundary
 
-The Runtime pin is `can1357/oh-my-pi` `v19.0.1` at commit `f40f335845f0b136453d12fec8d6057011082766`. The Studio revision is recorded in `patches/series.json`. See the [19.0.1 migration report](../docs/migrations/omp-19.0.1.md) for the Runtime, Host and workbench update.
+The Runtime pin is `can1357/oh-my-pi` `v19.2.1` at commit `b55cd1bb664d8ab46ddc77f2a34eb47555dbf1ac`. The Studio revision is recorded in `patches/series.json`. See the [19.2.1 migration report](../docs/migrations/omp-19.2.1.md) for the Runtime, Host and workbench update.
 
 The pinned upstream is attached as the Git submodule at `vendor/oh-my-pi/`. The root repository stores only the pinned gitlink; the upstream working tree keeps its own `.git` so the fork can be generated and reviewed without mixing upstream files into the Studio repository.
 
@@ -33,7 +33,7 @@ The overlay is ordinary tracked source in this repository. Editing it is an ordi
 
 ## Windows build toolchain
 
-The v19.0.1 Windows bytecode bundle uses the upstream-pinned Bun **1.4.4**, including its certificate/Brotli fixes. Set `BUN_EXE` to a separately installed 1.4.4 executable before building; the global Bun installation need not change. Use the upstream-pinned Rust `nightly-2026-11-08` toolchain (`vendor/oh-my-pi/rust-toolchain.toml`). Release signing uses the existing GitHub Environment; the isolated local `canary` test artifact is not a release identity and is not installed automatically.
+The v19.2.1 Windows bytecode bundle uses the upstream-pinned Bun **1.4.4**, including its certificate/Brotli fixes. Set `BUN_EXE` to a separately installed 1.4.4 executable before building; the global Bun installation need not change. Use the upstream-pinned Rust `nightly-2026-11-08` toolchain (`vendor/oh-my-pi/rust-toolchain.toml`). Release signing uses the existing GitHub Environment; the isolated local `canary` test artifact is not a release identity and is not installed automatically.
 
 ## Working loop
 

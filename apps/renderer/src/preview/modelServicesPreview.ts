@@ -2,6 +2,8 @@ import type { ModelAntigravityReadiness, ModelAuthProvider, ModelProviderRoster,
 import type { ModelAvailability } from "@omp-studio/client-contract";
 
 export const PREVIEW_MODEL_AUTH: ModelAuthProvider[] = [
+  { id: "anthropic-long-lived", name: "Anthropic (1-year token)", available: true, authenticated: true, kind: "oauth", credentialProvider: "anthropic", loginVariant: "anthropic-year", credentials: [{ id: -1, label: "mira@studio.dev", type: "oauth" }] },
+  { id: "openrouter", name: "OpenRouter", available: true, authenticated: true, kind: "oauth", credentials: [{ id: -8, label: "Studio", type: "oauth" }] },
   { id: "kiro", name: "Kiro", available: true, authenticated: true, kind: "oauth", loginBehavior: "add-account", credentials: [{ id: -5, label: "Studio · Builder ID", type: "oauth" }, { id: -6, label: "Team · IAM Identity Center", type: "oauth" }] },
   { id: "anthropic", name: "Anthropic", available: true, authenticated: true, kind: "oauth", credentials: [{ id: -1, label: "mira@studio.dev", type: "oauth" }] },
   { id: "antigravity-cli", name: "Antigravity CLI", available: true, authenticated: true, kind: "oauth", credentials: [{ id: -4, label: "mira@studio.dev", type: "oauth" }] },
@@ -10,7 +12,7 @@ export const PREVIEW_MODEL_AUTH: ModelAuthProvider[] = [
   { id: "opencode-zen", name: "OpenCode Zen", available: true, authenticated: false, kind: "api-key", credentials: [] },
   { id: "liquid", name: "Liquid AI", available: true, authenticated: true, kind: "api-key", credentials: [{ id: -2, label: "API key", type: "api_key" }] },
   { id: "typesafe", name: "TypeSafe", available: true, authenticated: false, kind: "api-key", credentials: [] },
-  { id: "otari", name: "Otari", available: true, authenticated: true, kind: "api-key", credentials: [{ id: -3, label: "Studio workspace key", type: "api_key" }] },
+  { id: "otari", loginVariant: "otari-region", name: "Otari", available: true, authenticated: true, kind: "api-key", credentials: [{ id: -3, label: "Studio workspace key", type: "api_key" }] },
   { id: "google-antigravity", name: "Google Antigravity", available: true, authenticated: false, kind: "oauth", credentials: [], warning: "Google's Antigravity terms do not allow third-party sign-in. Accounts may be suspended. Use a Gemini API key or Vertex AI for an account you depend on." },
 ];
 /** Demo readiness only; a real `ready` never implies paid inference or quota was checked. */
@@ -40,6 +42,9 @@ const PREVIEW_ROSTER_MODELS: Readonly<Record<string, ModelProviderRoster["models
   liquid: [
     { provider: "liquid", selector: "liquid/d1.1", name: "d1.1", kind: "judge", api: "liquid-systemone", reasoning: false, image: true, tools: false, contextWindow: 65536 },
     { provider: "liquid", selector: "liquid/d1-ultra", name: "d1-ultra", kind: "judge", api: "liquid-systemone", reasoning: false, image: true, tools: false, contextWindow: 32768 },
+  ],
+  openrouter: [
+    { provider: "openrouter", selector: "openrouter/openai/gpt-5.1", name: "GPT-5.1", kind: "chat", api: "openai-completions", transport: "pi-native", reasoning: true, image: true, tools: true, contextWindow: 400000 },
   ],
   otari: [
     { provider: "otari", selector: "otari/deepseek/deepseek-v4.1-flash", name: "DeepSeek workspace model", kind: "chat", api: "openai-completions", reasoning: true, image: false, tools: true, contextWindow: 131072 },

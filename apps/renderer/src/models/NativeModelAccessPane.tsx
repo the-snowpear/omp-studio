@@ -126,7 +126,7 @@ export function NativeModelAccessPane({ context, auth, visible, selected, onSele
     <div className="model-native-toolbar">
       <AppSelect className={openCode ? "model-native-key-picker" : ""} aria-label={tr("原生供应商", "Native provider")} value={selected} disabled={!auth.providers?.length || busy || !!auth.busyProvider} onChange={event => onSelect(event.target.value)}>
         {!auth.providers?.length ? <option value="">{auth.supported ? tr("正在读取…", "Loading…") : tr("原生授权不可用", "Native auth unavailable")}</option> : null}
-        {auth.providers?.map(row => <option key={row.id} value={row.id}>{row.name} · {row.id}{row.paused ? tr(" · 已暂停", " · paused") : ""}</option>)}
+        {auth.providers?.map(row => <option key={row.id} value={row.id}>{row.id === "anthropic-long-lived" ? tr("Anthropic · 1 年期令牌", "Anthropic · 1-year token") : row.name} · {row.id}{row.paused ? tr(" · 已暂停", " · paused") : ""}</option>)}
       </AppSelect>
       {provider ? <span className="model-native-status">
         <span className={`chip xs ${provider.authenticated ? "green" : "gray"}`}>{provider.authenticated ? tr("凭据已配置", "Credential configured") : tr("未配置凭据", "No credential")}</span>
@@ -187,6 +187,9 @@ export function NativeModelAccessPane({ context, auth, visible, selected, onSele
         <small>{tr("暂停与凭据是两回事：重新登录或读取状态都不会解除暂停。", "A pause is separate from credentials: signing in again or refreshing does not lift it.")}</small></span>
       <button className="btn small outline" disabled={!auth.canUnpause || !!auth.busyProvider} onClick={() => setResume(true)}>{tr("恢复使用…", "Resume…")}</button>
     </div> : null}
+    {provider?.loginVariant === "anthropic-year" || selected === "anthropic-long-lived" ? <p className="sec-desc">{tr("请求最长 1 年的推理与账号资料授权，实际到期时间由 Anthropic 决定。与普通 Anthropic 登录共用账号记录，不包含文件上传、Claude.ai 会话和 MCP 连接器权限。", "Request up to one year of inference and profile access; Anthropic decides the actual expiry. Shares the regular Anthropic account record and excludes file uploads, Claude.ai sessions and MCP connectors.")}</p> : null}
+    {provider?.loginVariant === "otari-region" || selected === "otari" ? <p className="sec-desc">{tr("原生登录先选择 US、EU 或自托管端点，再输入工作区密钥。选择的地址用于模型发现和推理；OTARI_BASE_URL 环境变量优先。", "Native sign-in first selects US, EU or a self-hosted endpoint, then requests your workspace key. Discovery and inference use that endpoint; OTARI_BASE_URL takes precedence.")}</p> : null}
+    {selected === "openrouter" ? <p className="sec-desc">{tr("刷新会读取 OpenRouter 当前目录和模型能力；模型仍按当前凭据和提供商配置可用。", "Refresh reads the current OpenRouter catalog and capabilities. Availability follows this credential and provider configuration.")}</p> : null}
     {provider?.id === ANTIGRAVITY_CLI ? <AntigravityReadiness context={context} visible={visible} zh={zh} /> : null}
     {provider?.loginBehavior === "add-account" && <p className="small muted">{tr("每次登录都会新增一个账号。现有账号继续可用。", "Each sign-in adds an account. Existing accounts stay available.")}</p>}
     {provider?.warning ? <p className="model-native-warning"><Icon name="alert" extra="sm" /><span>{provider.warning}</span></p> : null}
@@ -195,7 +198,7 @@ export function NativeModelAccessPane({ context, auth, visible, selected, onSele
     {roster && (!openCode || (!catalogFailed && roster.models.length > 0)) ? <div className="model-native-roster">
       {!openCode ? <p className="small muted">{roster.providerId} · {roster.authoritative ? tr("凭据授权的原生目录", "Native authoritative roster") : tr("当前原生目录", "Current native roster")}{roster.error ? ` · ${roster.error}` : ""}</p> : null}
       {roster.models.map(model => <div className="model-native-model" key={model.selector}>
-        <span><b>{model.name}</b><code>{model.selector}</code></span><span className="chip gray xs">{model.kind}</span><code>{model.api}</code>
+        <span><b>{model.name}</b><code>{model.selector}</code></span><span className="chip gray xs">{model.kind}</span><code>{model.api}</code>{model.transport === "pi-native" ? <span className="chip xs purple" data-tip={tr("模型目录与推理通过 Auth Gateway 提供", "Model discovery and inference use the Auth Gateway")}>Auth Gateway</span> : null}
         <span className="small muted">{model.contextWindow === undefined ? tr("上下文未知", "Context unknown") : `${model.contextWindow.toLocaleString()} tokens`}</span>
         <ThinkingProbe config={model.thinkingConfig} />
         {model.kind === "chat" ? <button className="btn small outline" onClick={() => setInspected(model.selector)}>{tr("系统提示详情", "System prompt details")}</button> : <span className="small muted">{tr("用于对应原生角色，不作为聊天参数", "Native role runner, not chat parameters")}</span>}

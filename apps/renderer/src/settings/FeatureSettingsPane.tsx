@@ -1,3 +1,4 @@
+import { RUNTIME_1921_SETTINGS } from "./runtime1921Settings";
 import { RUNTIME_18180_SETTINGS } from "./runtime18180Settings";
 import { RUNTIME_18202_SETTINGS } from "./runtime18202Settings";
 import { BashRulesEditor } from "./BashRulesEditor";
@@ -13,7 +14,7 @@ import "./featureSettings.css";
 import { ComputerSettings, COMPUTER_SETTING_DEFINITIONS } from "../computer/ComputerSettings";
 import { TaskDelegationSettings, TASK_DELEGATION_SETTINGS_DEFINITIONS } from "./TaskDelegationSettings";
 
-type Group = "interaction" | "context" | "tasks" | "voice" | "dictation" | "maintenance" | "permissions" | "models" | "experimental" | "auxiliary" | "shell";
+type Group = "interaction" | "context" | "tasks" | "voice" | "dictation" | "maintenance" | "permissions" | "models" | "experimental" | "auxiliary" | "shell" | "files";
 export type Definition = { key: FeatureSettingKey; group: Group; zh: string; en: string; hint: string; hintEn: string; options?: Array<[string, string, string]>; text?: boolean; list?: boolean; rules?: boolean; billed?: boolean; min?: number; max?: number; step?: number };
 export const FEATURE_SETTINGS_DEFINITIONS: Definition[] = [
   { key: "providers.webKeyless", group: "models", zh: "免密钥联网服务", en: "Keyless web services", hint: "允许联网搜索和网页读取使用公共服务。", hintEn: "Allow search and page reading to use public services without a key." },
@@ -27,6 +28,7 @@ export const FEATURE_SETTINGS_DEFINITIONS: Definition[] = [
   { key: "mnemopi.embeddingInputType", group: "context", zh: "嵌入输入类型", en: "Embedding input type", hint: "传给嵌入供应商的 input_type。", hintEn: "The input_type sent to the embedding provider.", text: true },
   { key: "tools.intentTracing", group: "permissions", zh: "工具意图追踪", en: "Tool intent tracing", hint: "记录工具调用的意图。", hintEn: "Record the intent behind tool calls." },
   { key: "providers.cacheWarmingStrategy", group: "models", zh: "缓存预热策略", en: "Cache warming strategy", hint: "控制长工具调用期间的续期和缓存到期前的压缩。", hintEn: "Choose how to keep caches warm during long tool calls and before expiry.", options: [["auto","自动","Auto"],["keepalive","续期","Keep alive"],["compact","压缩","Compact"]] },
+  ...RUNTIME_1921_SETTINGS,
   ...RUNTIME_18202_SETTINGS,
   ...RUNTIME_18180_SETTINGS,
   ...TASK_DELEGATION_SETTINGS_DEFINITIONS,
@@ -37,8 +39,8 @@ export const FEATURE_SETTINGS_DEFINITIONS: Definition[] = [
   { key: "bash.gitGuard", group: "tasks", zh: "保护共享 Git 工作区", en: "Protect shared Git checkouts", hint: "由原生 Bash 检查可能覆盖工作区文件的 Git 操作。", hintEn: "Native Bash checks Git operations that could overwrite workspace files." },
   { key: "worktree.onStart", group: "tasks", zh: "新会话工作目录", en: "New session directory", hint: "在当前目录开始，或创建独立 Worktree。已有会话不受影响。", hintEn: "Start here or create a dedicated worktree. Existing sessions are unchanged.", options: [["off", "当前工作区", "Current checkout"], ["ask", "创建时询问", "Ask when starting"], ["create", "创建独立 Worktree", "Create worktree"]] },
   { key: "worktree.onExit", group: "tasks", zh: "结束时的 Worktree", en: "Worktree on exit", hint: "强制移除会丢弃未提交改动及忽略的文件。分支上的提交仍保留。", hintEn: "Force removal discards uncommitted changes and ignored files. Commits on the branch remain.", options: [["keep", "保留", "Keep"], ["ask", "询问", "Ask"], ["remove", "清理安全项，其余询问", "Remove clean; ask otherwise"], ["force", "强制移除（丢弃未提交改动）", "Force remove (discard uncommitted changes)"]] },
-  { key: "prewalk.auto", group: "tasks", zh: "自动 Prewalk", en: "Automatic prewalk", hint: "用 judge 角色判断每个新任务是否把难点集中在前面；开启后在第一次编辑时交给目标模型继续。需要原生 judge，会额外调用模型。", hintEn: "The judge role classifies whether each new task front-loads its hard reasoning; when on, the turn hands off to the target model at the first edit. Needs a native judge; billed separately.", options: [["off", "关闭", "Off"], ["suggest", "只判断不切换", "Suggest only"], ["on", "自动切换", "On"]] },
-  { key: "prewalk.autoTarget", group: "tasks", zh: "Prewalk 目标模型", en: "Prewalk target", hint: "自动 Prewalk 在第一次编辑/写入时交接的模型或角色，例如 @smol 或 provider/model。", hintEn: "Model or role auto-prewalk hands off to at the first edit/write, e.g. @smol or provider/model.", text: true },
+  { key: "prewalk.auto", group: "tasks", zh: "自动 Prewalk", en: "Automatic prewalk", hint: "用 judge 角色判断每个新任务是否把难点集中在前面；开启后在第一次编辑时交给目标模型继续。需要原生 judge，会额外调用模型。", hintEn: "The judge role classifies whether each new task front-loads its hard reasoning; when on, the turn hands off to the target model at the first edit. Needs a native judge; billed separately.", options: [["off", "关闭", "Off"], ["suggest", "只判断不切换", "Suggest only"], ["on", "自动切换", "On"], ["escalate", "按难度升级规划模型", "Escalate for hard tasks"]] },
+  { key: "prewalk.autoTarget", group: "tasks", zh: "Prewalk 目标模型", en: "Prewalk target", hint: "自动 Prewalk 在第一次编辑/写入时交接的模型或角色，例如 @initial（本轮初始模型）、@smol 或 provider/model。", hintEn: "Model or role auto-prewalk hands off to at the first edit/write, e.g. @initial (this turn’s original model), @smol or provider/model.", text: true },
   { key: "async.widgets", group: "tasks", zh: "后台任务实时小组件", en: "Live job widgets", hint: "为运行中的后台任务绘制实时图表/进度；由 widget 角色模型（默认 smol）为每个任务生成一次规格。", hintEn: "Draw live charts and meters for running background jobs. The widget model role (default smol) writes one spec per job." },
   ...COMPUTER_SETTING_DEFINITIONS.map(definition => ({ ...definition, group: "tasks" as const })),
   { key: "speech.speed", group: "voice", zh: "实时朗读速度", en: "Live speech speed", hint: "本地 Phonon 31M 朗读速度，1× 为正常速度。", hintEn: "Local Phonon 31M speech speed; 1× is normal.", min: .8, max: 1.3, step: .1 },
@@ -58,7 +60,7 @@ export const FEATURE_SETTINGS_DEFINITIONS: Definition[] = [
   { key: "stt.language", group: "dictation", zh: "听写语言", en: "Dictation language", hint: "中文与英文技术词混说请选择中文，并使用支持中文的 dictation 角色模型。语言设置不会改变模型本身的语言能力。", hintEn: "Use Chinese with a compatible dictation model for mixed Chinese and English. This setting cannot add language support to a model.", options: [["zh", "中文（可夹英文）", "Chinese (with English terms)"], ["en", "English", "English"], ["", "自动检测（模型需支持）", "Auto-detect (if supported)"]] },
   { key: "stt.submitTrigger", group: "dictation", zh: "按住 / 快捷键结束后", en: "After hold / shortcut dictation", hint: "默认只填草稿。自动发送只对按住或快捷键录音有效；点击麦克风、恢复录音、手动修改或中断后始终不自动发送。", hintEn: "Draft only by default. Automatic submission applies only to hold or toggle capture, never clicks, recovery, manual edits or interruptions.", options: [["never", "只填草稿，不自动发送", "Fill draft, never auto-submit"], ["release", "松开后发送（至少两个词）", "Submit on release (at least two words)"], ["release-complete", "松开后发送完整句", "Submit complete sentences on release"], ["say-submit", "说出句尾提交指令", "Say the final submit command"]] },
 ];
-const TITLES: Record<Group, [string, string]> = { models: ["模型连接与回退", "Model connections and fallbacks"], experimental: ["实验功能", "Experimental features"], permissions: ["目录与扩展权限", "Folder and extension permissions"], interaction: ["消息建议", "Message suggestions"], context: ["上下文与回退", "Context and fallback"], tasks: ["任务与工作区策略", "Task and workspace policy"], voice: ["本地语音速度", "Local speech speed"], dictation: ["语音输入", "Voice input"], maintenance: ["会话存储策略", "Session storage policy"], auxiliary: ["辅助模型请求", "Auxiliary model requests"], shell: ["Shell 与 Bash 审批", "Shell and Bash approval"] };
+const TITLES: Record<Group, [string, string]> = { files: ["分析引擎路径", "Analysis engine paths"], models: ["模型连接与回退", "Model connections and fallbacks"], experimental: ["实验功能", "Experimental features"], permissions: ["目录与扩展权限", "Folder and extension permissions"], interaction: ["消息建议", "Message suggestions"], context: ["上下文与回退", "Context and fallback"], tasks: ["任务与工作区策略", "Task and workspace policy"], voice: ["本地语音速度", "Local speech speed"], dictation: ["语音输入", "Voice input"], maintenance: ["会话存储策略", "Session storage policy"], auxiliary: ["辅助模型请求", "Auxiliary model requests"], shell: ["Shell 与 Bash 审批", "Shell and Bash approval"] };
 
 export function FeatureSettingsPane(props: FeatureSettingsProps & { group: Group; keys?: readonly FeatureSettingKey[]; excludeKeys?: readonly FeatureSettingKey[]; onSaved?(): void }) {
   const state = useFeatureSettings(props), { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";

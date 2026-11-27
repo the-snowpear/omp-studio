@@ -52,10 +52,26 @@ export interface JobWidgetView {
 }
 
 /** Upstream `AsyncJobInspection` for one job. */
-import type { TaskStepState } from "@oh-my-pi/pi-tui/tools/task";
+import type { TaskStepState } from "../task/task-details";
 import type { JobActionsView } from "./job-actions-protocol";
 
+export interface JobOutputStream {
+	id: string;
+	kind: "pipe" | "file";
+	producer: string;
+	consumer: string;
+	bytes: number;
+	open: boolean;
+	modified: number;
+}
 export interface JobInspection {
+	streams?: JobOutputStream[];
+	selectedStreamId?: string;
+	binary?: boolean;
+	waitingForInput?: boolean;
+	inputDetection?: "known" | "unknown";
+	inputGeneration?: number;
+	canInput?: boolean;
 	actions?: JobActionsView;
 	taskSteps?: TaskStepState;
 	purpose?: string;
@@ -88,7 +104,8 @@ export type RuntimeFeatureOperation =
 	| { kind: "session.history.pin"; sessionId: string; targetSessionId: string; pinned: boolean }
 	| { kind: "session.lease.inspect"; sessionId: string; targetSessionIds: string[] }
 	| { kind: "approvals.forget"; sessionId: string }
-	| { kind: "jobs.inspect"; sessionId: string; jobId: string }
+	| { kind: "jobs.inspect"; sessionId: string; jobId: string; streamId?: string }
+	| { kind: "jobs.input"; sessionId: string; jobId: string; expectedGeneration: number; data: string }
 	| { kind: "mcp.auth.reauth"; sessionId: string; name: string }
 	| { kind: "mcp.auth.unauth"; sessionId: string; name: string }
 	| { kind: "mcp.auth.reconnect"; sessionId: string; name: string };
@@ -107,6 +124,7 @@ export interface RuntimeFeatureResultMap {
 	"session.lease.inspect": { held: string[]; unknown: string[] };
 	"approvals.forget": { cleared: true };
 	"jobs.inspect": JobInspection;
+	"jobs.input": { sent: true };
 	"mcp.auth.reauth": McpAuthResult;
 	"mcp.auth.unauth": McpAuthResult;
 	"mcp.auth.reconnect": McpAuthResult;
@@ -119,6 +137,7 @@ export const RUNTIME_FEATURE_KINDS = [
 	"session.lease.inspect",
 	"approvals.forget",
 	"jobs.inspect",
+	"jobs.input",
 	"mcp.auth.reauth",
 	"mcp.auth.unauth",
 	"mcp.auth.reconnect",
@@ -145,6 +164,20 @@ export function validateRuntimeFeatureOperation(value: unknown): asserts value i
 	const kind = input.kind;
 	if (typeof kind !== "string" || !isRuntimeFeatureKind(kind)) throw new Error("Unknown Runtime feature operation");
 	text(input.sessionId, "sessionId");
-	if (kind === "jobs.inspect") text(input.jobId, "jobId");
+	if (kind === "jobs.input") {
+		text(input.jobId, "jobId");
+		if (
+			typeof input.expectedGeneration !== "number" ||
+			!Number.isSafeInteger(input.expectedGeneration) ||
+			input.expectedGeneration < 0
+		)
+			throw new Error("Invalid PTY generation");
+		if (typeof input.data !== "string" || input.data.length === 0 || input.data.length > 65536)
+			throw new Error("Invalid PTY input");
+	}
+	if (kind === "jobs.inspect") {
+		text(input.jobId, "jobId");
+		if (input.streamId !== undefined) text(input.streamId, "streamId");
+	}
 	if (kind.startsWith("mcp.auth.")) text(input.name, "name");
 }

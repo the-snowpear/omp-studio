@@ -1,3 +1,4 @@
+import { ArchiveTranscriptInspector, ArchiveActivityPane } from "./ArchiveExplorer";
 import { AppSelect } from "../AppSelect";
 import { useEffect, useRef, useState } from "react";
 import type {
@@ -10,6 +11,7 @@ import type {
   NativeArchiveSession,
   NativeArchiveText,
   NativeArchiveDetail,
+ NativeArchiveSearchHit,
 } from "@omp-studio/studio-protocol";
 import { useI18n } from "../i18n";
 import { usePreviewMode } from "../preview/PreviewContext";
@@ -21,7 +23,7 @@ import {
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { WorkspaceEmpty, WorkspaceStatus } from "../workspaces/Workspace";
 import "./archive.css";
-type View = "sessions" | "recaps" | "prompts";
+type View = "sessions" | "recaps" | "prompts" | "activity";
 export interface NativeHistoryContext {
   sessionId?: string | undefined;
   available: boolean;
@@ -48,7 +50,7 @@ export function NativeArchivePane({
   const [query, setQuery] = useState(""),
     [search, setSearch] = useState(""),
     [refresh, setRefresh] = useState(0);
-  const [sessions, setSessions] = useState<NativeArchiveSession[]>([]),
+  const [sessions, setSessions] = useState<Array<NativeArchiveSession & Partial<Pick<NativeArchiveSearchHit, "matches">>>>([]),
     [texts, setTexts] = useState<NativeArchiveText[]>([]);
   const [detail, setDetail] = useState<NativeArchiveDetail>(),
     [selected, setSelected] = useState("");
@@ -93,7 +95,7 @@ export function NativeArchivePane({
     setDetailBusy(false);
     setError("");
     setDetailError("");
-    if (!active || !enabled) return;
+    if (!active || !enabled || view === "activity") return;
     setBusy(true);
     const key = [context?.sessionId, scope, preview].join(":");
     if (previousContext.current !== key) {
@@ -105,13 +107,13 @@ export function NativeArchivePane({
       try {
         const args = { sessionId: context?.sessionId ?? "", scope };
         if (preview) {
-          setSessions(previewArchiveSessions(zh));
+          setSessions(previewArchiveSessions(zh).filter(row => !search || `${row.title} ${row.recap ?? ""}`.toLowerCase().includes(search.toLowerCase())));
           setTexts(previewArchiveTexts(view, search, zh));
           setTruncated(false);
           return;
         }
         if (view === "sessions") {
-          const result = await read("archive.sessions.list", args);
+          const result = search ? await client!.query("archive.search", { ...args, query: search }) : await read("archive.sessions.list", args);
           if (current !== epoch.current) return;
           setSessions(result.rows);
           setTruncated(result.truncated);
@@ -182,6 +184,7 @@ export function NativeArchivePane({
       if (current === detailEpoch.current) setDetailBusy(false);
     }
   }
+  useEffect(() => { if (selected && active && inspectEnabled) void inspect(selected); }, [zh, preview, context?.sessionId]);
   const stamp = (date: string) =>
     new Date(date).toLocaleString(zh ? "zh-CN" : "en-US");
   const renderText = (row: NativeArchiveText, index: number) => (
@@ -247,6 +250,7 @@ export function NativeArchivePane({
             <option value="sessions">{zh ? "会话" : "Sessions"}</option>
             <option value="recaps">{zh ? "回顾" : "Recaps"}</option>
             <option value="prompts">{zh ? "提示词" : "Prompts"}</option>
+            <option value="activity">{zh ? "调用与统计" : "Calls and statistics"}</option>
           </AppSelect>
         </label>
         <label>
@@ -264,9 +268,9 @@ export function NativeArchivePane({
             <option value="all">{zh ? "全部工作区" : "All workspaces"}</option>
           </AppSelect>
         </label>
-        {view === "prompts" ? (
+        {view === "prompts" || view === "sessions" ? (
           <label className="archive-search">
-            {zh ? "搜索提示词" : "Search prompts"}
+            {view === "sessions" ? (zh ? "全文搜索" : "Full-text search") : (zh ? "搜索提示词" : "Search prompts")}
             <input
               className="input"
               type="search"
@@ -286,7 +290,9 @@ export function NativeArchivePane({
               : "Refresh"}
         </button>
       </form>
-      {!enabled ? (
+      {view === "activity" ? (
+        <ArchiveActivityPane client={client} sessionId={context?.sessionId} active={active} available={context?.available === true} scope={scope} />
+      ) : !enabled ? (
         <WorkspaceEmpty
           title={zh ? "原生历史暂不可用" : "Native history unavailable"}
         >
@@ -330,6 +336,7 @@ export function NativeArchivePane({
                     {row.recap ? (
                       <span className="archive-excerpt">{row.recap}</span>
                     ) : null}
+                    {row.matches?.map((match, index) => <span className="archive-excerpt" key={index}>{match.text}</span>)}
                     {row.truncated ? (
                       <small>
                         {zh ? "长内容已截断" : "Long content is truncated"}
@@ -401,6 +408,7 @@ export function NativeArchivePane({
                         : "This entry is not in the current Studio catalog. Refresh the catalog before opening."}
                     </p>
                   ) : null}
+                  <ArchiveTranscriptInspector client={client} sessionId={context?.sessionId} targetSessionId={detail.session.id} />
                   <h4>{zh ? "空闲回顾" : "Idle recaps"}</h4>
                   {detail.recaps.length ? (
                     detail.recaps.map(renderText)

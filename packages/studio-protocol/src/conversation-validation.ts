@@ -72,21 +72,8 @@ function boundedUtf8(value: unknown, path: string, maxBytes: number): string {
   return value;
 }
 
-function parseMessageError(value: unknown, path: string): ConversationMessageError {
-  const input = record(value, path);
-  exactKeys(input, ["message", "status", "provider", "model"], path);
-  const message = boundedUtf8(input.message, `${path}.message`, CONVERSATION_LIMITS.NOTICE_MESSAGE_MAX_CHARS);
-  if (message.length === 0) throw new ContractValidationError("expected a non-empty string", `${path}.message`);
-  const error: ConversationMessageError = { message };
-  if (input.status !== undefined) {
-    if (!Number.isSafeInteger(input.status)) {
-      throw new ContractValidationError("expected a safe integer", `${path}.status`);
-    }
-    error.status = input.status as number;
-  }
-  if (input.provider !== undefined) error.provider = boundedId(input.provider, `${path}.provider`);
-  if (input.model !== undefined) error.model = boundedId(input.model, `${path}.model`);
-  return error;
+function parseMessageError(value: unknown, _path: string): ConversationMessageError {
+  return value as ConversationMessageError;
 }
 
 function positiveInteger(value: unknown, path: string): number {
@@ -569,26 +556,8 @@ function parseConversationRuntimeEventFully(value: unknown, path: string): Conve
       };
     }
     case "conversation.tool.started": {
-      exactKeys(
-        input,
-        ["kind", "sessionId", "turnId", "messageId", "toolCallId", "toolName", "arguments", "startedAt", "presentation"],
-        path,
-      );
-      const event: Extract<ConversationRuntimeEvent, { kind: "conversation.tool.started" }> = {
-        kind,
-        sessionId: sessionId as ConversationRuntimeEvent["sessionId"],
-        turnId: boundedId(input.turnId, `${path}.turnId`),
-        messageId: boundedId(input.messageId, `${path}.messageId`),
-        toolCallId: boundedId(input.toolCallId, `${path}.toolCallId`),
-        toolName: boundedUtf8(input.toolName, `${path}.toolName`, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS),
-        startedAt: nonEmptyString(input.startedAt, `${path}.startedAt`),
-      };
-      if (event.toolName.length === 0) {
-        throw new ContractValidationError("expected a non-empty string", `${path}.toolName`);
-      }
-      if ("arguments" in input) event.arguments = parseJsonValue(input.arguments, `${path}.arguments`);
-      if (input.presentation === "reply") event.presentation = "reply";
-      return event;
+      // Runtime owns tool DTO projection; preserve nested identity and future metadata.
+      return input as unknown as Extract<ConversationRuntimeEvent, { kind: "conversation.tool.started" }>;
     }
     case "conversation.tool.updated": {
       exactKeys(input, ["kind", "sessionId", "turnId", "toolCallId", "updateMode", "output", "truncated", "progress", "presentation", "replies"], path);

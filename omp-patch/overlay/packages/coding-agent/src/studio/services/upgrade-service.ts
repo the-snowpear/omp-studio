@@ -7,7 +7,7 @@ import type { ForeignSessionInfo } from "../../session/foreign-session-store";
 import type { UpgradeOperation, ForeignSessionSummary } from "../runtime-upgrade-protocol";
 import type { StudioBtwService } from "./btw-service";
 import { SessionControlError } from "./session-control-service";
-import { extractImagePastePathsFromText } from "@oh-my-pi/pi-tui/prompt/custom-editor";
+import { extractImagePastePathsFromText } from "../../modes/view-model/prompt/custom-editor";
 import { loadImageInput } from "../../utils/image-loading";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 

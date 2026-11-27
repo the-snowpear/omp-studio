@@ -1,4 +1,5 @@
 import type { Model } from "@oh-my-pi/pi-ai";
+import { getOAuthCredentialProvider } from "@oh-my-pi/pi-ai/oauth";
 import { providerEntry } from "@oh-my-pi/pi-catalog/compat/providers";
 import { getModelPricingStatus } from "@oh-my-pi/pi-catalog/models";
 import type { LongContextTokenCost, TokenCost } from "@oh-my-pi/pi-catalog/types";
@@ -46,6 +47,7 @@ export function projectAvailableRuntimeModel(model: Model, discovery?: ProviderD
 		input: [...model.input],
 		tools: model.supportsTools !== false,
 		...(model.providerType === undefined ? {} : { providerType: model.providerType }),
+		...(model.transport === undefined ? {} : { transport: model.transport }),
 		...(model.supportsComputerUse === undefined ? {} : { supportsComputerUse: model.supportsComputerUse }),
 		...(model.hostedImage === undefined ? {} : { hostedImage: model.hostedImage }),
 		...(model.maxContextWindow === undefined ? {} : { maxContextWindow: model.maxContextWindow }),
@@ -244,6 +246,7 @@ export class StudioModelRosterService {
 
 	async refresh(sessionId: string, providerId: string): Promise<ModelProviderRoster> {
 		const registry = this.#current(sessionId);
+		providerId = getOAuthCredentialProvider(providerId);
 		this.invalidate();
 		await registry.refreshProvider(providerId, "online", { refreshCommandCredentials: true });
 		await this.session.refreshScopedModels();

@@ -120,7 +120,7 @@ export const GUI_SETTING_DEFINITIONS = {
 	},
 	"disassembler.backend": {
 		type: "enum",
-		values: ["auto", "ida", "ghidra", "none"],
+		values: ["auto", "ida", "ghidra", "binja", "none"],
 		default: "auto",
 		zh: "反汇编后端",
 		en: "Disassembler backend",

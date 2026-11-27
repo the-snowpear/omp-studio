@@ -1,6 +1,7 @@
+import type { StudioMcpAuthService } from "./mcp-auth-service";
 import type { MCPManager } from "../../mcp/manager";
 import { normalizeMCPTransportError } from "../../mcp/errors";
-import { cfgMcpStartupTimeoutMs } from "../../mcp/settings";
+import { cfgMcpIdleStopMinutes, cfgMcpShared, cfgMcpStartupTimeoutMs } from "../../mcp/settings";
 import { createHash } from "node:crypto";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { expandPromptTemplate, type PromptTemplate } from "../../config/prompt-templates";
@@ -8,12 +9,18 @@ import { resolveMCPStartupTimeoutMs } from "../../mcp/timeout";
 import type { AgentSession } from "../../session/agent-session";
 import {
 	type McpRuntimeStatus,
+	type McpServerRuntimeStatus,
 	type PromptTemplateRow,
 	type RuntimeCatalogOperation,
 } from "../runtime-catalog-protocol";
 import { SessionControlError } from "./session-control-service";
 
 const clean = (value: string, max = 512) => sanitizeText(value).replaceAll("\0", "").slice(0, max);
+const sanitizeStderr = (value: string) =>
+	clean(value, 2000)
+		.replace(/(Bearer\s+)\S+/giu, "$1[redacted]")
+		.replace(/([?&](?:token|key|secret|password|auth|code)=)[^&\s]+/giu, "$1[redacted]")
+		.replace(/((?:token|secret|password)\s*[:=]\s*)\S+/giu, "$1[redacted]");
 function describe(template: PromptTemplate): PromptTemplateRow {
 	const version = createHash("sha256").update(JSON.stringify(template)).digest("hex");
 	return {
@@ -29,6 +36,7 @@ export class StudioRuntimeCatalogService {
 	constructor(
 		readonly session: AgentSession,
 		readonly manager?: MCPManager,
+		readonly auth?: StudioMcpAuthService,
 	) {}
 	async execute(operation: RuntimeCatalogOperation): Promise<unknown> {
 		const cwd = this.session.sessionManager.getCwd();
@@ -43,8 +51,20 @@ export class StudioRuntimeCatalogService {
 		if (operation.kind === "mcp.runtime.status") {
 			const manager = this.manager;
 			const startupTimeoutMs = resolveMCPStartupTimeoutMs(cfgMcpStartupTimeoutMs.get(this.session.settings));
+			const shared = cfgMcpShared.get(this.session.settings);
+			const rawIdleStop = cfgMcpIdleStopMinutes.get(this.session.settings);
+			const idleStopMinutes = Number.isFinite(rawIdleStop) && rawIdleStop >= 0 ? rawIdleStop : 5;
 			if (!manager)
-				return { available: false, startupTimeoutMs, ready: false, settled: false, servers: [], total: 0 };
+				return {
+					available: false,
+					startupTimeoutMs,
+					shared,
+					idleStopMinutes,
+					ready: false,
+					settled: false,
+					servers: [],
+					total: 0,
+				};
 			// A one-millisecond bounded observation waits for no new discovery and never changes policy.
 			const status = await manager.waitForStartup(1);
 			const pending = new Set(status.pending);
@@ -67,10 +87,28 @@ export class StudioRuntimeCatalogService {
 				const namespace = this.session.mcpEvalNamespaceForServer(name);
 				const transport = config ? (config.type ?? "stdio") : undefined;
 				const failure = failed.get(name);
+				const upstream = manager.getServerRuntime?.(name);
+				const runtime: McpServerRuntimeStatus | undefined = upstream
+					? {
+							era: upstream.era,
+							state: upstream.state,
+							...(upstream.pid !== undefined ? { pid: upstream.pid } : {}),
+							links: upstream.links,
+							...(upstream.exit
+								? {
+										exit: {
+											...(upstream.exit.code !== undefined ? { code: upstream.exit.code } : {}),
+											...(upstream.exit.signal !== undefined ? { signal: upstream.exit.signal } : {}),
+											stderr: sanitizeStderr(upstream.exit.stderr),
+										},
+									}
+								: {}),
+						}
+					: undefined;
 				return {
 					name: clean(name),
 					replacedByBuiltin: dropped?.reason,
-					evalNamespaceUri: namespace ? "xd://eval/" + namespace : undefined,
+					evalNamespaceUri: namespace ? "help://eval/" + namespace : undefined,
 					state: pending.has(name)
 						? "pending"
 						: failed.has(name)
@@ -94,6 +132,8 @@ export class StudioRuntimeCatalogService {
 								),
 							}
 						: {}),
+					...(runtime ? { runtime } : {}),
+					...(this.auth?.getChallenge(name) ? { authChallenge: this.auth.getChallenge(name) } : {}),
 					toolInfo: this.session
 						.getAllToolInfos()
 						.filter(tool => tool.mcpServerName === name)
@@ -110,6 +150,8 @@ export class StudioRuntimeCatalogService {
 			return {
 				available: true,
 				startupTimeoutMs,
+				shared,
+				idleStopMinutes,
 				ready:
 					status.pending.length === 0 &&
 					status.failed.length === 0 &&

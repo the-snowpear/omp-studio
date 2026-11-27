@@ -114,12 +114,21 @@ export const GUI_SECOND_BATCH_SETTINGS = {
 	},
 	"edit.mode": {
 		type: "enum",
-		values: ["apply_patch", "hashline", "patch", "replace", "sloppy", "none"],
+		values: ["apply_patch", "hashline", "patch", "replace", "sloppy", "magic", "none"],
 		default: "hashline",
 		zh: "编辑模式",
 		en: "Edit mode",
 		note: "模型专属规则或环境变量可能改变实际使用的模式。",
 		noteEn: "Model-specific rules or environment variables may change the effective mode.",
+	},
+	"edit.magic.model": {
+		type: "string",
+		default: "",
+		zh: "Magic 编辑模型",
+		en: "Magic edit model",
+		note: "用于 magic 编辑模式的模型选择器或角色别名（如 @slow）；留空则回退到 smol 角色。",
+		noteEn:
+			"Model selector or role alias (@slow) for applying magic-mode changes; empty falls back to the smol role.",
 	},
 	readLineNumbers: {
 		type: "boolean",

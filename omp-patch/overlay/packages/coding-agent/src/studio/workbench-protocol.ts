@@ -1,4 +1,27 @@
 import {
+	TODO_BACKEND_KINDS,
+	TODO_BACKEND_READ_KINDS,
+	isTodoBackendKind,
+	validateTodoBackendOperation,
+	type TodoBackendOperation,
+	type TodoBackendResultMap,
+} from "./todo-backend-protocol";
+import {
+	MCP_AUTH_KINDS,
+	MCP_AUTH_READ_KINDS,
+	isMcpAuthKind,
+	validateMcpAuthOperation,
+	type McpAuthOperation,
+	type McpAuthResultMap,
+} from "./mcp-auth-protocol";
+import {
+	CHROME_RELAY_HOST_KINDS,
+	isChromeRelayHostKind,
+	validateChromeRelayHostOperation,
+	type ChromeRelayHostOperation,
+	type ChromeRelayHostResultMap,
+} from "./chrome-relay-host-protocol";
+import {
 	SELECTIVE_COMMIT_COMMAND_KINDS,
 	isSelectiveCommitKind,
 	validateSelectiveCommitOperation,
@@ -277,6 +300,16 @@ export interface StudioServiceRow {
 	/** Compatibility alias for ownerId; not necessarily an agent ID. */
 	ownerAgentId?: string;
 	mode: "session" | "persist" | "detached";
+	/** True when registered by adopting an already-running process (`o2ctl services add`). */
+	adopted?: boolean;
+}
+export interface StudioLeftoverProcess {
+	pid: number;
+	command: string;
+	kind: "&" | "nohup";
+	ignoresSighup: boolean;
+	startedAt: number;
+	cwd?: string;
 }
 export interface RuntimeModelChoice {
 	snapcompactShape?: { variant: string; frameSize?: number };
@@ -309,6 +342,9 @@ export interface TokenCountResult {
 }
 
 export type WorkbenchOperation =
+	| TodoBackendOperation
+	| McpAuthOperation
+	| Exclude<ChromeRelayHostOperation, { kind: "browser.relayHost.status" }>
 	| Extract<SelectiveCommitOperation, { kind: keyof SelectiveCommitCommandInputMap }>
 	| PromptHistoryCommandOperation
 	| SearchCredentialsOperation
@@ -356,12 +392,18 @@ export type WorkbenchOperation =
 	| { kind: "services.mode.set"; name: string; instanceId: string; mode: "session" | "persist" | "detached" }
 	| { kind: "services.send"; name: string; instanceId: string; text: string }
 	| { kind: "services.logs"; name: string; instanceId: string; cursor?: number; lines?: number }
+	| { kind: "services.leftovers.list" }
+	| { kind: "services.leftovers.adopt"; pid: number; name: string }
+	| { kind: "services.leftovers.terminate"; pids?: number[]; includeNohup?: boolean }
 	| { kind: "tokens.count"; text: string }
 	| { kind: "runtime.models.describe"; selector: string }
 	| { kind: "runtime.models.list"; modelKind?: string; cursor?: string; limit?: number };
 
 export interface WorkbenchResultMap
 	extends
+		TodoBackendResultMap,
+		McpAuthResultMap,
+		ChromeRelayHostResultMap,
 		SelectiveCommitCommandResultMap,
 		PromptHistoryCommandResultMap,
 		SearchCredentialsResultMap,
@@ -407,11 +449,17 @@ export interface WorkbenchResultMap
 	"services.mode.set": { service: StudioServiceRow };
 	"services.send": { service: StudioServiceRow };
 	"services.logs": { instanceId: string; text: string; cursor: number; state: StudioServiceRow["state"] };
+	"services.leftovers.list": { enabled: boolean; reapBackground: boolean; leftovers: StudioLeftoverProcess[] };
+	"services.leftovers.adopt": { service: StudioServiceRow };
+	"services.leftovers.terminate": { killed: number; remaining: StudioLeftoverProcess[] };
 	"tokens.count": TokenCountResult;
 	"runtime.models.describe": { model: RuntimeModelChoice };
 	"runtime.models.list": { models: RuntimeModelChoice[]; total: number; nextCursor?: string };
 }
 export const WORKBENCH_OPERATION_KINDS = [
+	...TODO_BACKEND_KINDS,
+	...MCP_AUTH_KINDS,
+	...CHROME_RELAY_HOST_KINDS.filter(kind => kind !== "browser.relayHost.status"),
 	...SELECTIVE_COMMIT_COMMAND_KINDS,
 	...PROMPT_HISTORY_COMMAND_KINDS,
 	...SEARCH_CREDENTIAL_KINDS,
@@ -459,11 +507,16 @@ export const WORKBENCH_OPERATION_KINDS = [
 	"services.mode.set",
 	"services.send",
 	"services.logs",
+	"services.leftovers.list",
+	"services.leftovers.adopt",
+	"services.leftovers.terminate",
 	"tokens.count",
 	"runtime.models.list",
 	"runtime.models.describe",
 ] as const;
 export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
+	...TODO_BACKEND_READ_KINDS,
+	...MCP_AUTH_READ_KINDS,
 	"search.credentials.list",
 	...COMPUTER_WORKSPACE_COMMAND_KINDS,
 	"evaluation.runtime.plan",
@@ -539,6 +592,7 @@ export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
 	"accounts.status.details",
 	"services.list",
 	"services.logs",
+	"services.leftovers.list",
 	"tokens.count",
 	"runtime.models.list",
 	"runtime.models.describe",
@@ -621,6 +675,18 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 	}
 	if (isMaintenanceKind(kind)) {
 		validateMaintenanceOperation(value);
+		return;
+	}
+	if (isChromeRelayHostKind(kind)) {
+		validateChromeRelayHostOperation(value);
+		return;
+	}
+	if (isMcpAuthKind(kind)) {
+		validateMcpAuthOperation(value);
+		return;
+	}
+	if (isTodoBackendKind(kind)) {
+		validateTodoBackendOperation(value);
 		return;
 	}
 	if (isArchiveOperationKind(kind)) {
@@ -745,6 +811,9 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 			| SessionTitlesOperation["kind"]
 			| PredictionChannelOperation["kind"]
 			| MaintenanceOperation["kind"]
+			| Exclude<ChromeRelayHostOperation, { kind: "browser.relayHost.status" }>["kind"]
+			| McpAuthOperation["kind"]
+			| TodoBackendOperation["kind"]
 			| ArchiveOperation["kind"]
 			| AgentModelOperation["kind"]
 			| SessionRestoreOperation["kind"]
@@ -783,6 +852,9 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 		"services.mode.set": ["name", "instanceId", "mode"],
 		"services.send": ["name", "instanceId", "text"],
 		"services.logs": ["name", "instanceId", "cursor", "lines"],
+		"services.leftovers.list": [],
+		"services.leftovers.adopt": ["pid", "name"],
+		"services.leftovers.terminate": ["pids", "includeNohup"],
 		"tokens.count": ["text"],
 		"runtime.models.describe": ["selector"],
 		"runtime.models.list": ["modelKind", "cursor", "limit"],
@@ -795,9 +867,20 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 	)
 		throw new Error("Invalid account refresh flag");
 	if (kind === "services.start") validateServiceSpec(input.spec);
-	if (fields[kind].includes("name")) {
-		text(input.name, 48);
-		text(input.instanceId);
+	if (fields[kind].includes("name")) text(input.name, 48);
+	if (fields[kind].includes("instanceId")) text(input.instanceId);
+	if (kind === "services.leftovers.adopt") {
+		if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$/u.test(input.name as string)) throw new Error("Invalid service name");
+		integer(input.pid, 1);
+	}
+	if (kind === "services.leftovers.terminate") {
+		if (input.includeNohup !== undefined && typeof input.includeNohup !== "boolean")
+			throw new Error("Invalid includeNohup flag");
+		if (input.pids !== undefined) {
+			if (!Array.isArray(input.pids) || input.pids.length === 0 || input.pids.length > 64)
+				throw new Error("Invalid leftover pid list");
+			for (const pid of input.pids) integer(pid, 1);
+		}
 	}
 	if (kind === "services.mode.set") mode(input.mode);
 	if (kind === "services.send") text(input.text, 65536, true);

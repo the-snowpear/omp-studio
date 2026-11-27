@@ -82,6 +82,7 @@ test("cancellation does not release deletion while execFile has reported an erro
 test("an older or different pinned Runtime is never launched with the private purge selector", async () => {
   const supported = { upstreamVersion: "18.20.2", upstreamCommit: "7c49c11aa5bbaf3f418406583096168ad5b8c6dc", patchsetVersion: "studio.1" } as RuntimeInstallationManifest;
   assert.equal(supportsSessionPurgeMaintenance(supported), true);
+  assert.equal(supportsSessionPurgeMaintenance({ ...supported, upstreamVersion: "19.2.1", upstreamCommit: "b55cd1bb664d8ab46ddc77f2a34eb47555dbf1ac" }), true);
   let launches = 0;
   for (const manifest of [
     { ...supported, upstreamVersion: "18.19.0" },

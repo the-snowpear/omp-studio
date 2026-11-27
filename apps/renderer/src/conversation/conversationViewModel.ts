@@ -17,7 +17,7 @@ export type ToolProgress = { readonly progress: number; readonly total?: number;
 export type ToolStatus = "queued" | "running" | "succeeded" | "failed" | "aborted" | "missing";
 export type LiveBlock = { readonly blockId: string; readonly blockType: "text" | "thinking"; readonly text: string; readonly truncated?: boolean };
 export type LiveMessage = { readonly messageId: string; readonly turnId: string; readonly role: ConversationMessageItem["role"]; readonly createdAt: string; readonly blocks: readonly LiveBlock[]; readonly aborted: boolean };
-export type LiveTool = { readonly presentation?: "reply" | undefined; readonly replies?: readonly string[] | undefined; readonly toolCallId: string; readonly messageId: string; readonly turnId: string; readonly toolName: string; readonly arguments?: JsonValue; readonly output?: string; readonly truncated?: boolean; readonly result?: Extract<ConversationContentBlock, { type: "toolResult" }>; readonly status: ToolStatus; readonly progress?: ToolProgress };
+export type LiveTool = { readonly parentToolCallId?: string; readonly presentation?: "reply" | undefined; readonly replies?: readonly string[] | undefined; readonly toolCallId: string; readonly messageId: string; readonly turnId: string; readonly toolName: string; readonly arguments?: JsonValue; readonly output?: string; readonly truncated?: boolean; readonly result?: Extract<ConversationContentBlock, { type: "toolResult" }>; readonly status: ToolStatus; readonly progress?: ToolProgress };
 export type PendingUser = { readonly requestId: string; readonly text: string; readonly draft: string; readonly status: "pending" | "failed"; readonly knownItemIds: readonly string[]; readonly error?: string; readonly doc?: ComposerDoc };
 export type ConversationNotice = { readonly id: string; readonly level: "info" | "warning" | "error"; readonly message: string; readonly source?: string };
 export type HydrateStatus = "idle" | "loading" | "ready" | "error" | "resyncing" | "unavailable";
@@ -33,7 +33,7 @@ export type ConversationState = {
   readonly userDisplays: { readonly [itemId: string]: ComposerDoc }; readonly userThumbs: UserThumbMap; readonly openTurnItems: { readonly [itemId: string]: string };
   readonly compacting?: { readonly action: string }; readonly messageErrors?: { readonly [messageId: string]: ConversationMessageError };
 };
-export type ToolView = { readonly presentation?: "reply" | undefined; readonly replies?: readonly string[] | undefined; readonly toolCallId: string; readonly toolName: string; readonly arguments?: JsonValue; readonly output?: string; readonly result?: Extract<ConversationContentBlock, { type: "toolResult" }>; readonly status: ToolStatus; readonly truncated?: boolean; readonly progress?: ToolProgress };
+export type ToolView = { readonly parentToolCallId?: string; readonly presentation?: "reply" | undefined; readonly replies?: readonly string[] | undefined; readonly toolCallId: string; readonly toolName: string; readonly arguments?: JsonValue; readonly output?: string; readonly result?: Extract<ConversationContentBlock, { type: "toolResult" }>; readonly status: ToolStatus; readonly truncated?: boolean; readonly progress?: ToolProgress };
 export type AssistantSegment =
   | { readonly type: "text"; readonly key: string; readonly text: string; readonly truncated?: boolean; readonly streaming?: boolean }
   | { readonly type: "thinking"; readonly key: string; readonly text: string; readonly truncated?: boolean }
@@ -156,6 +156,7 @@ function toolViews(content: readonly ConversationContentBlock[], live: readonly 
       presentation: liveTool?.presentation ?? call.presentation,
       replies: liveTool?.replies,
       toolCallId: call.toolCallId,
+      ...(liveTool?.parentToolCallId ? { parentToolCallId: liveTool.parentToolCallId } : {}),
       toolName: call.toolName,
       ...(call.arguments === undefined ? {} : { arguments: call.arguments }),
       ...(liveTool?.output === undefined ? {} : { output: liveTool.output }),
@@ -166,7 +167,7 @@ function toolViews(content: readonly ConversationContentBlock[], live: readonly 
     };
   });
   const known = new Set(persisted.map((tool) => tool.toolCallId));
-  return [...persisted, ...live.filter((tool) => !known.has(tool.toolCallId)).map((tool): ToolView => ({ presentation: tool.presentation, replies: tool.replies, toolCallId: tool.toolCallId, toolName: tool.toolName, ...(tool.arguments === undefined ? {} : { arguments: tool.arguments }), ...(tool.output === undefined ? {} : { output: tool.output }), ...(tool.result === undefined ? {} : { result: tool.result }), status: tool.status, ...(tool.truncated ? { truncated: true } : {}), ...(tool.progress === undefined || tool.status !== "running" ? {} : { progress: tool.progress }) }))];
+  return [...persisted, ...live.filter((tool) => !known.has(tool.toolCallId)).map((tool): ToolView => ({ presentation: tool.presentation, replies: tool.replies, ...(tool.parentToolCallId ? { parentToolCallId: tool.parentToolCallId } : {}), toolCallId: tool.toolCallId, toolName: tool.toolName, ...(tool.arguments === undefined ? {} : { arguments: tool.arguments }), ...(tool.output === undefined ? {} : { output: tool.output }), ...(tool.result === undefined ? {} : { result: tool.result }), status: tool.status, ...(tool.truncated ? { truncated: true } : {}), ...(tool.progress === undefined || tool.status !== "running" ? {} : { progress: tool.progress }) }))];
 }
 function assistantSegments(content: readonly ConversationContentBlock[], liveTools: readonly LiveTool[], turnOpen: boolean, streaming = false): readonly AssistantSegment[] {
   const segments: AssistantSegment[] = [];

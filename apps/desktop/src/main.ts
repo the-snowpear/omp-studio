@@ -69,7 +69,7 @@ import { handleMainWindowClose, moveToApplicationsMarkerPath, moveToApplications
 import { startAppNapGuard } from "./platform/app-nap.js";
 import { windowChromeOptions } from "./platform/window-chrome.js";
 import { registerChromeImageIpc } from "./chrome-image.js";
-import { registerChromeNotifyIpc } from "./chrome-notify.js";
+import { registerChromeNotifyIpc, notifyPtyInputWait } from "./chrome-notify.js";
 import { registerChromeOpenUrlIpc } from "./chrome-open-url.js";
 import { registerChromeLogsIpc } from "./chrome-logs.js";
 import { registerChromeMetricsIpc } from "./chrome-metrics.js";
@@ -285,6 +285,7 @@ export async function main(): Promise<void> {
     packaged: app.isPackaged,
     ...(runtimeInstallLayout ? { installLayout: runtimeInstallLayout } : {}),
   }, {
+    onPtyInputWait: notifyPtyInputWait,
     loginEnvironment,
     pickDirectory: async () => {
       const selected = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });

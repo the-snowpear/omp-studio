@@ -55,6 +55,12 @@ export class StudioModelAuthService {
 				const pauseReason = providerPauseReason(provider.id);
 				return {
 					id: provider.id,
+					credentialProvider: storageProvider,
+					...(provider.id === "anthropic-long-lived"
+						? { loginVariant: "anthropic-year" as const }
+						: provider.id === "otari"
+							? { loginVariant: "otari-region" as const }
+							: {}),
 					loginBehavior: storageProvider === "kiro" ? ("add-account" as const) : ("replace" as const),
 					name: provider.name,
 					available: provider.available && pauseReason === undefined,

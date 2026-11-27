@@ -36,8 +36,8 @@ export default defineConfig({
   base: "./",
   resolve: {
     alias: [
-      { find: "@oh-my-pi/pi-tui/html-form/data", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/tui/src/html-form/data.ts", import.meta.url)) },
-      { find: "@oh-my-pi/pi-tui/html-form/model", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/tui/src/html-form/model.ts", import.meta.url)) },
+      { find: "@oh-my-pi/pi-tui/html-form/data", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/coding-agent/src/tools/html-form/data.ts", import.meta.url)) },
+      { find: "@oh-my-pi/pi-tui/html-form/model", replacement: fileURLToPath(new URL("../../omp-patch/vendor/oh-my-pi/packages/coding-agent/src/tools/html-form/model.ts", import.meta.url)) },
     ],
   },
   server: { cors: { origin: ["null", /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/] } },

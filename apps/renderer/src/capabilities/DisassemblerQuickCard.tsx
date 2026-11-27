@@ -19,7 +19,7 @@ export function DisassemblerQuickCard({ status, available, loading, busy, error,
   const { preview, marks } = usePreviewMode();
   const zh = resolvedLanguage === "zh";
   const databases = status?.databases ?? [];
-  const engine = status?.activeBackend === "ida" ? "IDA Pro" : status?.activeBackend === "ghidra" ? "Ghidra" :
+  const engine = status?.activeBackend === "binja" ? "Binary Ninja" : status?.activeBackend === "ida" ? "IDA Pro" : status?.activeBackend === "ghidra" ? "Ghidra" :
     status?.backend === "none" ? (zh ? "仅文件头" : "Metadata only") :
     available && !status && !error ? (zh ? "检测引擎中…" : "Detecting engine…") : (zh ? "无活动引擎" : "No active engine");
   const refreshLabel = zh ? "刷新数据库" : "Refresh databases";
@@ -43,7 +43,7 @@ export function DisassemblerQuickCard({ status, available, loading, busy, error,
       {databases.slice(0, DATABASE_LIMIT).map(row => <li key={row.id}>
         <button type="button" className="disassembler-quick-db" aria-current={row.id === selected || undefined} data-tip={row.path} disabled={busy} onClick={() => onOpen(row.id)}>
           <span className="disassembler-quick-db-icon"><Icon name="database" /></span>
-          <span className="disassembler-quick-db-name"><strong>{row.module}</strong><small>{row.backend === "ida" ? "IDA Pro" : "Ghidra"} · {row.arch} / {row.bitness}-bit</small></span>
+          <span className="disassembler-quick-db-name"><strong>{row.module}</strong><small>{row.backend === "binja" ? "Binary Ninja" : row.backend === "ida" ? "IDA Pro" : "Ghidra"} · {row.arch} / {row.bitness}-bit</small></span>
           {row.busy || row.state === "opening" ? <span className="disassembler-quick-running"><Icon name="clock" /> <span className="sr-only">{zh ? "分析中" : "Analyzing"}</span></span> : null}
           {row.dirty ? <span className="disassembler-dirty" role="img" aria-label={zh ? "未保存更改" : "Unsaved changes"} /> : null}
           <Icon name="chevron-r" extra="sm disassembler-quick-arrow" />

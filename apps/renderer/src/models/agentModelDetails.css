@@ -33,3 +33,6 @@
   overflow-wrap: anywhere;
 }
 .agent-model-details .amd-refresh { align-self: flex-start; }
+.agent-model-details .amd-controls { display: grid; gap: var(--sp-8); padding-block: var(--sp-12); border-block: 1px solid var(--border); }
+.agent-model-details .amd-controls label { display: grid; gap: var(--sp-6); color: var(--text-3); font-size: var(--fs-11); }
+.agent-model-details .amd-controls p { margin: 0; }

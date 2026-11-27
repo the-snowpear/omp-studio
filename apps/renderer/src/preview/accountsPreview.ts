@@ -7,7 +7,7 @@ export const PREVIEW_ACCOUNT_STATUS: AccountStatusResult = {
   refreshedAt: previewNow,
   accounts: [
     {
-      id: "preview-claude", subscriptionPlan: "Max 20x", credentialId: 1, activeCredential: true,
+      id: "preview-claude", fastEligibility: { model: "anthropic/claude-opus-4.1", tier: "priority", state: "unknown" }, subscriptionPlan: "Max 20x", credentialId: 1, activeCredential: true,
       provider: "anthropic",
       label: "mira@studio.dev",
       organization: "OMP Studio",

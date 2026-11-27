@@ -41,17 +41,20 @@ function mimeFromFile(file: File): PromptImage["mimeType"] | null {
   return null;
 }
 
-export async function fileToPromptImage(file: File): Promise<PromptImage | null> {
-  const mimeType = mimeFromFile(file);
-  if (mimeType === null) return null;
-  const buffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
+export function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
   const chunk = 0x8000;
   for (let i = 0; i < bytes.length; i += chunk) {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
-  return { type: "image", mimeType, data: btoa(binary) };
+  return btoa(binary);
+}
+
+export async function fileToPromptImage(file: File): Promise<PromptImage | null> {
+  const mimeType = mimeFromFile(file);
+  if (mimeType === null) return null;
+  const buffer = await file.arrayBuffer();
+  return { type: "image", mimeType, data: bytesToBase64(new Uint8Array(buffer)) };
 }
 
 export function imagePreviewUrl(image: PromptImage): string {

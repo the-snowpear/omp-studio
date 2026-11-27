@@ -24,7 +24,7 @@ import {
 import { StudioStateProjector } from "./state-projector";
 import type { StudioBridgeLifecycle, StudioHostRuntime } from "./studio-host-mode";
 
-const UPSTREAM_COMMIT = "f40f335845f0b136453d12fec8d6057011082766";
+const UPSTREAM_COMMIT = "b55cd1bb664d8ab46ddc77f2a34eb47555dbf1ac";
 /**
  * Must match `omp-patch/patches/series.json` `patchsetVersion`. The Runtime
  * reports `${VERSION}-${PATCHSET_VERSION}` in its Studio Hello, and packaging

@@ -129,3 +129,9 @@
     gap: var(--sp-16);
   }
 }
+
+.archive-activity { padding-top: var(--sp-16); }
+.archive-transcript-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 32rem; overflow: auto; padding: var(--sp-12); background: var(--surface-2); border-radius: var(--radius-sm); font-size: var(--fs-12); line-height: 1.65; }
+.archive-stats { width: 100%; border-collapse: collapse; margin-top: var(--sp-12); }
+.archive-stats th, .archive-stats td { padding: var(--sp-12); border-bottom: 1px solid var(--border); text-align: right; }
+.archive-stats th:first-child, .archive-stats td:first-child { text-align: left; }

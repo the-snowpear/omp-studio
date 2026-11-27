@@ -1,7 +1,7 @@
-import { splitBtwInject, formatBtwInjectText } from "@oh-my-pi/pi-tui/overlays/btw-history";
 import type { BtwInjection } from "../btw-protocol";
 import { randomUUID } from "node:crypto";
 import { BtwHistoryStore, type BtwHistoryRecord, type BtwHistoryTurn, getBtwTurns } from "../../session/btw-history";
+import { formatBtwInjectText, splitBtwInject } from "../../session/btw-history-model";
 import { beginBtwTurn, runBtwTurn } from "../../session/btw-turn";
 import type { AgentSession } from "../../session/agent-session";
 import type { BtwTopicSummary } from "../runtime-upgrade-protocol";

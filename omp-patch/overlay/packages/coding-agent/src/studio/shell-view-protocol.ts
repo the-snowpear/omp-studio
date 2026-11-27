@@ -15,6 +15,7 @@ export interface ShellVizLayers {
 }
 /** Per-tool-call preferences. Node identifiers are opaque native `unit:source:node` keys. */
 export interface ShellVizPreferences {
+	streamId?: string;
 	view: ShellVizView;
 	layers: ShellVizLayers;
 	split: boolean;
@@ -93,6 +94,18 @@ export interface ShellVizWatch {
 }
 /** Browser-independent presentation shared by ANSI and native GUI renderers. */
 export interface ShellVizPresentation {
+	streams?: Array<{
+		id: string;
+		kind: "pipe" | "file";
+		producer: string;
+		consumer: string;
+		bytes: number;
+		open: boolean;
+		modified: number;
+	}>;
+	selectedStreamId?: string;
+	binary?: boolean;
+	waitingForInput?: boolean;
 	preferences: ShellVizPreferences;
 	rows: ShellVizRow[];
 	/** Raw counterpart for Pseudo split; empty when that pane is not requested. */

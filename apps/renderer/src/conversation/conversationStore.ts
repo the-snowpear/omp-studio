@@ -358,7 +358,7 @@ export class ConversationStore {
           if (oldest === undefined) break;
           this.deleteLiveTool(oldest);
         }
-        this.setLiveTool(update.toolCallId, { ...(existing?.messageId === update.messageId && existing.turnId === update.turnId ? existing : {}), ...(update.presentation ? { presentation: update.presentation } : {}), toolCallId: update.toolCallId, messageId: update.messageId, turnId: update.turnId, toolName: update.toolName, ...(update.arguments === undefined ? {} : { arguments: update.arguments }), status: "running" }); this.openTurnItems.set(update.messageId, update.turnId);
+        this.setLiveTool(update.toolCallId, { ...(existing?.messageId === update.messageId && existing.turnId === update.turnId ? existing : {}), ...(update.presentation ? { presentation: update.presentation } : {}), ...(update.parentToolCallId ? { parentToolCallId: update.parentToolCallId } : {}), toolCallId: update.toolCallId, messageId: update.messageId, turnId: update.turnId, toolName: update.toolName, ...(update.arguments === undefined ? {} : { arguments: update.arguments }), status: "running" }); this.openTurnItems.set(update.messageId, update.turnId);
         this.markRowChanged(update.messageId); break;
       }
       case "conversation.tool.updated": {

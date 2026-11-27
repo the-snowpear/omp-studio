@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
+import { parseConfiguredThinkingLevel } from "../../thinking/levels";
 import { setCfgApprovalHost } from "../../internal-urls/cfg-protocol";
 import type { AgentSession } from "../../session/agent-session";
 import { cfgDefaultThinkingLevel } from "../../session/settings";

@@ -17,7 +17,7 @@ import { CapabilityEditor } from "./CapabilityEditor";
 import "./disassembler.css";
 
 type Confirmation =
-  | { kind: "configure"; backend: DisassemblerBackend; maxOpen: number; idleCloseSec: number }
+  | { kind: "configure"; backend: DisassemblerBackend; maxOpen: number; idleCloseSec: number; binjaInstallDir?: string; binjaPython?: string }
   | { kind: "open"; path: string }
   | { kind: "run"; id: string; code: string }
   | { kind: "save" | "close"; id: string };
@@ -54,6 +54,8 @@ export function DisassemblerPane({ client, sessionId, available, visible = true,
   const [tab, setTab] = useState<"browse" | "python" | "info">("browse");
   const [configuration, setConfiguration] = useState(false);
   const [fileDialog, setFileDialog] = useState(false);
+  const [binjaInstallDir, setBinjaInstallDir] = useState("");
+  const [binjaPython, setBinjaPython] = useState("");
   const [backend, setBackend] = useState<DisassemblerBackend>("auto");
   const [maxOpen, setMaxOpen] = useState(4);
   const [idleCloseSec, setIdleCloseSec] = useState(900);
@@ -103,7 +105,7 @@ export function DisassemblerPane({ client, sessionId, available, visible = true,
       hasLoadedRef.current = true;
       setStatus(next);
       if (!configLoaded.current) {
-        setBackend(next.backend); setMaxOpen(next.maxOpen); setIdleCloseSec(next.idleCloseSec); configLoaded.current = true;
+        setBinjaInstallDir(next.binjaInstallDir ?? ""); setBinjaPython(next.binjaPython ?? ""); setBackend(next.backend); setMaxOpen(next.maxOpen); setIdleCloseSec(next.idleCloseSec); configLoaded.current = true;
       }
       return next;
     } catch (cause) {
@@ -168,12 +170,12 @@ export function DisassemblerPane({ client, sessionId, available, visible = true,
     if (action.kind === "open") { metadataRequest.current++; setFileDialog(false); }
     try {
       if (preview) {
-        if (action.kind === "configure") { setStatus(current => ({ ...current!, backend: action.backend, activeBackend: action.backend === "ghidra" ? "ghidra" : "ida", available: action.backend !== "none", maxOpen: action.maxOpen, idleCloseSec: action.idleCloseSec })); setConfiguration(false); }
+        if (action.kind === "configure") { setStatus(current => ({ ...current!, backend: action.backend, activeBackend: action.backend === "binja" ? "binja" : action.backend === "ghidra" ? "ghidra" : "ida", available: action.backend !== "none", maxOpen: action.maxOpen, idleCloseSec: action.idleCloseSec, ...(action.binjaInstallDir !== undefined ? { binjaInstallDir: action.binjaInstallDir } : {}), ...(action.binjaPython !== undefined ? { binjaPython: action.binjaPython } : {}) })); setConfiguration(false); }
         else if (action.kind === "open") {
           const name = action.path.split(/[\\/]/).at(-1) || "sample.exe";
           const existing = status?.databases.find(row => row.ref === action.path || row.path === action.path);
           const id = existing?.id ?? `preview-${Date.now()}`;
-          if (!existing) setStatus(current => ({ ...current!, databases: [...current!.databases, { ...PREVIEW_DISASSEMBLER.databases[0]!, id, module: name, ref: action.path, backend: current!.backend === "ghidra" ? "ghidra" : "ida", label: name, path: current!.backend === "ghidra" ? `${name}.gpr` : `${name}.i64` }] }));
+          if (!existing) setStatus(current => ({ ...current!, databases: [...current!.databases, { ...PREVIEW_DISASSEMBLER.databases[0]!, id, module: name, ref: action.path, backend: current!.backend === "binja" ? "binja" : current!.backend === "ghidra" ? "ghidra" : "ida", label: name, path: current!.backend === "binja" ? `${name}.bndb` : current!.backend === "ghidra" ? `${name}.gpr` : `${name}.i64` }] }));
           setSelected(id); setPath(""); setMetadata("");
         } else {
           applyPreviewEdit({ action: action.kind === "run" ? "exec" : action.kind, dbId: action.id, ...(action.kind === "run" ? { code: action.code } : action.kind === "close" ? { save: true } : {}) } as DisassemblerEdit);
@@ -182,7 +184,7 @@ export function DisassemblerPane({ client, sessionId, available, visible = true,
         if (marks) setNotice(zh ? "演示：操作已完成，设置已更新。" : "Demo: operation complete. Settings updated.");
       } else {
         if (action.kind === "configure") {
-          const next = await invoke("disassembler.configure", { sessionId: sessionId!, backend: action.backend, maxOpen: action.maxOpen, idleCloseSec: action.idleCloseSec });
+          const next = await invoke("disassembler.configure", { sessionId: sessionId!, backend: action.backend, maxOpen: action.maxOpen, idleCloseSec: action.idleCloseSec, ...(action.binjaInstallDir !== undefined ? { binjaInstallDir: action.binjaInstallDir } : {}), ...(action.binjaPython !== undefined ? { binjaPython: action.binjaPython } : {}) });
           if (generation !== epoch.current) return;
           setStatus(next); setConfiguration(false); setNotice(zh ? "配置已保存并重新检测。" : "Configuration saved and checked.");
         } else if (action.kind === "open") {
@@ -222,6 +224,8 @@ export function DisassemblerPane({ client, sessionId, available, visible = true,
   const refreshTitle = zh ? "刷新分析引擎状态" : "Refresh analysis engine status";
   const demo = preview && marks ? <span className="chip gray xs">{zh ? "演示" : "Demo"}</span> : null;
   const openSettings = () => {
+    setBinjaInstallDir(status?.binjaInstallDir ?? "");
+    setBinjaPython(status?.binjaPython ?? "");
     setBackend(status?.backend ?? "auto");
     setMaxOpen(status?.maxOpen ?? 4);
     setIdleCloseSec(status?.idleCloseSec ?? 900);
@@ -230,12 +234,12 @@ export function DisassemblerPane({ client, sessionId, available, visible = true,
   const refreshStatus = () => { setError(""); void refresh(); setRefreshKey(key => key + 1); };
   const canRefresh = canRead && !busy && !loading;
   const engineStates = <>
-      {status ? <span className="disassembler-engines" role="list" aria-label={zh ? "引擎状态" : "Engine status"}>{(["ida", "ghidra"] as const).map(engine => {
+      {status ? <span className="disassembler-engines" role="list" aria-label={zh ? "引擎状态" : "Engine status"}>{(["ida", "ghidra", "binja"] as const).map(engine => {
         const engineState = status.backends[engine].state;
         const inUse = status.available && status.activeBackend === engine;
         return <span key={engine} role="listitem" className="disassembler-engine" data-state={engineState} data-active={inUse || undefined} data-tip={status.backends[engine].detail || undefined}>
           <span className="disassembler-engine-dot" aria-hidden />
-          <b>{engine === "ida" ? "IDA Pro" : "Ghidra"}</b>
+          <b>{engine === "binja" ? "Binary Ninja" : engine === "ida" ? "IDA Pro" : "Ghidra"}</b>
           <span>{inUse ? (zh ? "使用中" : "In use") : ({ ready: zh ? "就绪" : "Ready", unavailable: zh ? "不可用" : "Unavailable", installing: zh ? "安装中" : "Installing", unknown: zh ? "待检测" : "Unknown" })[engineState]}</span>
         </span>;
       })}</span> : null}{status?.reason && <span className="disassembler-engine-reason">{status.reason}</span>}
@@ -294,7 +298,7 @@ export function DisassemblerPane({ client, sessionId, available, visible = true,
           <AppSelect aria-label={zh ? "分析引擎" : "Analysis engine"} value={status?.backend ?? "auto"} disabled={!status || busy || !can("disassembler.configure")} onChange={event => {
             const choice = event.target.value as DisassemblerBackend;
             setConfirm({ kind: "configure", backend: choice, maxOpen: status!.maxOpen, idleCloseSec: status!.idleCloseSec });
-          }}><option value="auto">{zh ? "自动" : "Auto"}{status?.backend === "auto" && status.activeBackend ? ` · ${status.activeBackend === "ida" ? "IDA Pro" : "Ghidra"}` : ""}</option><option value="ida">IDA Pro</option><option value="ghidra">Ghidra</option><option value="none">{zh ? "仅文件头" : "Metadata only"}</option></AppSelect>
+          }}><option value="auto">{zh ? "自动" : "Auto"}{status?.backend === "auto" && status.activeBackend ? ` · ${status.activeBackend === "binja" ? "Binary Ninja" : status.activeBackend === "ida" ? "IDA Pro" : "Ghidra"}` : ""}</option><option value="ida">IDA Pro</option><option value="ghidra">Ghidra</option><option value="binja">Binary Ninja</option><option value="none">{zh ? "仅文件头" : "Metadata only"}</option></AppSelect>
         </label>
         {engineStates}
       </div>
@@ -307,7 +311,7 @@ export function DisassemblerPane({ client, sessionId, available, visible = true,
         <div className="disassembler-list-heading"><strong>{zh ? "项目数据库" : "Project databases"}</strong><span>{status?.databases.length ?? 0}</span></div>
         <div className="disassembler-list-search"><Icon name="search" /><input aria-label={zh ? "筛选数据库" : "Filter databases"} placeholder={zh ? "筛选数据库…" : "Filter databases…"} value={filter} onChange={event => setFilter(event.target.value)} /></div>
         <div className="disassembler-database-list">{status?.databases.filter(row => row.module.toLowerCase().includes(filter.toLowerCase())).map(row => <button key={row.id} type="button" className="disassembler-database-row" aria-pressed={row.id === db?.id} disabled={busy} onClick={() => setSelected(row.id)}>
-          <Icon name="cpu" /><span><strong>{row.module}</strong><small><span className="disassembler-backend-tag" data-backend={row.backend}>{row.backend === "ida" ? "IDA" : "Ghidra"}</span>{row.arch} / {row.bitness}-bit</small></span>{row.dirty ? <span className="disassembler-dirty" title={zh ? "未保存更改" : "Unsaved changes"} aria-label={zh ? "未保存更改" : "Unsaved changes"} /> : null}{row.busy ? <Icon name="clock" /> : null}
+          <Icon name="cpu" /><span><strong>{row.module}</strong><small><span className="disassembler-backend-tag" data-backend={row.backend}>{row.backend === "binja" ? "Binary Ninja" : row.backend === "ida" ? "IDA" : "Ghidra"}</span>{row.arch} / {row.bitness}-bit</small></span>{row.dirty ? <span className="disassembler-dirty" title={zh ? "未保存更改" : "Unsaved changes"} aria-label={zh ? "未保存更改" : "Unsaved changes"} /> : null}{row.busy ? <Icon name="clock" /> : null}
         </button>)}{filter && !status?.databases.some(row => row.module.toLowerCase().includes(filter.toLowerCase())) ? <p className="disassembler-hint">{zh ? "没有匹配的数据库" : "No matching databases"}</p> : null}</div>
         <div className="disassembler-list-foot"><Icon name="shield" /><p>{zh ? "运行、保存和关闭前\n自动保留恢复副本" : "A recovery copy precedes\nrun, save and close"}</p></div>
       </aside>
@@ -332,27 +336,29 @@ export function DisassemblerPane({ client, sessionId, available, visible = true,
                 <details className="disassembler-disclosure"><summary>{zh ? "恢复副本与完整结果" : "Recovery copy and full result"}</summary><dl className="disassembler-facts"><div><dt>{zh ? "恢复副本" : "Recovery copy"}</dt><dd>{result.backup}</dd></div><div><dt>{zh ? "结果文件" : "Result file"}</dt><dd>{result.resultFile}</dd></div></dl></details>{result.truncated ? <p className="disassembler-hint">{zh ? "显示内容已截断，完整输出保存在结果文件中。" : "Output is truncated. The result file contains the complete output."}</p> : null}</> : <p className="disassembler-result-placeholder">{zh ? "运行后的输出、返回值和错误会显示在这里。" : "Output, return values and errors appear here after execution."}</p>}
             </section>
           </div></WorkspacePanel>
-          <WorkspacePanel id={tabsId} name="info" active={tab === "info"}><dl className="disassembler-facts"><div><dt>{zh ? "数据库文件" : "Database file"}</dt><dd>{db.path}</dd></div><div><dt>{zh ? "源文件引用" : "Source reference"}</dt><dd>{db.ref}</dd></div><div><dt>{zh ? "数据库 ID" : "Database ID"}</dt><dd>{db.id}</dd></div><div><dt>{zh ? "当前操作" : "Current operation"}</dt><dd>{db.current ? `${db.current.method} · ${new Date(db.current.startedAt).toLocaleString()}` : (zh ? "无活动操作" : "No active operation")}</dd></div></dl><div className="disassembler-info-note"><Icon name="info" /><p>{zh ? "打开二进制会创建独立数据库，不修改原二进制。已有 IDB / i64 原位打开；数据库和 Python 状态由项目共享。" : "Binaries use a separate database without changing the binary. Existing IDB / i64 files open in place. Database and Python state are shared by the project."}</p></div></WorkspacePanel>
+          <WorkspacePanel id={tabsId} name="info" active={tab === "info"}><dl className="disassembler-facts"><div><dt>{zh ? "数据库文件" : "Database file"}</dt><dd>{db.path}</dd></div><div><dt>{zh ? "源文件引用" : "Source reference"}</dt><dd>{db.ref}</dd></div><div><dt>{zh ? "数据库 ID" : "Database ID"}</dt><dd>{db.id}</dd></div><div><dt>{zh ? "当前操作" : "Current operation"}</dt><dd>{db.current ? `${db.current.method} · ${new Date(db.current.startedAt).toLocaleString()}` : (zh ? "无活动操作" : "No active operation")}</dd></div></dl><div className="disassembler-info-note"><Icon name="info" /><p>{zh ? "打开二进制会创建独立数据库，不修改原二进制。已有 IDB / i64 / BNDB 原位打开；数据库和 Python 状态由项目共享。" : "Binaries use a separate database without changing the binary. Existing IDB / i64 / BNDB files open in place. Database and Python state are shared by the project."}</p></div></WorkspacePanel>
         </> : <WorkspaceEmpty icon={canRead ? "cpu" : "plug"} title={loading ? (zh ? "正在加载数据库" : "Loading databases") : canRead ? (zh ? "打开你的第一个数据库" : "Open your first database") : (zh ? "连接支持反汇编的 Runtime" : "Connect a disassembler-capable Runtime")}>
-          {canRead ? (dock ? status?.reason || (zh ? "使用工具栏中的文件按钮打开二进制或数据库。" : "Use the file button to open a binary or database.") : (zh ? "输入二进制或 IDB / i64 文件路径，由所选引擎打开并分析。" : "Enter a binary or IDB / i64 path. The selected engine opens and analyzes the file.")) : (zh ? "连接后可查看与编辑项目数据库。" : "Connect to view and edit project databases.")}
+          {canRead ? (dock ? status?.reason || (zh ? "使用工具栏中的文件按钮打开二进制或数据库。" : "Use the file button to open a binary or database.") : (zh ? "输入二进制或 IDB / i64 / BNDB 文件路径，由所选引擎打开并分析。" : "Enter a binary or IDB / i64 / BNDB path. The selected engine opens and analyzes the file.")) : (zh ? "连接后可查看与编辑项目数据库。" : "Connect to view and edit project databases.")}
         </WorkspaceEmpty>}
       </div>
     </div>
     {busy || db?.busy ? <div className="disassembler-activity" role="status"><WorkspaceStatus state="running" /><span>{operation ? actionTitle(operation.kind) : db?.current?.method}{operation?.kind === "open" ? (zh ? "，原生分析会在后台继续。" : ". Native analysis continues in the background.") : ""}</span>{(operation?.kind === "run" || !operation && db?.busy) && can("disassembler.cancel") ? <button className="btn small outline danger" onClick={() => void cancel()}><Icon name="stop" />{zh ? "停止请求" : "Stop request"}</button> : null}</div> : null}
     {fileDialog && !confirm ? <WorkspaceDialog title={fileTitle} onClose={() => setFileDialog(false)}>{fileControls}</WorkspaceDialog> : null}
     {configuration ? <WorkspaceDialog title={engineTitle} onClose={() => setConfiguration(false)}>
-      <form className="disassembler-edit-form" onSubmit={event => { event.preventDefault(); setConfiguration(false); setConfirm({ kind: "configure", backend, maxOpen, idleCloseSec }); }}>
+      <form className="disassembler-edit-form" onSubmit={event => { event.preventDefault(); setConfiguration(false); setConfirm({ kind: "configure", backend, maxOpen, idleCloseSec, binjaInstallDir, binjaPython }); }}>
         {errorNotice}
         {dock ? <div className="disassembler-environment">{engineStates}</div> : null}
+        <label>{zh ? "Binary Ninja 安装目录" : "Binary Ninja install directory"}<input className="input mono" value={binjaInstallDir} placeholder={zh ? "留空自动检测" : "Leave empty to auto-detect"} onChange={event => setBinjaInstallDir(event.target.value)} /></label>
+        <label>{zh ? "Binary Ninja Python" : "Binary Ninja Python"}<input className="input mono" value={binjaPython} placeholder={zh ? "留空自动检测 Python 3" : "Leave empty to find Python 3"} onChange={event => setBinjaPython(event.target.value)} /></label>
         <label>{zh ? "后端" : "Backend"}<AppSelect value={backend} onChange={event => setBackend(event.target.value as DisassemblerBackend)}>
-          <option value="auto">{zh ? "自动 · 优先 IDA Pro" : "Auto · prefer IDA Pro"}</option><option value="ida">IDA Pro</option><option value="ghidra">Ghidra</option><option value="none">{zh ? "仅查看文件头" : "Metadata only"}</option>
+          <option value="auto">{zh ? "自动 · 优先 IDA Pro" : "Auto · prefer IDA Pro"}</option><option value="ida">IDA Pro</option><option value="ghidra">Ghidra</option><option value="binja">Binary Ninja</option><option value="none">{zh ? "仅查看文件头" : "Metadata only"}</option>
         </AppSelect></label>
         <label>{zh ? "最大打开数据库数" : "Maximum open databases"}<input className="input" type="number" value={maxOpen} onChange={event => setMaxOpen(event.target.valueAsNumber)} /></label>
         <label>{zh ? "空闲关闭时间（秒）" : "Idle timeout (seconds)"}<input className="input" type="number" value={idleCloseSec} onChange={event => setIdleCloseSec(event.target.valueAsNumber)} /></label>
         <button className="btn primary" disabled={!can("disassembler.configure")}>{zh ? "保存设置" : "Save settings"}</button>
       </form></WorkspaceDialog> : null}
     {confirm ? <WorkspaceDialog title={zh ? "确认反汇编操作" : "Confirm disassembler action"} onClose={() => setConfirm(undefined)}><div className="disassembler-edit-form"><div className="disassembler-review-heading"><Icon name="shield" /><div><strong>{actionTitle(confirm.kind)}</strong><p>{"id" in confirm ? status?.databases.find(row => row.id === confirm.id)?.module : confirm.kind === "open" ? confirm.path : (zh ? "原生全局配置" : "Native global configuration")}</p></div></div>
-      <p className="disassembler-hint">{confirm.kind === "configure" ? (zh ? "将分析引擎、数据库数量与空闲时间保存到全局设置。" : "Save the analysis engine, database limit and idle timeout globally.") : confirm.kind === "open" ? (zh ? "二进制将使用独立分析数据库。已有 IDB / i64 会原位打开，分析可能需要一些时间。" : "A binary uses a separate analysis database. Existing IDB / i64 files open in place. Analysis can take a while.") : confirm.kind === "close" ? (zh ? "先保留恢复副本并保存数据库，再关闭。其他使用此数据库的代理也会受影响。" : "Keep a recovery copy, save, then close the database. Other agents using it will be affected.") : confirm.kind === "run" ? (zh ? "先保留恢复副本。Python 可修改数据库并访问本机资源，命名空间与其他代理共享。" : "A recovery copy is kept first. Python can modify the database and access local resources. Its namespace is shared with other agents.") : (zh ? "保留恢复副本后，将当前数据库更改保存到磁盘。" : "Keep a recovery copy, then save database changes to disk.")}</p>
+      <p className="disassembler-hint">{confirm.kind === "configure" ? (zh ? "将分析引擎、数据库数量与空闲时间保存到全局设置。" : "Save the analysis engine, database limit and idle timeout globally.") : confirm.kind === "open" ? (zh ? "二进制将使用独立分析数据库。已有 IDB / i64 / BNDB 会原位打开，分析可能需要一些时间。" : "A binary uses a separate analysis database. Existing IDB / i64 / BNDB files open in place. Analysis can take a while.") : confirm.kind === "close" ? (zh ? "先保留恢复副本并保存数据库，再关闭。其他使用此数据库的代理也会受影响。" : "Keep a recovery copy, save, then close the database. Other agents using it will be affected.") : confirm.kind === "run" ? (zh ? "先保留恢复副本。Python 可修改数据库并访问本机资源，命名空间与其他代理共享。" : "A recovery copy is kept first. Python can modify the database and access local resources. Its namespace is shared with other agents.") : (zh ? "保留恢复副本后，将当前数据库更改保存到磁盘。" : "Keep a recovery copy, then save database changes to disk.")}</p>
       {confirm.kind === "run" ? <CapabilityEditor label={zh ? "待执行 Python" : "Python to execute"} value={confirm.code} language="python" readOnly /> : null}
       <div className="disassembler-dialog-actions"><button className="btn outline" onClick={() => setConfirm(undefined)}>{zh ? "取消" : "Cancel"}</button><button className="btn primary" onClick={() => void run()}>{zh ? "确认" : "Confirm"}</button></div></div></WorkspaceDialog> : null}
   </section>;

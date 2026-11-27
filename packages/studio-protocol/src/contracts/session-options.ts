@@ -6,6 +6,8 @@ export interface SessionSpeedState {
   supported: StudioSpeed[];
   effectiveTier?: string;
   fastActive: boolean;
+  fastStatus?: "unsupported" | "off" | "active" | "credential-unavailable" | "provider-fallback";
+  fastAccounts?: { eligible: number; total: number };
   slowEnabled: boolean;
   slowScope?: "session" | "global";
   usageLimit?: { stage: "wrap_up" | "low_priority"; resetsAtSec?: number; allowanceLeftPercent?: number; extraUsage?: boolean };
