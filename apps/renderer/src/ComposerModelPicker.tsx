@@ -681,6 +681,7 @@ export function ComposerModelPicker({
         </button>
         {menu === "thinking" ? (
           <ThinkingSliderPopover
+            key={`${preview}·${refreshKey}·${pick?.selector ?? ""}`}
             items={thinking.items}
             value={thinking.value}
             unverified={selectedModel?.thinkingConfig?.unverified === true}

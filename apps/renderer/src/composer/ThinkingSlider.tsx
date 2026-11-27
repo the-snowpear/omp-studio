@@ -19,6 +19,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 
 import { Icon } from "../icons";
 import { useI18n } from "../i18n";
+import { motionMs } from "../motion";
 
 import "./thinkingSlider.css";
 
@@ -55,8 +56,6 @@ const DESC_KEYS: Readonly<Record<string, string>> = {
 
 /** Runtime 迟迟不回推（例如档位被就近吸附成别的值）时，最多暂留这么久就回到真值。 */
 const PENDING_SETTLE_MS = 1500;
-/** 拖动停顿多久后把手的拉宽回弹。 */
-const STRETCH_IDLE_MS = 90;
 const EMBER_COUNT = 6;
 
 function heatOf(id: string, index: number, count: number): number {
@@ -195,7 +194,7 @@ export function ThinkingTrack({
       const speed = Math.abs(event.clientX - previous.x) / Math.max(1, event.timeStamp - previous.t);
       setStretch(Math.min(1, speed * 0.45));
       window.clearTimeout(stretchTimer.current);
-      stretchTimer.current = window.setTimeout(() => setStretch(0), STRETCH_IDLE_MS);
+      stretchTimer.current = window.setTimeout(() => setStretch(0), motionMs("tactile"));
     }
     lastMove.current = { x: event.clientX, t: event.timeStamp };
     if (drag.moved && nearest(next) !== nearest(drag.pos)) setPingKey((key) => key + 1);
@@ -332,6 +331,9 @@ export function ThinkingSliderPopover({
 
   const valueRef = useRef(value);
   valueRef.current = value;
+  const commitRef = useRef(onCommit);
+  commitRef.current = onCommit;
+  const active = useRef(true);
   const inflight = useRef(false);
   const queued = useRef<string | null>(null);
   const settleTimer = useRef<number | undefined>(undefined);
@@ -354,7 +356,14 @@ export function ThinkingSliderPopover({
     if (pending !== null && value === pending && !inflight.current) setPending(null);
   }, [value, pending]);
 
-  useEffect(() => () => window.clearTimeout(settleTimer.current), []);
+  useLayoutEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+      queued.current = null;
+      window.clearTimeout(settleTimer.current);
+    };
+  }, []);
 
   const send = (id: string) => {
     if (inflight.current) {
@@ -364,9 +373,10 @@ export function ThinkingSliderPopover({
     inflight.current = true;
     setSyncing(true);
     window.clearTimeout(settleTimer.current);
-    void onCommit(id)
+    void commitRef.current(id)
       .catch(() => false)
       .then((ok) => {
+        if (!active.current) return;
         inflight.current = false;
         const next = queued.current;
         queued.current = null;
