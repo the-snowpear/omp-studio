@@ -4554,7 +4554,6 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   top: 0;
   bottom: auto;
 }
-.cmp-think-menu { min-width: 170px; }
 .cmp-roles {
   display: flex; flex-direction: column; gap: 2px;
   max-height: min(320px, 45vh);
@@ -4661,9 +4660,6 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .cmp-flyout.side-left { right: calc(100% + 8px); }
 .cmp-flyout .rms-group-label { padding: 5px 8px; }
 .cmp-flyout .rms-option { padding: 4px 8px 4px 30px; }
-.cmp-think-item { justify-content: space-between; }
-.cmp-think-item.selected { color: var(--accent); }
-.cmp-think-item > .icon { color: var(--accent); }
 .cmp-menu-note {
   display: flex; align-items: center; gap: 6px;
   padding: 4px var(--sp-8) 2px;
@@ -4692,6 +4688,20 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   font-size: var(--fs-11);
   margin: var(--sp-4) var(--sp-8) 0;
 }
+.interaction-failure {
+  padding: var(--sp-8);
+  border: 1px solid color-mix(in srgb, var(--red) 24%, var(--border));
+  border-radius: var(--r-6);
+  background: color-mix(in srgb, var(--red) 4%, var(--surface));
+  overflow-wrap: anywhere;
+  max-height: 10em;
+  overflow-y: auto;
+}
+.interaction-failure p { margin: var(--sp-4) 0; white-space: pre-wrap; }
+.interaction-failure code { font-family: var(--font-mono); }
+.interaction-recovery { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-8); color: var(--text-muted); }
+.interaction-recovery span { flex: 1; min-width: 140px; }
+.interaction-recovery button { flex: none; }
 .send-btn {
   width: 30px; height: 30px;
   border-radius: var(--r-8);
@@ -7644,33 +7654,3 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .cmp-model-effort-head > .icon { color: var(--accent); }
 .cmp-model-effort-head > b { margin-inline-start: auto; padding: 0 var(--sp-6); border-radius: var(--r-full); background: var(--accent-soft); color: var(--accent); font-weight: var(--fw-semibold); }
 .cmp-model-effort-head > b.is-keep { background: var(--surface-2); color: var(--text-3); font-weight: var(--fw-medium); }
-/* 档位条：轨道上每档一个刻度，已选部分用 accent 填充。 */
-.cmp-model-effort input[type="range"] {
-  --effort-track: var(--surface-3);
-  width: 100%;
-  height: 16px;
-  margin: 0;
-  background: transparent;
-  cursor: pointer;
-  appearance: none;
-}
-.cmp-model-effort input[type="range"]::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: var(--r-full);
-  background:
-    radial-gradient(circle, var(--surface) 1.2px, transparent 1.6px) 0 50% / calc((100% - 4px) / var(--effort-steps)) 100% repeat-x,
-    linear-gradient(90deg, var(--accent) var(--effort-fill), var(--effort-track) var(--effort-fill));
-}
-.cmp-model-effort input[type="range"]::-webkit-slider-thumb {
-  width: 14px;
-  height: 14px;
-  margin-top: -5px;
-  border: 2px solid var(--accent);
-  border-radius: var(--r-full);
-  background: var(--surface);
-  appearance: none;
-  transition: scale var(--dur-fast) var(--ease-spring);
-}
-.cmp-model-effort input[type="range"]:hover::-webkit-slider-thumb { scale: 1.12; }
-.cmp-model-effort input[type="range"]:focus-visible { outline: none; }
-.cmp-model-effort input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--accent-soft); }

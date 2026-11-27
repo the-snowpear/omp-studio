@@ -15,7 +15,7 @@ import {
   type StudioInteractionForward,
   type StudioRuntimeSessionController,
 } from "@omp-studio/studio-host";
-import type { CommandId, RequestId, StudioOperation } from "@omp-studio/studio-protocol";
+import { canonicalJson, type RemoteInteractionRequest, type RequestId, type StudioOperation } from "@omp-studio/studio-protocol";
 
 import type { DesktopRuntimeSession } from "./host-composition.js";
 
@@ -47,7 +47,7 @@ function isHighRisk(kind: string, destructive?: boolean): boolean {
 export class DesktopInteractionHost {
   readonly #sessionRef: { current: DesktopRuntimeSession | undefined };
   readonly #confirmations = new HostConfirmationRegistry();
-  readonly #tokens = new Map<string, Map<HostInteractionRespondInput["value"], string>>();
+  readonly #tokens = new Map<string, Map<string, string>>();
   readonly #events = new IsolatedForwarder<StudioInteractionForward>();
   readonly #adapter: RemoteInteractionAdapter;
   #unsubscribe: (() => void) | undefined;
@@ -147,7 +147,9 @@ export class DesktopInteractionHost {
     }
     const highRisk = isHighRisk(pending.request.kind, pending.request.kind === "confirm" ? pending.request.destructive : undefined);
     const tokenKey = `${pending.interactionId}:${pending.generation}`;
-    const confirmationToken = highRisk && input.decision === "submit" ? this.#tokens.get(tokenKey)?.get(input.value) : undefined;
+    const confirmationToken = highRisk && input.decision === "submit" && input.value !== undefined
+      ? this.#tokens.get(tokenKey)?.get(canonicalJson(input.value))
+      : undefined;
     if (highRisk && input.decision === "submit" && confirmationToken === undefined) {
       throw new StudioHostError("INVALID_ARGUMENT", "High-risk confirmation token is not available");
     }
@@ -177,14 +179,7 @@ export class DesktopInteractionHost {
         current.interactionId === pending.interactionId &&
         isHighRisk(current.request.kind, current.request.kind === "confirm" ? current.request.destructive : undefined)
       ) {
-        this.#resign(
-          current.interactionId,
-          current.generation,
-          current.commandId,
-          current.request.kind,
-          current.request.kind === "confirm" ? current.request.destructive : undefined,
-          current.request.kind === "approval" ? current.request.approvalType : undefined,
-        );
+        this.#resign(current.request, current.generation);
       } else {
         this.#tokens.delete(tokenKey);
       }
@@ -208,7 +203,7 @@ export class DesktopInteractionHost {
         return;
       }
       const adopted = this.#adapter.adopt(forward.envelope.event);
-      this.#resign(adopted.interactionId, adopted.generation, adopted.commandId, adopted.request.kind, adopted.request.kind === "confirm" ? adopted.request.destructive : undefined, adopted.request.kind === "approval" ? adopted.request.approvalType : undefined);
+      this.#resign(adopted.request, adopted.generation);
       const clientRequestId =
         forward.clientRequestId ??
         (typeof controller.requestIdForCommandId === "function"
@@ -232,14 +227,7 @@ export class DesktopInteractionHost {
       owner: pending.owner,
       leaseGeneration: pending.leaseGeneration,
     });
-    this.#resign(
-      adopted.interactionId,
-      adopted.generation,
-      adopted.commandId,
-      adopted.request.kind,
-      adopted.request.kind === "confirm" ? adopted.request.destructive : undefined,
-      adopted.request.kind === "approval" ? adopted.request.approvalType : undefined,
-    );
+    this.#resign(adopted.request, adopted.generation);
   }
 
   #revokeToken(interactionId: string, generation: number): void {
@@ -247,24 +235,29 @@ export class DesktopInteractionHost {
   }
 
   #resign(
-    interactionId: string,
+    request: RemoteInteractionRequest,
     generation: number,
-    commandId: CommandId,
-    kind: string,
-    destructive?: boolean,
-    approvalType?: string,
   ): void {
+    const { interactionId, commandId, kind } = request;
     for (const key of [...this.#tokens.keys()]) {
       if (key.startsWith(`${interactionId}:`)) this.#tokens.delete(key);
     }
-    if (!isHighRisk(kind, destructive)) {
+    if (!isHighRisk(kind, request.kind === "confirm" ? request.destructive : undefined)) {
       return;
     }
     // Configuration approvals use explicit scope values, not boolean true.
     // Each pre-signed choice stays bound to its exact value, owner, generation,
     // and Runtime epoch; the GUI response selects one existing token.
-    const values = kind === "approval" && approvalType === "configuration" ? ["once", "session"] : [true];
-    const tokens = new Map<HostInteractionRespondInput["value"], string>();
+    const values: HostInteractionRespondInput["value"][] = request.kind === "approval" && request.approvalType === "configuration"
+      ? ["once", "session"]
+      : [true];
+    if (request.kind === "approval" && request.approvalType !== "configuration") {
+      if (request.session !== undefined) values.push("session");
+      for (const grant of request.grants ?? []) {
+        values.push({ grant: grant.scope, always: false }, { grant: grant.scope, always: true });
+      }
+    }
+    const tokens = new Map<string, string>();
     for (const value of values) {
       const operation: StudioOperation = {
         kind: "interaction.respond",
@@ -273,7 +266,7 @@ export class DesktopInteractionHost {
         decision: "submit",
         value,
       };
-      tokens.set(value, this.#confirmations.issue(operation, "gui", { leaseGeneration: generation, runtimeEpoch: this.#runtimeEpoch() }));
+      tokens.set(canonicalJson(value), this.#confirmations.issue(operation, "gui", { leaseGeneration: generation, runtimeEpoch: this.#runtimeEpoch() }));
     }
     this.#tokens.set(`${interactionId}:${generation}`, tokens);
   }

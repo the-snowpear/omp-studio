@@ -4,6 +4,8 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import type { WebStatus } from "../../../desktop/src/web/shared";
 import { webAccessPreview } from "../preview/webAccessPreview";
 import { updateControlState } from "./controlState";
+import { useWebAccessUi } from "./WebAccessContext";
+import { WebControlBar, type WebControlHolder } from "./WebControlBar";
 import "./web.css";
 
 export function WebAccess() {
@@ -12,7 +14,7 @@ export function WebAccess() {
   const zh = resolvedLanguage === "zh";
   const { preview, marks } = usePreviewMode();
   const [state, setState] = useState<WebStatus>();
-  const [open, setOpen] = useState(false);
+  const { open, setOpen, visible } = useWebAccessUi();
   const [pair, setPair] = useState<{
     url: string;
     expiresAt: number;
@@ -61,6 +63,14 @@ export function WebAccess() {
   const controlling = preview
     ? previewControl
     : state?.deviceId !== undefined && model?.control.owner?.id === state.deviceId;
+  const controlLabel = controlling
+    ? zh ? "此设备正在控制" : "You have control"
+    : model?.control.owner
+      ? zh ? `${model.control.owner.name} 正在控制` : `${model.control.owner.name} has control`
+      : zh ? "可接管工作台" : "Workbench available";
+  const holder: WebControlHolder = controlling
+    ? { kind: "self" }
+    : model?.control.owner ? { kind: "other", name: model.control.owner.name } : { kind: "free" };
   const run = async (action: () => Promise<unknown>) => {
     setError("");
     setBusy(true);
@@ -77,58 +87,20 @@ export function WebAccess() {
       setBusy(false);
     }
   };
+  const takeControl = () => {
+    void run(() => preview ? Promise.resolve(setPreviewControl(true)) : api!.takeControl());
+  };
   return (
     <>
-      <aside
-        className="web-access-strip"
-        aria-label={zh ? "主机控制" : "Host control"}
-      >
-        <span className={`web-control-dot ${controlling ? "is-owner" : ""}`} />
-        <span>
-          {controlling
-            ? zh
-              ? "此设备正在控制"
-              : "You have control"
-            : model?.control.owner
-              ? zh
-                ? `${model.control.owner.name} 正在控制`
-                : `${model.control.owner.name} has control`
-              : zh
-                ? "可接管工作台"
-                : "Workbench available"}
-        </span>
-        {preview && marks && <span>{zh ? "演示" : "Demo"}</span>}
-        {!controlling && (
-          <button
-            onClick={() => {
-              void run(() =>
-                preview
-                  ? Promise.resolve(setPreviewControl(true))
-                  : api!.takeControl(),
-              );
-            }}
-            disabled={busy}
-          >
-            {zh ? "接管" : "Take control"}
-          </button>
-        )}
-        <button
-          className="web-manage"
-          onClick={() => setOpen(!open)}
-          aria-expanded={open}
-        >
-          {zh ? "Web 访问" : "Web access"}
-        </button>
-        {model?.control.authorizationUrl && (
-          <a
-            href={model.control.authorizationUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {zh ? "完成登录" : "Complete sign-in"}
-          </a>
-        )}
-      </aside>
+      {visible && <WebControlBar
+        holder={holder}
+        demo={preview && marks}
+        busy={busy}
+        onTakeControl={takeControl}
+        manageOpen={open}
+        onManage={() => setOpen(!open)}
+        authorizationUrl={model?.control.authorizationUrl}
+      />}
       {open && (
         <div className="web-dialog-backdrop" onClick={() => setOpen(false)}>
           <section
@@ -154,6 +126,12 @@ export function WebAccess() {
                 ? "已配对设备共享项目与会话。每次由一个设备控制写入和终端。"
                 : "Paired devices share projects and conversations. One device controls changes and terminal input at a time."}
             </p>
+            <div className="web-dialog-control">
+              <span className="web-control-dot" data-state={holder.kind} aria-hidden="true" />
+              <span>{controlLabel}</span>
+              {!controlling && <button disabled={busy} onClick={takeControl}>{zh ? "接管" : "Take control"}</button>}
+              {model?.control.authorizationUrl && <a href={model.control.authorizationUrl} target="_blank" rel="noopener noreferrer">{zh ? "完成登录" : "Complete sign-in"}</a>}
+            </div>
             {!globalThis.OMP_STUDIO_WEB_ENTRY && (
               <>
                 <div className="web-address-row">
@@ -258,7 +236,6 @@ export function WebAccess() {
                     <input
                       aria-label={zh ? "设备名称" : "Device name"}
                       defaultValue={device.name}
-                      key={`${device.id}-${device.name}`}
                       onBlur={(event) => {
                         const name = event.target.value.trim();
                         if (name && name !== device.name)

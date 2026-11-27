@@ -49,9 +49,10 @@ export { RealFileTree } from "./sidebar/WorkspaceTree";
 
 export { AppSidebar } from "./sidebar/AppSidebar";
 import { WebAccess } from "./web/WebAccess";
+import { WebAccessProvider } from "./web/WebAccessContext";
 
 export function App({ client }: { readonly client: StudioClient }) {
-  return <PreviewModeProvider><FileCloseDialog /><ConversationWidthProvider><I18nProvider><TerminalSessionsProvider>{client.supportsContexts === true || (client.supportsContexts === undefined && client.openContext) ? <ExecutionTargets client={client}>{() => <ConversationWorkspace client={client} renderDocument={renderConversationDocument} />}</ExecutionTargets> : <LegacyWorkbench client={client} />}<WebAccess /><TipHost /></TerminalSessionsProvider></I18nProvider></ConversationWidthProvider></PreviewModeProvider>;
+  return <PreviewModeProvider><FileCloseDialog /><ConversationWidthProvider><I18nProvider><WebAccessProvider><TerminalSessionsProvider>{client.supportsContexts === true || (client.supportsContexts === undefined && client.openContext) ? <ExecutionTargets client={client}>{() => <ConversationWorkspace client={client} renderDocument={renderConversationDocument} />}</ExecutionTargets> : <LegacyWorkbench client={client} />}<WebAccess /><TipHost /></TerminalSessionsProvider></WebAccessProvider></I18nProvider></ConversationWidthProvider></PreviewModeProvider>;
 }
 
 function renderConversationDocument(client: StudioClient) { return <TargetApp client={client} />; }

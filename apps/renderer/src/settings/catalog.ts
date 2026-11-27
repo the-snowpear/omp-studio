@@ -73,6 +73,8 @@ const localKeys: Array<[string, ActiveSettingsGroup, string, string?]> = [
 ];
 
 const extras: SettingSearchItem[] = [
+  { id: "web-access", group: "general", zh: "设备与控制权", en: "Devices and control", targetZh: "设备与控制权", targetEn: "Devices and control", keywords: "Web access Web 访问 配对 pairing 局域网 接管 control" },
+  { id: "web-control-bar", group: "general", zh: "显示 Web 控制条", en: "Show Web control bar", targetZh: "显示 Web 控制条", targetEn: "Show Web control bar", keywords: "webAccessVisible webAccessPosition 控制权 胶囊 显示 隐藏 拖动 浮动 停靠 位置 show hide drag floating dock position" },
   { id: "time-travel", group: "general", zh: "启用 Time Travel", en: "Enable Time Travel", targetZh: "启用 Time Travel", targetEn: "Enable Time Travel", keywords: "time travel 时间旅行 检查点 快照 恢复 备份 保留期限 排除规则" },
   { id: "file-viewer", group: "files", zh: "文件查看器", en: "File Viewer", targetZh: "文件查看器", targetEn: "File Viewer", keywords: "file viewer 文件窗口 归属 保存 文件编辑" },
   { id: "office-preview", group: "maintenance", zh: "Office 文档预览", en: "Office document preview", targetZh: "Office 文档预览", targetEn: "Office document preview", keywords: "可选组件 Word PPT LibreOffice 安装 卸载" },

@@ -1,6 +1,8 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { ComposerModelMenu } from "./ComposerModelPicker";
+import type { StudioClient } from "@omp-studio/client-contract";
+import { contractFixtures } from "@omp-studio/testkit";
+import { ComposerModelMenu, ComposerModelPicker } from "./ComposerModelPicker";
 import { I18nProvider } from "./i18n";
 import { PreviewModeProvider } from "./preview/PreviewContext";
 import { createPreviewModelConfig } from "./preview/modelConfigFixtures";
@@ -45,4 +47,36 @@ it("shows a model's full selector and keeps thinking levels in the open picker w
   expect(option.textContent).toContain("关闭 · low · high");
   view.rerender(menu("en"));
   expect(option.textContent).toContain("Off · low · high");
+});
+
+it.each(["switch", "close"])("keeps queued thinking changes bound to their conversation (%s)", async (action) => {
+  const models = { ...createPreviewModelConfig(false), roles: [], availableModels: [{
+    provider: "test", id: "reasoner", selector: "test/reasoner", name: "Reasoner", reasoning: true,
+    thinkingConfig: { mode: "effort" as const, requiresEffort: true, efforts: ["low", "medium", "high"] as const },
+  }] };
+  const client = { query: vi.fn(async () => models) } as unknown as StudioClient;
+  let finish!: (ok: boolean) => void;
+  const run = vi.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+  const picker = (session: string) => <I18nProvider forcedLanguage="en"><PreviewModeProvider>
+    <ComposerModelPicker preview={false} client={client} refreshKey={session}
+      snapshot={{ ...contractFixtures.bootstrap.snapshot!, model: {
+        selector: "test/reasoner", provider: "test", id: "reasoner", thinking: "low",
+      } }} can={() => true} busy={false} onRun={run} />
+  </PreviewModeProvider></I18nProvider>;
+  const view = render(picker("first"));
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "Reasoning Effort" }));
+  fireEvent.keyDown(screen.getByRole("slider"), { key: "ArrowRight" });
+  fireEvent.keyDown(screen.getByRole("slider"), { key: "End" });
+  expect(run).toHaveBeenCalledWith("session.thinking.set", { level: "medium" });
+  if (action === "switch") {
+    view.rerender(picker("second"));
+    expect(screen.getByRole("slider").getAttribute("aria-valuetext")).toBe("Low");
+  } else {
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("slider")).toBeNull();
+  }
+  await act(async () => { finish(true); });
+  expect(run).toHaveBeenCalledTimes(action === "switch" ? 1 : 2);
+  if (action === "close") expect(run).toHaveBeenLastCalledWith("session.thinking.set", { level: "high" });
 });

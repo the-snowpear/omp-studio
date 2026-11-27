@@ -22,6 +22,7 @@ export type StreamingCadenceHz = 30 | 60 | 90 | 120;
 export type ConversationWidthMode = "standard" | "wide" | "full" | "custom";
 /** Explorer 文件图标着色：`cat` 按类型着色，`tri` 全灰阶只留敏感文件警示。 */
 export type FileTypePalette = "cat" | "tri";
+export type WebControlPosition = { readonly x: number; readonly y: number };
 
 export const CONVERSATION_WIDTH_MODES: readonly ConversationWidthMode[] = ["standard", "wide", "full", "custom"];
 export const CONVERSATION_WIDTH_LIMITS = { min: 640, max: 1440, step: 32 } as const;
@@ -60,6 +61,9 @@ export interface AppSettings {
   readonly notifyErrors: boolean;
   readonly notifyConfirmations: boolean;
   readonly notifyLongTasks: boolean;
+  readonly webAccessVisible: boolean;
+  /** null = 底部停靠；浮动位置是当前设备的视口坐标。 */
+  readonly webAccessPosition: WebControlPosition | null;
   readonly dictationDeviceId: string;
   readonly dictationToggleShortcut: string;
   readonly showThinkingSummary: boolean;
@@ -98,6 +102,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   notifyErrors: true,
   notifyConfirmations: true,
   notifyLongTasks: false,
+  webAccessVisible: false,
+  webAccessPosition: null,
   dictationDeviceId: "",
   dictationToggleShortcut: "",
   showThinkingSummary: true,
@@ -129,6 +135,12 @@ function pickNumber<T extends number>(value: unknown, allowed: ReadonlyArray<T>)
 
 function fontSize(value: unknown, min: number, max: number, fallback: number): number {
   return typeof value === "number" && Number.isInteger(value) && value >= min && value <= max ? value : fallback;
+}
+
+function webControlPosition(value: unknown): WebControlPosition | null {
+  if (!value || typeof value !== "object") return null;
+  const { x, y } = value as Partial<WebControlPosition>;
+  return typeof x === "number" && Number.isFinite(x) && typeof y === "number" && Number.isFinite(y) ? { x, y } : null;
 }
 
 export function normalizeConversationCustomWidth(value: unknown): number {
@@ -170,6 +182,8 @@ function parseStoredSettings(raw: string | null): AppSettings {
       notifyErrors: pickBoolean(value.notifyErrors) ?? DEFAULT_APP_SETTINGS.notifyErrors,
       notifyConfirmations: pickBoolean(value.notifyConfirmations) ?? DEFAULT_APP_SETTINGS.notifyConfirmations,
       notifyLongTasks: pickBoolean(value.notifyLongTasks) ?? DEFAULT_APP_SETTINGS.notifyLongTasks,
+      webAccessVisible: pickBoolean(value.webAccessVisible) ?? DEFAULT_APP_SETTINGS.webAccessVisible,
+      webAccessPosition: webControlPosition(value.webAccessPosition),
       dictationDeviceId: typeof value.dictationDeviceId === "string" ? value.dictationDeviceId : "",
       dictationToggleShortcut: typeof value.dictationToggleShortcut === "string" ? value.dictationToggleShortcut : "",
       showThinkingSummary: pickBoolean(value.showThinkingSummary) ?? DEFAULT_APP_SETTINGS.showThinkingSummary,
