@@ -65,6 +65,14 @@ function fakeClient(options?: {
   readonly servers?: McpServerRecord[];
   readonly logLines?: readonly string[];
   readonly holdTest?: Promise<void>;
+  readonly identities?: ReadonlyArray<{
+    readonly id: string;
+    readonly name: string;
+    readonly description: string;
+    readonly source: string;
+    readonly conflict: boolean;
+    readonly path?: string;
+  }>;
 }): StudioClient & {
   readonly query: ReturnType<typeof vi.fn>;
   readonly command: ReturnType<typeof vi.fn>;
@@ -96,16 +104,19 @@ function fakeClient(options?: {
   const subscribe = vi.fn((filter: { readonly requestId?: string }, cb: (event: { kind: string; receipt: CommandReceipt }) => void) => {
     const requestId = (filter.requestId ?? "req") as CommandRequestId;
     const isTest = String(requestId).includes("mcp.test");
+    const isSkillList = String(requestId).includes("session.skills.list");
     const fire = () => {
       cb({
         kind: "command.receipt",
         receipt: {
           requestId,
-          commandName: "skills.reveal",
+          commandName: isSkillList ? "session.skills.list" : "skills.reveal",
           status: "completed",
           result: isTest
             ? { ok: true, latencyMs: 12, detail: "已连接（2 个工具）", toolCount: 2 }
-            : { applied: true, runtimeEffect: "new-session", message: "已打开目录" },
+            : isSkillList
+              ? { result: { skills: options?.identities ?? [] } }
+              : { applied: true, runtimeEffect: "new-session", message: "已打开目录" },
           observedAt: T0,
         } as CommandReceipt,
       });
@@ -124,6 +135,7 @@ function renderPage(options: {
   preview?: boolean;
   client?: StudioClient;
   onRunSlash?: (command: StudioSlashCommand, args: string) => Promise<boolean>;
+  sessionId?: string;
 } = {}) {
   window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, options.preview === false ? "0" : "1");
   const client = options.client ?? fakeClient();
@@ -131,6 +143,7 @@ function renderPage(options: {
     <PreviewModeProvider switchEnabled>
       <CapabilitiesPage
         client={client}
+        {...(options.sessionId === undefined ? {} : { sessionId: options.sessionId })}
         {...(options.onRunSlash === undefined ? {} : { onRunSlash: options.onRunSlash as never })}
       />
     </PreviewModeProvider>,
@@ -159,6 +172,31 @@ describe("CapabilitiesPage", () => {
     expect(await screen.findByText("演示：已打开目录")).toBeTruthy();
     expect(client.command).not.toHaveBeenCalled();
     expect(client.query).not.toHaveBeenCalled();
+  });
+  it("shows session load status and the host enabled state for runtime skill rows", async () => {
+    renderPage({
+      preview: false,
+      sessionId: "s1",
+      client: fakeClient({
+        skills: [skill("research-writer"), { ...skill("gov-doc-writing"), enabled: false }],
+        identities: [
+          { id: "1", name: "research-writer", description: "研究报告", source: "user", conflict: false, path: "/home/x/research-writer/SKILL.md" },
+          { id: "2", name: "gov-doc-writing", description: "公文写作", source: "user", conflict: false, path: "/home/x/gov-doc-writing/SKILL.md" },
+        ],
+      }),
+    });
+
+    await screen.findByText("research-writer");
+    // Session rows know their runtime state — no "unknown" segments
+    expect(screen.queryByText("加载状态未知")).toBeNull();
+    expect(screen.queryByText("会话可用性未知")).toBeNull();
+    expect(screen.getAllByText("已加载")).toHaveLength(2);
+    expect(screen.getAllByText("会话可用")).toHaveLength(2);
+    // The switch mirrors the persisted host state, not a hard-coded on
+    const offRow = document.querySelector('[data-name="gov-doc-writing"]') as HTMLElement;
+    expect(within(offRow).queryByRole("switch", { checked: false })).toBeTruthy();
+    const onRow = document.querySelector('[data-name="research-writer"]') as HTMLElement;
+    expect(within(onRow).queryByRole("switch", { checked: true })).toBeTruthy();
   });
 
   it("lists builtin slash commands in real mode and runs ones that need no args", async () => {

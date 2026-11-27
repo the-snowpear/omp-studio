@@ -1635,7 +1635,6 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
 .mc-role-cycle .cycle-flow { background: transparent; padding: 0 0 0 calc(36px + var(--sp-12)); margin: 0; }
 .mc-role-cycle .cycle-chip { border-radius: var(--r-6); box-shadow: none; padding: var(--sp-6) var(--sp-10); }
 .mc-role-cycle .cycle-chip > .icon { color: var(--accent); }
-
 @container mc-roles (max-width: 760px) {
   .mc-role-columns { display: none; }
   .role-row { grid-template-columns: minmax(0, 1fr) 28px 28px; row-gap: var(--sp-12); }

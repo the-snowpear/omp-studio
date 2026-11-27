@@ -14,7 +14,18 @@ import { useWideLayout } from "../layout/useWideLayout";
 /** From this width the roster is a table: one column per fact instead of stacked lines. */
 const ROSTER_WIDE_MIN = 760;
 
-/** Stable parent-first ordering; lifecycle/usage updates never reorder siblings. */
+/** Spawn time for roster ordering; unparsable or missing values sort last. */
+function agentSpawnTime(agent: StudioAgentSnapshot): number {
+  const parsed = Date.parse(agent.startedAt ?? "");
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+/** Siblings in newest-spawned-first order; the stable sort keeps the input
+   order for equal timestamps (e.g. agents without a start time). */
+function siblingsNewestFirst(list: readonly StudioAgentSnapshot[]): StudioAgentSnapshot[] {
+  return [...list].sort((a, b) => agentSpawnTime(b) - agentSpawnTime(a));
+}
+/** Parent-first tree with newest-spawned siblings on top; lifecycle/usage
+   updates never reorder siblings (only a new spawn changes the order). */
 export function agentRosterRows(agents: readonly StudioAgentSnapshot[]) {
   const byId = new Map(agents.map(agent => [String(agent.agentId), agent]));
   const children = new Map<string, StudioAgentSnapshot[]>();
@@ -28,10 +39,10 @@ export function agentRosterRows(agents: readonly StudioAgentSnapshot[]) {
   function visit(agent: StudioAgentSnapshot, depth: number) {
     if (seen.has(agent.agentId)) return;
     seen.add(agent.agentId); result.push({ agent, depth });
-    for (const child of children.get(agent.agentId) ?? []) visit(child, depth + 1);
+    for (const child of siblingsNewestFirst(children.get(agent.agentId) ?? [])) visit(child, depth + 1);
   }
-  for (const agent of children.get("") ?? []) visit(agent, 0);
-  for (const agent of agents) visit(agent, 0);
+  for (const agent of siblingsNewestFirst(children.get("") ?? [])) visit(agent, 0);
+  for (const agent of siblingsNewestFirst(agents)) visit(agent, 0);
   return result;
 }
 

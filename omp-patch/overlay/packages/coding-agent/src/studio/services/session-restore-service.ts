@@ -10,7 +10,13 @@ export class StudioSessionRestoreService {
 		if (operation.sessionId !== this.session.sessionId)
 			throw new SessionControlError("COMMAND_BLOCKED", "Session changed before model inspection");
 		const manager = this.session.sessionManager;
-		const resolved = await resolveResumeTarget(operation.targetSessionId, manager.getCwd(), manager.getSessionDir());
+		// The target may live in another workspace: the recovery UI inspects
+		// from the active Runtime, while session.resume is catalog-bound and
+		// can open the target's own workspace. Search the global session
+		// buckets so cross-workspace targets still get model alternatives.
+		const resolved = await resolveResumeTarget(operation.targetSessionId, manager.getCwd(), manager.getSessionDir(), {
+			allowGlobalFallback: true,
+		});
 		const target = resolved?.session;
 		if (!target)
 			throw new SessionControlError(

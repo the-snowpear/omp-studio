@@ -655,6 +655,18 @@ index 1254fcc145..a1d405194b 100644
  	/// Skip the `pre-commit` and `commit-msg` hooks (`git commit --no-verify`).
  	pub no_verify:     bool,
  }
+diff --git a/packages/ai/src/auth-gateway/caller-options.ts b/packages/ai/src/auth-gateway/caller-options.ts
+index fc2712ca9e..73c77a1a8d 100644
+--- a/packages/ai/src/auth-gateway/caller-options.ts
++++ b/packages/ai/src/auth-gateway/caller-options.ts
+@@ -84,6 +84,7 @@ const OPTION_TIERS = {
+ 	minimizeEffort: "server",
+ 	liveSteering: "server",
+ 	maxInFlightRequests: "server",
++	modelMaxInFlightRequests: "server",
+ 	beforeDispatch: "server",
+ 	waitForTerminalDrain: "server",
+ 	onPayload: "server",
 diff --git a/packages/ai/src/providers/antigravity-cli/binary.ts b/packages/ai/src/providers/antigravity-cli/binary.ts
 index 7d38e528c3..f0ba3a9764 100644
 --- a/packages/ai/src/providers/antigravity-cli/binary.ts
@@ -803,6 +815,251 @@ index 0d8e213034..430be3b9e2 100644
  		} catch (error) {
  			close();
  			throw error;
+diff --git a/packages/ai/src/stream.ts b/packages/ai/src/stream.ts
+index 229e110e83..570a453412 100644
+--- a/packages/ai/src/stream.ts
++++ b/packages/ai/src/stream.ts
+@@ -154,7 +154,23 @@ export function configureProviderMaxInFlightRequests(limits: Record<string, numb
+ 	configuredProviderMaxInFlightRequests = limits ?? {};
+ }
+ 
+-function resolveProviderInFlightLimit(
++let configuredModelMaxInFlightRequests: Record<string, number> = {};
++
++export function configureModelMaxInFlightRequests(limits: Record<string, number> | undefined): void {
++	configuredModelMaxInFlightRequests = limits ?? {};
++}
++
++/**
++ * In-flight key for the model dimension: `provider/modelId`. Provider ids are
++ * top-level registry keys that never contain "/", so this string is unique per
++ * (provider, model) pair and cannot collide with a bare provider key or with
++ * another model's key.
++ */
++export function modelInFlightKey(provider: string, modelId: string): string {
++	return `${provider}/${modelId}`;
++}
++
++export function resolveProviderInFlightLimit(
+ 	provider: string,
+ 	options?: Pick<StreamOptions, "maxInFlightRequests">,
+ ): number | undefined {
+@@ -164,6 +180,16 @@ function resolveProviderInFlightLimit(
+ 	return Math.max(1, Math.floor(value));
+ }
+ 
++export function resolveModelInFlightLimit(
++	key: string,
++	options?: Pick<StreamOptions, "modelMaxInFlightRequests">,
++): number | undefined {
++	const limits = options?.modelMaxInFlightRequests ?? configuredModelMaxInFlightRequests;
++	const value = limits[key];
++	if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
++	return Math.max(1, Math.floor(value));
++}
++
+ function providerInFlightRoot(): string {
+ 	if (providerInFlightRootOverride) return providerInFlightRootOverride;
+ 	return getProviderInFlightRoot();
+@@ -429,6 +455,87 @@ async function cleanupProviderInFlightLeases(providerDir: string): Promise<numbe
+ 	return active;
+ }
+ 
++/**
++ * Non-blocking in-flight probe for the dispatch side: the number of active
++ * leases for `key` (a provider key or a `provider/modelId` key). Stale leases
++ * are reclaimed exactly the way the acquire path reclaims them, so the count
++ * reflects live concurrency. This reads the coordination directory without
++ * taking the per-key lock, so concurrent probes may briefly observe different
++ * mid-cleanup states — acceptable for a "is this at its cap" heuristic.
++ */
++export async function countActiveInFlightLeases(key: string): Promise<number> {
++	return cleanupProviderInFlightLeases(providerInFlightDir(key));
++}
++
++/**
++ * Key space for dispatch reservations: a subagent run that has resolved its
++ * model but not yet finished occupies the provider / provider-model slot for
++ * dispatch purposes even while it is between LLM requests. Reservations live
++ * in their own key space (same lease layout) so a run's own stream requests
++ * never dead-lock against its own reservation — the request semaphore only
++ * counts request leases.
++ */
++export function dispatchReservationKey(key: string): string {
++	return `dispatch-reserve:${key}`;
++}
++
++/**
++ * Claim one dispatch-reservation slot for `key` (a provider key or a
++ * `provider/modelId` key), admitting at most `limit` concurrent claimants.
++ * Returns the release function (await it when the subagent run finishes) or
++ * `null` when every slot is taken; with no limit it always succeeds and
++ * releases a no-op.
++ *
++ * Slots are claimed with deterministic directory names (`slot-<i>`) so
++ * concurrent claimants — in this process or in sibling worker processes —
++ * race on `mkdir`: the loser gets EEXIST and tries the next slot, which is
++ * what keeps a burst of simultaneous dispatches from all reading an empty
++ * count before any of them has written. A crashed claimant is reclaimed
++ * through the same staleness path as request leases (heartbeat + dead-pid
++ * check), so a leaked slot cannot pin the cap forever.
++ */
++export async function acquireDispatchReservationSlot(
++	key: string,
++	limit?: number,
++): Promise<(() => Promise<void>) | null> {
++	if (limit === undefined) return async () => {};
++	const dir = providerInFlightDir(dispatchReservationKey(key));
++	await cleanupProviderInFlightLeases(dir);
++	let leaseDir: string | undefined;
++	for (let slot = 0; slot < limit; slot++) {
++		const attempt = path.join(dir, `slot-${slot}`);
++		try {
++			await fs.mkdir(dir, { recursive: true });
++			await fs.mkdir(attempt);
++			leaseDir = attempt;
++			break;
++		} catch (error) {
++			// A concurrent claimant took this slot between cleanup and mkdir.
++			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
++		}
++	}
++	if (!leaseDir) return null;
++	const token = crypto.randomUUID();
++	try {
++		await writeProviderInFlightInfo(leaseDir, token);
++	} catch (error) {
++		logger.debug("Dispatch reservation could not be recorded", { key, error });
++		await fs.rm(leaseDir, { recursive: true, force: true }).catch(() => {});
++		return null;
++	}
++	let active = true;
++	const heartbeat = setInterval(() => {
++		if (!active) return;
++		void writeProviderInFlightInfo(leaseDir, token).catch(() => {});
++	}, PROVIDER_INFLIGHT_HEARTBEAT_MS);
++	heartbeat.unref?.();
++	return async () => {
++		active = false;
++		clearInterval(heartbeat);
++		await fs.rm(leaseDir, { recursive: true, force: true }).catch(() => {});
++	};
++}
++
+ async function tryAcquireProviderInFlightLease(
+ 	provider: string,
+ 	limit: number,
+@@ -620,6 +727,36 @@ async function acquireProviderInFlightSlot(
+ 	}
+ }
+ 
++/**
++ * Acquire the in-flight slots a single request must hold: the provider
++ * dimension (key = provider id) and, when configured, the model dimension
++ * (key = `provider/modelId`). Returns one release that clears both, in reverse
++ * acquisition order. The blocking-wait semantics of `acquireProviderInFlightSlot`
++ * (wait until a slot frees) apply per dimension; if the model slot cannot be
++ * acquired, the already-held provider slot is released before the error
++ * propagates so no orphan lease lingers.
++ */
++async function acquireInFlightSlots(
++	provider: string,
++	providerLimit: number | undefined,
++	modelKey: string,
++	modelLimit: number | undefined,
++	signal?: AbortSignal,
++): Promise<() => Promise<void>> {
++	const held: Array<() => Promise<void>> = [];
++	try {
++		if (providerLimit !== undefined) held.push(await acquireProviderInFlightSlot(provider, providerLimit, signal));
++		if (modelLimit !== undefined) held.push(await acquireProviderInFlightSlot(modelKey, modelLimit, signal));
++	} catch (error) {
++		for (const release of held.splice(0)) await release().catch(() => {});
++		throw error;
++	}
++	if (held.length === 0) return async () => {};
++	return async () => {
++		for (const release of held.reverse()) await release();
++	};
++}
++
+ export const __providerInFlightForTesting = {
+ 	setRoot(root: string | undefined): void {
+ 		providerInFlightRootOverride = root;
+@@ -676,7 +813,10 @@ export const __providerInFlightForTesting = {
+ };
+ 
+ function withProviderInFlightLimit<
+-	TOptions extends Pick<StreamOptions, "signal" | "maxInFlightRequests" | "beforeDispatch">,
++	TOptions extends Pick<
++		StreamOptions,
++		"signal" | "maxInFlightRequests" | "modelMaxInFlightRequests" | "beforeDispatch"
++	>,
+ >(
+ 	model: Model<Api>,
+ 	options: TOptions | undefined,
+@@ -686,8 +826,10 @@ function withProviderInFlightLimit<
+ 	// chokepoint — so the loop guard (which wraps this) sees healed events and all
+ 	// provider exits are covered by one wrap. Official first-party providers are
+ 	// exempt (see `healLeakedThinking`); healing is otherwise idempotent.
+-	const limit = resolveProviderInFlightLimit(model.provider, options);
+-	if (limit === undefined) {
++	const providerLimit = resolveProviderInFlightLimit(model.provider, options);
++	const modelKey = modelInFlightKey(model.provider, model.id);
++	const modelLimit = resolveModelInFlightLimit(modelKey, options);
++	if (providerLimit === undefined && modelLimit === undefined) {
+ 		options?.beforeDispatch?.();
+ 		return healLeakedThinking(model, dispatch(false));
+ 	}
+@@ -718,9 +860,14 @@ function withProviderInFlightLimit<
+ 		};
+ 		try {
+ 			const startedWaitingAt = Date.now();
+-			release = await acquireProviderInFlightSlot(model.provider, limit, options?.signal);
++			release = await acquireInFlightSlots(model.provider, providerLimit, modelKey, modelLimit, options?.signal);
+ 			if (Date.now() - startedWaitingAt >= PROVIDER_INFLIGHT_SIGNAL_FALLBACK_MS) {
+-				logger.debug("Provider in-flight limit wait completed", { provider: model.provider, limit });
++				logger.debug("Provider in-flight limit wait completed", {
++					provider: model.provider,
++					providerLimit,
++					model: modelKey,
++					modelLimit,
++				});
+ 			}
+ 			if (options?.signal?.aborted) {
+ 				throw options.signal.reason ?? new AIError.AbortError("Provider request aborted before dispatch");
+diff --git a/packages/ai/src/thinking-probe.ts b/packages/ai/src/thinking-probe.ts
+index 755f6caaf3..87999fa141 100644
+--- a/packages/ai/src/thinking-probe.ts
++++ b/packages/ai/src/thinking-probe.ts
+@@ -106,6 +106,7 @@ async function probeAttempt<TApi extends Api>(
+ 			maxHttpAttempts: 1,
+ 			maxRetryDelayMs: 0,
+ 			maxInFlightRequests: options.maxInFlightRequests,
++			modelMaxInFlightRequests: options.modelMaxInFlightRequests,
+ 			beforeDispatch: options.beforeDispatch,
+ 			streamFirstEventTimeoutMs: PROBE_TIMEOUT_MS,
+ 			streamIdleTimeoutMs: PROBE_TIMEOUT_MS,
+diff --git a/packages/ai/src/types.ts b/packages/ai/src/types.ts
+index 6db0c9226e..5517c5722a 100644
+--- a/packages/ai/src/types.ts
++++ b/packages/ai/src/types.ts
+@@ -670,6 +670,15 @@ export interface StreamOptions {
+ 	 * are not covered.
+ 	 */
+ 	maxInFlightRequests?: Record<string, number>;
++	/**
++	 * Optional per-model concurrent request cap for LLM stream calls. Keys are
++	 * `provider/modelId` (for example `anthropic/claude-opus-4`); positive numeric
++	 * values cap in-flight requests for that exact model across local OMP processes
++	 * that share the same config root. Omitted models are unlimited. In addition to
++	 * (and independent of) the provider-level `maxInFlightRequests` cap, a request
++	 * must hold a slot in both dimensions when both are configured.
++	 */
++	modelMaxInFlightRequests?: Record<string, number>;
+ 	/** Called after the provider slot is acquired, before each model dispatch; throwing refuses that attempt. */
+ 	beforeDispatch?: () => void;
+ 	/** @internal Keep the in-flight permit until a provider's bounded terminal drain finishes. */
 diff --git a/packages/ai/test/antigravity-cli-host.test.ts b/packages/ai/test/antigravity-cli-host.test.ts
 index cbf5b6cece..d5e267d387 100644
 --- a/packages/ai/test/antigravity-cli-host.test.ts
@@ -873,6 +1130,160 @@ index cbf5b6cece..d5e267d387 100644
  		expect(branch.writer.output.content).toEqual([]);
  		expect(branchPrompt.request.prompt).toEqual([{ type: "text", text: "what was the first number?" }]);
  		const fork = new Database(conversationStorePath(state.dir, forkId), { readonly: true });
+diff --git a/packages/ai/test/provider-inflight.test.ts b/packages/ai/test/provider-inflight.test.ts
+index bc5ba76656..7825bd76d3 100644
+--- a/packages/ai/test/provider-inflight.test.ts
++++ b/packages/ai/test/provider-inflight.test.ts
+@@ -8,7 +8,11 @@ import { clearCustomApis } from "@oh-my-pi/pi-ai/api-registry";
+ import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
+ import {
+ 	__providerInFlightForTesting,
++	configureModelMaxInFlightRequests,
+ 	configureProviderMaxInFlightRequests,
++	countActiveInFlightLeases,
++	acquireDispatchReservationSlot,
++	dispatchReservationKey,
+ 	stream,
+ 	streamSimple,
+ } from "@oh-my-pi/pi-ai/stream";
+@@ -769,3 +773,137 @@ describe("provider in-flight request limits", () => {
+ 		expect(path.isAbsolute(relative)).toBe(false);
+ 	});
+ });
++
++describe("model in-flight request limits", () => {
++	beforeEach(async () => {
++		await useIsolatedLimiterRoot();
++	});
++	afterEach(async () => {
++		configureModelMaxInFlightRequests(undefined);
++	});
++
++	function modelContext(): Context {
++		return {
++			systemPrompt: [],
++			messages: [{ role: "user", content: "hi", timestamp: 0 }],
++		};
++	}
++
++	test("serializes concurrent streamSimple calls for the same model but not other models of the provider", async () => {
++		registerMockApi();
++		const alpha = createMockModel({ provider: "tests", id: "alpha" });
++		const beta = createMockModel({ provider: "tests", id: "beta" });
++		const firstStarted = Promise.withResolvers<void>();
++		const releaseFirst = Promise.withResolvers<void>();
++		let active = 0;
++		let maxActive = 0;
++		let callIndex = 0;
++		const limits = { "tests/alpha": 1 };
++		alpha.fallback = async () => {
++			callIndex++;
++			active++;
++			maxActive = Math.max(maxActive, active);
++			try {
++				if (callIndex === 1) {
++					firstStarted.resolve();
++					await releaseFirst.promise;
++				}
++				return { content: [`reply ${callIndex}`] };
++			} finally {
++				active--;
++			}
++		};
++
++		const first = streamSimple(alpha.model, modelContext(), { modelMaxInFlightRequests: limits });
++		const firstResult = first.result();
++		await firstStarted.promise;
++
++		// A different model of the same provider must not be held by alpha's slot.
++		beta.fallback = async () => ({ content: ["beta-reply"] });
++		const betaResult = streamSimple(beta.model, modelContext(), { modelMaxInFlightRequests: limits }).result();
++		const betaMessage = await betaResult;
++		expect(betaMessage.content).toEqual([{ type: "text", text: "beta-reply" }]);
++
++		const secondWaiting = Promise.withResolvers<void>();
++		__providerInFlightForTesting.setWaitObserver(key => {
++			if (key === "tests/alpha") secondWaiting.resolve();
++		});
++		const second = streamSimple(alpha.model, modelContext(), { modelMaxInFlightRequests: limits });
++		await secondWaiting.promise;
++
++		releaseFirst.resolve();
++		const [firstMessage, secondMessage] = await Promise.all([firstResult, second.result()]);
++
++		expect(firstMessage.content).toEqual([{ type: "text", text: "reply 1" }]);
++		expect(secondMessage.content).toEqual([{ type: "text", text: "reply 2" }]);
++		expect(maxActive).toBe(1);
++		expect(alpha.calls).toHaveLength(2);
++		expect(beta.calls).toHaveLength(1);
++	});
++
++	test("holds both provider and model slots when both dimensions are capped", async () => {
++		registerMockApi();
++		const model = createMockModel({ provider: "tests", id: "alpha" });
++		const firstStarted = Promise.withResolvers<void>();
++		const releaseFirst = Promise.withResolvers<void>();
++		model.fallback = async () => {
++			firstStarted.resolve();
++			await releaseFirst.promise;
++			return { content: ["first"] };
++		};
++
++		const options = { maxInFlightRequests: { tests: 1 }, modelMaxInFlightRequests: { "tests/alpha": 1 } };
++		const first = streamSimple(model.model, modelContext(), options);
++		const firstResult = first.result();
++		await firstStarted.promise;
++
++		// Both dimensions report one active lease while the first request is held.
++		expect(await countActiveInFlightLeases("tests")).toBe(1);
++		expect(await countActiveInFlightLeases("tests/alpha")).toBe(1);
++
++		// A second request is held on the provider slot even though its model cap is open.
++		const second = streamSimple(model.model, modelContext(), options).result();
++		const outcome = await Promise.race([
++			second.then(() => "done" as const),
++			new Promise<"timeout">(resolve => setTimeout(() => resolve("timeout"), 300)),
++		]);
++		expect(outcome).toBe("timeout");
++
++		releaseFirst.resolve();
++		await firstResult;
++		const secondMessage = await second;
++		expect(secondMessage.content).toEqual([{ type: "text", text: "first" }]);
++		expect(await countActiveInFlightLeases("tests")).toBe(0);
++		expect(await countActiveInFlightLeases("tests/alpha")).toBe(0);
++	});
++
++	test("countActiveInFlightLeases is a non-blocking probe", async () => {
++		expect(await countActiveInFlightLeases("tests")).toBe(0);
++		expect(await countActiveInFlightLeases("tests/alpha")).toBe(0);
++	});
++
++	test("dispatch reservation slots admit at most the cap and release on completion", async () => {
++		await useIsolatedLimiterRoot();
++		const first = await acquireDispatchReservationSlot("tests", 1);
++		expect(first).not.toBeNull();
++		expect(await countActiveInFlightLeases(dispatchReservationKey("tests"))).toBe(1);
++		// A concurrent claimant at the same cap is rejected, not over-admitted.
++		expect(await acquireDispatchReservationSlot("tests", 1)).toBeNull();
++		await first!();
++		expect(await countActiveInFlightLeases(dispatchReservationKey("tests"))).toBe(0);
++		// Without a limit the slot always claims (no-op release).
++		const unlimited = await acquireDispatchReservationSlot("tests");
++		expect(unlimited).not.toBeNull();
++		await unlimited!();
++	});
++
++	test("dispatch reservation slots are independent of request leases", async () => {
++		await useIsolatedLimiterRoot();
++		const release = await acquireDispatchReservationSlot("tests", 1);
++		// A reservation must not consume the request-lease slot it shares a
++		// provider with: a run's own streams must not deadlock against it.
++		expect(await countActiveInFlightLeases("tests")).toBe(0);
++		expect(await countActiveInFlightLeases(dispatchReservationKey("tests"))).toBe(1);
++		await release!();
++	});
++});
 diff --git a/packages/coding-agent/src/cli/bench-cli.ts b/packages/coding-agent/src/cli/bench-cli.ts
 index ea5793d85a..a1b3c8b970 100644
 --- a/packages/coding-agent/src/cli/bench-cli.ts
@@ -6676,7 +7087,7 @@ index 89016385c0..c024f46778 100644
  	async function loadConfig(systemPromptTemplates: Record<string, unknown>): Promise<Settings> {
  		using tempDir = TempDir.createSync("@omp-system-prompt-templates-config-");
 diff --git a/packages/natives/native/index.d.ts b/packages/natives/native/index.d.ts
-index 3af18fcc63..d938192e57 100644
+index 3af18fcc63..6e0aed61a5 100644
 --- a/packages/natives/native/index.d.ts
 +++ b/packages/natives/native/index.d.ts
 @@ -31,6 +31,13 @@ export declare class AudioPlayback {
@@ -6728,14 +7139,20 @@ index 3af18fcc63..d938192e57 100644
    display?: string
    /**
     * Sessions created with the same key share one physical-Escape stop
-@@ -4623,8 +4651,10 @@ export interface VcsCommitOptions {
+@@ -4623,8 +4651,16 @@ export interface VcsCommitOptions {
    files?: Array<string>
    /** Build the commit from this index file instead of the repository's. */
    indexPath?: string
 -  /** Fail with `HeadMoved` unless HEAD resolves to this revision. */
-+  /** Fail with `HeadMoved` unless HEAD resolves to this revision; empty requires unborn HEAD. */
++  /**
++   * Fail with `HeadMoved` unless HEAD resolves to this revision; empty
++   * requires unborn HEAD.
++   */
    expectedHead?: string
-+  /** Reject hook/index changes and a commit tree different from the confirmed tree. */
++  /**
++   * Reject hook/index changes and a commit tree different from the confirmed
++   * tree.
++   */
 +  expectedTree?: string
    /** Skip the `pre-commit` and `commit-msg` hooks (`git commit --no-verify`). */
    noVerify?: boolean

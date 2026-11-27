@@ -36,6 +36,7 @@ export function SessionModelRecovery({
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
   const [inspection, setInspection] = useState<SessionRestoreInspection>();
+  const [fallbackModels, setFallbackModels] = useState<{ model: string; label: string }[]>([]);
   const [model, setModel] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -104,6 +105,33 @@ export function SessionModelRecovery({
       epoch.current++;
     };
   }, [client, currentSessionId, targetSessionId, enabled, preview, retry, zh]);
+
+  // When the inspection itself fails (e.g. a cross-workspace target the
+  // active Runtime cannot see), the alternatives list is empty and the
+  // replacement picker is unusable. Fall back to the current model catalog
+  // so the user can still choose a replacement model.
+  const catalogEpoch = useRef(0);
+  useEffect(() => {
+    if (!error || preview || !client) return;
+    const generation = ++catalogEpoch.current;
+    void client
+      .query("models.get", {})
+      .then(result => {
+        if (generation !== catalogEpoch.current) return;
+        setFallbackModels(
+          (result.availableModels ?? []).slice(0, 500).map(model => ({
+            model: `${model.provider}/${model.id}`,
+            label: model.name || model.id,
+          })),
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      catalogEpoch.current++;
+    };
+  }, [error, preview, client]);
+
+  const alternatives = inspection?.alternatives ?? fallbackModels;
   async function restore() {
     if (
       !enabled ||
@@ -209,7 +237,7 @@ export function SessionModelRecovery({
           <option value="">
             {zh ? "选择可用模型…" : "Choose an available model…"}
           </option>
-          {inspection?.alternatives.map((row) => (
+          {alternatives.map((row) => (
             <option key={row.model} value={row.model}>
               {row.label} · {row.model}
             </option>

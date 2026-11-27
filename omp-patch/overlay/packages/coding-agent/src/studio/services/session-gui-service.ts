@@ -179,6 +179,7 @@ export class StudioSessionGuiService {
 										: "runtime",
 						...(skill.name.includes("/") ? { namespace: skill.name.split("/")[0] } : {}),
 						conflict: /~\d+$/.test(skill.name),
+						path: skill.filePath,
 					})),
 					warnings: [],
 				};

@@ -227,6 +227,7 @@ export function blankDraft(): Draft {
     local: false, enabled: true, authType: "api-key", apiKey: "", envName: "", command: "",
     discoveryType: "", headersText: "", disableStrictTools: false,
     transport: "", remoteCompactionEnabled: false, remoteCompactionEndpoint: "", remoteCompactionModel: "",
+    maxInFlight: "",
     models: [], modelOverrides: {},
   };
 }
@@ -405,7 +406,8 @@ export function draftsEqual(left: Draft, right: Draft): boolean {
     || left.transport !== right.transport
     || left.remoteCompactionEnabled !== right.remoteCompactionEnabled
     || left.remoteCompactionEndpoint !== right.remoteCompactionEndpoint
-    || left.remoteCompactionModel !== right.remoteCompactionModel) {
+    || left.remoteCompactionModel !== right.remoteCompactionModel
+    || (left.maxInFlight ?? "") !== (right.maxInFlight ?? "")) {
     return false;
   }
   if (left.models.length !== right.models.length) return false;

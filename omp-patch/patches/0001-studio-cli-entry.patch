@@ -256,6 +256,346 @@ index 7ae6b6d58e..63456e0695 100644
  		}),
  		config: Flags.string({
  			description: "Load an extra config.yml-style overlay for this run (repeatable)",
+diff --git a/packages/coding-agent/src/config/model-resolver.ts b/packages/coding-agent/src/config/model-resolver.ts
+index 4ce55898ee..085377cade 100644
+--- a/packages/coding-agent/src/config/model-resolver.ts
++++ b/packages/coding-agent/src/config/model-resolver.ts
+@@ -25,6 +25,14 @@ import {
+ import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+ import type { ModelRoleLookup } from "@oh-my-pi/pi-tui/overlays/model-browser";
+ import type { Api, Effort, KnownProvider, Model, ModelSpec } from "@oh-my-pi/pi-ai";
++import {
++	acquireDispatchReservationSlot,
++	countActiveInFlightLeases,
++	dispatchReservationKey,
++	modelInFlightKey,
++	resolveModelInFlightLimit,
++	resolveProviderInFlightLimit,
++} from "@oh-my-pi/pi-ai/stream";
+ import { buildModel } from "@oh-my-pi/pi-catalog/build";
+ import { roleDefaultModels } from "@oh-my-pi/pi-catalog/compat/behavior";
+ import { resolveBareVariantSelector, resolveVariantSelector } from "@oh-my-pi/pi-catalog/compat/collapse";
+@@ -1329,6 +1337,50 @@ export function resolveConfiguredModelPatterns(
+ 		return resolved ?? [];
+ 	});
+ }
++
++/**
++ * The caller's dispatch priority for subagent model selection: the ordered
++ * pattern list where every role alias contributes its configured value and,
++ * after it, that role's configured retry fallback chain
++ * (`retry.fallbackChains[role]`). The chain normally only retries after
++ * provider errors; using it as dispatch priority means a saturated primary
++ * yields the dispatch to the role's fallbacks before it yields to the parent
++ * session's model or blocks. Exact model grants (per-call) keep the raw
++ * pattern list so an exact selector is never substituted by a role chain.
++ */
++export function resolveDispatchPriorityPatterns(
++	modelPatterns: string | string[] | undefined,
++	settings?: Settings,
++	exactOnly = false,
++	role?: string,
++): string[] {
++	if (exactOnly) return resolveConfiguredModelPatterns(modelPatterns, settings);
++	const chains = settings ? cfgRetryFallbackChains.get(settings) : {};
++	const out: string[] = [];
++	const seen = new Set<string>();
++	const push = (selector: string | undefined): void => {
++		const normalized = selector?.trim();
++		if (!normalized || seen.has(normalized)) return;
++		seen.add(normalized);
++		out.push(normalized);
++	};
++	for (const pattern of normalizeModelPatternList(modelPatterns)) {
++		for (const selector of resolveConfiguredModelPatterns(pattern, settings)) push(selector);
++		const normalizedPattern = pattern.trim();
++		const { base: aliasCandidate } = splitThinkingSuffix(
++			normalizedPattern,
++			modelRoleAliasPrefixLength(normalizedPattern) ?? LEGACY_MODEL_ROLE_ALIAS_PREFIX.length,
++			MAX_THINKING_SUFFIX_OPTIONS,
++		);
++		const patternRole = getModelRoleAlias(aliasCandidate, settings);
++		if (patternRole) for (const selector of chains[patternRole] ?? []) push(selector);
++	}
++	// Callers that pass already-expanded patterns plus the role identity keep
++	// the role's chain as the lowest dispatch priority, after every pattern.
++	if (role) for (const selector of chains[role] ?? []) push(selector);
++	return out;
++}
++
+ export interface AgentModelPatternResolutionOptions {
+ 	/** Highest-priority request selector, when supplied by a caller. */
+ 	requestModel?: string | string[];
+@@ -1809,6 +1861,84 @@ export function sessionModelDiscoveryProviders(
+ 	return providers;
+ }
+ 
++/**
++ * Whether a resolved model is at its in-flight capacity: either the
++ * provider-level cap (all models of the provider share the pool) or the
++ * model-level cap (`provider/modelId`). With no configured limit on either
++ * dimension there is nothing to saturate and no directory reads happen.
++ */
++/**
++ * Non-blocking in-flight saturation probe for the dispatch and retry paths:
++ * live request leases plus held dispatch reservations against the
++ * provider-level and model-level caps. Dispatch reservations cover sibling
++ * subagent runs that resolved a model but have not finished yet (their LLM
++ * leases only exist while a request streams), so a burst of simultaneous
++ * dispatches sees each other's claims instead of all reading an empty
++ * count.
++ */
++export async function isModelInFlightSaturated(
++	model: Model<Api>,
++	options:
++		| { providerInFlightLimits?: Record<string, number>; modelInFlightLimits?: Record<string, number> }
++		| undefined,
++): Promise<boolean> {
++	const providerLimit = resolveProviderInFlightLimit(model.provider, {
++		maxInFlightRequests: options?.providerInFlightLimits,
++	});
++	const modelKey = modelInFlightKey(model.provider, model.id);
++	const modelLimit = resolveModelInFlightLimit(modelKey, {
++		modelMaxInFlightRequests: options?.modelInFlightLimits,
++	});
++	if (providerLimit === undefined && modelLimit === undefined) return false;
++	const [providerActive, modelActive, providerReservations, modelReservations] = await Promise.all([
++		providerLimit === undefined ? 0 : countActiveInFlightLeases(model.provider),
++		modelLimit === undefined ? 0 : countActiveInFlightLeases(modelKey),
++		providerLimit === undefined ? 0 : countActiveInFlightLeases(dispatchReservationKey(model.provider)),
++		modelLimit === undefined ? 0 : countActiveInFlightLeases(dispatchReservationKey(modelKey)),
++	]);
++	return (
++		(providerLimit !== undefined && providerActive + providerReservations >= providerLimit) ||
++		(modelLimit !== undefined && modelActive + modelReservations >= modelLimit)
++	);
++}
++
++/**
++ * Test-and-reserve the in-flight slot of `model` for a subagent dispatch:
++ * saturated models (see {@link isModelInFlightSaturated}) are declined, and
++ * the reservation is claimed atomically (slot mkdir) in the same step, so a
++ * burst of simultaneous dispatches serializes on the claim instead of all
++ * passing the probe before any of them has written. Returns the release
++ * handle to hold for the run, or `null` when the model is saturated.
++ */
++async function tryReserveInFlightSlot(
++	model: Model<Api>,
++	options:
++		| { providerInFlightLimits?: Record<string, number>; modelInFlightLimits?: Record<string, number> }
++		| undefined,
++): Promise<(() => Promise<void>) | null> {
++	const providerLimit = resolveProviderInFlightLimit(model.provider, {
++		maxInFlightRequests: options?.providerInFlightLimits,
++	});
++	const modelKey = modelInFlightKey(model.provider, model.id);
++	const modelLimit = resolveModelInFlightLimit(modelKey, {
++		modelMaxInFlightRequests: options?.modelInFlightLimits,
++	});
++	if (providerLimit === undefined && modelLimit === undefined) return async () => {};
++	if (await isModelInFlightSaturated(model, options)) return null;
++	const releaseProvider = await acquireDispatchReservationSlot(model.provider, providerLimit);
++	const releaseModel = await acquireDispatchReservationSlot(modelKey, modelLimit);
++	if (!releaseProvider || !releaseModel) {
++		// A sibling claimed the last slot between the count and the claim.
++		await releaseProvider?.();
++		await releaseModel?.();
++		return null;
++	}
++	return async () => {
++		await releaseProvider();
++		await releaseModel();
++	};
++}
++
+ /**
+  * Resolve a list of override patterns to the first matching model, with an
+  * auth-aware fallback to the parent session's active model.
+@@ -1837,6 +1967,17 @@ export function sessionModelDiscoveryProviders(
+  * If neither the subagent nor the parent has working auth, returns the
+  * primary resolution unchanged so the existing error path still surfaces
+  * a meaningful failure downstream.
++ *
++ * When in-flight limits are provided, an authenticated primary that is at its
++ * provider- or model-level cap yields the subagent to the next pattern of the
++ * ordered override list (or the parent's model) that is authenticated and has
++ * room — the list is the caller's dispatch priority. A role alias in the
++ * override list also contributes its configured retry fallback chain
++ * (`retry.fallbackChains[role]`) as lower-priority candidates, so a subagent
++ * bound to a role dispatches to the role's fallbacks before the parent's
++ * model. Only when every candidate is saturated does the top priority keep
++ * the dispatch; the request then blocks in the stream layer until a slot
++ * frees.
+  */
+ export async function resolveModelOverrideWithAuthFallback(
+ 	modelPatterns: string[],
+@@ -1844,13 +1985,33 @@ export async function resolveModelOverrideWithAuthFallback(
+ 	modelRegistry: ModelLookupRegistry & Pick<ModelRegistry, "getApiKey">,
+ 	settings?: Settings,
+ 	sessionId?: string,
+-	options?: { exactOnly?: boolean; allowedProvider?: string | null },
++	options?: {
++		exactOnly?: boolean;
++		allowedProvider?: string | null;
++		providerInFlightLimits?: Record<string, number>;
++		modelInFlightLimits?: Record<string, number>;
++		/**
++		 * The dispatch role identity, when the caller's patterns already
++		 * discarded the alias (structured subagents pass expanded patterns
++		 * plus the role separately): its `retry.fallbackChains` entry joins
++		 * the dispatch priority after the expanded patterns.
++		 */
++		role?: string;
++	},
+ ): Promise<{
+ 	model?: Model<Api>;
+ 	thinkingLevel?: ConfiguredThinkingLevel;
+ 	explicitThinkingLevel: boolean;
+ 	authFallbackUsed: boolean;
++	concurrencyFallbackUsed: boolean;
+ 	warning?: string;
++	/**
++	 * Release handle for the in-flight slot the dispatch reserved (provider
++	 * and/or model cap). The caller holds it for the subagent run and awaits
++	 * it when the run finishes; absent when every candidate was saturated
++	 * and the dispatch queues in the stream layer instead.
++	 */
++	dispatchReservation?: () => Promise<void>;
+ }> {
+ 	const disabledProviders = disabledProviderIds(settings);
+ 	let lookupRegistry: ModelLookupRegistry = modelRegistry;
+@@ -1867,40 +2028,109 @@ export async function resolveModelOverrideWithAuthFallback(
+ 	const primary = resolveModelOverride(modelPatterns, lookupRegistry, settings, options);
+ 	if (!primary.model && options?.allowedProvider !== undefined && parentActiveModelPattern && !options.exactOnly) {
+ 		const fallback = resolveModelOverride([parentActiveModelPattern], lookupRegistry, settings);
+-		if (fallback.model) return { ...fallback, authFallbackUsed: true };
++		if (fallback.model) return { ...fallback, authFallbackUsed: true, concurrencyFallbackUsed: false };
+ 	}
+ 	if (!primary.model || !parentActiveModelPattern) {
+-		return { ...primary, authFallbackUsed: false };
++		return { ...primary, authFallbackUsed: false, concurrencyFallbackUsed: false };
+ 	}
+ 
+ 	const primaryKey = await modelRegistry.getApiKey(primary.model, sessionId);
+-	if (primaryKey === kNoAuth || isAuthenticated(primaryKey)) {
+-		return { ...primary, authFallbackUsed: false };
++	if (primaryKey !== kNoAuth && !isAuthenticated(primaryKey)) {
++		// The ordered override list is the caller's own fallback chain: an
++		// authenticated later entry beats the parent's model.
++		for (const pattern of resolveDispatchPriorityPatterns(
++			modelPatterns,
++			settings,
++			options?.exactOnly === true,
++			options?.role,
++		)) {
++			const candidate = resolveModelOverride([pattern], lookupRegistry, settings);
++			if (!candidate.model || modelsAreEqual(candidate.model, primary.model)) continue;
++			const candidateKey = await modelRegistry.getApiKey(candidate.model, sessionId);
++			if (candidateKey === kNoAuth || isAuthenticated(candidateKey)) {
++				return { ...candidate, authFallbackUsed: false, concurrencyFallbackUsed: false };
++			}
++		}
++
++		const fallback = resolveModelOverride([parentActiveModelPattern], lookupRegistry, settings);
++		if (!fallback.model) {
++			return { ...primary, authFallbackUsed: false, concurrencyFallbackUsed: false };
++		}
++		if (modelsAreEqual(fallback.model, primary.model)) {
++			return { ...primary, authFallbackUsed: false, concurrencyFallbackUsed: false };
++		}
++		const fallbackKey = await modelRegistry.getApiKey(fallback.model, sessionId);
++		if (!isAuthenticated(fallbackKey)) {
++			return { ...primary, authFallbackUsed: false, concurrencyFallbackUsed: false };
++		}
++
++		return {
++			...fallback,
++			authFallbackUsed: true,
++			concurrencyFallbackUsed: false,
++			warning: primary.warning ?? fallback.warning,
++		};
+ 	}
+-	// The ordered override list is the caller's own fallback chain: an
+-	// authenticated later entry beats the parent's model.
+-	for (const pattern of resolveConfiguredModelPatterns(modelPatterns, settings)) {
++
++	const primaryReservation = await tryReserveInFlightSlot(primary.model, options);
++	if (primaryReservation) {
++		return {
++			...primary,
++			authFallbackUsed: false,
++			concurrencyFallbackUsed: false,
++			dispatchReservation: primaryReservation,
++		};
++	}
++	// The authenticated top priority is at its in-flight cap. The dispatch
++	// priority (the override list plus each role's configured fallback chain)
++	// decides: the first later candidate that is authenticated and has room
++	// takes the subagent.
++	const modelRef = (model: Model<Api>) => `${model.provider}/${model.id}`;
++	const saturatedRef = modelRef(primary.model);
++	for (const pattern of resolveDispatchPriorityPatterns(
++		modelPatterns,
++		settings,
++		options?.exactOnly === true,
++		options?.role,
++	)) {
+ 		const candidate = resolveModelOverride([pattern], lookupRegistry, settings);
+ 		if (!candidate.model || modelsAreEqual(candidate.model, primary.model)) continue;
+ 		const candidateKey = await modelRegistry.getApiKey(candidate.model, sessionId);
+-		if (candidateKey === kNoAuth || isAuthenticated(candidateKey)) {
+-			return { ...candidate, authFallbackUsed: false };
+-		}
++		if (candidateKey !== kNoAuth && !isAuthenticated(candidateKey)) continue;
++		const candidateReservation = await tryReserveInFlightSlot(candidate.model, options);
++		if (!candidateReservation) continue;
++		return {
++			...candidate,
++			authFallbackUsed: false,
++			concurrencyFallbackUsed: true,
++			warning: `Model ${saturatedRef} is at its in-flight limit; dispatching ${modelRef(candidate.model)} instead.`,
++			dispatchReservation: candidateReservation,
++		};
+ 	}
+-
+ 	const fallback = resolveModelOverride([parentActiveModelPattern], lookupRegistry, settings);
+-	if (!fallback.model) {
+-		return { ...primary, authFallbackUsed: false };
+-	}
+-	if (modelsAreEqual(fallback.model, primary.model)) {
+-		return { ...primary, authFallbackUsed: false };
+-	}
+-	const fallbackKey = await modelRegistry.getApiKey(fallback.model, sessionId);
+-	if (!isAuthenticated(fallbackKey)) {
+-		return { ...primary, authFallbackUsed: false };
++	if (fallback.model && !modelsAreEqual(fallback.model, primary.model)) {
++		const fallbackKey = await modelRegistry.getApiKey(fallback.model, sessionId);
++		if (fallbackKey === kNoAuth || isAuthenticated(fallbackKey)) {
++			const fallbackReservation = await tryReserveInFlightSlot(fallback.model, options);
++			if (fallbackReservation) {
++				return {
++					...fallback,
++					authFallbackUsed: false,
++					concurrencyFallbackUsed: true,
++					warning: `Model ${saturatedRef} is at its in-flight limit; dispatching ${modelRef(fallback.model)} instead.`,
++					dispatchReservation: fallbackReservation,
++				};
++			}
++		}
+ 	}
+-
+-	return { ...fallback, authFallbackUsed: true, warning: primary.warning ?? fallback.warning };
++	// Every candidate is saturated: hold the top priority and let the stream
++	// layer block until a slot frees instead of dropping the dispatch.
++	return {
++		...primary,
++		authFallbackUsed: false,
++		concurrencyFallbackUsed: true,
++		warning: `Model ${saturatedRef} is at its in-flight limit; waiting for a slot to free.`,
++	};
+ }
+ 
+ /**
 diff --git a/packages/coding-agent/src/config/models-config-schema-bundle.ts b/packages/coding-agent/src/config/models-config-schema-bundle.ts
 index 2b21c1e36f..4c3cc7e371 100644
 --- a/packages/coding-agent/src/config/models-config-schema-bundle.ts

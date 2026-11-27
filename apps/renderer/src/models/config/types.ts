@@ -34,6 +34,8 @@ export type Draft = {
   remoteCompactionEnabled: boolean;
   remoteCompactionEndpoint: string;
   remoteCompactionModel: string;
+  /** In-flight request cap for this provider (runtime setting, not the provider YAML); "" = unlimited. */
+  maxInFlight?: string;
   models: ModelCatalogEntry[];
   modelOverrides: Record<string, DraftOverride>;
 };

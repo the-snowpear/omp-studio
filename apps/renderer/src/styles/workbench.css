@@ -4622,8 +4622,8 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .menu.rms-pop.cmp-flyout {
   position: absolute;
   bottom: 0;
-  width: 300px;
-  max-height: min(360px, 55vh);
+  width: 380px;
+  max-height: min(460px, 68vh);
   z-index: 42;
 }
 .cmp-flyout.side-right { left: calc(100% + 8px); }

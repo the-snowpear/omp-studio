@@ -1103,6 +1103,11 @@ img.profile-edit-avatar-img { display: block; }
 .runtime-setting-control { display: grid; grid-template-columns: auto auto; align-items: center; gap: var(--sp-6); min-width: 200px; max-width: 420px; }
 .runtime-setting-control .small, .runtime-setting-control textarea { grid-column: 1 / -1; }
 .runtime-setting-control .select { grid-column: 1 / -1; }
+.number-record-editor { display: grid; gap: var(--sp-6); }
+.runtime-setting-control .number-record-editor { grid-column: 1 / -1; }
+.number-record-row { display: grid; grid-template-columns: minmax(0, 1fr) 88px auto; gap: var(--sp-4); align-items: center; }
+.number-record-row .input, .number-record-row .select { min-width: 0; width: 100%; }
+.number-record-actions { display: flex; gap: var(--sp-6); }
 .memory-credential-control { display: flex; flex-direction: column; align-items: stretch; gap: var(--sp-6); width: 300px; max-width: 100%; }
 .set-row .memory-credential-control .input { width: 100%; }
 .memory-credential-actions { display: flex; flex-wrap: wrap; gap: var(--sp-6); }
