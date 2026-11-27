@@ -1,9 +1,10 @@
-import { isReplyWrite, toolResultReplies } from "@oh-my-pi/pi-tui/chat/reply-write";
-import { asyncJobState } from "@oh-my-pi/pi-tui/chat/tool-execution";
+import { isReplyWrite, toolResultReplies } from "../../session/transcript/reply-write";
+import { asyncJobState } from "../../session/transcript/tool-execution";
 import { projectToolMedia } from "./conversation-media";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, AssistantMessageEvent, ToolCall } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
+import { errorMessage } from "@oh-my-pi/pi-utils/type-guards";
 import { getStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { decodeStreamedToolArgs, streamingStringKeysForTool } from "../../modes/controllers/tool-args-reveal";
 import type { StudioAgentSessionEvent as AgentSessionEvent } from "./conversation-entry-identity";
@@ -25,6 +26,7 @@ import {
 	utf8ByteLength,
 } from "./conversation-sanitizer";
 import { isHarnessInjectedUserMessage, publicConversationRole } from "./conversation-visibility";
+import { observeNestedToolCalls } from "../../extensibility/extensions/wrapper";
 
 export const CONVERSATION_LIVE_COALESCE_INTERVAL_MS = 16;
 export const CONVERSATION_LIVE_COALESCE_CHAR_THRESHOLD = 64;
@@ -172,7 +174,10 @@ function messageErrorOf(message: AgentMessage): ConversationMessageError | undef
 		text.length > 0 ? text : "Provider request failed",
 		CONVERSATION_LIMITS.NOTICE_MESSAGE_MAX_CHARS,
 	);
-	const error: ConversationMessageError = { message: sanitized.text };
+	const error: ConversationMessageError = {
+		message: sanitized.text,
+		...(message.errorFromAgentLoop ? { source: "agentLoop" as const } : {}),
+	};
 	if (typeof message.errorStatus === "number" && Number.isSafeInteger(message.errorStatus)) {
 		error.status = message.errorStatus;
 	}
@@ -279,6 +284,7 @@ export class ConversationLiveProjector {
 	#openAssistantId: string | undefined;
 	#openCompactionId: string | undefined;
 	#unsubscribe: (() => void) | undefined;
+	#unsubscribeNested: (() => void) | undefined;
 	#coalesceTimer: unknown;
 	#disposed = false;
 
@@ -287,6 +293,30 @@ export class ConversationLiveProjector {
 		this.#clock = options.clock ?? defaultClock();
 		this.#sessionId = options.sessionId;
 		this.#runtimeEpoch = options.runtimeEpoch;
+		this.#unsubscribeNested = observeNestedToolCalls(event => {
+			if (
+				this.#disposed ||
+				event.sessionId !== this.#sessionId ||
+				!this.#toolOwners.has(publicToolCallId(event.parentToolCallId, "").id)
+			)
+				return;
+			if (event.phase === "start")
+				this.#onToolStart({
+					type: "tool_execution_start",
+					toolCallId: event.toolCallId,
+					parentToolCallId: event.parentToolCallId,
+					toolName: event.toolName,
+					args: event.args,
+				});
+			else
+				this.#onToolEnd({
+					type: "tool_execution_end",
+					toolCallId: event.toolCallId,
+					toolName: event.toolName,
+					result: event.result,
+					isError: event.isError,
+				});
+		});
 	}
 
 	get sessionId(): string {
@@ -345,6 +375,8 @@ export class ConversationLiveProjector {
 		return structuredClone({ ...retained.result, ...(output === undefined ? {} : { output }) });
 	}
 	dispose(): void {
+		this.#unsubscribeNested?.();
+		this.#unsubscribeNested = undefined;
 		this.#unsubscribe?.();
 		this.#unsubscribe = undefined;
 		this.#clearCoalesceTimer();
@@ -616,6 +648,7 @@ export class ConversationLiveProjector {
 		const turnId = this.#ensureTurnId();
 		const publicId = publicToolCallId(event.toolCallId, "").id;
 		const messageId =
+			(event.parentToolCallId ? this.#toolOwners.get(publicToolCallId(event.parentToolCallId, "").id) : undefined) ??
 			(publicId.length > 0 ? this.#toolOwners.get(publicId) : undefined) ??
 			this.#openAssistantId ??
 			this.#lastAssistantId;
@@ -628,6 +661,7 @@ export class ConversationLiveProjector {
 				messageId,
 				turnId,
 				toolCallId: event.toolCallId,
+				...(event.parentToolCallId ? { parentToolCallId: event.parentToolCallId } : {}),
 				toolName: event.toolName,
 				args: event.args,
 			})
@@ -675,7 +709,9 @@ export class ConversationLiveProjector {
 		const priorReplies = pending?.replies ?? sent?.replies;
 		const sameReplies =
 			replies === undefined ||
-			(priorReplies?.length === replies.length && replies.every((text, index) => text === priorReplies[index]));
+			(priorReplies !== undefined &&
+				priorReplies.length === replies.length &&
+				replies.every((text, index) => text === priorReplies[index]));
 		if (
 			progress === undefined &&
 			sameReplies &&
@@ -1024,6 +1060,7 @@ export class ConversationLiveProjector {
 		messageId: string;
 		turnId: string;
 		toolCallId: string;
+		parentToolCallId?: string;
 		toolName: string;
 		args: unknown;
 	}): boolean {
@@ -1046,6 +1083,7 @@ export class ConversationLiveProjector {
 			turnId: input.turnId,
 			messageId: input.messageId,
 			toolCallId: publicId.id,
+			...(input.parentToolCallId ? { parentToolCallId: publicToolCallId(input.parentToolCallId, "").id } : {}),
 			toolName,
 			startedAt: this.#clock.nowIso(),
 		};
@@ -1277,7 +1315,7 @@ export class ConversationLiveProjector {
 			} catch (error) {
 				this.#diagnostic(error instanceof Error ? error.message : "conversation live listener failed");
 				logger.warn("Conversation live projector listener threw", {
-					error: error instanceof Error ? error.message : String(error),
+					error: errorMessage(error),
 				});
 			}
 		}

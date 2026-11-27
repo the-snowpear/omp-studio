@@ -1,3 +1,8 @@
+import { StudioChromeRelayHostService } from "./chrome-relay-host-service";
+import { isChromeRelayHostKind, type ChromeRelayHostOperation } from "../chrome-relay-host-protocol";
+import { isMcpAuthKind, type McpAuthOperation } from "../mcp-auth-protocol";
+import { StudioTodoBackendService } from "./todo-backend-service";
+import { isTodoBackendKind, type TodoBackendOperation } from "../todo-backend-protocol";
 import { StudioSearchCredentialsService } from "./search-credentials-service";
 import { inspectStudioAntigravity } from "./antigravity-readiness";
 import { StudioCommitService } from "./commit-service";
@@ -70,6 +75,24 @@ import { isSessionOptionsKind, type SessionOptionsOperation } from "../session-o
 import { type JudgmentOperation } from "../judgments-protocol";
 import { isRuntimeFeatureKind, type RuntimeFeatureOperation } from "../runtime-features-protocol";
 
+function isChromeRelayHostOperation(
+	operation: WorkbenchOperation,
+): operation is Exclude<ChromeRelayHostOperation, { kind: "browser.relayHost.status" }> {
+	return isChromeRelayHostKind(operation.kind);
+}
+
+function isMcpAuthOperation(operation: WorkbenchOperation): operation is McpAuthOperation {
+	return isMcpAuthKind(operation.kind);
+}
+
+function isTodoBackendOperation(operation: WorkbenchOperation): operation is TodoBackendOperation {
+	return isTodoBackendKind(operation.kind);
+}
+
+function isAgentModelOperation(operation: WorkbenchOperation): operation is AgentModelOperation {
+	return isAgentModelKind(operation.kind);
+}
+
 function isRuntimeFeatureOperation(operation: { kind: string }): operation is RuntimeFeatureOperation {
 	return isRuntimeFeatureKind(operation.kind);
 }
@@ -77,12 +100,17 @@ import { StudioAnnotationService } from "./annotation-service";
 import { StudioAccountStatusService } from "./account-status-service";
 import * as path from "node:path";
 import { realpath } from "node:fs/promises";
-import { Encoding, countTokens } from "@oh-my-pi/pi-natives";
+import { Encoding, countTokens, killProcessFamily } from "@oh-my-pi/pi-natives";
 import type { UnitSnapshot } from "../../daemon/protocol";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
-import { listServices, modeService, requestService, startService } from "../../launch/services";
+import { heldShellProcesses } from "../../exec/bash-executor";
+import { killLeftoverProcesses, listLeftoverProcesses, type LeftoverProcess } from "../../exec/session-processes";
+import { cfgBashReapBackground } from "../../exec/settings";
+import { adoptService, listServices, modeService, requestService, startService } from "../../launch/services";
 import type { AgentSession } from "../../session/agent-session";
-import type { StudioServiceRow, WorkbenchOperation } from "../workbench-protocol";
+import type { ToolSession } from "../../tools";
+import { isAgentModelKind, type AgentModelOperation } from "../agent-model-protocol";
+import type { StudioLeftoverProcess, StudioServiceRow, WorkbenchOperation } from "../workbench-protocol";
 import { SessionControlError } from "./session-control-service";
 
 function isAdvisorConfigOperation(operation: WorkbenchOperation): operation is AdvisorConfigOperation {
@@ -155,6 +183,19 @@ export function projectService(daemon: UnitSnapshot, sessionId?: string): Studio
 		mode:
 			daemon.policy.survive === "detached" ? "detached" : daemon.policy.hold === "persist" ? "persist" : "session",
 		manageable: daemon.kind === "proc" && daemon.scope.kind !== "global",
+		...(daemon.adopted === undefined ? {} : { adopted: daemon.adopted }),
+	};
+}
+
+export function projectLeftoverProcess(proc: LeftoverProcess): StudioLeftoverProcess {
+	const cwd = (proc as LeftoverProcess & { cwd?: string }).cwd;
+	return {
+		pid: proc.pid,
+		command: sanitizeText(proc.command).slice(0, 4096),
+		kind: proc.kind,
+		ignoresSighup: proc.kind === "nohup",
+		startedAt: proc.startedAt,
+		...(typeof cwd === "string" && cwd.trim().length > 0 ? { cwd } : {}),
 	};
 }
 
@@ -199,6 +240,8 @@ export class StudioWorkbenchService {
 	readonly disassembler: StudioDisassemblerService;
 	readonly browserObservation: StudioBrowserObservationService;
 	readonly managedBrowser: StudioManagedBrowserService;
+	readonly relayHost: StudioChromeRelayHostService;
+	readonly todoBackend: StudioTodoBackendService;
 	readonly computerObservation: StudioComputerObservationService;
 	readonly computerWorkspace: StudioComputerWorkspaceService;
 	constructor(
@@ -233,7 +276,7 @@ export class StudioWorkbenchService {
 		this.accounts = new StudioAccountStatusService(session);
 		this.judgments = new StudioJudgmentService(session);
 		this.runtimeFeatures = new StudioRuntimeFeatureService(session, mcpManager);
-		this.catalog = new StudioRuntimeCatalogService(session, mcpManager);
+		this.catalog = new StudioRuntimeCatalogService(session, mcpManager, this.runtimeFeatures.mcpAuth);
 		this.modelSystemTemplates = new StudioModelSystemTemplatesService(session);
 		this.modelAuth = new StudioModelAuthService(session);
 		this.modelRoster = new StudioModelRosterService(session);
@@ -249,6 +292,9 @@ export class StudioWorkbenchService {
 		this.disassembler = new StudioDisassemblerService(session);
 		this.browserObservation = new StudioBrowserObservationService(session);
 		this.managedBrowser = new StudioManagedBrowserService(session);
+		this.relayHost = new StudioChromeRelayHostService(session);
+		this.todoBackend = new StudioTodoBackendService(session);
+		this.views.relayHostReader = operation => this.relayHost.execute(operation);
 		this.computerObservation = new StudioComputerObservationService(session, undefined, this.computerWorkspace);
 	}
 	get commit(): StudioCommitService {
@@ -272,6 +318,7 @@ export class StudioWorkbenchService {
 		void this.computerWorkspace.dispose().catch(() => {});
 		this.browserObservation.dispose();
 		this.managedBrowser.dispose();
+		this.runtimeFeatures.mcpAuth.dispose();
 		this.disassembler.dispose();
 		this.agentBtw.dispose();
 		this.skillshare.dispose();
@@ -319,8 +366,11 @@ export class StudioWorkbenchService {
 		if (isSessionTitlesOperation(operation)) return this.titles.execute(operation);
 		if (isPredictionChannelOperation(operation)) return this.prediction.execute(operation);
 		if (isMaintenanceOperation(operation)) return this.maintenance.execute(operation);
+		if (isChromeRelayHostOperation(operation)) return this.relayHost.execute(operation as ChromeRelayHostOperation);
+		if (isMcpAuthOperation(operation)) return this.runtimeFeatures.mcpAuth.execute(operation as McpAuthOperation);
+		if (isTodoBackendOperation(operation)) return this.todoBackend.execute(operation as TodoBackendOperation);
 		if (isArchiveOperation(operation)) return this.archive.execute(operation);
-		if (operation.kind === "agent.model.inspect") return this.agentModels.execute(operation);
+		if (isAgentModelOperation(operation)) return this.agentModels.execute(operation);
 		if (operation.kind === "session.restore.inspect") return this.sessionRestore.execute(operation);
 		if (isRuntimeQueueOperation(operation)) return this.runtimeQueue.execute(operation);
 		if (isNativePreferenceOperation(operation)) return this.nativePreferences.execute(operation);
@@ -460,9 +510,44 @@ export class StudioWorkbenchService {
 					: {}),
 			};
 		}
+		if (operation.kind === "services.leftovers.list") {
+			const enabled = cfgLaunchEnabled.get(this.session.settings);
+			const leftovers = await this.#listLeftovers();
+			return {
+				enabled,
+				reapBackground: cfgBashReapBackground.get(this.session.settings),
+				leftovers: leftovers.map(projectLeftoverProcess),
+			};
+		}
+		if (operation.kind === "services.leftovers.terminate") {
+			const leftovers = await this.#listLeftovers();
+			const selected = this.#selectLeftovers(leftovers, operation.pids, operation.includeNohup === true);
+			let killed = killLeftoverProcesses(selected);
+			if (operation.includeNohup === true) {
+				const nohupPids = selected.filter(proc => proc.kind === "nohup").map(proc => proc.pid);
+				if (nohupPids.length > 0) killed += killProcessFamily(nohupPids);
+			}
+			const remaining = await this.#listLeftovers();
+			return { killed, remaining: remaining.map(projectLeftoverProcess) };
+		}
 		const session = this.session.studioToolSession;
 		if (!session) throw new SessionControlError("COMMAND_BLOCKED", "Service context is unavailable");
 		const enabled = cfgLaunchEnabled.get(session.settings);
+		if (operation.kind === "services.leftovers.adopt") {
+			const leftovers = await this.#listLeftovers();
+			if (!leftovers.some(proc => proc.pid === operation.pid)) {
+				throw new SessionControlError(
+					"INVALID_ARGUMENT",
+					`Process ${operation.pid} is not a leftover process of this session`,
+				);
+			}
+			try {
+				const unit = await adoptService(session, operation.name, operation.pid);
+				return { service: projectService(unit, this.session.sessionId) };
+			} catch (error) {
+				throw new SessionControlError("COMMAND_BLOCKED", error instanceof Error ? error.message : String(error));
+			}
+		}
 		if (operation.kind === "services.list") {
 			const [project, global] = await Promise.all([
 				listServices(session),
@@ -530,6 +615,65 @@ export class StudioWorkbenchService {
 		if (operation.kind === "services.stop" && unit.generation !== named.generation)
 			throw new SessionControlError("COMMAND_BLOCKED", "Service instance changed; refresh before trying again");
 		return { service: projectService(unit, this.session.sessionId) };
+	}
+
+	async #listLeftovers(): Promise<LeftoverProcess[]> {
+		const sessionId = this.session.sessionManager.getSessionId();
+		const excluded: number[] = [];
+		for (const job of this.session.asyncJobManager?.getAllJobs() ?? []) {
+			if (job.status === "running" && job.process) excluded.push(...job.process.pids());
+		}
+		const held = heldShellProcesses(sessionId);
+		const initial = listLeftoverProcesses(sessionId, held, excluded);
+		if (initial.length === 0) return [];
+		if (cfgLaunchEnabled.get(this.session.settings)) {
+			const toolSession = this.session.studioToolSession;
+			if (!toolSession) {
+				throw new SessionControlError("COMMAND_BLOCKED", "Service context is unavailable");
+			}
+			try {
+				const [project, global] = await Promise.all([
+					listServices(toolSession, AbortSignal.timeout(5_000)),
+					requestService(toolSession, { op: "list", scope: { kind: "global" } }, AbortSignal.timeout(5_000)).catch(
+						() => ({ units: [] }),
+					),
+				]);
+				for (const unit of [...project, ...global.units]) excluded.push(...unit.pids);
+			} catch {
+				throw new SessionControlError(
+					"COMMAND_BLOCKED",
+					"Service registry could not be queried; refusing to inspect or modify leftover processes",
+				);
+			}
+		}
+		return listLeftoverProcesses(sessionId, held, excluded);
+	}
+
+	#selectLeftovers(
+		leftovers: readonly LeftoverProcess[],
+		pids: readonly number[] | undefined,
+		includeNohup: boolean,
+	): LeftoverProcess[] {
+		if (pids === undefined) return [...leftovers];
+		const byPid = new Map(leftovers.map(proc => [proc.pid, proc]));
+		const selected: LeftoverProcess[] = [];
+		for (const pid of new Set(pids)) {
+			const match = byPid.get(pid);
+			if (!match) {
+				throw new SessionControlError(
+					"INVALID_ARGUMENT",
+					`Process ${pid} is not a leftover process of this session`,
+				);
+			}
+			selected.push(match);
+		}
+		if (!includeNohup && selected.some(proc => proc.kind === "nohup")) {
+			throw new SessionControlError(
+				"COMMAND_BLOCKED",
+				"Selected leftover process ignores SIGHUP (nohup); pass includeNohup to terminate it",
+			);
+		}
+		return selected;
 	}
 }
 

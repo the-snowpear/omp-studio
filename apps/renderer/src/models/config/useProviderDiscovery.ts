@@ -26,7 +26,7 @@ export function useProviderDiscovery({ client, editorState, catalogVersion, setE
   const fetchIdentity = useRef("");
   const [rawFetchDetail, setFetchDetail] = useState<RawFetchDetail | null>(null);
   const [candidates, setCandidates] = useState<FetchedModelCandidate[] | null>(null);
-  const currentFetchIdentity = JSON.stringify([editorState?.id, editorState?.api, editorState?.endpointUrl]);
+  const currentFetchIdentity = JSON.stringify([editorState?.id, editorState?.api, editorState?.transport, editorState?.endpointUrl]);
   fetchIdentity.current = currentFetchIdentity;
   useEffect(() => { fetchGeneration.current += 1; setCandidates(null); setFetching(false); }, [currentFetchIdentity]);
   /**
@@ -77,6 +77,7 @@ export function useProviderDiscovery({ client, editorState, catalogVersion, setE
         providerId,
         endpointUrl,
         api: draft.api,
+        transport: draft.transport || "direct",
         advertisedReasoning: draft.advertisedReasoning !== false,
         ...(secret ? { apiKey: secret } : {}),
         ...(Object.keys(headers).length > 0 ? { headers } : {}),

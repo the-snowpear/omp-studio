@@ -1,3 +1,6 @@
+import { CHROME_RELAY_HOST_KINDS, type ChromeRelayHostOperation, type ChromeRelayHostResultMap } from "./managed-browser.js";
+import { MCP_AUTH_KINDS, MCP_AUTH_READ_KINDS, type McpAuthOperation, type McpAuthResultMap } from "./mcp-auth.js";
+import { TODO_BACKEND_KINDS, TODO_BACKEND_READ_KINDS, type TodoBackendOperation, type TodoBackendResultMap } from "./todo-backend.js";
 import { SEARCH_CREDENTIAL_KINDS, type SearchCredentialsOperation, type SearchCredentialsResultMap } from "./search-credentials.js";
 import { SELECTIVE_COMMIT_COMMAND_KINDS, type SelectiveCommitOperation, type SelectiveCommitCommandInputMap, type SelectiveCommitCommandResultMap } from "./selective-commit.js";
 import { PROMPT_HISTORY_COMMAND_KINDS, type PromptHistoryCommandOperation, type PromptHistoryCommandResultMap } from "./prompt-history.js";
@@ -67,6 +70,16 @@ export interface StudioServiceRow {
   /** Compatibility alias for ownerId; not necessarily an agent ID. */
   ownerAgentId?: string;
   mode: "session" | "persist" | "detached";
+  /** True when registered by adopting an already-running process (`o2ctl services add`). */
+  adopted?: boolean;
+}
+export interface StudioLeftoverProcess {
+  pid: number;
+  command: string;
+  kind: "&" | "nohup";
+  ignoresSighup: boolean;
+  startedAt: number;
+  cwd?: string;
 }
 export interface RuntimeModelChoice {
   snapcompactShape?: { variant: string; frameSize?: number };
@@ -92,6 +105,7 @@ export interface TokenCountResult {
 }
 
 export type WorkbenchOperation =
+ | Exclude<ChromeRelayHostOperation, { kind: "browser.relayHost.status" }> | McpAuthOperation | TodoBackendOperation
  | Extract<SelectiveCommitOperation, { kind: keyof SelectiveCommitCommandInputMap }>
  | PromptHistoryCommandOperation
  | SearchCredentialsOperation
@@ -139,11 +153,14 @@ export type WorkbenchOperation =
   | { kind: "services.mode.set"; name: string; instanceId: string; mode: "session" | "persist" | "detached" }
   | { kind: "services.send"; name: string; instanceId: string; text: string }
   | { kind: "services.logs"; name: string; instanceId: string; cursor?: number; lines?: number }
+  | { kind: "services.leftovers.list" }
+  | { kind: "services.leftovers.adopt"; pid: number; name: string }
+  | { kind: "services.leftovers.terminate"; pids?: number[]; includeNohup?: boolean }
   | { kind: "tokens.count"; text: string }
   | { kind: "runtime.models.describe"; selector: string }
  | { kind: "runtime.models.list"; modelKind?: string; cursor?: string; limit?: number };
 
-export interface WorkbenchResultMap extends SelectiveCommitCommandResultMap, PromptHistoryCommandResultMap, SearchCredentialsResultMap, ExtensionLinkResultMap, WebMcpResultMap, EvaluationWorkspaceResultMap, AdvisorConfigResultMap, LocalResourceResultMap, DictationResultMap,SessionGuiResultMap, SessionTitlesResultMap, PredictionResultMap, MaintenanceResultMap, ArchiveResultMap, AgentModelResultMap, SessionRestoreResultMap, RuntimeQueueResultMap, NativePreferenceResultMap, FeatureSettingsResultMap, SessionPortabilityResultMap, SessionCompressionResultMap, SessionWorktreeResultMap, NativePlanReviewResultMap, RatchetResultMap, ComputerObservationResultMap, Pick<ComputerWorkspaceResultMap, ComputerWorkspaceCommand["kind"]>, BrowserObservationResultMap, DisassemblerResultMap, SessionOptionsResultMap, SkillshareResultMap, LiveAudioResultMap, AnnotationResultMap, JudgmentResultMap, RuntimeCatalogResultMap, BenchmarkResultMap, MediaResultMap, RuntimeFeatureResultMap {
+export interface WorkbenchResultMap extends ChromeRelayHostResultMap, McpAuthResultMap, TodoBackendResultMap, SelectiveCommitCommandResultMap, PromptHistoryCommandResultMap, SearchCredentialsResultMap, ExtensionLinkResultMap, WebMcpResultMap, EvaluationWorkspaceResultMap, AdvisorConfigResultMap, LocalResourceResultMap, DictationResultMap,SessionGuiResultMap, SessionTitlesResultMap, PredictionResultMap, MaintenanceResultMap, ArchiveResultMap, AgentModelResultMap, SessionRestoreResultMap, RuntimeQueueResultMap, NativePreferenceResultMap, FeatureSettingsResultMap, SessionPortabilityResultMap, SessionCompressionResultMap, SessionWorktreeResultMap, NativePlanReviewResultMap, RatchetResultMap, ComputerObservationResultMap, Pick<ComputerWorkspaceResultMap, ComputerWorkspaceCommand["kind"]>, BrowserObservationResultMap, DisassemblerResultMap, SessionOptionsResultMap, SkillshareResultMap, LiveAudioResultMap, AnnotationResultMap, JudgmentResultMap, RuntimeCatalogResultMap, BenchmarkResultMap, MediaResultMap, RuntimeFeatureResultMap {
   "accounts.status": AccountStatusResult;
  "accounts.status.details": AccountStatusResult;
   "accounts.logout": { loggedOut: true };
@@ -154,11 +171,14 @@ export interface WorkbenchResultMap extends SelectiveCommitCommandResultMap, Pro
   "services.mode.set": { service: StudioServiceRow };
   "services.send": { service: StudioServiceRow };
   "services.logs": { instanceId: string; text: string; cursor: number; state: StudioServiceRow["state"] };
+  "services.leftovers.list": { enabled: boolean; reapBackground: boolean; leftovers: StudioLeftoverProcess[] };
+  "services.leftovers.adopt": { service: StudioServiceRow };
+  "services.leftovers.terminate": { killed: number; remaining: StudioLeftoverProcess[] };
   "tokens.count": TokenCountResult;
   "runtime.models.describe": { model: RuntimeModelChoice };
  "runtime.models.list": { models: RuntimeModelChoice[]; total: number; nextCursor?: string };
 }
-export const WORKBENCH_OPERATION_KINDS = [
+export const WORKBENCH_OPERATION_KINDS = [...CHROME_RELAY_HOST_KINDS.filter(kind => kind !== "browser.relayHost.status"), ...MCP_AUTH_KINDS, ...TODO_BACKEND_KINDS,
 ...SELECTIVE_COMMIT_COMMAND_KINDS, ...PROMPT_HISTORY_COMMAND_KINDS,
  ...SEARCH_CREDENTIAL_KINDS,
  ...EXTENSION_LINK_KINDS, ...WEBMCP_KINDS,
@@ -176,8 +196,8 @@ export const WORKBENCH_OPERATION_KINDS = [
 ...COMPUTER_WORKSPACE_COMMAND_KINDS,
 ...BROWSER_OBSERVATION_KINDS,
 ...DISASSEMBLER_KINDS,
-...SESSION_OPTIONS_KINDS,...SKILLSHARE_OPERATION_KINDS, ...LIVE_AUDIO_OPERATION_KINDS, ...MEDIA_OPERATION_KINDS, ...BENCHMARK_OPERATION_KINDS, ...RUNTIME_CATALOG_OPERATION_KINDS, ...JUDGMENT_OPERATION_KINDS, ...ANNOTATION_OPERATION_KINDS, ...RUNTIME_FEATURE_KINDS, "accounts.status", "accounts.status.details", "accounts.logout", "services.list", "services.start", "services.stop", "services.restart", "services.mode.set", "services.send", "services.logs", "tokens.count", "runtime.models.list", "runtime.models.describe"] as const;
-export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
+...SESSION_OPTIONS_KINDS,...SKILLSHARE_OPERATION_KINDS, ...LIVE_AUDIO_OPERATION_KINDS, ...MEDIA_OPERATION_KINDS, ...BENCHMARK_OPERATION_KINDS, ...RUNTIME_CATALOG_OPERATION_KINDS, ...JUDGMENT_OPERATION_KINDS, ...ANNOTATION_OPERATION_KINDS, ...RUNTIME_FEATURE_KINDS, "accounts.status", "accounts.status.details", "accounts.logout", "services.list", "services.start", "services.stop", "services.restart", "services.mode.set", "services.send", "services.logs", "services.leftovers.list", "services.leftovers.adopt", "services.leftovers.terminate", "tokens.count", "runtime.models.list", "runtime.models.describe"] as const;
+export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [ ...MCP_AUTH_READ_KINDS, ...TODO_BACKEND_READ_KINDS,
  "search.credentials.list",
  "evaluation.runtime.plan", "evaluation.runtime.read", "evaluation.runtime.rows", "evaluation.runtime.report", "evaluation.runtime.patch", "evaluation.runtime.control",...SESSION_GUI_READ_KINDS,
 "dictation.inspect",
@@ -192,7 +212,7 @@ export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
 "computer.status", "computer.capture", "computer.stop", "computer.observe.release",
 "browser.tabs.get", "browser.observe.prepare", "browser.managed.prepare",
 "disassembler.status", "disassembler.metadata.read", "disassembler.query", "disassembler.edit.prepare", "disassembler.cancel",
-"session.speed.get", "session.budget.get", "session.warming.get", "models.presets.list","skillshare.status", "skillshare.home", "skillshare.search", "skillshare.package", "skillshare.installed", "skillshare.tokens", "skillshare.action", "live.audio.status", "live.audio.mute", "live.audio.release", "media.models", "media.list", "media.read", "benchmarks.accounts.read", "benchmarks.list", "benchmarks.read", ...RUNTIME_CATALOG_OPERATION_KINDS, "judgments.list", "judgments.read", ...ANNOTATION_OPERATION_KINDS, ...RUNTIME_FEATURE_READ_KINDS, "accounts.status", "accounts.status.details", "services.list", "services.logs", "tokens.count", "runtime.models.list", "runtime.models.describe"];
+"session.speed.get", "session.budget.get", "session.warming.get", "models.presets.list","skillshare.status", "skillshare.home", "skillshare.search", "skillshare.package", "skillshare.installed", "skillshare.tokens", "skillshare.action", "live.audio.status", "live.audio.mute", "live.audio.release", "media.models", "media.list", "media.read", "benchmarks.accounts.read", "benchmarks.list", "benchmarks.read", ...RUNTIME_CATALOG_OPERATION_KINDS, "judgments.list", "judgments.read", ...ANNOTATION_OPERATION_KINDS, ...RUNTIME_FEATURE_READ_KINDS, "accounts.status", "accounts.status.details", "services.list", "services.logs", "services.leftovers.list", "tokens.count", "runtime.models.list", "runtime.models.describe"];
 export function isWorkbenchOperationKind(value: string): value is WorkbenchOperation["kind"] {
   return (WORKBENCH_OPERATION_KINDS as readonly string[]).includes(value);
 }

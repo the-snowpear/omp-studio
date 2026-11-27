@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { SessionId, StudioClient } from "@omp-studio/client-contract";
+import type { ClientBootstrap, SessionId, StudioClient } from "@omp-studio/client-contract";
 import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import type { MentionCandidate } from "../composer/types";
 import { Icon } from "../icons";
@@ -19,6 +19,7 @@ import { AgentSwitcher } from "./AgentSwitcher";
 import { deckTone } from "./deck/deckModel";
 import { TaskStepsView } from "./TaskStepsView";
 import { previewTaskStepsForAgent } from "../preview/taskStepsPreview";
+import { AgentModelDetails } from "../models/AgentModelDetails";
 
 /** From this body width the details move out of their tab into a column beside the conversation. */
 const AGENT_DETAIL_WIDE_MIN = 1080;
@@ -62,6 +63,13 @@ function AgentDetailContent({ target, agents, visible, client, conversationClien
   const { preview, marks } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
+  const [modelCapabilities, setModelCapabilities] = useState<ClientBootstrap["capabilityManifest"]>();
+  useEffect(() => {
+    if (preview || !visible || !runtimeConnected) return;
+    let alive = true;
+    void client.bootstrap().then(value => { if (alive) setModelCapabilities(value.capabilityManifest); }).catch(() => {});
+    return () => { alive = false; };
+  }, [client, preview, visible, runtimeConnected]);
   const [tab, setTab] = useState<"chat" | "details" | "btw">(viewState?.contentTab ?? "chat");
   const [btwVisited, setBtwVisited] = useState(viewState?.btwVisited ?? false);
   const [sourceMissing, setSourceMissing] = useState(false);
@@ -154,10 +162,10 @@ function AgentDetailContent({ target, agents, visible, client, conversationClien
         {...(viewState === undefined ? {} : { viewState })} {...(workspaceId === undefined ? {} : { workspaceId })}
         {...(loadMentions === undefined ? {} : { loadMentions })} {...(pendingInteractionSessionId === undefined ? {} : { pendingInteractionSessionId })} />
     </div>
-    {shown === "details" ? <div className="agent-detail-metadata">{taskSteps ? <TaskStepsView state={taskSteps} zh={zh} /> : null}<dl>{metrics.filter(([, value]) => value !== undefined && value !== "").map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></div> : null}
+    {shown === "details" ? <div className="agent-detail-metadata"><AgentModelDetails client={client} sessionId={parentSessionId} agentId={target.agentId} available={runtimeConnected && !historical} capabilities={modelCapabilities} running={agent?.status === "running"} previewModel={model} />{taskSteps ? <TaskStepsView state={taskSteps} zh={zh} /> : null}<dl>{metrics.filter(([, value]) => value !== undefined && value !== "").map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></div> : null}
     {btwVisited ? <div className="agent-detail-btw" hidden={shown !== "btw"}><AgentBtwPane client={preview ? undefined : client} sessionId={parentSessionId} agentId={target.agentId} {...(viewState ? { viewState: viewState.btw } : {})}
       available={visible && shown === "btw" && canBtw && runtimeConnected && !historical && agent?.hasLiveSession === true} /></div> : null}
-    {wide ? <aside className="agent-detail-aside" aria-label={zh ? "子 Agent 详情" : "Agent details"}>
+    {wide ? <aside className="agent-detail-aside" aria-label={zh ? "子 Agent 详情" : "Agent details"}><AgentModelDetails client={client} sessionId={parentSessionId} agentId={target.agentId} available={runtimeConnected && !historical} capabilities={modelCapabilities} running={agent?.status === "running"} previewModel={model} />
       <div className="agent-detail-stats">
         {([[zh ? "运行时间" : "Duration", metric(4)], ["Tokens", metric(5)], [zh ? "费用" : "Cost", metric(6)]] as const).map(([label, stat]) =>
           <div key={label} className="agent-detail-stat"><span>{label}</span><strong>{stat || "—"}</strong></div>)}

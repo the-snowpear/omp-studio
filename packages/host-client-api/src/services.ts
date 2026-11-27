@@ -337,6 +337,7 @@ export type HostInvokeOutcome =
 
 /** One session-history row as supplied by the Host-side catalog provider. */
 export interface HostCatalogEntry {
+  readonly waitingForApproval?: boolean;
   /** Opaque OMP session identity; the facade derives all public ids from it deterministically. */
   readonly sessionId: string;
   /** Safe display title; the facade bounds and sanitizes it again. */

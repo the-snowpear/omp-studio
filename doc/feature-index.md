@@ -4,6 +4,25 @@
 
 这是 **功能 → 文件** 的地图，不是架构愿景。协议形状以类型为准，不在这里复述。搬家后改这一份，不要在 `AGENTS.md` 复制表格。
 
+## OMP 19.2.1 适配入口
+
+固定正式标签 `v19.2.1`，实施、验收证据与平台边界见 [19.2.1 迁移报告](../docs/migrations/omp-19.2.1.md)。
+
+**暂不迁移（2026-11-27 用户确认）**：扩展 `ctx.ui.composer` 钩子与 `ctx.ui.custom()` 自定义界面（含 `fullscreen` / `onHandle`）。范围及当前代码状态见上述迁移记录；不计为本轮已完成能力。
+
+| 功能 | Runtime / Host / 契约 | Renderer / 预览 |
+| --- | --- | --- |
+| 新设置与 Todo 后端 | overlay `feature-settings-protocol.ts`、`services/{feature-settings,todo-backend}-service.ts`；`contracts/todo-backend.ts`；原生扩展 runner | `settings/runtime1921Settings.ts`、`settings/TodoBackendSettings.tsx`、`preview/{featureSettingsPreview,todoBackendPreview}.ts` |
+| Binary Ninja / MCP 共享与 OAuth | overlay `services/{disassembler,mcp-auth,runtime-catalog}-service.ts`；`contracts/{disassembler,mcp-auth,runtime-catalog}.ts` | `capabilities/{DisassemblerPane,McpRuntimePane,McpAuthActions}.tsx`；对应 preview |
+| Chrome 扩展 Native Host | overlay `chrome-relay-host-protocol.ts`、`services/chrome-relay-host-service.ts`；Desktop `managed-browser-{relay,ipc,shared}.ts`、`chrome-api.ts`；`contracts/managed-browser.ts` | `browser/ChromeRelayHostPane.tsx`、`ManagedBrowserPane.tsx`；`preview/chromeRelayPreview.ts` |
+| 后台进程、子代理热切与工作树钩子 | overlay `services/{workbench,agent-model,session-worktrees}-service.ts`；`contracts/{workbench,agent-model,session-worktrees}.ts` | `services/LeftoverProcesses.tsx`、`models/AgentModelDetails.tsx`、`workspaces/WorktreeHookProgress.tsx` |
+| 多输出流与 PTY 输入提醒 | 原生 `tools/bash-interactive.ts` 语义订阅；overlay `state-projector.ts`、`services/job-inspect.ts`；Desktop `runtime-session.ts` → shared Host → `chrome-notify.ts` | `conversation/{JobInspector,ShellView,PtyWaitNotice}.tsx`；`preview/runtimeViewsPreview.ts` |
+| 全文检索、转录与调用分析 | 原生 `archive/{archive,transcript,activity}.ts`；overlay `archive-protocol.ts`、`services/archive-service.ts`；瞬时 `runtime-views` query | `history/{NativeArchivePane,ArchiveExplorer}.tsx`、`evaluation/EvaluationWorkspace.tsx`；`preview/archivePreview.ts` |
+| 图片附件批注 | 保留 Composer 图片 ID 与 `[图N]` 序列化；字节只替换选定附件 | `composer/{ImageAnnotatorModal,ChipComposer}.tsx`、`composer/imageAnnotation.ts`；中英热切与画布合成回归 |
+| 授权模型目录与 fast 资格 | overlay `services/{model-auth,model-roster,account-status}-service.ts`；Host `omp-models-adapter.ts`；`scripts/model-catalog.mjs` | `models/{NativeModelAccessPane,AccountStatusPane}.tsx`、`models/config/ProviderControls.tsx`；原生 Anthropic 长期 OAuth / Otari 交互 |
+
+开发验收入口：`apps/renderer/upgrade1921-harness.html`。真实分支使用隔离受控读取端口；预览使用独立 fixture，支持 `?marks=off`；不会安装或卸载用户 Chrome 扩展。
+
 ## OMP 19.0.1 适配入口
 
 运行时版本、验收证据与平台覆盖见 [19.0.1 迁移报告](../docs/migrations/omp-19.0.1.md)。

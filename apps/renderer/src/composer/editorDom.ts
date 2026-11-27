@@ -161,9 +161,8 @@ export function readDoc(editor: HTMLElement, images: Map<string, PromptImage>): 
 
 export function writeDoc(editor: HTMLElement, doc: ComposerDoc, images: Map<string, PromptImage>): void {
   const document = editor.ownerDocument!;
-  const window = document.defaultView!;
   editor.replaceChildren();
-  for (const node of doc.nodes) {
+  for (const [index, node] of doc.nodes.entries()) {
     if (node.type === "text") {
       const parts = node.value.split("\n");
       parts.forEach((part, index) => {
@@ -174,7 +173,10 @@ export function writeDoc(editor: HTMLElement, doc: ComposerDoc, images: Map<stri
     }
     if (node.chip.image) images.set(node.chip.id, node.chip.image);
     editor.append(createChipElement(node.chip, document));
-    if (node.chip.kind !== "mode" && node.chip.kind !== "github" && node.chip.kind !== "git-commit" && node.chip.kind !== "browser" && node.chip.kind !== "session") editor.append(document.createTextNode(" "));
+    // Existing text already carries its intended spacing. Add the editing
+    // spacer only between/end capsules, never before the next text node.
+    const next = doc.nodes[index + 1];
+    if (next?.type !== "text" && node.chip.kind !== "mode" && node.chip.kind !== "github" && node.chip.kind !== "git-commit" && node.chip.kind !== "browser" && node.chip.kind !== "session") editor.append(document.createTextNode(" "));
   }
 }
 

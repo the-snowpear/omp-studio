@@ -445,6 +445,8 @@ describe("WP-011 Studio Bridge runtime server", () => {
 				workerGeneration: 0,
 				isStreaming: false,
 				isCompacting: false,
+				waitingForApproval: false,
+				ptyInputWaits: [],
 				activeMode: "normal",
 				approvalMode: "yolo",
 				pause: { paused: false },

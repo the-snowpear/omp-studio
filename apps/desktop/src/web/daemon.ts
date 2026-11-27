@@ -42,6 +42,7 @@ export async function startSharedHost(
     ...options,
     memoryCredentials,
     managedBrowser: true,
+    onPtyInputWait: wait => { if (desktop) void desktopCall("ptyInputWait", wait).catch(() => {}); },
     pickDirectory: () => desktopCall("pickDirectory"),
     openUrl: async (url) => {
       control.authorizeUrl(url);

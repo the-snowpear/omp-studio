@@ -10,6 +10,7 @@ import { hostErrorMessage, waitReceipt } from "../hostError";
 import { Icon } from "../icons";
 import { useSurfaceDocument } from "../dock/SurfaceContext";
 import "./sessionWorktrees.css";
+import { WorktreeHookProgress } from "./WorktreeHookProgress";
 
 async function invoke<K extends keyof SessionWorktreeResultMap>(client: StudioClient, kind: K, input: CommandInput<K>): Promise<SessionWorktreeResultMap[K]> {
   const handle = await client.command(kind, input);
@@ -177,6 +178,7 @@ export function SessionWorktreesPane(props: FeatureSettingsProps & { launcher?: 
   }
   const picked = rows.find(row => row.id === selected) ?? rows[0];
   const body = <section className={props.launcher ? "worktree-modal" : "worktree-pane"} role={props.launcher ? undefined : "region"} aria-label={props.launcher ? undefined : zh ? "会话 Worktree" : "Session worktrees"}>
+    <WorktreeHookProgress client={props.client} sessionId={props.context?.sessionId} supported={!!props.context?.capabilities?.capabilities.some(row => row.id === "worktrees.session.hookStatus" && row.grade !== "unavailable")} visible={panelActive} busy={busy} />
     <header className="feature-settings-head"><div><span className="feature-eyebrow">{zh ? "并行工作区" : "PARALLEL WORKSPACES"}{preview && marks ? zh ? " · 演示" : " · DEMO" : ""}</span><h3>{zh ? "会话 Worktree" : "Session worktrees"}</h3></div><div className="feature-actions"><button className="btn small ghost" disabled={!enabled || busy} onClick={() => void run(refresh)}>{zh ? "刷新" : "Refresh"}</button>{props.launcher ? <button className="icon-btn" aria-label={zh ? "关闭 Worktree 管理" : "Close worktree manager"} disabled={busy} onClick={() => setOpen(false)}><Icon name="x" /></button> : null}</div></header>
     <p className="feature-status">{zh ? "每个目录拥有自己的分支与会话。创建不会清理源工作区；移除前会检查改动、活动会话和目录是否发生变化。" : "Each directory has its own branch and sessions. Creation preserves the source checkout; removal checks changes, active sessions and directory identity."}</p>
     {!enabled ? <p className="feature-status">{zh ? "连接支持会话 Worktree 的 Runtime 后可管理。" : "Connect a Runtime with session worktree support."}</p> : null}

@@ -1,0 +1,26 @@
+.pty-wait-notice {
+  display: grid;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-8);
+  width: 100%;
+  max-width: var(--conversation-width);
+  margin-inline: auto;
+}
+.pty-wait-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  padding: var(--sp-10) var(--sp-12);
+  border-inline-start: 2px solid var(--amber);
+  border-radius: var(--r-6);
+  background: color-mix(in srgb, var(--amber) 6%, var(--surface));
+}
+.pty-wait-row > .icon { flex: none; color: var(--amber); }
+.pty-wait-copy { flex: 1; min-width: 0; }
+.pty-wait-label { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-6); color: var(--text-2); font-size: var(--fs-12); }
+.pty-wait-label strong { font-weight: var(--fw-medium); }
+.pty-wait-copy code { display: block; margin-top: var(--sp-4); font-size: var(--fs-11); color: var(--text-3); overflow-wrap: anywhere; }
+.pty-wait-copy p { margin: var(--sp-4) 0 0; font-size: var(--fs-11); color: var(--text-3); }
+.pty-wait-row > button { flex: none; }
+.pty-wait-actions { display: flex; flex-wrap: wrap; gap: var(--sp-6); justify-content: flex-end; }
+.pty-wait-entry > .job-inspector { margin: var(--sp-8) 0 0; max-height: 300px; overflow: auto; }

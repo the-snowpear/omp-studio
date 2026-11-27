@@ -3,7 +3,7 @@ import type { SessionManager } from "../../session/session-manager";
 import { isHarnessInjectedUserMessage, publicConversationRole } from "./conversation-visibility";
 
 /** Private display metadata; the public OMP RPC event schema stays native. */
-export type StudioAgentSessionEvent = AgentSessionEvent & { studioEntryId?: string };
+export type StudioAgentSessionEvent = AgentSessionEvent & { studioEntryId?: string; parentToolCallId?: string };
 
 /** Reserves display identities before the home thread can persist the corresponding entry. */
 export class StudioConversationEntryIdentity {

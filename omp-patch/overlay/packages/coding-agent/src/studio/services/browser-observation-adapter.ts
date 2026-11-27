@@ -1,5 +1,5 @@
 import { isRecord } from "@oh-my-pi/pi-utils";
-import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
+import { ToolError } from "../../tools/tool-errors";
 import type { CDPSession } from "puppeteer-core";
 import type { ToolSession } from "../../tools/index";
 import type { BrowserCaptureResult, BrowserConsoleEntry } from "../../tools/browser/console-capture";

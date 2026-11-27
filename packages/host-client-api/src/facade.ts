@@ -882,6 +882,12 @@ export class StudioHostClientFacade implements ClientTransport {
         }
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
+      case "browser.relayHost.status":
+      case "archive.search":
+      case "archive.transcript.read":
+      case "archive.calls.list":
+      case "archive.messages.grep":
+      case "archive.stats.read":
       case "commit.draft.prepare":
       case "commit.draft.read":
       case "commit.draft.preview":
@@ -2376,6 +2382,7 @@ export class StudioHostClientFacade implements ClientTransport {
       messageCount: entry.messageCount,
       status: entry.status,
       ...(entry.pinned === undefined ? {} : { pinned: entry.pinned }),
+      ...(entry.waitingForApproval === undefined ? {} : { waitingForApproval: entry.waitingForApproval }),
     };
   }
 

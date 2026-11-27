@@ -21,7 +21,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/studio/services/mode-control-service";
 import { StudioRuntimeSettingsService } from "@oh-my-pi/pi-coding-agent/studio/services/runtime-settings-service";
 import { StudioLoopService } from "@oh-my-pi/pi-coding-agent/studio/services/loop-service";
-import { PROPOSE_DEVICE_NAME } from "@oh-my-pi/pi-tui/tools/resolve";
+import { PROPOSE_COMMAND_NAME } from "@oh-my-pi/pi-coding-agent/tools/details/resolve";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 describe("WP-030/031/032 StudioModeControlService", () => {
@@ -244,16 +244,19 @@ describe("WP-030/031/032 StudioModeControlService", () => {
 		session.agent.emitExternalEvent({
 			type: "tool_execution_end",
 			toolCallId: "proposal",
-			toolName: "write",
+			toolName: "bash",
 			result: {
 				content: proposal.content,
 				details: {
-					xdev: {
-						tool: PROPOSE_DEVICE_NAME,
-						mode: "execute",
-						args: { title: "demo" },
-						inner: proposal.details,
-					},
+					toolCommands: [
+						{
+							tool: PROPOSE_COMMAND_NAME,
+							mode: "execute",
+							exitCode: 0,
+							args: { title: "demo" },
+							inner: proposal.details,
+						},
+					],
 				},
 			},
 		});

@@ -8,14 +8,8 @@ import type {
 import type { StudioRuntimeCommandArbiter } from "../command-arbiter";
 import type { CfgApproval } from "../../internal-urls/cfg-protocol";
 import type { ExtensionApprovalAnswer, ExtensionApprovalGrant } from "../../extensibility/extensions/types";
-import {
-	fieldError,
-	isArrayChoice,
-	textValue,
-	type HtmlFormValue,
-	type OptionNote,
-} from "@oh-my-pi/pi-tui/html-form/data";
-import { spansText, type ChoiceOption } from "@oh-my-pi/pi-tui/html-form/parse";
+import { fieldError, isArrayChoice, textValue, type HtmlFormValue, type OptionNote } from "../../tools/html-form/data";
+import { spansText, type ChoiceOption } from "../../tools/html-form/parse";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import type { FormSubmitValue, InteractionForm, InteractionFormField } from "../form-protocol";
 import { validateAskImages } from "../ask-attachments-protocol";

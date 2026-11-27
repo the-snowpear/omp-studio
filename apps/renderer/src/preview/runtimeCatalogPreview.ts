@@ -127,14 +127,16 @@ export function getPreviewMcpRuntime(zh = isZh()): McpRuntimeStatus {
   return {
     available: true,
     startupTimeoutMs: 250,
+    shared: true,
+    idleStopMinutes: 5,
     ready: false,
     settled: false,
     total: 4,
     servers: [
       { name: "node_repl", replacedByBuiltin: "node_repl", state: "disconnected", transport: "stdio", tools: 0 },
-      { name: "filesystem", evalNamespaceUri: "xd://eval/filesystem", state: "ready", transport: "stdio", source: { providerName: "OMP", level: "project" }, tools: 11, toolInfo: buildFilesystemTools(zh) },
+      { name: "filesystem", evalNamespaceUri: "help://eval/filesystem", runtime: { era: "modern", state: "running", pid: 18420, links: 3 }, state: "ready", transport: "stdio", source: { providerName: "OMP", level: "project" }, tools: 11, toolInfo: buildFilesystemTools(zh) },
       { name: "github", state: "pending", transport: "http", source: { providerName: "OMP", level: "user" }, tools: 0 },
-      { name: "docs", state: "failed", transport: "sse", source: { providerName: "OMP", level: "project" }, tools: 0, error: zh ? "连接超时：文档服务未在等待期限内响应。" : "Connection timed out: docs server did not respond before deadline." },
+      { name: "docs", runtime: { era: "modern", state: "running", pid: 18460, links: 2 }, authChallenge: { name: "docs", status: "pending", authChallenge: { kind: "insufficient_scope", requiredScopes: ["docs:read"], wwwAuthenticate: [] }, requiredScopes: ["docs:read"], updatedAt: 0 }, state: "failed", transport: "sse", source: { providerName: "OMP", level: "project" }, tools: 0, error: zh ? "服务器要求重新授权 docs:read 范围。" : "The server requires re-authorization for the docs:read scope." },
     ],
   };
 }
@@ -149,6 +151,8 @@ export function applyPreviewMcpAction(status: McpRuntimeStatus, result: McpAuthR
     const tools = result.status === "removed" ? [] : connectedTools[server.name]!;
     const updated = { ...server, state: result.status === "removed" ? "disconnected" as const : "ready" as const, tools: tools.length, toolInfo: tools };
     delete updated.error;
+    if (result.status === "authorized" && updated.authChallenge) updated.authChallenge = { ...updated.authChallenge, status: "authorized" };
+    if (result.status === "removed") delete updated.authChallenge;
     return updated;
   });
   return { ...status, servers, ready: servers.every((server) => server.state === "ready"), settled: !servers.some((server) => server.state === "pending") };

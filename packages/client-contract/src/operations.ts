@@ -365,6 +365,7 @@ export interface ModelProviderSetEnabledInput {
  * button uses for ordinary providers that have no `discovery` block.
  */
 export interface ModelProviderProbeInput {
+  readonly transport?: "pi-native" | "direct";
   readonly advertisedReasoning?: boolean;
   readonly providerId: string;
   readonly endpointUrl?: string;

@@ -1,3 +1,4 @@
+import { desktopText } from "./desktop-language-shared.js";
 /**
  * Renderer 请求的系统通知（Main-only；preload 不得 import）。
  *
@@ -5,7 +6,7 @@
  * Renderer 组装好的固定文案，不读取文件系统 / Host 状态。
  */
 
-import { Notification, ipcMain, type WebContents } from "electron";
+import { BrowserWindow, Notification, ipcMain, type WebContents } from "electron";
 
 import { CHROME_NOTIFY_CHANNEL, parseChromeNotifyInput } from "./chrome-notify-shared.js";
 
@@ -26,4 +27,10 @@ export function registerChromeNotifyIpc(options: {
   return () => {
     ipcMain.removeHandler(CHROME_NOTIFY_CHANNEL);
   };
+}
+
+/** Native PTY input demand reaches Main through the authenticated shared Host. */
+export function notifyPtyInputWait(wait: { command: string; waiting: boolean; notify: boolean }): void {
+  if (!wait.waiting || !wait.notify || BrowserWindow.getFocusedWindow() || !Notification.isSupported()) return;
+  new Notification({ title: desktopText("终端等待输入", "Terminal is waiting for input"), body: wait.command }).show();
 }

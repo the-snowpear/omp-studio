@@ -64,7 +64,7 @@ export const PREVIEW_COMPUTER_TOOL_MEDIA = [{ type: "image", mimeType: "image/pn
 export const PREVIEW_COMPUTER_SETTINGS: FeatureSettingRow[] = [
   { key: "computer.enabled", value: true, source: "runtime" }, { key: "computer.display", value: "active", source: "default" },
   { key: "computer.maxWidth", value: 3840, source: "default" }, { key: "computer.maxHeight", value: 2400, source: "default" },
-  { key: "computer.backgroundFallback", value: "refuse", source: "global" },
+  { key: "computer.takeover", value: "refuse", source: "global" },
 ];
 
 export const PREVIEW_COMPUTER: StudioComputerStatus = {

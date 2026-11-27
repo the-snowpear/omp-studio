@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { JsonValue, StudioClient } from "@omp-studio/client-contract";
 import type { JobInspection } from "@omp-studio/studio-protocol";
@@ -21,6 +21,22 @@ function client() {
 function view(value: StudioClient, changes: Partial<Parameters<typeof JobInspector>[0]> = {}) {
   return <I18nProvider forcedLanguage="zh"><JobInspector job={job} client={value} sessionId="session-a" available onClose={() => {}} {...changes} /></I18nProvider>;
 }
+it("switches a native output stream without losing the choice on a mounted language change", async () => {
+  const streams = [{ id: "file:2", kind: "file" as const, producer: "build", consumer: "build.log", bytes: 100, open: true, modified: 1 }];
+  receipt.mockResolvedValue({ result: { ...inspection, streams } });
+  const value = client();
+  const renderView = (language: "zh" | "en") => <I18nProvider forcedLanguage={language}><JobInspector job={job} client={value} sessionId="session-a" available onClose={() => {}} /></I18nProvider>;
+  const mounted = render(renderView("zh"));
+  await screen.findByRole("combobox", { name: "输出流" });
+  fireEvent.click(screen.getByRole("combobox", { name: "输出流" }));
+  fireEvent.click(await screen.findByRole("option", { name: /build.log/ }));
+  await act(async () => {});
+  expect(value.command).toHaveBeenLastCalledWith("jobs.inspect", { sessionId: "session-a", jobId: "job-a", streamId: "file:2" });
+  mounted.rerender(renderView("en"));
+  expect(screen.getByRole("combobox", { name: "Output stream" }).textContent).toContain("build.log");
+  mounted.rerender(renderView("zh"));
+  expect(screen.getByRole("combobox", { name: "输出流" }).textContent).toContain("build.log");
+});
 it.each(["details", "process"] as const)("does not poll a hidden dock, and reads the final output once when a job ends (%s)", async presentation => {
   vi.useFakeTimers();
   receipt.mockResolvedValue({ result: inspection });
@@ -298,4 +314,59 @@ it("pauses reads in a hidden document and discards an observation spanning hide/
   hidden = true; fireEvent(document, new Event("visibilitychange"));
   await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
   expect(value.command).toHaveBeenCalledTimes(2);
+});
+
+
+it("keeps typed PTY input across language changes and rejected writes, clearing only a successful send", async () => {
+  const pty = { ...inspection, canInput: true, inputGeneration: 1700000000, inputDetection: "unknown" } satisfies JobInspection;
+  receipt.mockResolvedValue({ result: pty });
+  let rejectInput = true;
+  const command = vi.fn(async (kind: string) => { if (kind === "jobs.input" && rejectInput) throw Error("input refused"); return { requestId: kind }; });
+  const value = { command } as unknown as StudioClient;
+  const content = (language: "zh" | "en") => <I18nProvider forcedLanguage={language}><JobInspector job={job} client={value} sessionId="session-a" available onClose={() => {}} /></I18nProvider>;
+  const mounted = render(content("zh"));
+  fireEvent.change(await screen.findByRole("textbox", { name: "终端输入" }), { target: { value: "keep this" } });
+  mounted.rerender(content("en"));
+  expect(screen.getByRole("textbox", { name: "Console input" })).toHaveProperty("value", "keep this");
+  fireEvent.click(screen.getByRole("button", { name: "Send + Enter" }));
+  await screen.findByRole("alert");
+  expect(screen.getByRole("textbox", { name: "Console input" })).toHaveProperty("value", "keep this");
+  rejectInput = false;
+  fireEvent.click(screen.getByRole("button", { name: "Send + Enter" }));
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Console input" })).toHaveProperty("value", ""));
+  expect(command).toHaveBeenCalledWith("jobs.input", { sessionId: "session-a", jobId: "job-a", expectedGeneration: 1700000000, data: "keep this" + String.fromCharCode(13) });
+  mounted.rerender(content("zh"));
+  expect(screen.getByText("输入已发送")).toBeTruthy();
+});
+
+it("handles preview PTY input locally without a Host write", async () => {
+  const value = client();
+  render(view(value, { previewInspection: { ...inspection, canInput: true, inputGeneration: 1, waitingForInput: true } }));
+  fireEvent.change(screen.getByRole("textbox", { name: "终端输入" }), { target: { value: "preview input" } });
+  fireEvent.click(screen.getByRole("button", { name: "发送并回车" }));
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "终端输入" })).toHaveProperty("value", ""));
+  expect(value.command).not.toHaveBeenCalled(); expect(receipt).not.toHaveBeenCalled();
+});
+
+
+it("finishes a pending PTY send after a language switch without leaving input locked", async () => {
+  const pty = { ...inspection, canInput: true, inputGeneration: 1700000000 } satisfies JobInspection;
+  let resolveInput!: () => void;
+  receipt.mockImplementation((_client: unknown, requestId: string) => requestId === "jobs.input"
+    ? new Promise(resolve => { resolveInput = () => resolve({ result: { sent: true } }); })
+    : Promise.resolve({ result: pty }));
+  const value = { command: vi.fn(async (kind: string) => ({ requestId: kind })) } as unknown as StudioClient;
+  const content = (language: "zh" | "en") => <I18nProvider forcedLanguage={language}><JobInspector job={job} client={value} sessionId="session-a" available onClose={() => {}} /></I18nProvider>;
+  const mounted = render(content("zh"));
+  fireEvent.change(await screen.findByRole("textbox", { name: "终端输入" }), { target: { value: "pending answer" } });
+  fireEvent.click(screen.getByRole("button", { name: "发送并回车" }));
+  await waitFor(() => expect(resolveInput).toBeDefined());
+  mounted.rerender(content("en"));
+  expect(screen.getByRole("button", { name: "Send + Enter" })).toHaveProperty("disabled", true);
+  await act(async () => { resolveInput(); });
+  expect(screen.getByRole("button", { name: "Send + Enter" })).toHaveProperty("disabled", false);
+  expect(screen.getByRole("textbox", { name: "Console input" })).toHaveProperty("value", "");
+  expect(screen.getByText("Input sent")).toBeTruthy();
+  mounted.rerender(content("zh"));
+  expect(screen.getByRole("button", { name: "发送并回车" })).toHaveProperty("disabled", false);
 });

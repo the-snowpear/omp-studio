@@ -295,7 +295,7 @@ const ToolItem = memo(function ToolItem({ tool, open, onToggle, slot, showDetail
     ? `${label}${detail ? ` · ${detail}` : ""}${diffLabel ? `，${diffLabel}` : ""}，${statusLabel(tool.status, zh)}，${open ? "收起" : "展开"}详情`
     : `${label}${detail ? ` · ${detail}` : ""}${diffLabel ? `, ${diffLabel}` : ""}, ${statusLabel(tool.status, zh)}, ${open ? "collapse" : "expand"} details`;
   return (
-    <div className={`tl-item${expanded ? " open" : ""}${running ? " is-running" : ""}`} data-kind={kind} data-status={tool.status} data-tool-call-id={tool.toolCallId}>
+    <div className={`tl-item${expanded ? " open" : ""}${running ? " is-running" : ""}`} data-kind={kind} data-status={tool.status} data-tool-call-id={tool.toolCallId} data-parent-tool-call-id={tool.parentToolCallId}>
       <button
         type="button"
         className={`tl-row${failed ? " is-error" : ""}${running ? " is-running" : ""}`}
@@ -309,6 +309,7 @@ const ToolItem = memo(function ToolItem({ tool, open, onToggle, slot, showDetail
           {running ? <span className="spinner" /> : <Icon name={queued ? "clock" : toolIcon(kind)} extra="sm" />}
         </span>
         <span className="tl-name">{label}</span>
+        {tool.parentToolCallId ? <span className="chip gray xs" data-tip={`${zh ? "由工具调用" : "Called by tool"} ${tool.parentToolCallId}`}>{zh ? "嵌套" : "Nested"}</span> : null}
         {detail ? (
           <>
             <span className="tl-sep">·</span>

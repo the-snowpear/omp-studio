@@ -1,4 +1,5 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+import { createRoot, effect } from "@oh-my-pi/pi-tui";
 import { ComposerPredictionController, predictionAnchor } from "../../modes/controllers/composer-prediction-controller";
 import type { AgentSession } from "../../session/agent-session";
 import { cfgComposerPredictions } from "../../modes/settings";
@@ -7,6 +8,7 @@ import { cfgComposerPredictions } from "../../modes/settings";
 export class StudioMessagePrediction {
 	readonly #controller: ComposerPredictionController;
 	readonly #tried = new WeakSet<AgentMessage>();
+	readonly #disposePrediction: () => void;
 	readonly #unsubscribe: () => void;
 	readonly #unsubscribeSettings: () => void;
 	#active: { channelId: string; revision: number; text: string } | undefined;
@@ -24,7 +26,6 @@ export class StudioMessagePrediction {
 			rank?: number,
 		) => void,
 	) {
-		const owner = this;
 		this.#controller = new ComposerPredictionController({
 			get settings() {
 				return session.settings;
@@ -33,11 +34,13 @@ export class StudioMessagePrediction {
 				return session;
 			},
 			editor: { getText: () => this.#active?.text ?? "draft" },
-			ui: {
-				requestRender() {
-					owner.#show();
-				},
-			},
+		});
+		this.#disposePrediction = createRoot(dispose => {
+			effect(() => {
+				void this.#controller.choices;
+				this.#show();
+			});
+			return dispose;
 		});
 		this.#unsubscribe = session.subscribe(event => {
 			if (
@@ -118,6 +121,7 @@ export class StudioMessagePrediction {
 	dispose(): void {
 		this.#disposed = true;
 		this.#active = undefined;
+		this.#disposePrediction();
 		this.#controller.cancel();
 		this.#unsubscribe();
 		this.#unsubscribeSettings();

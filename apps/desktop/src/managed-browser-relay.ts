@@ -6,9 +6,10 @@ import type { WebContents } from "electron";
 import type { ManagedBrowserPage } from "@omp-studio/studio-protocol";
 import type { DesktopManagedBrowser, ManagedBrowserRuntime } from "./managed-browser.js";
 
+type OverlayAction = "mount" | "unmount" | "hide" | "show";
 interface Descriptor { version: number; sessionId: string; generation: string; endpoint: string; pid: number; }
 interface TabSnapshot { studioPageId: string; studioDocumentId?: string; tabId: number; url: string; title: string; active: boolean; discarded: boolean; windowId: number; pinned: boolean; groupId: number; }
-interface RelayRequest { t: "rpc"; id: number; op: string; tabId?: number; sessionId?: string; method?: string; params?: Record<string, unknown>; url?: string; active?: boolean; action?: "enable" | "list"; directory?: string; }
+interface RelayRequest { t: "rpc"; id: number; op: string; tabId?: number; sessionId?: string; method?: string; params?: Record<string, unknown>; url?: string; active?: boolean; action?: "enable" | "list" | OverlayAction; directory?: string; clearForeignFrames?: boolean; tabIds?: number[]; title?: string; color?: string; guid?: string; }
 interface Attached { contents: WebContents; message: (event: Electron.Event, method: string, params: Record<string, unknown>, sessionId?: string) => void; detach: (event: Electron.Event, reason: string) => void; }
 interface Link {
   descriptor: Descriptor;
@@ -101,9 +102,11 @@ export class ManagedBrowserRelay implements ManagedBrowserRuntime {
           let descriptor: Descriptor;
           try { descriptor = JSON.parse(await readFile(filename, "utf8")) as Descriptor; } catch { continue; }
           if (descriptor.version !== 1 || typeof descriptor.sessionId !== "string" || typeof descriptor.generation !== "string") continue;
+          if (typeof descriptor.pid !== "number" || !Number.isInteger(descriptor.pid) || descriptor.pid <= 0) continue;
           let endpoint: URL;
           try { endpoint = new URL(descriptor.endpoint); } catch { continue; }
-          if (endpoint.protocol !== "http:" || endpoint.hostname !== "127.0.0.1" || !/^\/managed\/[a-f0-9]{64}$/u.test(endpoint.pathname)) continue;
+          if (endpoint.protocol !== "http:" || endpoint.hostname !== "127.0.0.1" || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || !/^\/managed\/[a-f0-9]{64}$/u.test(endpoint.pathname)) continue;
+          descriptor = { ...descriptor, endpoint: endpoint.href };
           try {
             process.kill(descriptor.pid, 0);
           } catch (error) {
@@ -150,7 +153,20 @@ export class ManagedBrowserRelay implements ManagedBrowserRuntime {
     socket.addEventListener("open", () => {
       const tabs = this.options.manager.pages(descriptor.sessionId).map(page => this.#snapshot(page));
       for (const tab of tabs) link.signatures.set(tab.tabId, JSON.stringify(tab));
-      this.#send(link, { t: "hello", userAgent: `OMP Studio Electron/${process.versions.electron}`, browserVersion: process.versions.chrome ?? "", tabs, attachedTabIds: [], discardedTabsProtocol: 1, instanceId: this.#instance, browserSession: this.#instance });
+      // Intentionally omit extension-only capabilities (`ompVersion`, `ompBuild`, `reloadProtocol`,
+      // `downloadsProtocol`, `overlayProtocol`, `panelProtocol`): Electron cannot `chrome.runtime.reload()`,
+      // manages downloads via `studioDownloads` instead of `findDownload`, renders Studio's own control shield
+      // instead of the page overlay, and has no Chrome extension side panel.
+      this.#send(link, {
+        t: "hello",
+        userAgent: `OMP Studio Electron/${process.versions.electron ?? ""}`,
+        browserVersion: process.versions.chrome ? `Chrome/${process.versions.chrome}` : "Chrome/unknown",
+        tabs,
+        attachedTabIds: [],
+        discardedTabsProtocol: 1,
+        instanceId: this.#instance,
+        browserSession: this.#instance,
+      });
       const control = this.options.manager.store.initialControl(descriptor.sessionId) ?? "agent";
       void this.#requestControl(link, control === "waiting" ? "human" : control).then(() => {
         if (socket.readyState !== WebSocket.OPEN) return;
@@ -159,13 +175,24 @@ export class ManagedBrowserRelay implements ManagedBrowserRuntime {
       }).catch(() => socket.close());
     });
     socket.addEventListener("message", event => {
-      let message: Omit<RelayRequest, "t"> & { t: string; ok?: boolean; error?: string };
+      let message: (Omit<RelayRequest, "t"> & { t: string; ok?: boolean; error?: string }) | null;
       try { message = JSON.parse(String(event.data)); } catch { socket.close(); return; }
-      if (message.t === "studioControlResult") {
-        const pending = link.controls.get(message.id);
-        if (pending) { clearTimeout(pending.timer); link.controls.delete(message.id); if (message.ok) pending.resolve(); else pending.reject(new Error(message.error ?? "Browser control handoff failed.")); }
-      } else if (message.t === "rpc") {
-        void this.#rpc(link, { ...message, t: "rpc" }).then(result => this.#send(link, { t: "rpcResult", id: message.id, ok: true, result }), error => this.#send(link, { t: "rpcResult", id: message.id, ok: false, error: error instanceof Error ? error.message : "Browser operation failed" }));
+      if (!message || typeof message !== "object") { socket.close(); return; }
+      switch (message.t) {
+        case "studioControlResult": {
+          const pending = link.controls.get(message.id);
+          if (pending) { clearTimeout(pending.timer); link.controls.delete(message.id); if (message.ok) pending.resolve(); else pending.reject(new Error(message.error ?? "Browser control handoff failed.")); }
+          return;
+        }
+        case "rpc":
+          void this.#rpc(link, { ...message, t: "rpc" }).then(result => this.#send(link, { t: "rpcResult", id: message.id, ok: true, result }), error => this.#send(link, { t: "rpcResult", id: message.id, ok: false, error: error instanceof Error ? error.message : "Browser operation failed" }));
+          return;
+        case "reload":
+        case "input":
+        case "callResult":
+          // Electron is an embedded browser host rather than a Chrome extension, so extension reload,
+          // page-overlay input pushes, and side-panel call replies are safe no-ops.
+          return;
       }
     });
     socket.addEventListener("close", () => this.#disconnect(link));
@@ -230,7 +257,13 @@ export class ManagedBrowserRelay implements ManagedBrowserRuntime {
     const contents = await this.options.manager.ensure(page.id);
     const release = this.options.manager.holdActivity(page.id);
     try {
-      if (link.attached.has(tabId) && contents.debugger.isAttached()) return contents;
+      const existing = link.attached.get(tabId);
+      if (existing) {
+        if (contents.debugger.isAttached()) return contents;
+        contents.debugger.removeListener("message", existing.message);
+        contents.debugger.removeListener("detach", existing.detach);
+        link.attached.delete(tabId);
+      }
       if (contents.isDevToolsOpened()) throw new Error("DevTools is open. Return browser control after closing DevTools.");
       if (!contents.debugger.isAttached()) contents.debugger.attach("1.3");
       const message = (_event: Electron.Event, method: string, params: Record<string, unknown>, sessionId?: string) => this.#send(link, { t: "cdpEvent", tabId, method, params, ...(sessionId ? { sessionId } : {}) });
@@ -256,18 +289,36 @@ export class ManagedBrowserRelay implements ManagedBrowserRuntime {
     if (request.op === "detach") { this.#detach(link, request.tabId!); return {}; }
     if (manager.store.initialControl(sessionId) === "human" && ["createTab", "removeTab", "activateTab"].includes(request.op)) throw new Error("This chat's browser is under human control.");
     switch (request.op) {
-      case "createTab": return { tab: this.#snapshot(await manager.create(sessionId, request.url ?? "about:blank", "agent")) };
+      case "createTab":
+        return {
+          tab: this.#snapshot(
+            await manager.create(
+              sessionId,
+              request.url ?? "about:blank",
+              "agent",
+              undefined,
+              undefined,
+              request.active === false ? { active: false } : undefined,
+            ),
+          ),
+        };
       case "removeTab": { const page = this.#page(link, request.tabId); await manager.close(sessionId, page.id); return {}; }
       case "activateTab": { const page = this.#page(link, request.tabId); manager.store.select(sessionId, page.id); return {}; }
-      case "group": return { groupId: -1 };
+      case "group": return { grouped: {} };
       case "ungroup": return {};
       case "attach": await this.#attach(link, request.tabId!); return {};
-      case "studioDownloads": return manager.downloadOperation(this.#page(link, request.tabId).id, request.action!, request.directory);
+      case "findDownload": return null;
+      case "overlay": return {};
+      case "studioDownloads": {
+        if (request.action !== "enable" && request.action !== "list") throw new Error(`Unsupported Studio download action: ${String(request.action)}`);
+        return manager.downloadOperation(this.#page(link, request.tabId).id, request.action, request.directory);
+      }
       case "send": {
-        const contents = await this.#attach(link, request.tabId!);
+        await this.#attach(link, request.tabId!);
+        if (typeof request.method !== "string" || !request.method) throw new Error("Missing CDP method.");
         if (request.method === "Page.bringToFront") return {};
         if (request.method === "Browser.setDownloadBehavior") return {};
-        return manager.agentCommand(this.#page(link, request.tabId).id, request.method!, request.params, request.sessionId);
+        return manager.agentCommand(this.#page(link, request.tabId).id, request.method, request.params, request.sessionId);
       }
       default: throw new Error(`Unsupported Studio browser operation: ${request.op}`);
     }

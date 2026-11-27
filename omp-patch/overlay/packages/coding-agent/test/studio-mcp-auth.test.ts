@@ -1,3 +1,4 @@
+import type { MCPManager } from "../src/mcp/manager";
 import { expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -36,4 +37,57 @@ test("MCP sign-out removes the auth block from the project config that defines t
 	} finally {
 		await fs.rm(cwd, { recursive: true, force: true });
 	}
+});
+
+test("403 scope challenges survive reconnection until step-up applies the native grant", async () => {
+	const config = { type: "http" as const, url: "https://mcp.example.invalid/mcp" };
+	let onStatus:
+		| ((event: { type: "connected"; serverName: string } | { type: "connecting"; serverNames: string[] }) => void)
+		| undefined;
+	const challenges: string[][] = [];
+	const manager = {
+		setAuthHandler: () => {},
+		getConnectionStatus: () => "connected" as const,
+		addConnectionStatusListener: (callback: typeof onStatus) => {
+			onStatus = callback;
+			return () => {};
+		},
+	} as unknown as MCPManager;
+	const service = new StudioMcpAuthService(
+		{
+			sessionId: "s",
+			settings: Settings.isolated(),
+			sessionManager: { getCwd: () => "/project" },
+			modelRegistry: { authStorage: {} },
+		} as unknown as AgentSession,
+		manager,
+		{
+			findServer: async () => ({ config, scope: "project", filePath: "/project/.mcp.json", discovered: false }),
+			reauthorize: async (_name, _found, options) => {
+				challenges.push([...(options.authChallenge?.wwwAuthenticate ?? [])]);
+				return {
+					config,
+					persisted: true,
+					credentialId: "credential",
+					oauth: { authorizationUrl: "https://auth.invalid/authorize", tokenUrl: "https://auth.invalid/token" },
+				};
+			},
+			reconnectManager: async () => "connected",
+			openUrl: () => {},
+		},
+	);
+	const headers = ['Bearer error="insufficient_scope", scope="docs:read docs:write"'];
+	service.recordAuthChallenge("docs", { wwwAuthenticate: headers });
+	onStatus?.({ type: "connecting", serverNames: ["docs"] });
+	onStatus?.({ type: "connected", serverName: "docs" });
+	expect(service.status().challenges[0]).toMatchObject({
+		status: "pending",
+		serverStatus: "connected",
+		requiredScopes: ["docs:read", "docs:write"],
+	});
+	const result = await service.execute({ kind: "mcp.auth.stepUp", sessionId: "s", name: "docs" });
+	expect(result).toMatchObject({ status: "authorized", serverStatus: "connected" });
+	expect(challenges).toEqual([headers]);
+	expect(service.status().challenges[0]?.status).toBe("authorized");
+	service.dispose();
 });

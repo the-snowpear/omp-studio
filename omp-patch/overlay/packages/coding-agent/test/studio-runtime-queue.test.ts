@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { tagImageAttachmentSource } from "@oh-my-pi/pi-tui/prompt/image-source";
+import { tagImageAttachmentSource } from "../src/utils/image-source";
 import { ModelRegistry } from "../src/config/model-registry";
 import { Settings } from "../src/config/settings";
 import { AgentSession } from "../src/session/agent-session";
@@ -47,6 +47,11 @@ test("identity-based edits and promotion retain the exact duplicate's image comp
 	let after: RuntimeQueueResult | undefined;
 	let once = false;
 	let staleRejected = false;
+	let deliveringSnapshot: RuntimeQueueResult | undefined;
+	const stopWatching = agent.onQueueChange(() => {
+		const snapshot = service.get();
+		if (snapshot.entries.some(entry => entry.state === "inFlight")) deliveringSnapshot = snapshot;
+	});
 	agent.setOnBeforeYield(async () => {
 		if (once) return;
 		once = true;
@@ -113,6 +118,9 @@ test("identity-based edits and promotion retain the exact duplicate's image comp
 				.filter(part => part.type === "image"),
 		).toHaveLength(1);
 		expect(delivered).not.toContain("duplicate");
+		expect(deliveringSnapshot?.entries).toEqual([
+			expect.objectContaining({ id: before!.entries[1]!.id, state: "inFlight", editable: false, imageCount: 1 }),
+		]);
 		expect(service.get().entries).toEqual([]);
 		expect(() =>
 			service.execute({
@@ -124,6 +132,7 @@ test("identity-based edits and promotion retain the exact duplicate's image comp
 		).toThrow("no longer queued");
 		expect(() => service.execute({ kind: "session.queue.get", sessionId: "other" })).toThrow("another session");
 	} finally {
+		stopWatching();
 		await session.dispose();
 		auth.close();
 		await fs.rm(directory, { recursive: true, force: true });

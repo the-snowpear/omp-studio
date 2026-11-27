@@ -9,6 +9,7 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { previewAgentModel } from "../preview/agentModelPreview";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { Icon } from "../icons";
+import { AppSelect } from "../AppSelect";
 import "./agentModelDetails.css";
 export function AgentModelDetails({
   client,
@@ -36,6 +37,7 @@ export function AgentModelDetails({
   const [data, setData] = useState<AgentModelInspection>();
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
+  const [changing, setChanging] = useState(false);
   const epoch = useRef(0);
   const enabled =
     preview ||
@@ -48,16 +50,36 @@ export function AgentModelDetails({
           row.id === "agent.model.inspect" && row.grade !== "unavailable",
       )
     );
+  async function change(kind: "agent.model.set" | "agent.effort.set", value: string) {
+    if (!data) return;
+    const current = epoch.current;
+    setChanging(true); setError("");
+    try {
+      if (preview) {
+        setData(current => current && (kind === "agent.model.set"
+          ? { ...current, selectedModel: value, servingModel: value, usingFallback: false }
+          : { ...current, configuredThinking: value, effectiveThinking: value === "auto" ? "high" : value }));
+      } else {
+        const handle = kind === "agent.model.set"
+          ? await client!.command(kind, { sessionId: sessionId!, agentId, model: value })
+          : await client!.command(kind, { sessionId: sessionId!, agentId, effort: value });
+        const next = (await waitReceipt<{ result: AgentModelInspection }>(client!, handle.requestId)).result;
+        if (current === epoch.current) setData(next);
+      }
+    } catch (cause) { if (current === epoch.current) setError(hostErrorMessage(cause, zh ? "模型切换失败" : "Could not change the agent model")); }
+    finally { setChanging(false); }
+  }
   useEffect(() => {
     const current = ++epoch.current;
     let reading = false;
     setError("");
-    setData(undefined);
-    if (!open || !enabled) return;
+    if (!enabled) { setData(undefined); return; }
+    if (!open) return;
     if (preview) {
-      setData(previewAgentModel(agentId, previewModel, previewSaved));
+      setData(current => current?.agentId === agentId ? current : previewAgentModel(agentId, previewModel, previewSaved));
       return;
     }
+    setData(undefined);
     async function load() {
       if (reading || document.hidden) return;
       reading = true;
@@ -179,6 +201,18 @@ export function AgentModelDetails({
               </dd>
             </div>
           </dl>
+          {data.controllable ? <div className="amd-controls">
+            <label>{zh ? "切换模型" : "Change model"}<AppSelect value={data.selectedModel ?? ""}
+              disabled={changing || !data.models?.length} onChange={event => void change("agent.model.set", event.target.value)}>
+              {data.selectedModel && !data.models?.some(row => row.selector === data.selectedModel) ? <option value={data.selectedModel}>{data.selectedModel}</option> : null}
+              {data.models?.map(model => <option key={model.selector} value={model.selector}>{model.name} · {model.selector}</option>)}
+            </AppSelect></label>
+            {data.thinkingLevels?.length ? <label>{zh ? "思考档位" : "Thinking effort"}<AppSelect value={data.configuredThinking ?? data.effectiveThinking ?? "auto"}
+              disabled={changing} onChange={event => void change("agent.effort.set", event.target.value)}>
+              {data.thinkingLevels.map(level => <option key={level} value={level}>{level === "auto" ? zh ? "自动" : "Auto" : level === "off" ? zh ? "关闭" : "Off" : level}</option>)}
+            </AppSelect></label> : null}
+            <p className="tiny muted">{zh ? "立即用于此代理后续请求，保留当前任务。" : "Applies to this agent’s next request while keeping its task."}</p>
+          </div> : null}
           <b className="amd-chain-title">{zh ? "原生候选链" : "Native candidate chain"}</b>
           {data.candidates ? (
             <ol>

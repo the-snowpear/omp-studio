@@ -28,7 +28,23 @@ export interface JobWidgetView {
 import type { StudioTaskStepState } from "./agents-jobs.js";
 import type { JobActionsView } from "./job-actions.js";
 
+export interface JobOutputStream {
+  id: string;
+  kind: "pipe" | "file";
+  producer: string;
+  consumer: string;
+  bytes: number;
+  open: boolean;
+  modified: number;
+}
 export interface JobInspection {
+  streams?: JobOutputStream[];
+  selectedStreamId?: string;
+  binary?: boolean;
+  waitingForInput?: boolean;
+  inputDetection?: "known" | "unknown";
+  inputGeneration?: number;
+  canInput?: boolean;
   actions?: JobActionsView;
   taskSteps?: StudioTaskStepState;
   purpose?: string;
@@ -61,7 +77,8 @@ export type RuntimeFeatureOperation =
   | { kind: "session.history.pin"; sessionId: string; targetSessionId: string; pinned: boolean }
   | { kind: "session.lease.inspect"; sessionId: string; targetSessionIds: string[] }
   | { kind: "approvals.forget"; sessionId: string }
-  | { kind: "jobs.inspect"; sessionId: string; jobId: string }
+  | { kind: "jobs.inspect"; sessionId: string; jobId: string; streamId?: string }
+  | { kind: "jobs.input"; sessionId: string; jobId: string; expectedGeneration: number; data: string }
   | { kind: "mcp.auth.reauth"; sessionId: string; name: string }
   | { kind: "mcp.auth.unauth"; sessionId: string; name: string }
   | { kind: "mcp.auth.reconnect"; sessionId: string; name: string };
@@ -73,10 +90,11 @@ export interface RuntimeFeatureResultMap {
   "session.lease.inspect": { held: string[]; unknown: string[] };
   "approvals.forget": { cleared: true };
   "jobs.inspect": JobInspection;
+  "jobs.input": { sent: true };
   "mcp.auth.reauth": McpAuthResult;
   "mcp.auth.unauth": McpAuthResult;
   "mcp.auth.reconnect": McpAuthResult;
 }
-export const RUNTIME_FEATURE_KINDS = ["agent.spawn.options", "btw.inject", "session.history.rename", "session.history.pin", "session.lease.inspect", "approvals.forget", "jobs.inspect", "mcp.auth.reauth", "mcp.auth.unauth", "mcp.auth.reconnect"] as const;
+export const RUNTIME_FEATURE_KINDS = ["agent.spawn.options", "btw.inject", "session.history.rename", "session.history.pin", "session.lease.inspect", "approvals.forget", "jobs.inspect", "jobs.input", "mcp.auth.reauth", "mcp.auth.unauth", "mcp.auth.reconnect"] as const;
 export const RUNTIME_FEATURE_READ_KINDS = ["agent.spawn.options", "btw.inject", "session.history.rename", "session.history.pin", "session.lease.inspect", "jobs.inspect"] as const;
 export function isRuntimeFeatureKind(kind: string): kind is RuntimeFeatureOperation["kind"] { return (RUNTIME_FEATURE_KINDS as readonly string[]).includes(kind); }

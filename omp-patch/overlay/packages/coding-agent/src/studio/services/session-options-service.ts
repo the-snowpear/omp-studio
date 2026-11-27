@@ -1,4 +1,10 @@
-import { realizesPriorityServiceTier, serviceTierFamily, shouldSendServiceTier } from "@oh-my-pi/pi-ai/types";
+import { isAnthropicFastModeFallbackDisabled } from "@oh-my-pi/pi-ai/providers/anthropic-state";
+import {
+	realizesPriorityServiceTier,
+	serviceTierFamily,
+	serviceTierOffersByAccount,
+	shouldSendServiceTier,
+} from "@oh-my-pi/pi-ai/types";
 import {
 	applyModelPreset,
 	deleteModelPreset,
@@ -42,6 +48,21 @@ export class StudioSessionOptionsService {
 		const slowEnabled = session.isSlowModeEnabled();
 		const slowScope = session.getSlowModeScope();
 		const usageLimit = session.getUsageLimitState();
+		const fast = session.isFastModeEnabled();
+		const active = session.isFastModeActive();
+		const offers = model
+			? serviceTierOffersByAccount(model, session.isUltrafastModeEnabled() ? "ultrafast" : "priority")
+			: undefined;
+		const fastStatus =
+			!supported.includes("fast") && !supported.includes("ultrafast")
+				? "unsupported"
+				: !fast
+					? "off"
+					: active
+						? "active"
+						: model && isAnthropicFastModeFallbackDisabled(session.providerSessionState, model)
+							? "provider-fallback"
+							: "credential-unavailable";
 		return {
 			model: model ? model.provider + "/" + model.id : null,
 			selected: session.isUltrafastModeEnabled()
@@ -52,7 +73,16 @@ export class StudioSessionOptionsService {
 						? "slow"
 						: "normal",
 			supported,
-			fastActive: session.isFastModeActive(),
+			fastActive: active,
+			fastStatus,
+			...(offers
+				? {
+						fastAccounts: {
+							eligible: Object.values(offers).filter(Boolean).length,
+							total: Object.keys(offers).length,
+						},
+					}
+				: {}),
 			slowEnabled,
 			...(effectiveTier ? { effectiveTier } : {}),
 			...(slowScope ? { slowScope } : {}),

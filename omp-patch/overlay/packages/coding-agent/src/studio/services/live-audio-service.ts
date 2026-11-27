@@ -18,7 +18,7 @@ import type {
 import { type LiveAudioOperation, type LiveAudioState } from "../live-audio-protocol";
 import { StudioLiveError, type StudioLiveService, type StudioLiveSessionFactory } from "./live-service";
 import { StudioDictationCapture } from "./dictation-capture";
-import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
+import { KeybindingsManager } from "../../config/keybindings/keybindings";
 import { inspectDictationConfiguration } from "./dictation-configuration";
 
 interface Controller {
@@ -286,8 +286,8 @@ export class StudioLiveAudioService {
 		this.#dictationKeybindings ??= KeybindingsManager.create();
 		this.#dictationKeybindings.reload();
 		configuration.hotkeys = {
-			pushToTalk: this.#dictationKeybindings.getKeys("app.stt.pushToTalk"),
-			toggle: this.#dictationKeybindings.getKeys("app.stt.toggle"),
+			pushToTalk: this.#dictationKeybindings.keysFor("app.stt.pushToTalk"),
+			toggle: this.#dictationKeybindings.keysFor("app.stt.toggle"),
 		};
 		if (!configuration.cloud)
 			configuration.downloadRequired = !(await isSttModelCached(resolveSttModelSpec(model?.id).key));

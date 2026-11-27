@@ -6,7 +6,9 @@ import { Settings } from "../src/config/settings";
 import type { AgentSession } from "../src/session/agent-session";
 import type { ToolSession } from "../src/tools";
 import { ReadTool } from "../src/tools/read";
+import { cfgEditMagicModel, cfgEditMode } from "../src/edit/settings";
 import { StudioRuntimeSettingsService } from "../src/studio/services/runtime-settings-service";
+import { GUI_SECOND_BATCH_SETTINGS } from "../src/studio/gui-second-batch-settings-protocol";
 import { HindsightApi } from "../src/hindsight/client";
 
 test("Studio read settings change actual read output without writing user configuration", async () => {
@@ -75,4 +77,26 @@ test("Hindsight service checks distinguish successful requests and authenticatio
 	} finally {
 		server.stop(true);
 	}
+});
+
+test("Studio runtime settings expose magic edit mode and edit.magic.model", async () => {
+	expect(GUI_SECOND_BATCH_SETTINGS["edit.mode"].values).toContain("magic");
+	expect(GUI_SECOND_BATCH_SETTINGS["edit.magic.model"]).toMatchObject({ type: "string", default: "" });
+	const settings = Settings.isolated();
+	const service = new StudioRuntimeSettingsService({ settings } as AgentSession);
+	expect(service.snapshot()["edit.magic.model"]).toBe("");
+
+	await service.set("edit.mode", "magic", false);
+	expect(cfgEditMode.get(settings)).toBe("magic");
+	expect(service.snapshot()["edit.mode"]).toBe("magic");
+	expect(service.activation().resolvedEditMode).toBe("magic");
+	expect(service.activation().sources?.["edit.mode"]).toBe("runtime");
+
+	await service.set("edit.magic.model", " @slow ", false);
+	expect(cfgEditMagicModel.get(settings)).toBe("@slow");
+	expect(service.snapshot()["edit.magic.model"]).toBe("@slow");
+
+	await service.set("edit.magic.model", "   ", false);
+	expect(cfgEditMagicModel.get(settings)).toBe("");
+	expect(service.snapshot()["edit.magic.model"]).toBe("");
 });

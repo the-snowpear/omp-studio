@@ -103,7 +103,7 @@ import {
 } from "../../hindsight/settings";
 import { HindsightError } from "../../hindsight/client";
 import { resolveEditMode } from "../../utils/edit-mode";
-import { cfgEditMode } from "../../edit/settings";
+import { cfgEditMagicModel, cfgEditMode } from "../../edit/settings";
 import {
 	cfgReadLineNumbers,
 	cfgReadDefaultLimit,
@@ -137,6 +137,7 @@ const GUI_SETTING_HANDLES = {
 	"hindsight.recallMaxTokens": cfgHindsightRecallMaxTokens,
 	"hindsight.debug": cfgHindsightDebug,
 	"edit.mode": cfgEditMode,
+	"edit.magic.model": cfgEditMagicModel,
 	readLineNumbers: cfgReadLineNumbers,
 	"read.defaultLimit": cfgReadDefaultLimit,
 	"read.summarize.enabled": cfgReadSummarizeEnabled,
@@ -500,10 +501,10 @@ export class StudioRuntimeSettingsService {
 		this.#syncSession();
 		return {
 			...(Object.fromEntries(
-				GUI_SETTING_KEYS.map(key => [
-					key,
-					structuredClone(RUNTIME_SETTING_HANDLES[key].get(this.session.settings)),
-				]),
+				GUI_SETTING_KEYS.map(key => {
+					const raw = RUNTIME_SETTING_HANDLES[key].get(this.session.settings);
+					return [key, structuredClone(key === "edit.magic.model" ? (raw ?? "") : raw)];
+				}),
 			) as Required<GuiSettingsSnapshot>),
 			"modelRoles.judge": this.session.settings.getModelRoles().judge ?? "",
 			"providers.openai-codex.codeMode": "off",
@@ -606,6 +607,12 @@ export class StudioRuntimeSettingsService {
 		if (key === "modelRoles.judge") {
 			if (persist) settings.setModelRole("judge", (value as string).trim() || undefined);
 			else settings.overrideModelRoles({ ...settings.getModelRoles(), judge: value as string });
+			return;
+		}
+		if (key === "edit.magic.model") {
+			const trimmed = (value as string).trim();
+			if (persist) cfgEditMagicModel.set(settings, trimmed || undefined);
+			else cfgEditMagicModel.override(settings, trimmed);
 			return;
 		}
 		if (key === "providers.openai-codex.codeMode")

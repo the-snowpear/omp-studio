@@ -15,6 +15,7 @@ import { BrowserViews, type BrowserView } from "./BrowserViews";
 import { useBrowserPresentation } from "./useBrowserPresentation";
 import { useBrowserWatch, useNativeBrowserObservation } from "./useNativeBrowserObservation";
 import { NativeBrowserFrame } from "./NativeBrowserFrame";
+import { ChromeRelayHostPane } from "./ChromeRelayHostPane";
 import "./managedBrowser.css";
 
 export function useBrowserCopy(): Copy {
@@ -141,25 +142,27 @@ export function ManagedBrowserPane({ client, nativeClient, sessionId, pageId, vi
 }
 
 /** The Browser tool itself: a new-tab page for the chat, plus downloads and settings. */
-export function BrowserStartPanel({ nativeClient, sessionId, visible, unbound = false }: { nativeClient?: StudioClient | undefined; sessionId: string | undefined; visible: boolean; unbound?: boolean }) {
+export function BrowserStartPanel({ nativeClient, relayClient, relaySessionId, remote, sessionId, visible, unbound = false }: { nativeClient?: StudioClient | undefined; relayClient?: StudioClient | undefined; relaySessionId?: string | undefined; remote?: boolean | undefined; sessionId: string | undefined; visible: boolean; unbound?: boolean }) {
   const { preview, marks } = usePreviewMode();
   const copy = useBrowserCopy();
   const { session, snap } = useChatBrowser(unbound ? undefined : sessionId, nativeClient);
   useBrowserWatch(session, visible);
-  const [view, setView] = useState<BrowserView | "page">("page");
+  const [view, setView] = useState<BrowserView | "page" | "relay-host">("page");
   const state = snap.state;
   return <section className="managed-browser is-start" hidden={!visible} aria-label={copy("对话浏览器", "Chat browser")}>
-    {session && state && view === "page" ? <div className="mb-toolbar is-start">
+    {view === "page" ? <div className="mb-toolbar is-start">
       <span className="mb-toolbar-title">{copy("浏览器", "Browser")}</span>
       {preview && marks ? <span className="chip gray xs">{copy("演示", "Demo")}</span> : null}
       <div className="mb-actions">
-        {state.pages.length && !session.nativeAvailable ? <BrowserControlToggle session={session} snap={snap} copy={copy} compact={false} /> : null}
-        {session.embeddedAvailable ? <><button type="button" className="icon-btn" aria-label={copy("Embedded 下载", "Embedded downloads")} data-tip={copy("Studio embedded 下载；原生下载在各页面中查看", "Studio embedded downloads; native downloads belong to each page")} onClick={() => setView("downloads")}><Icon name="download" extra="sm" /></button>
+        <button type="button" className="btn small ghost" onClick={() => setView("relay-host")}><Icon name="globe" extra="sm" />{copy("Chrome 扩展", "Chrome extension")}</button>
+        {session && state?.pages.length && !session.nativeAvailable ? <BrowserControlToggle session={session} snap={snap} copy={copy} compact={false} /> : null}
+        {session?.embeddedAvailable ? <><button type="button" className="icon-btn" aria-label={copy("Embedded 下载", "Embedded downloads")} data-tip={copy("Studio embedded 下载；原生下载在各页面中查看", "Studio embedded downloads; native downloads belong to each page")} onClick={() => setView("downloads")}><Icon name="download" extra="sm" /></button>
         <button type="button" className="icon-btn" aria-label={copy("Embedded 浏览器设置", "Embedded browser settings")} data-tip={copy("仅作用于明确选择的 Studio embedded adapter", "Only applies to the explicitly selected Studio embedded adapter")} onClick={() => setView("settings")}><Icon name="settings" extra="sm" /></button></> : null}
       </div>
     </div> : null}
     <div className="mb-stage"><div className="mb-viewport" role="region" aria-label={copy("新标签页", "New tab")}>
-      {session && state && view !== "page" ? <BrowserViews view={view} session={session} snap={snap} copy={copy} onBack={() => setView("page")} />
+      {view === "relay-host" ? <ChromeRelayHostPane client={relayClient} sessionId={relaySessionId ?? sessionId} remote={remote} visible={visible} onBack={() => setView("page")} />
+        : session && state && view !== "page" ? <BrowserViews view={view} session={session} snap={snap} copy={copy} onBack={() => setView("page")} />
         : session && !state ? <BrowserPageState kind={snap.readFailed ? "read-failed" : "loading"} copy={copy} {...(snap.readFailed ? { onRetry: () => void session.read() } : {})} />
         : <BrowserStartPage session={session} snap={snap} copy={copy} unbound={unbound || !session} autoFocus={visible && !!snap.pendingLink} />}
     </div></div>

@@ -101,3 +101,6 @@ export * from "./contracts/extension-links.js";
 export * from "./contracts/webmcp.js";
 
 export * from "./contracts/search-credentials.js";
+
+export * from "./contracts/mcp-auth.js";
+export * from "./contracts/todo-backend.js";

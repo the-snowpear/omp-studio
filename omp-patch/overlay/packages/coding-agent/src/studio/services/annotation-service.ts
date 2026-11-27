@@ -8,7 +8,7 @@ import {
 	createResolvedReviewTarget,
 	readUncommittedReviewTarget,
 } from "../../extensibility/custom-commands/bundled/review/target";
-import type { TextReviewAnnotation } from "@oh-my-pi/pi-tui/overlays/annotation-types";
+import type { TextReviewAnnotation } from "../../extensibility/custom-commands/bundled/annotate/annotation-types";
 import { type AnnotationCapture, type AnnotationSource, type AnnotationOperation } from "../annotations-protocol";
 import { SessionControlError } from "./session-control-service";
 

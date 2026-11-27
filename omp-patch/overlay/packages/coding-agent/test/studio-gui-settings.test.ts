@@ -160,3 +160,12 @@ for (const [mode, expectedCalls] of [
 		}
 	});
 }
+
+test("GUI settings expose binja in disassembler.backend", async () => {
+	expect(GUI_SETTING_DEFINITIONS["disassembler.backend"].values).toContain("binja");
+	const settings = Settings.isolated();
+	const service = new StudioRuntimeSettingsService({ settings } as AgentSession);
+	await service.set("disassembler.backend", "binja", false);
+	expect(service.snapshot()["disassembler.backend"]).toBe("binja");
+	expect(service.activation().sources?.["disassembler.backend"]).toBe("runtime");
+});

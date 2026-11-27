@@ -14,6 +14,22 @@ import { hasNativeJudge } from "../src/judgment";
 import type { AgentSession } from "../src/session/agent-session";
 import type { ToolSession } from "../src/tools";
 import { BashTool } from "../src/tools/bash";
+import { cfgBinjaInstallDir, cfgBinjaPython } from "../src/binja/settings";
+import { cfgDisassembler } from "../src/disasm/settings";
+import { cfgEvalToolsEnabled } from "../src/eval/settings";
+import { cfgBashReapBackground } from "../src/exec/settings";
+import { cfgMcpIdleStopMinutes, cfgMcpShared } from "../src/mcp/settings";
+import { cfgPtyNotify } from "../src/modes/settings";
+import { cfgPrewalkAuto, cfgPrewalkAutoTarget } from "../src/session/settings";
+import { cfgTaskCrossInstance } from "../src/task/settings";
+import {
+	cfgComputerTakeover,
+	cfgTodoBackend,
+	cfgToolsCommandDocs,
+	cfgToolsCommandInline,
+	cfgToolsCommandNotices,
+	cfgToolsCommands,
+} from "../src/tools/settings";
 import { StudioFeatureSettingsService } from "../src/studio/services/feature-settings-service";
 import type { FeatureSettingKey, FeatureSettingValue } from "../src/studio/feature-settings-protocol";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
@@ -188,4 +204,141 @@ test("editing authored Bash rules never promotes project or path-scoped grants t
 		AgentStorage.close();
 		await dir.remove();
 	}
+});
+
+test("renames tools.xdev* and computer.backgroundFallback on legacy configs and supports Studio feature controls", async () => {
+	const dir = TempDir.createSync("@studio-feature-legacy-");
+	try {
+		const agentDir = `${dir.path()}/agent`;
+		const cwd = `${dir.path()}/workspace`;
+		await fs.mkdir(agentDir, { recursive: true });
+		await fs.mkdir(cwd, { recursive: true });
+		await Bun.write(
+			`${agentDir}/config.yml`,
+			[
+				"tools.xdev: false",
+				"tools.xdevDocs: builtins",
+				"tools.xdevInline:",
+				"  - mcp__demo_*",
+				"tools.xdevNotices: false",
+				"computer:",
+				"  backgroundFallback: refuse",
+			].join("\n"),
+		);
+		const loaded = await Settings.loadIsolated({ cwd, agentDir });
+		expect(cfgToolsCommands.get(loaded)).toBe(false);
+		expect(cfgToolsCommandDocs.get(loaded)).toBe("builtins");
+		expect(cfgToolsCommandInline.get(loaded)).toEqual(["mcp__demo_*"]);
+		expect(cfgToolsCommandNotices.get(loaded)).toBe(false);
+		expect(cfgComputerTakeover.get(loaded)).toBe("refuse");
+
+		const service = new StudioFeatureSettingsService({ sessionId: "settings", settings: loaded } as AgentSession);
+		const setNotices: FeatureSettingsOperation = {
+			kind: "preferences.features.set",
+			sessionId: "settings",
+			key: "tools.commandNotices",
+			scope: "session",
+			value: true,
+		};
+		validateFeatureSettingsOperation(setNotices);
+		expect(((await service.execute(setNotices)) as FeatureSettingRow).value).toBe(true);
+		const setTakeover: FeatureSettingsOperation = {
+			kind: "preferences.features.set",
+			sessionId: "settings",
+			key: "computer.takeover",
+			scope: "session",
+			value: "foreground",
+		};
+		validateFeatureSettingsOperation(setTakeover);
+		expect(((await service.execute(setTakeover)) as FeatureSettingRow).value).toBe("foreground");
+	} finally {
+		AgentStorage.close();
+		await dir.remove();
+	}
+});
+
+test("exposes v19.2.1 feature settings with Studio overrides and validation", async () => {
+	const f = featureSettings();
+	const list = (await f.service.execute({ kind: "preferences.features.get", sessionId: "settings" })) as {
+		settings: FeatureSettingRow[];
+	};
+	const keys = new Set(list.settings.map(row => row.key));
+	for (const expectedKey of [
+		"tools.commands",
+		"tools.commandDocs",
+		"tools.commandInline",
+		"tools.commandNotices",
+		"computer.takeover",
+		"prewalk.auto",
+		"prewalk.autoTarget",
+		"eval.tools.enabled",
+		"task.crossInstance",
+		"mcp.shared",
+		"mcp.idleStopMinutes",
+		"bash.reapBackground",
+		"pty.notify",
+		"todo.backend",
+		"disassembler.backend",
+		"binja.installDir",
+		"binja.python",
+	] as const) {
+		expect(keys.has(expectedKey)).toBe(true);
+	}
+
+	await f.set("tools.commands", false);
+	await f.set("tools.commandDocs", "inline");
+	await f.set("tools.commandInline", ["mcp__demo_*"]);
+	await f.set("prewalk.auto", "escalate");
+	await f.set("prewalk.autoTarget", "@initial");
+	await f.set("eval.tools.enabled", true);
+	await f.set("task.crossInstance", false);
+	await f.set("mcp.shared", false);
+	await f.set("mcp.idleStopMinutes", 15);
+	await f.set("bash.reapBackground", false);
+	await f.set("pty.notify", "off");
+	await f.set("todo.backend", "custom-todo");
+	await f.set("disassembler.backend", "binja");
+	await f.set("binja.installDir", "/opt/binaryninja");
+	await f.set("binja.python", "/opt/venv/bin/python");
+
+	expect([
+		cfgToolsCommands.get(f.settings),
+		cfgToolsCommandDocs.get(f.settings),
+		cfgToolsCommandInline.get(f.settings),
+		cfgPrewalkAuto.get(f.settings),
+		cfgPrewalkAutoTarget.get(f.settings),
+		cfgEvalToolsEnabled.get(f.settings),
+		cfgTaskCrossInstance.get(f.settings),
+		cfgMcpShared.get(f.settings),
+		cfgMcpIdleStopMinutes.get(f.settings),
+		cfgBashReapBackground.get(f.settings),
+		cfgPtyNotify.get(f.settings),
+		cfgTodoBackend.get(f.settings),
+		cfgDisassembler.get(f.settings),
+		cfgBinjaInstallDir.get(f.settings),
+		cfgBinjaPython.get(f.settings),
+	]).toEqual([
+		false,
+		"inline",
+		["mcp__demo_*"],
+		"escalate",
+		"@initial",
+		true,
+		false,
+		false,
+		15,
+		false,
+		"off",
+		"custom-todo",
+		"binja",
+		"/opt/binaryninja",
+		"/opt/venv/bin/python",
+	]);
+
+	await expect(f.set("mcp.idleStopMinutes", -1)).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+	await expect(f.set("mcp.idleStopMinutes", 10081)).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+
+	const cleared = (await f.clear("prewalk.auto")) as FeatureSettingRow;
+	expect(cleared.source).toBe("default");
+	expect(cfgPrewalkAuto.get(f.settings)).toBe("off");
 });

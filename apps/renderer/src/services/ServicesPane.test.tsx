@@ -29,6 +29,18 @@ it("preview creates and controls demo services without calling Host or desktop s
   await screen.findByText("demo-task");
   expect(client.command).not.toHaveBeenCalled(); expect(save).not.toHaveBeenCalled();
 });
+it("adopts a preview leftover into the service list and terminates the remaining process locally", async () => {
+  const client = mount(true);
+  const adopt = await screen.findAllByRole("button", { name: "接管为服务" });
+  fireEvent.click(adopt[0]!);
+  fireEvent.change(screen.getByRole("textbox", { name: "服务名称" }), { target: { value: "asset-watcher" } });
+  fireEvent.click(screen.getByRole("button", { name: "接管" }));
+  await screen.findByText("asset-watcher");
+  expect(screen.queryByText("node scripts/watch-assets.mjs &")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "终止" }));
+  await screen.findByText("没有未托管的后台进程。");
+  expect(client.command).not.toHaveBeenCalled();
+});
 it("saving a real configuration never starts a process and defaults to session lifetime", async () => {
   const saved = vi.fn(async () => ({ ok: true, definitions: [] }));
   window.ompStudioChrome = { listServiceDefinitions: vi.fn(async () => ({ ok: true, definitions: [] })), saveServiceDefinition: saved } as unknown as NonNullable<typeof window.ompStudioChrome>;

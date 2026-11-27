@@ -155,6 +155,7 @@ export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?
       execute: command => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.execute, command) as Promise<ManagedBrowserState>,
       present: presentation => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.present, presentation) as Promise<void>,
       inspect: request => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.inspect, request) as Promise<BrowserPageInspection>,
+      openRelayExtensionDirectory: directory => ipcRenderer.invoke(MANAGED_BROWSER_CHANNELS.openRelayExtensionDirectory, directory) as Promise<void>,
       subscribe: listener => subscribeChannel<ManagedBrowserEvent>(ipcRenderer, MANAGED_BROWSER_CHANNELS.event, listener),
     }),
     attachBrowserObservation(input: BrowserObservationAttach): Promise<BrowserObservationResult> { return ipcRenderer.invoke(BROWSER_OBSERVATION_CHANNELS.attach, input) as Promise<BrowserObservationResult>; },

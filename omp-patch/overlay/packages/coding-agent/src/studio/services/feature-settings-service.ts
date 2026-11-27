@@ -6,7 +6,7 @@ import {
 	cfgProvidersCacheWarmingCompactTokens,
 } from "../../session/settings";
 import { cfgDisassembler, cfgDisasmMaxOpen, cfgDisasmIdleCloseSec } from "../../disasm/settings";
-import { cfgMcpBuiltinTransforms, cfgMcpEvalNamespaces } from "../../mcp/settings";
+import { cfgMcpBuiltinTransforms, cfgMcpEvalNamespaces, cfgMcpIdleStopMinutes, cfgMcpShared } from "../../mcp/settings";
 import { cfgTaskCrossInstance, cfgTaskAgentPrewalkAuto, cfgTaskEnableLsp } from "../../task/settings";
 import {
 	cfgMnemopiRecallRelevance,
@@ -17,12 +17,22 @@ import { cfgToolsIntentTracing } from "../../tools/settings";
 import { cfgLiveEndpoint, cfgLiveApiKey, cfgLiveVoice } from "../../live/settings";
 import { outRepliesActive } from "../../internal-urls/out-protocol";
 import { cfgMagicKeyword, cfgMagicKeywordsEnabled } from "../../modes/settings";
-import { cfgOutEnabled, cfgToolsXdevNotices } from "../../tools/settings";
+import {
+	cfgOutEnabled,
+	cfgTodoBackend,
+	cfgToolsCommandDocs,
+	cfgToolsCommandInline,
+	cfgToolsCommandNotices,
+	cfgToolsCommands,
+} from "../../tools/settings";
+import { cfgBinjaInstallDir, cfgBinjaPython } from "../../binja/settings";
+import { cfgEvalToolsEnabled } from "../../eval/settings";
 import {
 	cfgBtwInject,
 	cfgComposerPredictionAlternatives,
 	cfgDisplayShellVisualization,
 	cfgDisplayAdvisorCollapsedLines,
+	cfgPtyNotify,
 } from "../../modes/settings";
 import { cfgTitleRefreshAfterPrompts } from "../../utils/title-settings";
 import {
@@ -76,7 +86,7 @@ import {
 } from "../../session/settings";
 import {
 	cfgAsyncWidgets,
-	cfgComputerBackgroundFallback,
+	cfgComputerTakeover,
 	cfgComputerEnabled,
 	cfgComputerDisplay,
 	cfgComputerMaxWidth,
@@ -86,7 +96,13 @@ import {
 import type { StudioComputerWorkspaceService } from "./computer-workspace-service";
 import { cfgExtensionHandlersModeControl } from "../../extensibility/settings";
 import { cfgSttEnabled, cfgSttLanguage, cfgSttSubmitTrigger } from "../../stt/settings";
-import { cfgBashAllowedEnvVars, cfgBashGitGuard, cfgBashPatterns, cfgShellPath } from "../../exec/settings";
+import {
+	cfgBashAllowedEnvVars,
+	cfgBashGitGuard,
+	cfgBashPatterns,
+	cfgBashReapBackground,
+	cfgShellPath,
+} from "../../exec/settings";
 import { cfgNoJudge, cfgNoSpotlight, cfgOffline } from "../../config/auxiliary-model-policy";
 import { cfgEncourageEdits } from "../../session/settings";
 import { cfgCommitEnabled, cfgFindHitThreshold, cfgFindVerifyModel, cfgTodoMidRunNudges } from "../../tools/settings";
@@ -167,7 +183,10 @@ const HANDLES: Record<FeatureSettingKey, AnySetting> = {
 	"judgment.attemptTimeoutMs": cfgJudgmentAttemptTimeoutMs,
 	"skills.manualSkills": cfgSkillsManualSkills,
 	"hindsight.globalScope": cfgHindsightGlobalScope,
-	"tools.xdevNotices": cfgToolsXdevNotices,
+	"tools.commands": cfgToolsCommands,
+	"tools.commandDocs": cfgToolsCommandDocs,
+	"tools.commandInline": cfgToolsCommandInline,
+	"tools.commandNotices": cfgToolsCommandNotices,
 	"spotlight.experiment.enabled": cfgSpotlightExperimentEnabled,
 	"spotlight.url": cfgSpotlightUrl,
 	"spotlight.model": cfgSpotlightModel,
@@ -197,7 +216,7 @@ const HANDLES: Record<FeatureSettingKey, AnySetting> = {
 	"computer.display": cfgComputerDisplay,
 	"computer.maxWidth": cfgComputerMaxWidth,
 	"computer.maxHeight": cfgComputerMaxHeight,
-	"computer.backgroundFallback": cfgComputerBackgroundFallback,
+	"computer.takeover": cfgComputerTakeover,
 	"tools.restrictedFolders": cfgToolsRestrictedFolders,
 	"extensionHandlers.modeControl": cfgExtensionHandlersModeControl,
 	"recap.enabled": cfgRecapEnabled,
@@ -210,6 +229,14 @@ const HANDLES: Record<FeatureSettingKey, AnySetting> = {
 	"stt.enabled": cfgSttEnabled,
 	"stt.language": cfgSttLanguage,
 	"stt.submitTrigger": cfgSttSubmitTrigger,
+	"eval.tools.enabled": cfgEvalToolsEnabled,
+	"mcp.shared": cfgMcpShared,
+	"mcp.idleStopMinutes": cfgMcpIdleStopMinutes,
+	"bash.reapBackground": cfgBashReapBackground,
+	"pty.notify": cfgPtyNotify,
+	"todo.backend": cfgTodoBackend,
+	"binja.installDir": cfgBinjaInstallDir,
+	"binja.python": cfgBinjaPython,
 };
 
 export class StudioFeatureSettingsService {
@@ -340,6 +367,14 @@ export class StudioFeatureSettingsService {
 				"INVALID_ARGUMENT",
 				"Computer image dimensions must be integers from 1 to 16384",
 			);
+		if (
+			operation.key === "mcp.idleStopMinutes" &&
+			(typeof operation.value !== "number" ||
+				!Number.isFinite(operation.value) ||
+				operation.value < 0 ||
+				operation.value > 10080)
+		)
+			throw new SessionControlError("INVALID_ARGUMENT", "MCP idle stop minutes must be between 0 and 10080");
 		if (
 			operation.key === "computer.display" &&
 			(typeof operation.value !== "string" || !operation.value.trim() || operation.value.length > 512)

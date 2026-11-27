@@ -1,3 +1,5 @@
+import { type ChromeRelayHostOperation, type ChromeRelayHostStatus } from "./managed-browser.js";
+import { ARCHIVE_QUERY_KINDS, type ArchiveQueryOperation, type ArchiveQueryResultMap } from "./archive.js";
 import type { WebMcpListOptions, StudioWebMcpCatalog } from "./webmcp.js";
 import { SELECTIVE_COMMIT_QUERY_KINDS, type SelectiveCommitOperation, type SelectiveCommitQueryInputMap, type SelectiveCommitQueryResultMap } from "./selective-commit.js";
 import { PROMPT_HISTORY_QUERY_KINDS, type PromptHistoryQueryOperation, type PromptHistoryQueryResultMap } from "./prompt-history.js";
@@ -47,6 +49,8 @@ export interface StudioAgentMessages {
 
 /** Transient reads, reversible close checks and media negotiation: no payload is persisted in the command ledger. */
 export type RuntimeViewOperation =
+ | Extract<ChromeRelayHostOperation, { kind: "browser.relayHost.status" }>
+ | ArchiveQueryOperation
   | Extract<SelectiveCommitOperation, { kind: keyof SelectiveCommitQueryInputMap }>
   | PromptHistoryQueryOperation
   | Extract<ModelServicesOperation, { kind: keyof ModelServicesQueryInputMap }>
@@ -64,7 +68,8 @@ export type RuntimeViewOperation =
   | { kind: "live.webrtc.status"; sessionId: string; audioId?: string }
   | { kind: "live.webrtc.mute"; sessionId: string; audioId: string; muted: boolean }
   | { kind: "live.webrtc.release"; sessionId: string; audioId: string };
-export interface RuntimeViewResultMap extends ModelServicesQueryResultMap, SelectiveCommitQueryResultMap, PromptHistoryQueryResultMap {
+export interface RuntimeViewResultMap extends ArchiveQueryResultMap, ModelServicesQueryResultMap, SelectiveCommitQueryResultMap, PromptHistoryQueryResultMap {
+ "browser.relayHost.status": ChromeRelayHostStatus;
   "runtime.close.confirm": { allowed: boolean };
   "interaction.form.read": { form: InteractionForm };
   "agent.spawn.options.read": RuntimeFeatureResultMap["agent.spawn.options"];
@@ -80,7 +85,7 @@ export interface RuntimeViewResultMap extends ModelServicesQueryResultMap, Selec
   "live.webrtc.mute": LiveAudioState;
   "live.webrtc.release": LiveAudioState;
 }
-export const RUNTIME_VIEW_KINDS = [...SELECTIVE_COMMIT_QUERY_KINDS, ...PROMPT_HISTORY_QUERY_KINDS, ...MODEL_SERVICES_QUERY_KINDS, "runtime.close.confirm", "interaction.form.read", "agent.spawn.options.read", "agent.messages.list", "session.lease.read", "extensions.links.list", "browser.webmcp.list", "session.cache.get", "shell.view.read", "shell.view.release", "live.webrtc.connect", "live.webrtc.status", "live.webrtc.mute", "live.webrtc.release"] as const;
+export const RUNTIME_VIEW_KINDS = ["browser.relayHost.status",...ARCHIVE_QUERY_KINDS,...SELECTIVE_COMMIT_QUERY_KINDS, ...PROMPT_HISTORY_QUERY_KINDS, ...MODEL_SERVICES_QUERY_KINDS, "runtime.close.confirm", "interaction.form.read", "agent.spawn.options.read", "agent.messages.list", "session.lease.read", "extensions.links.list", "browser.webmcp.list", "session.cache.get", "shell.view.read", "shell.view.release", "live.webrtc.connect", "live.webrtc.status", "live.webrtc.mute", "live.webrtc.release"] as const;
 export function isRuntimeViewKind(kind: string): kind is RuntimeViewOperation["kind"] {
   return (RUNTIME_VIEW_KINDS as readonly string[]).includes(kind);
 }

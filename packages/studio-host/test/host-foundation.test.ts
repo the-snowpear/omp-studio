@@ -607,6 +607,12 @@ test("expired Runtime model cursors retain the native retryable error across the
 test("RT-002 Bridge command-manifest probe parses and returns the advertised manifest", async () => {
   const token = "bridge-token-command-manifest";
   const bridge = await listenForHello((hello) => helloResponse(hello, token), {
+    snapshot(requestId, hello) {
+      const response = snapshotResponse(requestId, hello);
+      response.snapshot.waitingForApproval = true;
+      response.snapshot.ptyInputWaits = [{ sessionId: response.snapshot.sessionId, toolCallId: "pty-1", command: "python -i", waiting: true, notify: true }];
+      return response;
+    },
     onRequest(request, socket, hello) {
       assert.deepEqual(request.operation, { kind: "operator.manifest.get" });
       socket.write(encodeFrame("receipt:manifest", hello.runtimeEpoch, {
@@ -629,7 +635,9 @@ test("RT-002 Bridge command-manifest probe parses and returns the advertised man
   const client = new StudioBridgeClient({ endpoint: bridge.endpoint, token });
   try {
     await client.connect();
-    await client.requestSnapshot();
+    const { snapshot } = await client.requestSnapshot();
+    assert.equal(snapshot.waitingForApproval, true);
+    assert.equal(snapshot.ptyInputWaits?.[0]?.toolCallId, "pty-1");
     const manifest = await client.requestCommandManifest();
     assert.equal(manifest.hash, "sha256:empty-commands");
     assert.deepEqual(manifest.unclassifiedBuiltins, []);

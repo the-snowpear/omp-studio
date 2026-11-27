@@ -18,6 +18,7 @@ interface BrowserPaneProps {
   sessionId?: string | undefined;
   /** The chat being viewed; its web pages open as their own dock tabs. */
   chatId?: string | undefined;
+  remote?: boolean;
   available: boolean; visible: boolean; capabilities?: ClientBootstrap["capabilityManifest"] | undefined;
 }
 
@@ -41,7 +42,7 @@ export function useManagedBrowserAvailable(available: boolean, capabilities: Cli
 
 export function BrowserPane(props: BrowserPaneProps) {
   const workspace = useManagedBrowserAvailable(props.available, props.capabilities);
-  if (workspace) return <BrowserStartPanel nativeClient={supportsNativeBrowser(props.available, props.capabilities) ? props.client : undefined} sessionId={props.chatId ?? props.sessionId} visible={props.visible} />;
+  if (workspace) return <BrowserStartPanel nativeClient={supportsNativeBrowser(props.available, props.capabilities) ? props.client : undefined} relayClient={props.available && props.capabilities?.capabilities.some(item => item.id === "browser.relayHost.status" && item.grade !== "unavailable") ? props.client : undefined} relaySessionId={props.sessionId} remote={props.remote} sessionId={props.chatId ?? props.sessionId} visible={props.visible} />;
   return <LegacyBrowserPane {...props} />;
 }
 function LegacyBrowserPane({ client, sessionId, available, visible, capabilities }: BrowserPaneProps) {

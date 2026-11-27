@@ -10,6 +10,8 @@ import { bindTailGestures, distanceFromBottom } from "./useConversationScroll";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { useSurfaceDocument } from "../dock/SurfaceContext";
 import "./jobs.css";
+import { AppSelect } from "../AppSelect";
+import { previewJobStreamOutput } from "../preview/backgroundTasksPreview";
 
 const POLL_MS = 2000;
 export type JobInspectorTarget = {
@@ -41,18 +43,26 @@ export function JobInspector({ job, client, sessionId, available, previewInspect
   const surfaceDocument = useSurfaceDocument();
   const doc = ownerDocument ?? surfaceDocument;
   const zh = resolvedLanguage === "zh";
+  const inputZh = useRef(zh); inputZh.current = zh;
   const preview = previewInspection !== undefined;
   const [inspection, setInspection] = useState<JobInspection>();
   const [error, setError] = useState("");
-  const generation = useRef(0);
+  const [streamId, setStreamId] = useState("");
+  const [input, setInput] = useState(""), [sending, setSending] = useState(false), [inputError, setInputError] = useState("");
+  const [inputNotice, setInputNotice] = useState(false);
+  const generation = useRef(0), inputOwner = useRef(0);
   const refresh = useRef<() => void>(() => {});
   const outputRef = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   const [following, setFollowing] = useState(true);
 
   useEffect(() => {
+    inputOwner.current++;
     setInspection(undefined);
     setError("");
+    setStreamId("");
+    setInput(""); setSending(false); setInputError(""); setInputNotice(false);
+    return () => { inputOwner.current++; };
   }, [client, sessionId, scopeKey, job.id, job.generation, preview]);
 
   useEffect(() => {
@@ -66,7 +76,7 @@ export function JobInspector({ job, client, sessionId, available, previewInspect
       inFlight = true;
       const observation = readingEpoch;
       try {
-        const handle = await client.command("jobs.inspect", { sessionId, jobId: job.id });
+        const handle = await client.command("jobs.inspect", { sessionId, jobId: job.id, ...(streamId ? { streamId } : {}) });
         const result = (await waitReceipt<{ result: JobInspection }>(client, handle.requestId)).result;
         if (epoch !== generation.current || observation !== readingEpoch || doc.hidden) return;
         setInspection(result);
@@ -100,7 +110,7 @@ export function JobInspector({ job, client, sessionId, available, previewInspect
       doc.removeEventListener("visibilitychange", visibilityChanged);
       if (refresh.current === request) refresh.current = () => {};
     };
-  }, [preview, client, sessionId, scopeKey, available, visible, doc, job.id, job.generation, job.status, zh]);
+  }, [preview, client, sessionId, scopeKey, available, visible, doc, job.id, job.generation, job.status, zh, streamId]);
 
   useLayoutEffect(() => {
     pinned.current = true;
@@ -122,6 +132,31 @@ export function JobInspector({ job, client, sessionId, available, previewInspect
   });
 
   const shown = preview ? (previewInspection ?? undefined) : inspection;
+  const sendInput = async (data: string, clearDraft: boolean) => {
+    if (sending || !shown?.canInput) return;
+    const epoch = inputOwner.current;
+    setSending(true); setInputError(""); setInputNotice(false);
+    try {
+      if (!preview) {
+        const handle = await client!.command("jobs.input", { sessionId: sessionId!, jobId: job.id, expectedGeneration: shown.inputGeneration!, data });
+        await waitReceipt(client!, handle.requestId);
+      }
+      if (inputOwner.current === epoch) { if (clearDraft) setInput(""); setInputNotice(true); refresh.current(); }
+    } catch (cause) { if (inputOwner.current === epoch) setInputError(hostErrorMessage(cause, inputZh.current ? "未能发送终端输入" : "Could not send console input")); }
+    finally { if (inputOwner.current === epoch) setSending(false); }
+  };
+  const terminalInput = shown?.canInput ? <form className="ji-input" onSubmit={event => { event.preventDefault(); void sendInput(input + String.fromCharCode(13), true); }}>
+    <label>{zh ? "终端输入" : "Console input"}<input className="input mono" value={input} autoComplete="off" spellCheck={false} disabled={sending || !preview && !available} onChange={event => setInput(event.target.value)} /></label>
+    <div className="ji-input-actions"><button className="btn small primary" type="submit" disabled={sending || !preview && !available}>{zh ? "发送并回车" : "Send + Enter"}</button><button className="btn small outline" type="button" disabled={sending || !preview && !available} onClick={() => void sendInput(String.fromCharCode(3), false)}>Ctrl+C</button></div>
+    {shown.inputDetection === "unknown" ? <p className="ji-note">{zh ? "此系统无法自动判断终端是否等待输入，可在上方手动输入。" : "This system cannot detect whether the console is waiting; you can send input above."}</p> : null}
+    {inputError ? <p className="ji-error" role="alert">{inputError}</p> : inputNotice ? <p className="ji-note" role="status">{preview && marks ? (zh ? "演示：输入仅在本页处理。" : "Demo: input was handled locally.") : (zh ? "输入已发送" : "Input sent")}</p> : null}
+  </form> : null;
+  const streamSelector = shown?.streams?.length ? <div className="ji-streams"><label>{zh ? "输出流" : "Output stream"}<AppSelect value={streamId} onChange={event => setStreamId(event.target.value)}>
+    <option value="">{zh ? "标准输出" : "Command output"}</option>
+    {shown.streams.map(stream => <option key={stream.id} value={stream.id}>{stream.kind === "file" ? stream.consumer : `${stream.producer} → ${stream.consumer}`} · {stream.bytes} B</option>)}
+  </AppSelect></label></div> : null;
+  const waiting = shown?.waitingForInput ? <p className="ji-waiting" role="status">{zh ? "终端正在等待键盘输入" : "The console is waiting for keyboard input"}</p> : null;
+  const output = preview && streamId ? previewJobStreamOutput(shown?.streams?.find(stream => stream.id === streamId)?.consumer ?? streamId, zh) : shown?.output;
   const steps = shown ? <>
     {shown.actions ? <ActionsSteps view={shown.actions} zh={zh} parentStatus={job.status} /> : null}
     {shown.taskSteps ? <details className="ji-task-phases" key={`${job.id}:${job.generation}`}>
@@ -161,6 +196,9 @@ export function JobInspector({ job, client, sessionId, available, previewInspect
           <button className="btn small ghost" type="button" onClick={onClose} aria-label={zh ? "关闭" : "Close"}>×</button>
         </div> : null}
         {steps}
+        {waiting}
+        {terminalInput}
+        {streamSelector}
         {shown?.command ? <div className="ji-process-command">
           <span>{zh ? "命令" : "Command"}</span><code>{shown.command}</code>
         </div> : null}
@@ -194,8 +232,8 @@ export function JobInspector({ job, client, sessionId, available, previewInspect
               {shown?.output ? (zh ? "；保留上次读取的输出。" : "; showing the last successful read.") : null}
             </div> : null}
             {unavailable && shown?.output ? <div className="ji-note" role="status">{note}</div> : null}
-            {shown?.output ? <pre className="ji-output">{shown.output}</pre>
-              : !error ? <div className="ji-note" role="status">{note}</div> : null}
+            {output ? <pre className="ji-output">{output}</pre>
+              : !error ? <div className="ji-note" role="status">{shown?.binary ? zh ? "二进制输出无法作为文本显示。" : "Binary output cannot be displayed as text." : note}</div> : null}
           </div>
           <div className="ji-process-limit">{zh ? "只读 · 仅末尾最多 16 KiB，非完整记录" : "Read-only · Up to the last 16 KiB, not the full log"}</div>
         </div>
@@ -221,10 +259,13 @@ export function JobInspector({ job, client, sessionId, available, previewInspect
       {error ? <div className="ji-error" role="alert">{error}</div> : null}
       {shown ? <>
         {steps}
+        {waiting}
+        {terminalInput}
+        {streamSelector}
         {metadata}
         {shown.widget ? <JobWidget view={shown.widget} /> : null}
-        {shown.output ? <pre className="ji-output" aria-label={zh ? "输出尾部" : "Output tail"}>{shown.output}</pre>
-          : <div className="ji-note">{zh ? "暂无输出" : "No output yet"}</div>}
+        {output ? <pre className="ji-output" aria-label={zh ? "输出尾部" : "Output tail"}>{output}</pre>
+          : <div className="ji-note">{shown.binary ? zh ? "二进制输出无法作为文本显示。" : "Binary output cannot be displayed as text." : zh ? "暂无输出" : "No output yet"}</div>}
       </> : !error && (preview || available) ? <div className="ji-note">
         {preview ? (marks ? (zh ? "此演示任务没有详情" : "No demo details for this job") : zh ? "没有更多详情" : "No further details") : zh ? "读取中…" : "Loading…"}
       </div> : null}

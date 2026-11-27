@@ -10,7 +10,8 @@ import type { RuntimeInstallationManifest, SessionPurgeResult } from "@omp-studi
 export function supportsSessionPurgeMaintenance(manifest: RuntimeInstallationManifest): boolean {
   return (
     (manifest.upstreamVersion === "18.20.2" && manifest.upstreamCommit === "7c49c11aa5bbaf3f418406583096168ad5b8c6dc") ||
-    (manifest.upstreamVersion === "19.0.1" && manifest.upstreamCommit === "f40f335845f0b136453d12fec8d6057011082766")
+    (manifest.upstreamVersion === "19.0.1" && manifest.upstreamCommit === "f40f335845f0b136453d12fec8d6057011082766") ||
+    (manifest.upstreamVersion === "19.2.1" && manifest.upstreamCommit === "b55cd1bb664d8ab46ddc77f2a34eb47555dbf1ac")
   ) && /^studio\.[1-9]\d*$/u.test(manifest.patchsetVersion);
 }
 

@@ -50,15 +50,19 @@ export function waitKindFromLive(input: {
   readonly planStatus?: PlanState["status"];
   readonly resident?: ResidentSessionRow;
   readonly residents?: ResidentRows;
+  readonly snapshotWaitingForApproval?: boolean;
+  readonly persistedWaitingForApproval?: boolean;
 }): ThreadWaitKind | undefined {
   const { sessionId, pending, snapshotSessionId, planStatus, resident, residents } = input;
   if (sessionId === undefined) return undefined;
-  if (resident !== undefined || residents !== undefined) {
-    return waitKindFromResident(resident ?? residentForSession(residents, sessionId));
-  }
+  const liveResident = resident ?? residentForSession(residents, sessionId);
+  if (liveResident !== undefined) return waitKindFromResident(liveResident);
   if (pending !== null && pending !== undefined && pending.sessionId === sessionId) {
     return waitKindFromInteraction(pending.kind);
   }
-  if (snapshotSessionId === sessionId && planStatus === "review") return "plan";
-  return undefined;
+  if (snapshotSessionId === sessionId) {
+    if (planStatus === "review") return "plan";
+    return input.snapshotWaitingForApproval ? "approval" : undefined;
+  }
+  return input.persistedWaitingForApproval ? "approval" : undefined;
 }

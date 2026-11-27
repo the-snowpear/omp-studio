@@ -73,6 +73,7 @@ export type ConversationItem = ConversationMessageItem | ConversationCompactionI
  */
 export type ConversationMessageError = {
 	message: string;
+	source?: "provider" | "agentLoop";
 	/** Provider HTTP status when the failure came from a request. */
 	status?: number;
 	provider?: string;
@@ -170,6 +171,7 @@ export type ConversationRuntimeEvent =
 	  }
 	| {
 			kind: "conversation.tool.started";
+			parentToolCallId?: string;
 			presentation?: "reply";
 			sessionId: string;
 			turnId: string;
@@ -253,7 +255,7 @@ function boundedUtf8(value: unknown, maxBytes: number): string {
 
 function parseMessageError(value: unknown): ConversationMessageError {
 	const input = record(value);
-	exactKeys(input, ["message", "status", "provider", "model"]);
+	exactKeys(input, ["message", "status", "provider", "model", "source"]);
 	const message = boundedUtf8(input.message, CONVERSATION_LIMITS.NOTICE_MESSAGE_MAX_CHARS);
 	if (message.length === 0) throw new StudioConversationError("Invalid message error");
 	if (input.status !== undefined && !Number.isSafeInteger(input.status)) {
@@ -479,6 +481,7 @@ export function parseConversationRuntimeEvent(value: unknown): ConversationRunti
 				"turnId",
 				"messageId",
 				"toolCallId",
+				"parentToolCallId",
 				"toolName",
 				"arguments",
 				"startedAt",

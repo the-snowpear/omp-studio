@@ -182,7 +182,7 @@ export const RUNTIME_18180_SETTINGS: Definition[] = [
     "hintEn": "Allow retain/learn memories shared across projects; requires global or per-project-tagged scoping."
   },
   {
-    "key": "tools.xdevNotices",
+    "key": "tools.commandNotices",
     "group": "interaction",
     "zh": "工具挂载通知",
     "en": "Tool mount notices",

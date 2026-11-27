@@ -1,0 +1,14 @@
+import type { Definition } from "./FeatureSettingsPane";
+
+export const RUNTIME_1921_SETTINGS: Definition[] = [
+  { key: "binja.installDir", group: "files", zh: "Binary Ninja 安装目录", en: "Binary Ninja install directory", hint: "包含核心库的目录或 macOS .app；留空依次检查 BN_INSTALL_DIR、最近安装与默认位置。", hintEn: "Directory containing the core library, or the macOS .app. Leave empty to use BN_INSTALL_DIR, the last install, then default locations.", text: true },
+  { key: "binja.python", group: "files", zh: "Binary Ninja Python", en: "Binary Ninja Python", hint: "能加载 Binary Ninja API 的 Python 3 解释器；留空自动检测。", hintEn: "Python 3 interpreter able to load the Binary Ninja API; leave empty to auto-detect.", text: true },
+  { key: "tools.commands", group: "permissions", zh: "按需工具命令", en: "On-demand tool commands", hint: "把低频工具挂载为 Bash 命令，使用 --help 按需读取说明，减少每次请求携带的工具 schema。", hintEn: "Mount infrequent tools as Bash commands with on-demand --help, reducing tool schemas in each request." },
+  { key: "tools.commandDocs", group: "permissions", zh: "工具命令说明", en: "Tool command documentation", hint: "选择系统提示中内联哪些命令说明。", hintEn: "Choose which command help is included in the system prompt.", options: [["inline", "全部内联", "All commands"], ["builtins", "仅内置工具", "Built-ins only"], ["catalog", "仅目录，按需读取", "Catalog only"]] },
+  { key: "tools.commandInline", group: "permissions", zh: "额外内联命令", en: "Additional inline commands", hint: "每行一个 glob，如 mcp__context_mode_*；只在「仅内置工具」模式生效。", hintEn: "One glob per line, such as mcp__context_mode_*. Applies only with Built-ins only.", list: true },
+  { key: "eval.tools.enabled", group: "permissions", zh: "Eval 定义工具", en: "Eval-defined tools", hint: "允许 Eval 用 Python @tool 或 JavaScript tool(fn) 定义工具，供 task、agent() 和 workpool() 子代理调用。", hintEn: "Let Eval define tools with Python @tool or JavaScript tool(fn), available to task, agent() and workpool() subagents." },
+  { key: "mcp.shared", group: "permissions", zh: "共享 MCP 进程", en: "Shared MCP processes", hint: "通过 Daemon 复用服务器和工具目录；需要会话隔离的服务器保持独立。后续连接生效。", hintEn: "Reuse servers and tool catalogs through the daemon. Session-bound servers remain private. Applies to subsequent connections." },
+  { key: "mcp.idleStopMinutes", group: "permissions", zh: "MCP 空闲停止（分钟）", en: "MCP idle stop (minutes)", hint: "共享服务器空闲到期后停止，下次请求时重新启动。", hintEn: "Stop an unused shared server after this interval; the next request starts it again.", min: 0, step: 1 },
+  { key: "bash.reapBackground", group: "shell", zh: "检测遗留后台进程", en: "Detect leftover background processes", hint: "Agent 停止时检测遗留进程，可在服务面板接管或终止。", hintEn: "Detect processes left behind when the agent stops; adopt or terminate them in Services." },
+  { key: "pty.notify", group: "shell", zh: "PTY 等待输入提醒", en: "PTY input notifications", hint: "当后台 PTY 等待键盘输入时提醒。", hintEn: "Notify when a background PTY waits for keyboard input.", options: [["on", "开启", "On"], ["off", "关闭", "Off"]] },
+];
