@@ -310,6 +310,19 @@
   from { translate: -100% 0; }
   to { translate: 100% 0; }
 }
+/* A texture streaming along a filled bar (the thinking slider): it travels
+   exactly one period of its pattern (`--flow-period`), so the loop has no seam. */
+@keyframes omp-flow {
+  to { translate: var(--flow-period, 20px) 0; }
+}
+/* Embers lifting off the thinking slider's thumb at its hottest level
+   (composer/thinkingSlider.css): "this is running hot". Each ember sets its
+   own sideways `--ember-x`; the held last frame is transparent, so a stilled
+   loop simply shows no embers. */
+@keyframes omp-ember {
+  15% { opacity: 1; }
+  to { opacity: 0; translate: var(--ember-x, 0px) calc(var(--shift-lg) * -1.6); scale: 0.3; }
+}
 /* The ambient light field (styles/light.css): a slow wander, run `alternate`
    so it is at rest at both ends. Each spot sets its own `--drift-x/-y`. */
 @keyframes omp-field-drift {

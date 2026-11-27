@@ -89,23 +89,287 @@
   opacity: 0.5;
   cursor: default;
 }
+/* ---------- Web control bar ------------------------------------------------
+   One component, two frames. Docked it is the workbench's bottom edge: a flat
+   band in chrome tone with a hairline on top, reserving its own row so
+   approvals and the composer stay reachable. Floating it is the same row lifted
+   into a compact capsule. Only the frame changes; the row keeps its order, so
+   the grip stays under the pointer when a drag lifts it out
+   (FLOAT_INSET in WebControlBar.tsx is the floating padding below).
+
+   Row: [grip + status] … [take control · sign-in] | [Web access · dock · hide]
+   The left half is the drag zone; the right half holds every action, with the
+   primary one filled and the device utilities as quiet icons. */
 .web-access-strip {
+  --wcb-row: 26px;
+  --wcb-radius: var(--r-6);
+  flex: none;
+  display: flex;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 3px var(--sp-8) 3px var(--sp-4);
+  background: var(--bg-inset);
+  color: var(--text-2);
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-12);
+  line-height: 1;
+  animation: var(--motion-reveal);
+}
+.web-access-strip:not(.is-floating) {
+  container: web-strip / inline-size;
+}
+.web-access-strip.is-floating {
+  --wcb-radius: calc(var(--r-8) - 4px);
   position: fixed;
-  bottom: 10px;
-  right: 18px;
-  z-index: 120;
+  z-index: var(--z-float);
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border-float);
+  border-radius: var(--r-8);
+  box-shadow: var(--shadow-menu);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+/* Held: a soft accent halo instead of a heavier shadow, so the lifted bar
+   reads as "in hand" in both themes and with light effects off. */
+.web-access-strip.is-floating.is-dragging {
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow-menu), 0 0 0 3px var(--accent-softer);
+}
+.web-access-strip.is-dragging,
+.web-access-strip.is-dragging * {
+  cursor: grabbing;
+}
+.web-control-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 5px 8px 5px 12px;
-  background: var(--surface-1);
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  border-radius: var(--r-full);
-  box-shadow: 0 2px 12px #0001;
-  font-size: 11px;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--wcb-row);
 }
-.web-access-strip button,
+
+/* Drag zone: the grip is the labelled, focusable handle; the status beside it
+   extends the target so the bar can be picked up by its text as well. */
+.web-control-grab {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.web-control-drag {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--wcb-radius);
+  background: transparent;
+  color: var(--glyph-faint);
+  cursor: inherit;
+  touch-action: none;
+  transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
+}
+.web-control-drag .icon {
+  width: 14px;
+  height: 14px;
+}
+.web-control-grab:hover .web-control-drag {
+  color: var(--text-2);
+  background: var(--surface-hover);
+}
+.web-control-drag:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  color: var(--accent);
+}
+.web-access-strip.is-dragging .web-control-drag {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.web-control-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  min-width: 0;
+  height: 100%;
+  padding: 0 var(--sp-10) 0 var(--sp-6);
+}
+.web-control-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-full);
+  background: var(--glyph-faint);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--glyph-faint) 18%, transparent);
+  transition: background-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.web-control-dot[data-state="self"] {
+  background: var(--green);
+  box-shadow: 0 0 0 3px var(--green-soft);
+}
+.web-control-dot[data-state="other"] {
+  background: var(--amber);
+  box-shadow: 0 0 0 3px var(--amber-soft);
+}
+/* A long owner name gives way first; the verb after it never truncates. */
+.web-control-label {
+  display: flex;
+  min-width: 0;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+.web-access-strip.is-floating .web-control-label {
+  max-width: 240px;
+}
+.web-control-text,
+.web-control-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.web-control-name {
+  color: var(--text);
+  font-weight: var(--fw-medium);
+}
+.web-control-suffix {
+  flex: none;
+  white-space: pre;
+}
+.web-control-demo {
+  flex: none;
+}
+
+/* Actions */
+.web-control-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  margin-left: auto;
+}
+.web-control-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 var(--sp-10);
+  border: 0;
+  border-radius: var(--wcb-radius);
+  font: inherit;
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease);
+}
+.web-control-take {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.web-control-take:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent-hover);
+}
+.web-control-take:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.web-control-signin {
+  background: transparent;
+  color: var(--accent);
+}
+.web-control-signin:hover {
+  background: var(--accent-softer);
+}
+.web-control-signin .icon {
+  width: 12px;
+  height: 12px;
+  opacity: 0.8;
+}
+.web-control-sep {
+  flex: none;
+  width: 1px;
+  height: 14px;
+  margin: 0 var(--sp-4);
+  background: var(--border-strong);
+}
+.web-control-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  padding: 0;
+  border: 0;
+  border-radius: var(--wcb-radius);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.web-control-icon .icon {
+  width: 14px;
+  height: 14px;
+}
+.web-control-icon:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.web-control-icon[aria-expanded="true"] {
+  background: var(--surface-active);
+  color: var(--text);
+}
+.web-control-actions :is(button, a):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* Narrow: the sign-in link keeps its icon; the status text gives way before
+   any action does. */
+@container web-strip (max-width: 420px) {
+  .web-control-signin > span { display: none; }
+  .web-control-signin { padding: 0 var(--sp-6); }
+}
+@media (max-width: 480px) {
+  .web-access-strip.is-floating .web-control-signin > span { display: none; }
+  .web-access-strip.is-floating .web-control-signin { padding: 0 var(--sp-6); }
+  .web-access-strip.is-floating .web-control-label { max-width: 40vw; }
+}
+
+/* Docking reserves space for Composer and approvals; floating is an explicit
+   user choice, with a persistent way back to the non-overlapping layout. */
+#root:has(> .web-access-strip:not(.is-floating)) {
+  display: flex;
+  flex-direction: column;
+}
+#root:has(> .web-access-strip:not(.is-floating)) > .conversation-workspace,
+#root:has(> .web-access-strip:not(.is-floating)) > .app,
+#root:has(> .web-access-strip:not(.is-floating)) > .page {
+  flex: 1;
+  height: 0;
+  min-height: 0;
+}
+.web-dialog-control {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  font-size: 12px;
+}
+.web-dialog-control .web-control-dot {
+  margin-inline: 3px 2px;
+}
 .web-dialog button:not(.web-primary) {
   background: var(--surface-2);
   color: var(--text);
@@ -113,15 +377,6 @@
   border-radius: var(--r-6);
   padding: 6px 10px;
   cursor: pointer;
-}
-.web-control-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--text-muted);
-}
-.web-control-dot.is-owner {
-  background: var(--accent);
 }
 .web-dialog-backdrop {
   position: fixed;
@@ -246,10 +501,6 @@
   padding: 12px;
 }
 @media (max-width: 680px) {
-  html[data-web-workbench] #root > .conversation-workspace,
-  html[data-web-workbench] #root > .app {
-    height: calc(100dvh - 48px);
-  }
   html[data-web-workbench] .cw-sidebar-slot:not([hidden]) {
     position: absolute;
     left: 48px;
@@ -298,11 +549,6 @@
   }
   .web-pair-intro h1 {
     margin: 14px 0;
-  }
-  .web-access-strip {
-    right: 8px;
-    bottom: 8px;
-    max-width: calc(100% - 16px);
   }
   .web-dialog {
     padding: 20px;

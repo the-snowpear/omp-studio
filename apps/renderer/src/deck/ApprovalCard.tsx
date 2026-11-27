@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import { Icon } from "../icons";
 import { demoMark } from "./PromptHead";
@@ -21,7 +21,7 @@ export function ApprovalCard({
   demo?: boolean;
   meta?: string;
   disabled?: boolean;
-  submitError?: boolean;
+  submitError?: ReactNode;
   onAllow: () => void;
   onAlways: () => void;
   /** Remember a Runtime-offered grant for this session (`always: false`) or across sessions. */
@@ -76,9 +76,7 @@ export function ApprovalCard({
           {zh ? "此时在输入框发送消息，会拒绝这次调用并把消息转交给 OMP。" : "Sending a message now denies this call and steers the turn."}
         </p>
       )}
-      {submitError ? (
-        <p className="ask-error" role="alert">{zh ? "提交失败，卡片已保留。请重试。" : "Submission failed. The card remains available for retry."}</p>
-      ) : null}
+      {submitError}
       <div className="dk-actions">
         <button type="button" className="btn small danger" disabled={disabled} onClick={onDeny}>{zh ? "拒绝" : "Deny"}</button>
         {view.grants && onGrant ? (

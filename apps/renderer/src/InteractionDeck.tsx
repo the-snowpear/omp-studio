@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ClientInteraction, InteractionResponseValue } from "@omp-studio/client-contract";
 import { ApprovalCard } from "./deck/ApprovalCard";
+import { InteractionFailure, type InteractionFailureDetail } from "./deck/InteractionFailure";
 import { AskActions, AskBody, AskHead } from "./deck/AskCard";
 import { ASK_GENIE_MS } from "./deck/askGenie";
 import { motionReduced } from "./motion";
@@ -33,9 +34,10 @@ export type InteractionCaption = {
   readonly meta?: string;
 };
 
-export function InteractionPrompt({ interaction, onRespond, disabled, caption, demo, queue, readForm }: {
+export function InteractionPrompt({ interaction, onRespond, onRefresh, disabled, caption, demo, queue, readForm }: {
   interaction: ClientInteraction;
   onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
+  onRefresh?: (() => Promise<unknown>) | undefined;
   disabled?: boolean;
   caption?: InteractionCaption;
   demo?: boolean;
@@ -47,40 +49,51 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
   const [text, setText] = useState(interaction.kind === "editor" ? (interaction.content ?? "") : "");
   const [answer, setAnswer] = useState<DeckAskAnswer>(NO_ASK_ANSWER);
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState(false);
+  const [submitError, setSubmitError] = useState<InteractionFailureDetail | null>(null);
   useEffect(() => {
     if (interaction.kind === "editor") setText(interaction.content ?? "");
     else setText("");
     setAnswer(interaction.kind === "select" ? initialAskAnswer(selectToAskView(interaction).question) : NO_ASK_ANSWER);
+    setSubmitError(null);
   }, [interaction.interactionId, interaction.leaseGeneration]); // eslint-disable-line react-hooks/exhaustive-deps
   const busy = disabled || submitting;
-  const submit = (value?: InteractionResponseValue) => {
+  const submit = async (value?: InteractionResponseValue) => {
     if (busy) return;
     setSubmitting(true);
-    setSubmitError(false);
-    Promise.resolve(onRespond("submit", value)).then(
-      (ok) => {
-        if (ok === false) setSubmitError(true);
-      },
-      () => setSubmitError(true),
-    ).finally(() => setSubmitting(false));
+    setSubmitError(null);
+    try {
+      if (await onRespond("submit", value) === false) setSubmitError({});
+    } catch (cause) {
+      setSubmitError({ cause });
+    } finally {
+      setSubmitting(false);
+    }
   };
-  const cancel = () => {
+  const cancel = async () => {
     if (busy) return;
     setSubmitting(true);
-    setSubmitError(false);
-    Promise.resolve(onRespond("cancel")).then(
-      (ok) => {
-        if (ok === false) setSubmitError(true);
-      },
-      () => setSubmitError(true),
-    ).finally(() => setSubmitting(false));
+    setSubmitError(null);
+    try {
+      if (await onRespond("cancel") === false) setSubmitError({});
+    } catch (cause) {
+      setSubmitError({ cause });
+    } finally {
+      setSubmitting(false);
+    }
   };
-  const retryNote = submitError ? (
-    <p className="ask-error" role="alert">
-      {zh ? "提交失败，卡片已保留。请重试。" : "Submission failed; the card was kept. Please try again."}
-    </p>
-  ) : null;
+  const refresh = async () => {
+    if (submitting || !onRefresh) return;
+    setSubmitting(true);
+    try {
+      await onRefresh();
+      setSubmitError(null);
+    } catch (cause) {
+      setSubmitError({ cause });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const retryNote = submitError ? <InteractionFailure failure={submitError} onRefresh={onRefresh ? () => { void refresh(); } : undefined} refreshing={submitting} /> : null;
   if (interaction.kind === "form") return <LiveFormPrompt interaction={interaction} readForm={readForm} onRespond={onRespond} disabled={busy} caption={caption} demo={demo} queue={queue} />;
   if (interaction.kind === "confirm") {
     return (
@@ -187,7 +200,7 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
       {...(demo === true ? { demo: true } : {})}
       {...(caption?.meta ? { meta: caption.meta } : {})}
       {...(busy ? { disabled: true } : {})}
-      {...(submitError ? { submitError: true } : {})}
+      submitError={retryNote}
       onAllow={() => submit(view.configuration ? "once" : true)}
       onAlways={() => { if (view.configuration || view.session !== undefined) submit("session"); }}
       onGrant={(scope, always) => submit({ grant: scope, always })}
@@ -239,7 +252,12 @@ function LiveAskQueue({
     if (reason === "submit") answersRef.current[item.id] = answer ?? NO_ASK_ANSWER;
     else answersRef.current[item.id] = NO_ASK_ANSWER;
     outcomesRef.current[item.id] = reason;
-    const ok = await finishIfComplete();
+    let ok: boolean;
+    try {
+      ok = await finishIfComplete();
+    } catch {
+      ok = false;
+    }
     if (!ok) {
       delete outcomesRef.current[item.id];
       setSubmitError(true);
@@ -273,9 +291,10 @@ function liveAskValue(
   return submitSelectValue(view, answers[view.question.id] ?? NO_ASK_ANSWER, interaction.multiple);
 }
 
-export function InteractionDeck({ interaction, onRespond, disabled, leaving, readForm, partialAsk }: {
+export function InteractionDeck({ interaction, onRespond, onRefresh, disabled, leaving, readForm, partialAsk }: {
   interaction: ClientInteraction | null;
   onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
+  onRefresh?: (() => Promise<unknown>) | undefined;
   disabled: boolean;
   leaving?: boolean;
   readForm?: ReadInteractionForm | undefined;
@@ -301,7 +320,7 @@ export function InteractionDeck({ interaction, onRespond, disabled, leaving, rea
     );
   }
   return (
-    <PromptDeckShell interaction={interaction} onRespond={onRespond} disabled={disabled} leaving={leaving === true} />
+    <PromptDeckShell key={`${interaction.interactionId}:${interaction.leaseGeneration}`} interaction={interaction} onRespond={onRespond} onRefresh={onRefresh} disabled={disabled} leaving={leaving === true} />
   );
 }
 
@@ -335,11 +354,13 @@ function LiveFormQueue({ interaction, readForm, onRespond, disabled, leaving }: 
 function PromptDeckShell({
   interaction,
   onRespond,
+  onRefresh,
   disabled,
   leaving,
 }: {
   interaction: ClientInteraction;
   onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
+  onRefresh?: (() => Promise<unknown>) | undefined;
   disabled: boolean;
   leaving: boolean;
 }) {
@@ -367,7 +388,7 @@ function PromptDeckShell({
     >
       <div className="deck-card">
         <div className="dk-stage">
-          <InteractionPrompt interaction={interaction} onRespond={onRespond} disabled={disabled || leaving} />
+          <InteractionPrompt interaction={interaction} onRespond={onRespond} onRefresh={onRefresh} disabled={disabled || leaving} />
         </div>
       </div>
     </div>

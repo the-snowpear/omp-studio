@@ -88,7 +88,8 @@
 
 /* Decorative sweeps stop entirely: they are the cheapest thing to drop and the
    least noticed. (L1 already collapsed their duration; this removes the layer.) */
-:root[data-perf-tier~="L2"] .ce-heat-cells::after {
+:root[data-perf-tier~="L2"] .ce-heat-cells::after,
+:root[data-perf-tier~="L2"] :is(.think-ember, .think-shine, .think-glow, .think-edge, .think-flow) {
   display: none !important;
 }
 

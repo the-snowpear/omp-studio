@@ -51,6 +51,8 @@ export const PREVIEW_APP_SETTINGS: AppSettings = {
   notifyErrors: true,
   notifyConfirmations: true,
   notifyLongTasks: true,
+  webAccessVisible: false,
+  webAccessPosition: null,
   dictationDeviceId: "",
   dictationToggleShortcut: "",
   showThinkingSummary: true,
