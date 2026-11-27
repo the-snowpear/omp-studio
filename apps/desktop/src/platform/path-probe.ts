@@ -19,7 +19,7 @@ async function localPaths(): Promise<(path: string) => boolean> {
     // DriveType gets volume metadata. Listing a drive root could connect a disconnected mapping.
     const { stdout } = await execute(powershell, ["-NoProfile", "-NonInteractive", "-Command",
       "foreach ($drive in [IO.DriveInfo]::GetDrives()) { if ($drive.DriveType -in 'Removable','Fixed','CDRom','Ram') { $drive.Name } }"
-    ], { windowsHide: true, timeout: 3000 });
+    ], { windowsHide: true, timeout: 8000 });
     const localRoots = new Set(stdout.trim().toUpperCase().split(/\s+/));
     return path => localRoots.has(parse(path).root.toUpperCase());
   }
@@ -41,13 +41,25 @@ async function localPaths(): Promise<(path: string) => boolean> {
   return path => !remoteMounts.some(mount => path === mount || path.startsWith(mount === sep ? mount : mount + sep));
 }
 
+// Enumeration is expensive (a PowerShell spawn on Windows) and transiently
+// fails on loaded CI runners, so the predicate is cached for the process.
+// When it cannot be established at all, fail open: a missed enumeration must
+// not turn every transcript path into a dead link — the `\\server` filter and
+// the drive-type check above still protect the common case.
+let localPredicate: Promise<(path: string) => boolean> | undefined;
+
+function localProbe(): Promise<(path: string) => boolean> {
+  localPredicate ??= localPaths().catch(() => () => true);
+  return localPredicate;
+}
+
 /** An automatic probe may inspect local metadata. Follow links and mounts only on an explicit open. */
 export async function probeFilePaths(
   paths: readonly string[],
   pathFor: (path: string) => string | Promise<string>,
   explicit = false,
 ): Promise<readonly WorkspacePathResolution[]> {
-  const isLocal = explicit ? undefined : await localPaths().catch(() => () => false);
+  const isLocal = explicit ? undefined : await localProbe();
   const classified = new Map<string, Promise<WorkspacePathKind | undefined>>();
   function localKind(path: string): Promise<WorkspacePathKind | undefined> {
     let result = classified.get(path);
