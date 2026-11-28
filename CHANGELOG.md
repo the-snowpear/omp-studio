@@ -7,13 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-11-28
+
+### Added
+
+- 以新的思考强度滑块在 Composer 和模型菜单中选择 Off、Low、Medium、High、Max，拖动、点击刻度与键盘操作都会保持当前会话的选择，并在切换模型后正确同步。
+- The new thinking intensity slider in the Composer and model menu supports Off, Low, Medium, High and Max. Dragging, tick selection and keyboard input keep the active conversation's choice and stay synchronized when the model changes.
+
 ### Changed
 
-- 项目侧栏按对话活动时间排列历史，优先展示运行中的会话和最近结束的回合。后台标题实时刷新，未发送的草稿可从所属项目重新打开。
-- Project history follows conversation activity. Running and recently ended turns appear first, background titles refresh live, and unsent drafts reopen in their project.
-- 模型页可独立保存 OMP 原生的服务商并发上限。Runtime 就绪时自动刷新模型目录，切换语言保留正在编辑的值。
-- The model page edits OMP’s native per-provider request limits independently. The catalog refreshes when the Runtime becomes ready, and language changes preserve edits.
+- 内置 Runtime 升级到 OMP 19.2.1（Studio patchset `19.2.1-studio.4`），同步会话、Agent、模型、后台任务和工作台状态。
+- Upgrade the bundled Runtime to OMP 19.2.1 (`19.2.1-studio.4`) with synchronized session, Agent, model, background-task and workbench state.
+- Web 访问控制条移入设置并支持可选启用、自由拖动、底部停靠、键盘操作和每设备位置记忆；预览模式的位置操作保持本地。
+- Web access control now lives in Settings and supports optional enablement, free dragging, bottom docking, keyboard actions and per-device position memory; preview positioning remains local.
+- 侧栏优先展示运行中和最近完成的会话，后台标题实时刷新，未发送的草稿可从所属项目恢复；模型页支持独立保存供应商并发上限并在 Runtime 就绪时刷新目录。
+- The sidebar prioritizes running and recently completed sessions, refreshes resident titles live and restores unsent drafts from their project. The model page saves provider concurrency limits independently and refreshes the catalog when Runtime is ready.
 
+### Fixed
+
+- 修复 Web 控制条遮挡审批卡片操作区的问题，审批按钮现在始终可见可用。 [#75](https://github.com/the-snowpear/omp-studio/issues/75)
+- Fix the Web control bar covering approval actions so every approval button remains visible and usable. [#75](https://github.com/the-snowpear/omp-studio/issues/75)
+- 修复“本会话允许”和“允许一次”提交失败后无法诊断或恢复的问题，保留用户输入并支持重新同步后重试。 [#76](https://github.com/the-snowpear/omp-studio/issues/76)
+- Fix undiagnosable, unrecoverable failures for “Allow for session” and “Allow once”; user input is preserved and retry can resynchronize the snapshot. [#76](https://github.com/the-snowpear/omp-studio/issues/76)
+- 修复思考档位关闭弹层后选中值丢失、跨会话串写，以及审批候选项和失败恢复状态不完整的问题。
+- Fix thinking selections being lost after closing the popover or leaking across conversations, and restore complete approval choices and failure recovery state.
 ## [0.2.11] - 2026-11-25
 
 ### Added

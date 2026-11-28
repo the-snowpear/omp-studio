@@ -56,7 +56,7 @@
 </p>
 
 > [!NOTE]
-> **0.2.11** adds a standalone Web workbench and zoomable Mermaid windows. New chats keep the current window and tools, and command completion stays dismissed. It bundles Runtime `19.0.1-studio.1`. [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.11) · [Release notes](docs/releases/v0.2.11.md)
+> **0.2.12** upgrades OMP Runtime to 19.2.1, adds the thinking intensity slider, a draggable Web access bar, activity-aware sidebar ordering and approval recovery. It bundles Runtime `19.2.1-studio.4`. [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.12) · [Release notes](docs/releases/v0.2.12.md)
 
 <table>
 <tr>

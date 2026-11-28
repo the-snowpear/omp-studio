@@ -56,7 +56,7 @@
 </p>
 
 > [!NOTE]
-> **0.2.11** 新增独立 Web 工作台，支持 Mermaid 图表缩放浮窗、同窗开启新会话并保留工具状态，修复命令菜单反复弹出。内置 Runtime 为 `19.0.1-studio.1`。 [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.11) · [发布说明](docs/releases/v0.2.11.md)
+> **0.2.12** 升级 OMP Runtime 19.2.1，新增思考强度滑块、可拖动 Web 访问控制条、侧栏活动排序与审批恢复。内置 Runtime 为 `19.2.1-studio.4`。 [GitHub Release](https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.12) · [发布说明](docs/releases/v0.2.12.md)
 
 <table>
 <tr>

@@ -1,6 +1,6 @@
 {
   "name": "omp-studio",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "private": true,
   "description": "Desktop GUI and arrangeable workbench for oh-my-pi (omp) AI coding agent — typed Studio Bridge and Electron app for Windows, macOS, and Linux",
   "license": "MIT",
